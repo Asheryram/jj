@@ -1,6 +1,7 @@
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
 import { StoreProvider } from './state/store'
 import { AppShell, PublicShell, RequireAuth } from './components/layout'
+import RouteMeta from './components/RouteMeta'
 import { Button, Card, EmptyState } from './components/ui'
 import { SearchIcon } from './components/icons'
 
@@ -33,6 +34,7 @@ export default function App() {
   return (
     <StoreProvider>
       <BrowserRouter>
+        <RouteMeta />
         <Routes>
           {/* Public storefront — buyable without an account (FR-4.8) */}
           <Route element={<PublicShell />}>

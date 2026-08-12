@@ -132,6 +132,13 @@ export default function Buy() {
 
   return (
     <div className="mx-auto max-w-lg px-4 py-6 sm:py-8">
+      {/* Every page needs exactly one h1. Checkout leads with the stepper
+          visually, so the heading is present for assistive tech and search
+          engines without competing with it on screen. */}
+      <h1 className="sr-only">
+        Buy {product.name}
+        {product.network ? ` on ${product.network}` : ''} — checkout
+      </h1>
       <button
         type="button"
         onClick={() => (step <= 1 || step === 3 ? navigate('/shop') : setStep(step - 1))}
@@ -376,7 +383,14 @@ export default function Buy() {
           )}
 
           <div className="mt-4 space-y-2">
-            <Button block size="lg" disabled={!ownNumber && !receiptCheck?.ok} onClick={confirm}>
+            {/* The one highest-emphasis action in the whole product. */}
+            <Button
+              block
+              size="lg"
+              variant="cta"
+              disabled={!ownNumber && !receiptCheck?.ok}
+              onClick={confirm}
+            >
               Confirm and pay {cedis(price)}
             </Button>
             <Button block variant="ghost" onClick={() => setStep(1)}>
@@ -395,7 +409,9 @@ export default function Buy() {
       {step === 3 && placed && (
         <>
           {placed.status === 'processing' || placed.status === 'pending' ? (
-            <Card className="mt-3 p-8 text-center">
+            /* The status flips from a provider callback, not from a click, so it
+               needs announcing (WCAG 4.1.3). */
+            <Card className="mt-3 p-8 text-center" role="status" aria-live="polite">
               <Spinner className="mx-auto size-9 text-brand-600" />
               <p className="mt-4 font-semibold text-slate-900">
                 Sending to {prettyPhone(placed.recipient)}
@@ -407,7 +423,7 @@ export default function Buy() {
                 We are waiting for the network to confirm delivery — this usually takes a few
                 seconds.
               </p>
-              <p className="tabular mt-4 text-xs text-slate-400">Reference {placed.reference}</p>
+              <p className="tabular mt-4 text-xs text-slate-500">Reference {placed.reference}</p>
             </Card>
           ) : placed.status === 'completed' ? (
             <Card className="mt-3 overflow-hidden">

@@ -236,7 +236,7 @@ export default function Overview() {
         {/* Live order feed */}
         <Card>
           <CardHead title="Latest orders" subtitle="Across the whole platform" />
-          <TableWrap>
+          <TableWrap caption="Latest orders across the platform">
             <thead>
               <tr>
                 <Th>Order</Th>

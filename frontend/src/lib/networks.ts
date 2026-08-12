@@ -15,10 +15,24 @@ export const NETWORK_PREFIXES: Record<Network, string[]> = {
 
 export const NETWORKS: Network[] = ['MTN', 'Telecel', 'AirtelTigo']
 
+/**
+ * Network chips are deliberately neutral, identified by a small brand-accurate
+ * dot beside the name rather than by a filled colour.
+ *
+ * The platform's own palette is Deep Blue + Golden Yellow, and both collide with
+ * a carrier: our yellow is effectively MTN's, and our blue is close to
+ * AirtelTigo's. If chips stayed filled, a yellow pill would read as "MTN" on a
+ * page where yellow also means "press this" — so saturated fills belong to the
+ * brand, and carriers keep the dot.
+ */
 export const NETWORK_STYLES: Record<Network, { chip: string; dot: string; label: string }> = {
-  MTN: { chip: 'bg-yellow-100 text-yellow-900', dot: 'bg-mtn', label: 'MTN' },
-  Telecel: { chip: 'bg-red-100 text-red-800', dot: 'bg-telecel', label: 'Telecel' },
-  AirtelTigo: { chip: 'bg-blue-100 text-blue-800', dot: 'bg-airteltigo', label: 'AirtelTigo' },
+  MTN: { chip: 'bg-slate-100 text-slate-700', dot: 'bg-mtn', label: 'MTN' },
+  Telecel: { chip: 'bg-slate-100 text-slate-700', dot: 'bg-telecel', label: 'Telecel' },
+  AirtelTigo: {
+    chip: 'bg-slate-100 text-slate-700',
+    dot: 'bg-airteltigo',
+    label: 'AirtelTigo',
+  },
 }
 
 /** Strip spaces, dashes and the +233 / 233 country prefix down to 0XXXXXXXXX. */

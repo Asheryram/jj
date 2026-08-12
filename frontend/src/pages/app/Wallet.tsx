@@ -69,10 +69,10 @@ export default function Wallet() {
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="bg-brand-700 p-4 text-white sm:col-span-2 lg:col-span-1">
+        <Card tone="brand" className="p-4 sm:col-span-2 lg:col-span-1">
           <p className="text-sm text-brand-100">Available balance</p>
           <p className="tabular mt-2 text-3xl font-bold tracking-tight">{cedis(balance)}</p>
-          <p className="mt-1 text-xs text-brand-100/80">Ready to spend</p>
+          <p className="mt-1 text-xs text-brand-100">Ready to spend</p>
         </Card>
         <StatTile label="Total topped up" value={cedis(toppedUp)} icon={<WalletIcon className="size-5" />} />
         <StatTile label="Total spent" value={cedis(spent)} icon={<CashIcon className="size-5" />} />
@@ -112,7 +112,7 @@ export default function Wallet() {
             />
           }
         />
-        <TableWrap>
+        <TableWrap caption="Your wallet transaction history">
           <thead>
             <tr>
               <Th>Description</Th>
@@ -259,7 +259,7 @@ function TopUpModal({
 
           <Field label="Or enter another amount" htmlFor="topup-custom" error={error}>
             <div className="relative">
-              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-400">
+              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
                 GHS
               </span>
               <TextInput

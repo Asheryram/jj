@@ -1,18 +1,93 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-GH">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#0b6148" />
+
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="apple-touch-icon" href="/logo.svg" />
+    <meta name="theme-color" content="#0B3B8F" />
+
+    <!-- Primary meta. RouteMeta.tsx rewrites these per route on navigation. -->
+    <title>Buy Data Bundles, Airtime &amp; Result Checkers in Ghana | JamesDataConsult</title>
     <meta
       name="description"
-      content="JamesDataConsult — buy data bundles, airtime, voice and SMS bundles, AFA registration and BECE/WASSCE result checkers in Ghana."
+      content="Buy MTN, Telecel and AirtelTigo data bundles, airtime, voice and SMS bundles, MTN AFA registration and BECE/WASSCE result checkers. Pay with Mobile Money — no account needed, delivered in seconds."
     />
-    <title>JamesDataConsult — Data Bundles, Airtime &amp; Result Checkers</title>
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://jamesdataconsult.com/" />
+
+    <!-- Open Graph — controls how the link looks when shared on WhatsApp,
+         which is how most of this traffic will actually arrive. -->
+    <meta property="og:site_name" content="JamesDataConsult" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_GH" />
+    <meta property="og:url" content="https://jamesdataconsult.com/" />
+    <meta
+      property="og:title"
+      content="Buy Data Bundles, Airtime &amp; Result Checkers in Ghana | JamesDataConsult"
+    />
+    <meta
+      property="og:description"
+      content="MTN, Telecel and AirtelTigo bundles plus BECE/WASSCE checkers. Pay with Mobile Money — no account needed."
+    />
+
+    <meta name="twitter:card" content="summary" />
+    <meta
+      name="twitter:title"
+      content="Buy Data Bundles, Airtime &amp; Result Checkers in Ghana"
+    />
+    <meta
+      name="twitter:description"
+      content="MTN, Telecel and AirtelTigo bundles plus BECE/WASSCE checkers. Pay with Mobile Money — no account needed."
+    />
+
+    <!-- Structured data. Deliberately limited to facts we actually know: no
+         invented address, phone number or review counts. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://jamesdataconsult.com/#organization",
+            "name": "JamesDataConsult",
+            "url": "https://jamesdataconsult.com/",
+            "logo": "https://jamesdataconsult.com/logo.svg",
+            "description": "Reseller of data bundles, airtime, voice and SMS bundles, MTN AFA registration and BECE/WASSCE result checker vouchers in Ghana.",
+            "areaServed": {
+              "@type": "Country",
+              "name": "Ghana"
+            }
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://jamesdataconsult.com/#website",
+            "url": "https://jamesdataconsult.com/",
+            "name": "JamesDataConsult",
+            "inLanguage": "en-GH",
+            "publisher": { "@id": "https://jamesdataconsult.com/#organization" }
+          }
+        ]
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <p
+        style="
+          font-family: system-ui, sans-serif;
+          max-width: 34rem;
+          margin: 4rem auto;
+          padding: 0 1rem;
+          line-height: 1.6;
+        "
+      >
+        <strong>JamesDataConsult</strong> needs JavaScript to load the shop. Please enable it, or
+        call us on your network's data vendor line to order by phone.
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

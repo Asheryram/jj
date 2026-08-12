@@ -72,10 +72,10 @@ export default function Earnings() {
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card className="bg-brand-700 p-4 text-white sm:col-span-2 lg:col-span-1">
+        <Card tone="brand" className="p-4 sm:col-span-2 lg:col-span-1">
           <p className="text-sm text-brand-100">Available to withdraw</p>
           <p className="tabular mt-2 text-3xl font-bold tracking-tight">{cedis(agentBalance)}</p>
-          <p className="mt-1 text-xs text-brand-100/80">Paid out to your MoMo on request</p>
+          <p className="mt-1 text-xs text-brand-100">Paid out to your MoMo on request</p>
         </Card>
         <StatTile
           label="From your own sales"
@@ -131,7 +131,7 @@ export default function Earnings() {
             />
           }
         />
-        <TableWrap>
+        <TableWrap caption="Your earnings ledger">
           <thead>
             <tr>
               <Th>Description</Th>

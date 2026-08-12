@@ -4,22 +4,48 @@
   --font-sans:
     system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 
-  /* Brand — deliberately distinct from MTN yellow / Telecel red / AirtelTigo blue */
-  --color-brand-50: #edfaf4;
-  --color-brand-100: #d3f2e4;
-  --color-brand-200: #a9e5cb;
-  --color-brand-300: #74d0ac;
-  --color-brand-400: #42b489;
-  --color-brand-500: #1f996f;
-  --color-brand-600: #0f7a59;
-  --color-brand-700: #0b6148;
-  --color-brand-800: #0a4d3a;
-  --color-brand-900: #093f31;
+  /* ── Brand: Deep Blue #0B3B8F ────────────────────────────────────────────
+     700 is the exact brand hex, because that is the step used for the header,
+     primary buttons and every filled brand surface. The rest of the ramp is
+     built around it for tints, borders and hover states. */
+  --color-brand-50: #eef3fc;
+  --color-brand-100: #d8e3f8;
+  --color-brand-200: #b3c8f1;
+  --color-brand-300: #84a5e5;
+  --color-brand-400: #5280d5;
+  --color-brand-500: #2d5bbb;
+  --color-brand-600: #16459f;
+  --color-brand-700: #0b3b8f;
+  --color-brand-800: #092f72;
+  --color-brand-900: #082657;
 
-  /* Network brand accents, used only as identity chips */
+  /* ── Accent: Golden Yellow #FFC107 ──────────────────────────────────────
+     500 is the exact brand hex.
+
+     IMPORTANT: #FFC107 has a contrast ratio of only 1.9:1 against white, so it
+     must never carry text on a light background and never sit behind white
+     text. It is a *surface* colour: yellow behind deep-blue or near-black text
+     reaches 6.4:1, which passes AA. The `cta` button variant enforces this. */
+  --color-accent-50: #fff8e1;
+  --color-accent-100: #ffecb3;
+  --color-accent-200: #ffe082;
+  --color-accent-300: #ffd54f;
+  --color-accent-400: #ffca28;
+  --color-accent-500: #ffc107;
+  --color-accent-600: #ffb300;
+  --color-accent-700: #ffa000;
+  --color-accent-800: #ff8f00;
+  --color-accent-900: #ff6f00;
+
+  /* ── Network identity ────────────────────────────────────────────────────
+     Used only as a small dot beside the network's name, never as a filled
+     chip. Both of our brand colours now clash with a network's: our Golden
+     Yellow is effectively MTN's yellow, and our Deep Blue is close to
+     AirtelTigo's. Reserving saturated fills for the brand keeps "yellow means
+     act on this" from also meaning "this is an MTN product". */
   --color-mtn: #ffcc00;
   --color-telecel: #e02127;
-  --color-airteltigo: #1f4e9c;
+  --color-airteltigo: #d0202e;
 }
 
 @layer base {
@@ -38,8 +64,37 @@
     margin: 0;
   }
 
+  /**
+   * Two-tone focus ring.
+   *
+   * No single colour is visible on both a white card and a Deep Blue header, so
+   * the ring pairs Golden Yellow with a dark blue halo: on light grounds the
+   * dark halo defines it, on the brand-blue header and hero the yellow does.
+   * This is the same reason WCAG 2.2's focus-appearance guidance asks for a
+   * contrasting indicator rather than a fixed colour.
+   */
   :focus-visible {
-    @apply outline-brand-500 outline-2 outline-offset-2;
+    outline: 3px solid var(--color-accent-500);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-brand-900) 55%, transparent);
+    border-radius: 0.35rem;
+  }
+
+  /* Windows High Contrast / forced-colours: let the OS own the indicator. */
+  @media (forced-colors: active) {
+    :focus-visible {
+      outline: 3px solid Highlight;
+      box-shadow: none;
+    }
+  }
+
+  /* The skip link stays off-screen until focused (WCAG 2.4.1). */
+  .skip-link {
+    @apply sr-only;
+  }
+
+  .skip-link:focus-visible {
+    @apply not-sr-only fixed top-2 left-2 z-100 rounded-lg bg-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-lg;
   }
 }
 

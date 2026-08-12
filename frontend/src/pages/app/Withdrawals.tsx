@@ -73,7 +73,7 @@ export default function Withdrawals() {
             action={<Button onClick={() => setOpen(true)}>Request withdrawal</Button>}
           />
         ) : (
-          <TableWrap>
+          <TableWrap caption="Your withdrawal requests">
             <thead>
               <tr>
                 <Th>Requested</Th>
@@ -178,7 +178,7 @@ function RequestModal({
 
         <Field label="Amount to withdraw" htmlFor="wd-amount" error={error}>
           <div className="relative">
-            <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-400">
+            <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
               GHS
             </span>
             <TextInput

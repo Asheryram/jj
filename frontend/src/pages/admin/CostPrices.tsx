@@ -113,7 +113,7 @@ export default function CostPrices() {
 
       <Card className="mt-3">
         <CardHead title={CATEGORY_META[category].label} subtitle={`${visible.length} products`} />
-        <TableWrap>
+        <TableWrap caption="Product price tiers">
           <thead>
             <tr>
               <Th>Product</Th>
@@ -159,7 +159,7 @@ export default function CostPrices() {
                   <Td align="right" className="tabular text-slate-600">
                     {cedis(product.standardPrice)}
                   </Td>
-                  <Td align="right" className="tabular text-xs text-slate-400">
+                  <Td align="right" className="tabular text-xs text-slate-500">
                     {cedis(product.maxRetailPrice)}
                   </Td>
                   <Td align="right">
@@ -281,7 +281,7 @@ function EditPricesModal({
               hint={TIER_LABELS[tier].help}
             >
               <div className="relative">
-                <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-400">
+                <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
                   GHS
                 </span>
                 <TextInput

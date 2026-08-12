@@ -133,7 +133,7 @@ export default function Referrals() {
             detail="Share your referral link on WhatsApp and the people who join will appear here."
           />
         ) : (
-          <TableWrap>
+          <TableWrap caption="Agents in your referral chain">
             <thead>
               <tr>
                 <Th>Agent</Th>

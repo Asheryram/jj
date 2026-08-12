@@ -203,11 +203,13 @@ function ProductCard({
                     ? `you keep ${cedis(agentMargin.margin).replace('GHS ', '')}`
                     : 'at cost'}
                 </span>
-                {agentMargin.isDefault && <span className="text-slate-400"> · default</span>}
+                {agentMargin.isDefault && <span className="text-slate-500"> · default</span>}
               </p>
             )}
           </div>
-          <Badge tone="brand" className="gap-0.5">
+          {/* Golden Yellow marks the action on the card — the one thing the
+              buyer is here to press. */}
+          <Badge tone="accent" className="gap-0.5">
             Buy <ChevronRightIcon className="size-3.5" />
           </Badge>
         </div>

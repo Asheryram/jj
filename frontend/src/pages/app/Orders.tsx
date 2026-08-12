@@ -95,7 +95,7 @@ export default function Orders() {
           onChange={setFilter}
         />
         <div className="relative sm:w-64">
-          <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-400" />
+          <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-500" />
           <TextInput
             placeholder="Number, reference or product"
             className="pl-9"
@@ -131,7 +131,7 @@ export default function Orders() {
             }
           />
         ) : (
-          <TableWrap>
+          <TableWrap caption="Your orders">
             <thead>
               <tr>
                 <Th>Product</Th>

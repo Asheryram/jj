@@ -134,7 +134,7 @@ export default function AdminOrders() {
           onChange={setFilter}
         />
         <div className="relative sm:w-72">
-          <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-400" />
+          <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-500" />
           <TextInput
             placeholder="Number, reference, agent or product"
             className="pl-9"
@@ -158,7 +158,7 @@ export default function AdminOrders() {
             }
           />
         ) : (
-          <TableWrap>
+          <TableWrap caption="All orders on the platform, with the split per order">
             <thead>
               <tr>
                 <Th>Product</Th>

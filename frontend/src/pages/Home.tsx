@@ -55,7 +55,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
           <div className="flex flex-wrap items-end justify-between gap-5">
             <div className="max-w-xl">
-              <Badge tone="brand" className="bg-white/15 text-brand-50">
+              <Badge tone="onBrand">
                 MTN · Telecel · AirtelTigo
               </Badge>
               <h1 className="mt-3 text-2xl leading-tight font-extrabold tracking-tight text-white sm:text-3xl">

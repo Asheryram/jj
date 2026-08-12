@@ -98,7 +98,7 @@ export default function Settings() {
             hint="Stops tiny top-ups that cost more in fees than they are worth."
           >
             <div className="relative">
-              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-400">
+              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
                 GHS
               </span>
               <TextInput
@@ -136,7 +136,7 @@ export default function Settings() {
                 <p className="mt-0.5 font-mono text-xs text-slate-500">{integration.field}</p>
               </div>
               <div className="flex items-center gap-2">
-                <span className="tabular font-mono text-sm text-slate-400">
+                <span className="tabular font-mono text-sm text-slate-500">
                   {integration.value}
                 </span>
                 <Badge tone="success">Connected</Badge>

@@ -12,7 +12,7 @@ export default function Checkers() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 sm:py-14">
       <div className="text-center">
-        <span className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-teal-50 text-teal-700">
+        <span className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
           <CertificateIcon className="size-7" />
         </span>
         <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
@@ -50,7 +50,7 @@ export default function Checkers() {
               ))}
             </ul>
             <Link to={`/buy/${product.id}`} className="mt-5">
-              <Button block size="lg">
+              <Button block size="lg" variant="cta">
                 Buy {product.name.replace(' Result Checker', '')} checker
               </Button>
             </Link>

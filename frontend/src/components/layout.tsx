@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useStore } from '../state/store'
+import { useStore, type Toast } from '../state/store'
 import { cedis, initials } from '../lib/format'
 import type { Role } from '../data/types'
 import { Badge, Button, Modal, Segmented, Toggle, cn } from './ui'
@@ -66,6 +66,9 @@ export function DemoBar() {
         <span className="flex items-center gap-1.5 font-semibold tracking-wide text-amber-300 uppercase">
           <AlertIcon className="size-3.5" /> Demo
         </span>
+        {/* slate-400 on slate-900 is 6.0:1. Bumping it to slate-500 as we did on
+            white surfaces would DROP it to 3.7:1 — on a dark ground, lighter is
+            the accessible direction. */}
         <span className="hidden text-slate-400 sm:inline">
           Mock data — no live payments or DataHub GH calls
         </span>
@@ -232,6 +235,7 @@ export function AppShell() {
 
   return (
     <div className="min-h-dvh bg-slate-50">
+      <SkipLink />
       <DemoBar />
 
       <header className="sticky top-9 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
@@ -264,7 +268,7 @@ export function AppShell() {
               type="button"
               onClick={logout}
               aria-label="Log out"
-              className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
             >
               <LogoutIcon className="size-5" />
             </button>
@@ -291,7 +295,7 @@ export function AppShell() {
           </div>
         </aside>
 
-        <main className="min-w-0 flex-1 py-5 pb-28 lg:pb-10">
+        <main id="main" className="min-w-0 flex-1 py-5 pb-28 lg:pb-10">
           <Outlet />
         </main>
       </div>
@@ -351,11 +355,21 @@ export function AppShell() {
 
 // ─── Public chrome ──────────────────────────────────────────────────────────
 
+/** WCAG 2.4.1 — the first thing in the tab order jumps past the nav. */
+export function SkipLink() {
+  return (
+    <a href="#main" className="skip-link">
+      Skip to main content
+    </a>
+  )
+}
+
 export function PublicShell() {
   const { session } = useStore()
 
   return (
     <div className="min-h-dvh bg-white">
+      <SkipLink />
       <DemoBar />
       <header className="sticky top-9 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4">
@@ -402,7 +416,9 @@ export function PublicShell() {
           </nav>
         </div>
       </header>
-      <Outlet />
+      <main id="main">
+        <Outlet />
+      </main>
       <PublicFooter />
       <ToastHost />
     </div>
@@ -485,14 +501,51 @@ function FooterColumn({ title, links }: { title: string; links: [string, string]
 
 export function ToastHost() {
   const { toasts, dismissToast } = useStore()
-  if (toasts.length === 0) return null
+
+  const spoken = (t: Toast) => [t.title, t.detail].filter(Boolean).join('. ')
 
   return (
-    <div className="pointer-events-none fixed inset-x-3 top-12 z-50 flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:top-auto sm:w-80">
+    <>
+      {/*
+        The live regions are always in the DOM, even with nothing to say.
+        A region created at the same moment as its content is frequently missed
+        by screen readers, so announcements would be silently dropped — exactly
+        the messages that confirm money moved.
+
+        Errors go in an assertive region (interrupt), everything else polite.
+        The visual toasts below are aria-hidden so nothing is read twice.
+      */}
+      <div aria-live="assertive" aria-atomic="false" className="sr-only">
+        {toasts.filter((t) => t.tone === 'error').map((t) => (
+          <p key={t.id}>{spoken(t)}</p>
+        ))}
+      </div>
+      <div aria-live="polite" aria-atomic="false" className="sr-only">
+        {toasts.filter((t) => t.tone !== 'error').map((t) => (
+          <p key={t.id}>{spoken(t)}</p>
+        ))}
+      </div>
+
+      {toasts.length > 0 && <VisualToasts toasts={toasts} onDismiss={dismissToast} />}
+    </>
+  )
+}
+
+function VisualToasts({
+  toasts,
+  onDismiss,
+}: {
+  toasts: Toast[]
+  onDismiss: (id: number) => void
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none fixed inset-x-3 top-12 z-50 flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:top-auto sm:w-80"
+    >
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          role="status"
           className={cn(
             'pointer-events-auto flex gap-2.5 rounded-xl border p-3.5 shadow-lg',
             toast.tone === 'success' && 'border-emerald-200 bg-emerald-50 text-emerald-900',
@@ -515,9 +568,9 @@ export function ToastHost() {
           </div>
           <button
             type="button"
-            onClick={() => dismissToast(toast.id)}
+            onClick={() => onDismiss(toast.id)}
             aria-label="Dismiss"
-            className="-mt-0.5 -mr-0.5 shrink-0 self-start rounded p-1 opacity-60 hover:opacity-100"
+            className="pointer-events-auto -mt-0.5 -mr-0.5 shrink-0 self-start rounded p-1 opacity-60 hover:opacity-100"
           >
             <XIcon className="size-4" />
           </button>

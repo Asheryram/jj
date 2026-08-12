@@ -1,5 +1,8 @@
 import {
+  createContext,
+  useContext,
   useEffect,
+  useRef,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -18,6 +21,7 @@ export function cn(...parts: (string | false | null | undefined)[]): string {
 
 type ButtonVariant =
   | 'primary'
+  | 'cta'
   | 'secondary'
   | 'outline'
   | 'ghost'
@@ -35,6 +39,12 @@ type ButtonSize = 'sm' | 'md' | 'lg'
  */
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary: 'bg-brand-700 text-white hover:bg-brand-800 active:bg-brand-900 shadow-sm',
+  /**
+   * Golden Yellow, for the single highest-emphasis action on a screen.
+   * The text is deep blue, never white — #FFC107 behind white text fails AA
+   * badly (1.9:1), behind brand-900 it passes at 6.4:1.
+   */
+  cta: 'bg-accent-500 text-brand-900 hover:bg-accent-400 active:bg-accent-600 shadow-sm',
   secondary: 'bg-brand-50 text-brand-800 hover:bg-brand-100 border border-brand-100',
   outline: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50',
   ghost: 'text-slate-600 hover:bg-slate-100',
@@ -106,19 +116,44 @@ export function Spinner({ className }: { className?: string }) {
 
 // ─── Surfaces ───────────────────────────────────────────────────────────────
 
+const CARD_TONES = {
+  default: 'border-slate-200 bg-white',
+  /** Filled Deep Blue, for a figure that should read as the headline on a page. */
+  brand: 'border-brand-800 bg-brand-700 text-white',
+} as const
+
 export function Card({
   className,
   children,
   as: As = 'div',
+  tone = 'default',
+  role,
+  'aria-live': ariaLive,
+  'aria-label': ariaLabel,
 }: {
   className?: string
   children: ReactNode
   as?: 'div' | 'section' | 'li'
+  /**
+   * Use this rather than passing `bg-*` through `className`. Two utilities of the
+   * same kind are resolved by CSS source order, not by attribute order, so an
+   * override there can silently lose to the base class — which is how a filled
+   * card ends up as white text on a white background.
+   */
+  tone?: keyof typeof CARD_TONES
+  /** Allows a card to double as a status region when its content updates itself. */
+  role?: string
+  'aria-live'?: 'off' | 'polite' | 'assertive'
+  'aria-label'?: string
 }) {
   return (
     <As
+      role={role}
+      aria-live={ariaLive}
+      aria-label={ariaLabel}
       className={cn(
-        'rounded-2xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
+        'rounded-2xl border shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
+        CARD_TONES[tone],
         className,
       )}
     >
@@ -169,7 +204,15 @@ export function PageHead({
 
 // ─── Badges ─────────────────────────────────────────────────────────────────
 
-type BadgeTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info' | 'brand'
+type BadgeTone =
+  | 'neutral'
+  | 'success'
+  | 'warning'
+  | 'danger'
+  | 'info'
+  | 'brand'
+  | 'accent'
+  | 'onBrand'
 
 const BADGE_TONES: Record<BadgeTone, string> = {
   neutral: 'bg-slate-100 text-slate-700',
@@ -178,6 +221,10 @@ const BADGE_TONES: Record<BadgeTone, string> = {
   danger: 'bg-red-100 text-red-800',
   info: 'bg-sky-100 text-sky-800',
   brand: 'bg-brand-100 text-brand-800',
+  /** Golden Yellow, for offers and highlights. Deep-blue text keeps it legible. */
+  accent: 'bg-accent-500 text-brand-900',
+  /** For sitting on top of a filled Deep Blue surface. */
+  onBrand: 'bg-white/15 text-white',
 }
 
 export function Badge({
@@ -257,6 +304,23 @@ export function NetworkChip({ network, className }: { network: Network | null; c
 
 // ─── Form controls ──────────────────────────────────────────────────────────
 
+/**
+ * Carries a Field's hint/error ids down to whatever control sits inside it,
+ * however deeply it is wrapped.
+ */
+const FieldContext = createContext<{ describedBy?: string; invalid: boolean }>({
+  invalid: false,
+})
+
+/**
+ * A labelled form control.
+ *
+ * The hint and error are wired to the input with `aria-describedby`, and the
+ * error also sets `aria-invalid`, so a screen reader announces *why* a field is
+ * wrong when focus lands on it — not just that something failed somewhere on the
+ * page. The error carries `role="alert"` so it is also read out the moment it
+ * appears. Rendering red text alone would leave both groups of users guessing.
+ */
 export function Field({
   label,
   hint,
@@ -272,38 +336,53 @@ export function Field({
   children: ReactNode
   className?: string
 }) {
+  const errorId = htmlFor ? `${htmlFor}-error` : undefined
+  const hintId = htmlFor ? `${htmlFor}-hint` : undefined
+  const describedBy = error ? errorId : hint ? hintId : undefined
+
   return (
     <div className={cn('space-y-1.5', className)}>
       <label htmlFor={htmlFor} className="block text-sm font-medium text-slate-700">
         {label}
       </label>
-      {children}
+      {/* Passed by context rather than cloned onto the child: the control is
+          often wrapped (a currency prefix, an inline network chip), and cloning
+          would decorate the wrapper instead of the input. */}
+      <FieldContext.Provider value={{ describedBy, invalid: Boolean(error) }}>
+        {children}
+      </FieldContext.Provider>
       {error ? (
-        <p className="flex items-start gap-1.5 text-sm text-red-600">
+        <p id={errorId} role="alert" className="flex items-start gap-1.5 text-sm text-red-600">
           <AlertIcon className="mt-0.5 size-4 shrink-0" />
           <span>{error}</span>
         </p>
       ) : hint ? (
-        <p className="text-sm text-slate-500">{hint}</p>
+        <p id={hintId} className="text-sm text-slate-500">
+          {hint}
+        </p>
       ) : null}
     </div>
   )
 }
 
 const CONTROL_BASE =
-  'w-full rounded-xl border bg-white px-3.5 text-[15px] text-slate-900 placeholder:text-slate-400 transition-colors focus:outline-none'
+  'w-full rounded-xl border bg-white px-3.5 text-[15px] text-slate-900 placeholder:text-slate-500/90 transition-colors focus:outline-none'
 
 export function TextInput({
   invalid,
   className,
   ...rest
 }: InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }) {
+  const field = useContext(FieldContext)
+  const isInvalid = invalid ?? field.invalid
   return (
     <input
+      aria-invalid={isInvalid || undefined}
+      aria-describedby={rest['aria-describedby'] ?? field.describedBy}
       className={cn(
         CONTROL_BASE,
         'h-11',
-        invalid
+        isInvalid
           ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100'
           : 'border-slate-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-100',
         className,
@@ -318,8 +397,11 @@ export function Select({
   children,
   ...rest
 }: SelectHTMLAttributes<HTMLSelectElement>) {
+  const field = useContext(FieldContext)
   return (
     <select
+      aria-invalid={field.invalid || undefined}
+      aria-describedby={rest['aria-describedby'] ?? field.describedBy}
       className={cn(
         CONTROL_BASE,
         'h-11 appearance-none border-slate-300 pr-9 focus:border-brand-500 focus:ring-2 focus:ring-brand-100',
@@ -420,16 +502,58 @@ export function Modal({
   children: ReactNode
   footer?: ReactNode
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const titleId = useRef(`dialog-${Math.random().toString(36).slice(2, 8)}`).current
+
   useEffect(() => {
     if (!open) return
+
+    // Remember where focus was so it can be handed back on close (WCAG 2.4.3).
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    const focusables = () =>
+      Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((el) => el.offsetParent !== null)
+
+    // Move focus inside, preferring the first control over the container.
+    const first = focusables()[0]
+    if (first) first.focus()
+    else dialogRef.current?.focus()
+
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      // Keep Tab inside the dialog — otherwise focus escapes to the page behind,
+      // which a screen-reader user cannot see has been covered.
+      const items = focusables()
+      if (items.length === 0) {
+        event.preventDefault()
+        return
+      }
+      const firstItem = items[0]
+      const lastItem = items[items.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && (active === firstItem || !dialogRef.current?.contains(active))) {
+        event.preventDefault()
+        lastItem.focus()
+      } else if (!event.shiftKey && active === lastItem) {
+        event.preventDefault()
+        firstItem.focus()
+      }
     }
+
     document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = ''
+      previouslyFocused?.focus?.()
     }
   }, [open, onClose])
 
@@ -445,18 +569,22 @@ export function Modal({
       />
       {/* Bottom sheet on phones, centred dialog on wider screens. */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
-        className="relative w-full max-w-md rounded-t-2xl bg-white shadow-xl sm:rounded-2xl"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="relative w-full max-w-md rounded-t-2xl bg-white shadow-xl outline-none sm:rounded-2xl"
       >
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3.5">
-          <h2 className="font-semibold text-slate-900">{title}</h2>
+          <h2 id={titleId} className="font-semibold text-slate-900">
+            {title}
+          </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            className="-mr-1 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-600"
           >
             <XIcon className="size-5" />
           </button>
@@ -515,7 +643,7 @@ export function EmptyState({
   return (
     <div className="flex flex-col items-center px-6 py-12 text-center">
       {icon && (
-        <div className="mb-3 flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+        <div className="mb-3 flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
           {icon}
         </div>
       )}
@@ -526,11 +654,30 @@ export function EmptyState({
   )
 }
 
-/** Wide tables scroll inside their own container — the page never scrolls sideways. */
-export function TableWrap({ children }: { children: ReactNode }) {
+/**
+ * Wide tables scroll inside their own container — the page never scrolls
+ * sideways. The scroll container is focusable and labelled so a keyboard user
+ * can actually reach the overflowing content, and `caption` gives screen-reader
+ * users the table's purpose before they start reading cells.
+ */
+export function TableWrap({
+  children,
+  caption,
+}: {
+  children: ReactNode
+  caption?: string
+}) {
   return (
-    <div className="-mx-px overflow-x-auto">
-      <table className="w-full min-w-[36rem] border-collapse text-sm">{children}</table>
+    <div
+      className="-mx-px overflow-x-auto"
+      tabIndex={0}
+      role="region"
+      aria-label={caption ? `${caption} (scrollable)` : 'Table (scrollable)'}
+    >
+      <table className="w-full min-w-[36rem] border-collapse text-sm">
+        {caption && <caption className="sr-only">{caption}</caption>}
+        {children}
+      </table>
     </div>
   )
 }
@@ -591,7 +738,11 @@ export function Stepper({ steps, current }: { steps: string[]; current: number }
       {steps.map((step, index) => {
         const state = index < current ? 'done' : index === current ? 'active' : 'todo'
         return (
-          <li key={step} className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <li
+            key={step}
+            aria-current={state === 'active' ? 'step' : undefined}
+            className="flex min-w-0 flex-1 flex-col gap-1.5"
+          >
             <span
               className={cn(
                 'h-1.5 rounded-full transition-colors',
@@ -603,10 +754,14 @@ export function Stepper({ steps, current }: { steps: string[]; current: number }
             <span
               className={cn(
                 'truncate text-[11px] font-semibold tracking-wide uppercase',
-                state === 'todo' ? 'text-slate-400' : 'text-brand-800',
+                state === 'todo' ? 'text-slate-500' : 'text-brand-800',
               )}
             >
               {step}
+              {/* The bar alone is colour-only; say the state out loud for AT. */}
+              <span className="sr-only">
+                {state === 'done' ? ' (completed)' : state === 'active' ? ' (current step)' : ' (not started)'}
+              </span>
             </span>
           </li>
         )

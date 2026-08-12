@@ -26,7 +26,7 @@ export const CATEGORY_META: Record<
     short: 'Airtime',
     blurb: 'Instant top-up on all three networks.',
     icon: PhoneIcon,
-    accent: 'bg-sky-50 text-sky-700',
+    accent: 'bg-teal-50 text-teal-700',
   },
   voice: {
     label: 'Voice Bundles',
@@ -40,7 +40,8 @@ export const CATEGORY_META: Record<
     short: 'SMS',
     blurb: 'Bulk SMS packs for personal and business use.',
     icon: SmsIcon,
-    accent: 'bg-amber-50 text-amber-700',
+    // Not amber: too close to the brand's Golden Yellow, which means "act".
+    accent: 'bg-cyan-50 text-cyan-700',
   },
   afa: {
     label: 'AFA Registration',
@@ -54,7 +55,7 @@ export const CATEGORY_META: Record<
     short: 'Checkers',
     blurb: 'BECE and WASSCE vouchers delivered instantly.',
     icon: CertificateIcon,
-    accent: 'bg-teal-50 text-teal-700',
+    accent: 'bg-emerald-50 text-emerald-700',
   },
 }
 

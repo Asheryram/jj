@@ -92,7 +92,7 @@ export default function AdminWithdrawals() {
             }
           />
         ) : (
-          <TableWrap>
+          <TableWrap caption="Agent withdrawal requests">
             <thead>
               <tr>
                 <Th>Agent</Th>
@@ -141,7 +141,7 @@ export default function AdminWithdrawals() {
                         Review
                       </Button>
                     ) : (
-                      <span className="text-xs text-slate-400">Decided</span>
+                      <span className="text-xs text-slate-500">Decided</span>
                     )}
                   </Td>
                 </tr>

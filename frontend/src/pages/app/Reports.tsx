@@ -191,7 +191,7 @@ export default function Reports() {
 
       <Card className="mt-3">
         <CardHead title="Breakdown by category" />
-        <TableWrap>
+        <TableWrap caption="Revenue breakdown by category">
           <thead>
             <tr>
               <Th>Category</Th>

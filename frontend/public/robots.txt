@@ -1,0 +1,15 @@
+# JamesDataConsult
+
+User-agent: *
+Allow: /
+
+# Signed-in and transactional surfaces have nothing to index and should never
+# appear in results. Agent sell links (/s/<code>) are deliberately left
+# crawlable — they are public shopfronts.
+Disallow: /app
+Disallow: /admin
+Disallow: /buy/
+Disallow: /login
+Disallow: /track
+
+Sitemap: https://jamesdataconsult.com/sitemap.xml

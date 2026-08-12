@@ -259,7 +259,7 @@ export default function Dashboard() {
               <div className="mt-3 text-brand-500">
                 <Sparkline values={agentEarningsByDay.map((d) => d.revenue)} />
               </div>
-              <div className="mt-1.5 flex justify-between text-xs text-slate-400">
+              <div className="mt-1.5 flex justify-between text-xs text-slate-500">
                 <span>{agentEarningsByDay[0].day}</span>
                 <span>{agentEarningsByDay[agentEarningsByDay.length - 1].day}</span>
               </div>

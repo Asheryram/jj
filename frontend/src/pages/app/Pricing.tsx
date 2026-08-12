@@ -96,7 +96,7 @@ export default function Pricing() {
 
       <Card className="mt-3">
         <CardHead title={CATEGORY_META[category].label} subtitle={`${visible.length} products`} />
-        <TableWrap>
+        <TableWrap caption="Your resale prices by product">
           <thead>
             <tr>
               <Th>Product</Th>
@@ -142,7 +142,7 @@ export default function Pricing() {
                       {margin > 0 ? cedis(margin, { sign: true }) : 'at cost'}
                     </span>
                   </Td>
-                  <Td align="right" className="tabular text-xs text-slate-400">
+                  <Td align="right" className="tabular text-xs text-slate-500">
                     {cedis(band.ceiling)}
                   </Td>
                   <Td align="right">
@@ -251,7 +251,7 @@ function EditPriceModal({
           hint={`Anywhere between ${cedis(band.floor)} and ${cedis(band.ceiling)}.`}
         >
           <div className="relative">
-            <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-400">
+            <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
               GHS
             </span>
             <TextInput
