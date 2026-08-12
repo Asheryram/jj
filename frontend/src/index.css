@@ -1,0 +1,59 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  /* Brand — deliberately distinct from MTN yellow / Telecel red / AirtelTigo blue */
+  --color-brand-50: #edfaf4;
+  --color-brand-100: #d3f2e4;
+  --color-brand-200: #a9e5cb;
+  --color-brand-300: #74d0ac;
+  --color-brand-400: #42b489;
+  --color-brand-500: #1f996f;
+  --color-brand-600: #0f7a59;
+  --color-brand-700: #0b6148;
+  --color-brand-800: #0a4d3a;
+  --color-brand-900: #093f31;
+
+  /* Network brand accents, used only as identity chips */
+  --color-mtn: #ffcc00;
+  --color-telecel: #e02127;
+  --color-airteltigo: #1f4e9c;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-slate-50 font-sans text-slate-800 antialiased;
+  }
+
+  /* Numeric fields should open the phone keypad, not the alphabet */
+  input[inputmode='numeric']::-webkit-outer-spin-button,
+  input[inputmode='numeric']::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+
+  :focus-visible {
+    @apply outline-brand-500 outline-2 outline-offset-2;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Respect users who ask for less motion (NFR-4.1 covers a wide device range) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
