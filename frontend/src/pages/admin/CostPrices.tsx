@@ -22,17 +22,20 @@ import {
 } from '../../components/ui'
 import { AlertIcon, TagIcon, TrendUpIcon } from '../../components/icons'
 
-type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice' | 'maxRetailPrice'
+type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice'
 
 /**
- * The three tiers James actually sets.
+ * The two prices James actually sets.
  *
  * `supplierCost` is deliberately not one of them: it is what the provider
  * charges, it arrives from the provider catalogue, and it is the baseline every
  * margin on this page is measured against. Typing it here would let our idea of
  * the cost drift from the invoice — so it is shown, not edited.
+ *
+ * There is no retail cap any more either. Agents price their own stock above
+ * their cost, however they like.
  */
-const EDITABLE_TIERS = ['adminPrice', 'standardPrice', 'maxRetailPrice'] as const
+const EDITABLE_TIERS = ['adminPrice', 'standardPrice'] as const
 
 type EditableTier = (typeof EDITABLE_TIERS)[number]
 
@@ -49,17 +52,14 @@ const TIER_LABELS: Record<Tier, { label: string; help: string }> = {
     label: 'Your own walk-up price',
     help: 'What a customer pays buying direct from you, with no agent link. You keep the whole spread. It can sit below what agents pay if you would rather make your margin on agent volume — the only floor is your own cost.',
   },
-  maxRetailPrice: {
-    label: 'Retail cap',
-    help: 'The most anyone in the chain may charge, so a long chain cannot price you out of the market. Has to clear what agents pay, or none of them could sell.',
-  },
 }
 
 /**
- * FR-3.3, FR-3.6, FR-6.4 — James sets the three prices he charges.
+ * FR-3.3, FR-3.6, FR-6.4 — James sets the two prices he charges.
  *
- * The fourth number, what he pays the provider, is shown here but edited on the
- * provider catalogue under Settings. See EDITABLE_TIERS above.
+ * The third number, what he pays the provider, is shown here but edited on the
+ * provider catalogue under Settings. Agents set their own retail price and are
+ * not capped. See EDITABLE_TIERS above.
  */
 export default function CostPrices() {
   const { products, updateProductTier } = useStore()
@@ -69,20 +69,17 @@ export default function CostPrices() {
   const visible = products.filter((p) => p.category === category)
   const agentMargin = products.reduce((sum, p) => sum + (p.adminPrice - p.supplierCost), 0)
   const directMargin = products.reduce((sum, p) => sum + (p.standardPrice - p.supplierCost), 0)
-  // Both selling prices must clear cost, and the cap must clear the agent price.
-  // Walk-up vs agent price is deliberately not checked — see EDITABLE_TIERS.
+  // Both selling prices must clear cost. Walk-up vs agent price is deliberately
+  // not checked, and there is no ceiling to check — see EDITABLE_TIERS.
   const broken = products.filter(
-    (p) =>
-      p.adminPrice < p.supplierCost ||
-      p.standardPrice < p.supplierCost ||
-      p.maxRetailPrice < p.adminPrice,
+    (p) => p.adminPrice < p.supplierCost || p.standardPrice < p.supplierCost,
   )
 
   return (
     <div>
       <PageHead
         title="Prices"
-        subtitle="What agents pay, what walk-up customers pay, and the ceiling. What you pay comes from the provider catalogue."
+        subtitle="What agents pay and what walk-up customers pay. What you pay comes from the provider catalogue; agents set their own retail price."
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -113,8 +110,8 @@ export default function CostPrices() {
             title={`${broken.length} product${broken.length === 1 ? '' : 's'} priced wrong`}
             icon={<AlertIcon className="size-4" />}
           >
-            Either a selling price is below what you pay, or the cap is below what your agents pay.
-            Fix these before they sell.
+            A selling price is below what you pay the provider, so every one of those sales loses
+            money. Fix these before they sell.
           </Callout>
         )}
         <Callout
@@ -145,7 +142,6 @@ export default function CostPrices() {
               <Th align="right">Agents pay</Th>
               <Th align="right">Your margin</Th>
               <Th align="right">Walk-up price</Th>
-              <Th align="right">Cap</Th>
               <Th align="right" />
             </tr>
           </thead>
@@ -154,7 +150,7 @@ export default function CostPrices() {
               const margin = product.adminPrice - product.supplierCost
               const invalid =
                 product.adminPrice < product.supplierCost ||
-                product.maxRetailPrice < product.adminPrice
+                product.standardPrice < product.supplierCost
               return (
                 <tr key={product.id} className={cn('hover:bg-slate-50', invalid && 'bg-red-50/50')}>
                   <Td>
@@ -182,9 +178,6 @@ export default function CostPrices() {
                   </Td>
                   <Td align="right" className="tabular text-slate-600">
                     {cedis(product.standardPrice)}
-                  </Td>
-                  <Td align="right" className="tabular text-xs text-slate-500">
-                    {cedis(product.maxRetailPrice)}
                   </Td>
                   <Td align="right">
                     <Button size="sm" variant="outline" onClick={() => setEditing(product)}>
@@ -221,7 +214,6 @@ function EditPricesModal({
   const [values, setValues] = useState<Record<EditableTier, string>>({
     adminPrice: '',
     standardPrice: '',
-    maxRetailPrice: '',
   })
   const [error, setError] = useState('')
 
@@ -232,7 +224,6 @@ function EditPricesModal({
     setValues({
       adminPrice: product ? (product.adminPrice / 100).toFixed(2) : '',
       standardPrice: product ? (product.standardPrice / 100).toFixed(2) : '',
-      maxRetailPrice: product ? (product.maxRetailPrice / 100).toFixed(2) : '',
     })
     setError('')
   }
@@ -242,7 +233,6 @@ function EditPricesModal({
   const parsed = {
     adminPrice: parseCedis(values.adminPrice),
     standardPrice: parseCedis(values.standardPrice),
-    maxRetailPrice: parseCedis(values.maxRetailPrice),
   }
 
   const save = () => {
@@ -257,8 +247,6 @@ function EditPricesModal({
     const supplier = product.supplierCost
     const agent = parsed.adminPrice as number
     const standard = parsed.standardPrice as number
-    const cap = parsed.maxRetailPrice as number
-
     if (agent < supplier) {
       setError(`Your price to agents cannot be below the ${cedis(supplier)} you pay for it.`)
       return
@@ -267,12 +255,6 @@ function EditPricesModal({
     // that is a channel decision, not an error. See EDITABLE_TIERS above.
     if (standard < supplier) {
       setError(`You pay ${cedis(supplier)} for this, so you cannot sell it for less.`)
-      return
-    }
-    if (cap < agent) {
-      setError(
-        `The retail cap cannot be below the ${cedis(agent)} your agents pay — none of them could sell.`,
-      )
       return
     }
 

@@ -132,7 +132,7 @@ interface Store {
   products: Product[]
   updateProductTier: (
     productId: string,
-    tier: 'supplierCost' | 'adminPrice' | 'standardPrice' | 'maxRetailPrice',
+    tier: 'supplierCost' | 'adminPrice' | 'standardPrice',
     value: number,
   ) => Promise<void>
 
@@ -371,10 +371,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSession(result.user)
       if (result.user.role === 'customer') setCustomerBalance(result.balance)
       if (result.user.role === 'agent') setAgentBalance(result.balance)
-      await loadForSession(result.user)
+
+      // The catalogue is re-fetched, not just the session's own data, because
+      // its *shape* depends on who is asking: `supplierCost` is admin-only and
+      // is stripped for everyone else. Skipping this left an admin holding the
+      // anonymous payload, so every "you pay" and margin on the Prices page
+      // rendered from an absent number — GHS NaN.
+      await Promise.all([loadCatalogue(), loadForSession(result.user)])
       return result.user
     },
-    [loadForSession],
+    [loadCatalogue, loadForSession],
   )
 
   const register = useCallback(
@@ -393,6 +399,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     token.clear()
     setSession(null)
+    // Re-fetch for the same reason as login: an admin's catalogue carries
+    // supplier costs, and those should not linger in a signed-out browser.
+    void loadCatalogue()
     setOrders([])
     setTransactions([])
     setEarnings([])
@@ -404,7 +413,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setCustomerBalance(0)
     setAgentBalance(0)
     setPrices([])
-  }, [])
+  }, [loadCatalogue])
 
   const setSellerCode = useCallback((code: string | null) => {
     if (code) sessionStorage.setItem('jdc.seller', code)
@@ -465,7 +474,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const myBand = useCallback(
     (product: Product): PriceBand => {
-      if (!meAsAgent) return { floor: product.adminPrice, ceiling: product.maxRetailPrice }
+      if (!meAsAgent) return { floor: product.adminPrice }
       return priceBandFor(meAsAgent, product)
     },
     [meAsAgent],
@@ -511,7 +520,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const updateProductTier = useCallback(
     async (
       productId: string,
-      tier: 'supplierCost' | 'adminPrice' | 'standardPrice' | 'maxRetailPrice',
+      tier: 'supplierCost' | 'adminPrice' | 'standardPrice',
       value: number,
     ) => {
       try {
@@ -626,9 +635,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               })
             }
 
-            // Balances and ledgers moved server-side when the order settled.
-            void loadForSession(session)
-            if (!session) {
+            if (session) {
+              // Balances and ledgers moved server-side when the order settled.
+              void loadForSession(session)
+            } else {
+              // A guest has no server-side lists to refresh, and calling
+              // loadForSession(null) here would be actively harmful: its first
+              // act is to clear `orders`, which is where the order this receipt
+              // is about lives. That blanked the receipt at the exact moment the
+              // buyer had just paid — the worst screen in the product to lose.
               void api
                 .credits(fresh.buyerPhone)
                 .then(setClaimableCredits)

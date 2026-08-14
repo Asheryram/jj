@@ -27,10 +27,13 @@ import { AlertIcon, TagIcon, TrendUpIcon } from '../../components/icons'
 /**
  * FR-3.4, FR-6.2 — an agent sets their own resale price.
  *
- * The floor is what *they* pay, which is their upline's price, not the
- * supplier's cost. That is what guarantees everyone above them earns on every
- * sale. The ceiling is James's retail cap, so a long chain cannot price a
- * bundle out of the market.
+ * The floor is what they pay James — the same price for every agent, whoever
+ * referred them. Below it they would be selling at a loss, so it is enforced
+ * server-side as well as here.
+ *
+ * There is no ceiling. An agent charges whatever they judge the market will bear,
+ * and an agent who overprices loses the sale to one who does not — competition is
+ * a better cap than a number James would have to maintain per product.
  */
 export default function Pricing() {
   const { products, myBand, myResalePrice, hasOwnPrice, setAgentPrice } = useStore()
@@ -142,9 +145,6 @@ export default function Pricing() {
                       {margin > 0 ? cedis(margin, { sign: true }) : 'at cost'}
                     </span>
                   </Td>
-                  <Td align="right" className="tabular text-xs text-slate-500">
-                    {cedis(band.ceiling)}
-                  </Td>
                   <Td align="right">
                     <Button size="sm" variant="outline" onClick={() => setEditing(product)}>
                       Edit
@@ -175,7 +175,7 @@ export default function Pricing() {
           for (const product of products) {
             const band = myBand(product)
             const wanted = Math.round(band.floor * (1 + percent / 100))
-            setAgentPrice(product.id, Math.min(Math.max(wanted, band.floor), band.ceiling))
+            setAgentPrice(product.id, Math.max(wanted, band.floor))
           }
           setBulkOpen(false)
         }}
@@ -238,9 +238,11 @@ function EditPriceModal({
           </div>
           <div className="rounded-xl bg-slate-50 px-3.5 py-3">
             <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
-              Most you may charge
+              You keep
             </p>
-            <p className="tabular mt-0.5 font-bold text-slate-900">{cedis(band.ceiling)}</p>
+            <p className="tabular mt-0.5 font-bold text-brand-800">
+              {margin === null ? '—' : cedis(margin, { sign: margin > 0 })}
+            </p>
           </div>
         </div>
 
@@ -248,7 +250,7 @@ function EditPriceModal({
           label="Your resale price"
           htmlFor="price-input"
           error={error}
-          hint={`Anywhere between ${cedis(band.floor)} and ${cedis(band.ceiling)}.`}
+          hint={`Anything from ${cedis(band.floor)} upwards — there is no maximum.`}
         >
           <div className="relative">
             <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">

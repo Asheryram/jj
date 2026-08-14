@@ -27,7 +27,6 @@ export function toProduct(row: Product) {
     supplierCost: row.supplierCost,
     adminPrice: row.adminPrice,
     standardPrice: row.standardPrice,
-    maxRetailPrice: row.maxRetailPrice,
     active: row.active,
   }
 }

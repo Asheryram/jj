@@ -186,7 +186,7 @@ Four numbers per product, and only three of them are James's to set.
 | **What James pays** | The provider | `supplier_products.cost_price` → Settings → Provider catalogue |
 | What agents pay | James | Prices page |
 | James's own walk-up price | James | Prices page |
-| Retail cap | James | Prices page |
+| An agent's retail price | The agent | Their own "My prices" page — **uncapped** |
 
 `supplier_cost` is **read-only on the Prices page**, and `PATCH /admin/products/:id/tier`
 refuses that tier outright. It is what James is invoiced, and it is the baseline
@@ -201,13 +201,18 @@ because each one carries its own split snapshot.
 
 ### The rules, and the one that is deliberately absent
 
-Only two orderings are enforced:
+One rule is enforced: **no selling price may be below cost.** Selling under cost
+destroys money on every order, and that is never a pricing strategy. It is checked
+in the service and again by `products_tiers_ordered` in the database.
 
-- **Neither selling price may be below cost.** Selling under cost destroys money
-  on every order; that is never a preference.
-- **The retail cap must clear what agents pay**, or no agent could legally sell.
+**There is no ceiling.** An agent charges whatever they judge the market will bear
+above their own cost. A platform cap used to exist because prices cascaded down
+the chain and a deep network could price a bundle out of the market — that cascade
+is gone, every agent buys at the same price, and an agent who overprices simply
+loses the sale to one who does not. Competition caps the price more reliably than
+a number James would have to maintain per product.
 
-There is deliberately **no rule that the walk-up price sits above the agent
+There is also deliberately **no rule that the walk-up price sits above the agent
 price.** James wholesales *and* retails, so where his own counter price sits
 relative to what he charges agents is a commercial choice per product:
 
@@ -218,8 +223,9 @@ relative to what he charges agents is a commercial choice per product:
 | above it | his own sales are the more profitable ones |
 
 The price dialog states which of the three he has picked, and both margins are
-shown against the provider cost. A cost rise lifts the walk-up price only as far
-as cost — never up to the agent price, which would silently overwrite his choice.
+shown against the provider cost. A cost rise lifts either selling price only as
+far as cost — never up to the agent price, which would silently overwrite his
+choice.
 
 Below James, **every agent pays the same price** — `admin_price` — no matter who
 referred them. There is no cascade. Being three referrals deep does not make your
@@ -346,8 +352,10 @@ Worth knowing before this goes in front of anyone.
    public page keeps that agent's prices and the wordmark returns to their
    storefront — otherwise the platform would quietly poach customers the agent
    brought, and agents would stop sharing links. There is no "use standard prices"
-   escape; the buyer's protection is `max_retail_price`, which caps what any agent
-   can charge. A fresh browser session is the platform shop again.
+   escape. A fresh browser session is the platform shop again. Note that with the
+   retail cap removed there is now no ceiling on what an agent may charge, so the
+   only check on an overpriced agent is that a buyer can compare and walk away —
+   worth watching during testing.
 
 6. **Withdrawal payout is manual.** Approving a withdrawal is bookkeeping; the
    MoMo transfer happens outside the system. Rejection is the branch that moves

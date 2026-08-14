@@ -28,10 +28,9 @@ export type WithdrawalStatus = 'pending' | 'approved' | 'rejected'
 export type UserStatus = 'active' | 'suspended'
 
 /**
- * Four price tiers per product. The middle two are what make the reseller
- * chain work: James buys at `supplierCost` and sells to agents at
- * `adminPrice`, so his margin is built into every agent's cost rather than
- * calculated as a commission afterwards.
+ * Three prices per product: what James pays, what he charges agents, and what he
+ * charges a walk-up customer himself. There is no ceiling — an agent sets their
+ * own retail price anywhere above what they pay.
  */
 export interface Product {
   id: string
@@ -47,8 +46,6 @@ export interface Product {
   adminPrice: Pesewas
   /** What a walk-up customer pays with no agent link (FR-3.5). */
   standardPrice: Pesewas
-  /** Ceiling on the retail price, so a deep chain cannot inflate it. */
-  maxRetailPrice: Pesewas
   active: boolean
 }
 

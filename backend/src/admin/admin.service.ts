@@ -6,7 +6,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../common/domain-
 import type { OrderSplit } from '../domain/pricing'
 import type { Role } from '@prisma/client'
 
-export type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice' | 'maxRetailPrice'
+export type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice'
 
 @Injectable()
 export class AdminService {
@@ -127,13 +127,6 @@ export class AdminService {
       )
     }
 
-    // The cap governs the resale chain, so it has to clear what agents pay —
-    // otherwise there is no legal price at which any agent could sell.
-    if (next.maxRetailPrice < next.adminPrice) {
-      throw new ValidationError(
-        `The retail cap cannot be below the ${ghs(next.adminPrice)} your agents pay — none of them would be able to sell.`,
-      )
-    }
 
     const updated = await this.prisma.product.update({
       where: { id: productId },
@@ -250,7 +243,6 @@ export class AdminService {
             supplierCost: cost,
             adminPrice,
             standardPrice: Math.max(product.standardPrice, cost),
-            maxRetailPrice: Math.max(product.maxRetailPrice, adminPrice),
           },
         })
         changed++

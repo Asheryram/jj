@@ -207,8 +207,6 @@ model Product {
   adminPrice     Int @map("admin_price")
   /// What a walk-up customer pays with no agent link (FR-3.5).
   standardPrice  Int @map("standard_price")
-  /// Ceiling on retail, so a deep chain cannot price the product out of market.
-  maxRetailPrice Int @map("max_retail_price")
 
   active Boolean @default(true)
 

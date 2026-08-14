@@ -50,7 +50,7 @@ export class AgentsService {
     // The band goes back in `detail` so the form can re-render its own limits
     // from the server's view rather than the stale one it validated against.
     if (complaint) {
-      throw new ValidationError(complaint, { floor: band.floor, ceiling: band.ceiling })
+      throw new ValidationError(complaint, { floor: band.floor })
     }
 
     await this.prisma.agentPrice.upsert({

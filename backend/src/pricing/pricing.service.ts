@@ -86,7 +86,6 @@ export class PricingService {
       supplierCost: row.supplierCost,
       adminPrice: row.adminPrice,
       standardPrice: row.standardPrice,
-      maxRetailPrice: row.maxRetailPrice,
       active: row.active,
     }
   }
@@ -130,7 +129,7 @@ export class PricingService {
     const [product, agents] = await Promise.all([this.product(productId), this.agents()])
     const agent = agents.find((a) => a.userId === userId)
     if (!agent) {
-      return { floor: product.adminPrice, ceiling: product.maxRetailPrice }
+      return { floor: product.adminPrice }
     }
     return priceBandFor(agent, product)
   }

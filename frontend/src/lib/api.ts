@@ -316,7 +316,7 @@ export const api = {
 
   setProductTier: (
     productId: string,
-    tier: 'supplierCost' | 'adminPrice' | 'standardPrice' | 'maxRetailPrice',
+    tier: 'supplierCost' | 'adminPrice' | 'standardPrice',
     value: number,
   ) =>
     request<Product>(`/admin/products/${encodeURIComponent(productId)}/tier`, {

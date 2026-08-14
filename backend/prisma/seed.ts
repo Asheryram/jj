@@ -130,21 +130,19 @@ const VOUCHER_PROVIDER = 'voucher-wholesale-gh'
 const round10 = (value: number) => Math.round(value / 10) * 10
 
 /**
- * James takes ~8% to agents, sells to walk-up customers at ~16%, and caps retail
- * at ~45% so a deep referral chain cannot price the product out of the market.
+ * James takes ~8% to agents and sells to walk-up customers at ~16%. No ceiling —
+ * agents price their own stock above their cost, however they like.
  */
 const tiers = (supplierCost: number) => ({
   supplierCost,
   adminPrice: round10(supplierCost * 1.08),
   standardPrice: round10(supplierCost * 1.16),
-  maxRetailPrice: round10(supplierCost * 1.45),
 })
 
 const airtimeTiers = (supplierCost: number, faceValue: number) => ({
   supplierCost,
   adminPrice: Math.round(faceValue * 0.97),
   standardPrice: faceValue,
-  maxRetailPrice: Math.round(faceValue * 1.08),
 })
 
 /** Our product id, kept identical to the frontend's mock ids so links survive. */

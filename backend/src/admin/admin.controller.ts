@@ -4,7 +4,7 @@ import { IsBoolean, IsIn, IsInt, IsOptional, Max, Min, ValidateIf } from 'class-
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { AdminService, type Tier } from './admin.service'
 
-const TIERS = ['supplierCost', 'adminPrice', 'standardPrice', 'maxRetailPrice'] as const
+const TIERS = ['supplierCost', 'adminPrice', 'standardPrice'] as const
 
 export class SetTierDto {
   @IsIn(TIERS)

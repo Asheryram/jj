@@ -1,0 +1,14 @@
+-- Remove the platform retail cap.
+--
+-- The cap existed because prices used to cascade down the referral chain: each
+-- level added its markup to the next level's cost, so a deep network could price
+-- a bundle out of the market and needed a ceiling to stop it.
+--
+-- That cascade is gone. Every agent now buys at `admin_price` and sets their own
+-- retail price, so an agent who overprices simply loses the sale to one who does
+-- not. Competition is the ceiling, and a better one than a number the admin has
+-- to maintain per product.
+--
+-- The floor remains, enforced by `products_tiers_ordered` in scripts/constraints.sql:
+-- no selling price may sit below cost.
+ALTER TABLE "products" DROP COLUMN "max_retail_price";

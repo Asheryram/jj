@@ -16,21 +16,21 @@ ALTER TABLE users DROP CONSTRAINT IF EXISTS users_markup_sane;
 ALTER TABLE users ADD CONSTRAINT users_markup_sane
   CHECK (markup_percent >= 0 AND markup_percent <= 200);
 
--- Price tiers. Two rules, and deliberately not a single ordering:
---
---   · Neither selling price may be below cost. Selling under cost destroys money
---     on every order, which is never a preference.
---   · The retail cap must clear the agent price, or no agent could legally sell.
+-- Prices. One rule: neither selling price may be below cost. Selling under cost
+-- destroys money on every order, which is never a preference.
 --
 -- `standard_price` is intentionally free relative to `admin_price`. James retails
 -- as well as wholesales, and whether his own counter price sits below, level
 -- with, or above what he charges agents is his commercial call per product.
+--
+-- There is no ceiling. Agents price their own stock however they like above cost;
+-- the cascade that made a platform cap necessary is gone, so an overpriced agent
+-- now simply loses the sale to a cheaper one.
 ALTER TABLE products DROP CONSTRAINT IF EXISTS products_tiers_ordered;
 ALTER TABLE products ADD CONSTRAINT products_tiers_ordered
   CHECK (supplier_cost >= 0
      AND admin_price >= supplier_cost
-     AND standard_price >= supplier_cost
-     AND max_retail_price >= admin_price);
+     AND standard_price >= supplier_cost);
 
 -- FR-3.4 — an agent's resale price is never negative. The real floor is their
 -- own cost, which depends on the chain and so cannot be a row-level CHECK; that

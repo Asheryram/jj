@@ -22,6 +22,11 @@
  * the market — the customer paid for the length of the chain. Here the customer
  * pays what their seller chose, and depth is invisible to them.
  *
+ * **There is no price ceiling.** An agent sets whatever they like above their own
+ * cost. The cascade was the only reason a cap was ever needed, and with it gone
+ * an overpriced agent just loses the sale to a cheaper one — competition caps the
+ * price more reliably than a number James has to maintain per product.
+ *
  * **Referral is exactly one level, and the bonus comes out of James's margin.**
  * An agent either registered directly or was referred by one other agent; there
  * is no third level. When a referred agent sells, their referrer is paid an
@@ -55,7 +60,6 @@ export interface PricedProduct {
   supplierCost: Pesewas
   adminPrice: Pesewas
   standardPrice: Pesewas
-  maxRetailPrice: Pesewas
 }
 
 export interface AgentPriceRow {
@@ -151,13 +155,23 @@ export function resalePriceFor(agent: PricingAgent, product: PricedProduct): Pes
   const cost = costForAgent(agent, product)
   const explicit = agent.prices?.find((p) => p.productId === product.id)?.resalePrice
   const raw = explicit ?? Math.round(cost * (1 + agent.markupPercent / 100))
-  return clampPrice(raw, cost, product)
+  return floorAtCost(raw, cost)
 }
 
-/** A price is never below what the seller paid, and never above the retail cap. */
-export function clampPrice(price: Pesewas, cost: Pesewas, product: PricedProduct): Pesewas {
-  const ceiling = Math.max(product.maxRetailPrice, cost)
-  return Math.min(Math.max(price, cost), ceiling)
+/**
+ * A price is never below what the seller paid. There is no upper bound.
+ *
+ * There used to be a platform retail cap here, on the theory that a long chain
+ * could price a bundle out of the market. That reasoning died with the cascade:
+ * every agent now buys at the same price and sets their own, so an agent who
+ * overprices simply loses to the agent who does not. Competition is the ceiling,
+ * and it is a better one than a number James has to maintain per product.
+ *
+ * Selling below cost is still refused — that destroys money on every order and is
+ * never a pricing strategy.
+ */
+export function floorAtCost(price: Pesewas, cost: Pesewas): Pesewas {
+  return Math.max(price, cost)
 }
 
 /**
@@ -293,9 +307,13 @@ export function splitDiscrepancy(salePrice: Pesewas, split: OrderSplit): Pesewas
 
 // ─── Price editing rules (FR-3.4) ───────────────────────────────────────────
 
+/**
+ * The legal window for an agent's price. Open-ended upwards — only the floor is
+ * enforced, so this is a floor with a name rather than a band. Kept as an object
+ * because callers pass it around and read `.floor`.
+ */
 export interface PriceBand {
   floor: Pesewas
-  ceiling: Pesewas
 }
 
 /**
@@ -303,8 +321,7 @@ export interface PriceBand {
  * the same for every agent, however they joined.
  */
 export function priceBandFor(_agent: PricingAgent, product: PricedProduct): PriceBand {
-  const floor = product.adminPrice
-  return { floor, ceiling: Math.max(product.maxRetailPrice, floor) }
+  return { floor: product.adminPrice }
 }
 
 /**
@@ -318,8 +335,6 @@ export function validateResalePrice(price: Pesewas | null, band: PriceBand): str
   if (price < band.floor) {
     return `You pay ${ghs(band.floor)} for this, so you cannot charge less than that.`
   }
-  if (price > band.ceiling) {
-    return `James caps this product at ${ghs(band.ceiling)} so it stays competitive.`
-  }
+  // No upper bound: an agent may charge whatever they think the market will bear.
   return null
 }
