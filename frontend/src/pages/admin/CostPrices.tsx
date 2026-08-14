@@ -24,26 +24,43 @@ import { AlertIcon, TagIcon, TrendUpIcon } from '../../components/icons'
 
 type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice' | 'maxRetailPrice'
 
+/**
+ * The three tiers James actually sets.
+ *
+ * `supplierCost` is deliberately not one of them: it is what the provider
+ * charges, it arrives from the provider catalogue, and it is the baseline every
+ * margin on this page is measured against. Typing it here would let our idea of
+ * the cost drift from the invoice — so it is shown, not edited.
+ */
+const EDITABLE_TIERS = ['adminPrice', 'standardPrice', 'maxRetailPrice'] as const
+
+type EditableTier = (typeof EDITABLE_TIERS)[number]
+
 const TIER_LABELS: Record<Tier, { label: string; help: string }> = {
   supplierCost: {
-    label: 'Supplier cost',
-    help: 'What DataHub GH (or the voucher supplier) charges you. Nobody else ever sees this.',
+    label: 'What you pay the provider',
+    help: 'From DataHub GH (or the voucher supplier). Nobody else ever sees this.',
   },
   adminPrice: {
     label: 'Your price to agents',
     help: 'What your agents pay. The gap above supplier cost is your margin on every agent sale.',
   },
   standardPrice: {
-    label: 'Standard customer price',
-    help: 'What a walk-up customer pays with no agent link. You keep the whole spread on these.',
+    label: 'Your own walk-up price',
+    help: 'What a customer pays buying direct from you, with no agent link. You keep the whole spread. It can sit below what agents pay if you would rather make your margin on agent volume — the only floor is your own cost.',
   },
   maxRetailPrice: {
     label: 'Retail cap',
-    help: 'The most anyone in the chain may charge, so a long chain cannot price you out of the market.',
+    help: 'The most anyone in the chain may charge, so a long chain cannot price you out of the market. Has to clear what agents pay, or none of them could sell.',
   },
 }
 
-/** FR-3.3, FR-3.6, FR-6.4 — James controls all four price tiers. */
+/**
+ * FR-3.3, FR-3.6, FR-6.4 — James sets the three prices he charges.
+ *
+ * The fourth number, what he pays the provider, is shown here but edited on the
+ * provider catalogue under Settings. See EDITABLE_TIERS above.
+ */
 export default function CostPrices() {
   const { products, updateProductTier } = useStore()
   const [category, setCategory] = useState<Category>('data')
@@ -52,13 +69,20 @@ export default function CostPrices() {
   const visible = products.filter((p) => p.category === category)
   const agentMargin = products.reduce((sum, p) => sum + (p.adminPrice - p.supplierCost), 0)
   const directMargin = products.reduce((sum, p) => sum + (p.standardPrice - p.supplierCost), 0)
-  const broken = products.filter((p) => p.adminPrice < p.supplierCost || p.maxRetailPrice < p.adminPrice)
+  // Both selling prices must clear cost, and the cap must clear the agent price.
+  // Walk-up vs agent price is deliberately not checked — see EDITABLE_TIERS.
+  const broken = products.filter(
+    (p) =>
+      p.adminPrice < p.supplierCost ||
+      p.standardPrice < p.supplierCost ||
+      p.maxRetailPrice < p.adminPrice,
+  )
 
   return (
     <div>
       <PageHead
         title="Prices"
-        subtitle="Four tiers per product: what you pay, what agents pay, what walk-up customers pay, and the ceiling."
+        subtitle="What agents pay, what walk-up customers pay, and the ceiling. What you pay comes from the provider catalogue."
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -89,8 +113,8 @@ export default function CostPrices() {
             title={`${broken.length} product${broken.length === 1 ? '' : 's'} priced wrong`}
             icon={<AlertIcon className="size-4" />}
           >
-            A tier is out of order — either your agent price is below what you pay, or the cap is
-            below your agent price. Fix these before they sell.
+            Either a selling price is below what you pay, or the cap is below what your agents pay.
+            Fix these before they sell.
           </Callout>
         )}
         <Callout
@@ -194,8 +218,7 @@ function EditPricesModal({
   onClose: () => void
   onSave: (tier: Tier, value: number) => void
 }) {
-  const [values, setValues] = useState<Record<Tier, string>>({
-    supplierCost: '',
+  const [values, setValues] = useState<Record<EditableTier, string>>({
     adminPrice: '',
     standardPrice: '',
     maxRetailPrice: '',
@@ -207,7 +230,6 @@ function EditPricesModal({
   if (key !== lastKey) {
     setLastKey(key)
     setValues({
-      supplierCost: product ? (product.supplierCost / 100).toFixed(2) : '',
       adminPrice: product ? (product.adminPrice / 100).toFixed(2) : '',
       standardPrice: product ? (product.standardPrice / 100).toFixed(2) : '',
       maxRetailPrice: product ? (product.maxRetailPrice / 100).toFixed(2) : '',
@@ -218,51 +240,52 @@ function EditPricesModal({
   if (!product) return null
 
   const parsed = {
-    supplierCost: parseCedis(values.supplierCost),
     adminPrice: parseCedis(values.adminPrice),
     standardPrice: parseCedis(values.standardPrice),
     maxRetailPrice: parseCedis(values.maxRetailPrice),
   }
 
   const save = () => {
-    const tiers: Tier[] = ['supplierCost', 'adminPrice', 'standardPrice', 'maxRetailPrice']
-    for (const tier of tiers) {
+    for (const tier of EDITABLE_TIERS) {
       if (parsed[tier] === null) {
         setError(`${TIER_LABELS[tier].label} needs to be a number like 5.50.`)
         return
       }
     }
-    const supplier = parsed.supplierCost as number
+
+    // The provider's cost, as recorded — the floor both selling prices sit above.
+    const supplier = product.supplierCost
     const agent = parsed.adminPrice as number
     const standard = parsed.standardPrice as number
     const cap = parsed.maxRetailPrice as number
 
-    // The tiers have to stay in order or the whole chain breaks.
     if (agent < supplier) {
-      setError('Your price to agents cannot be below what the supplier charges you.')
+      setError(`Your price to agents cannot be below the ${cedis(supplier)} you pay for it.`)
       return
     }
+    // Only floored at cost. The walk-up price may sit below what agents pay —
+    // that is a channel decision, not an error. See EDITABLE_TIERS above.
     if (standard < supplier) {
-      setError('The walk-up price cannot be below what the supplier charges you.')
+      setError(`You pay ${cedis(supplier)} for this, so you cannot sell it for less.`)
       return
     }
     if (cap < agent) {
-      setError('The retail cap cannot be below the price your agents pay.')
+      setError(
+        `The retail cap cannot be below the ${cedis(agent)} your agents pay — none of them could sell.`,
+      )
       return
     }
 
-    for (const tier of tiers) onSave(tier, parsed[tier] as number)
+    for (const tier of EDITABLE_TIERS) onSave(tier, parsed[tier] as number)
     onClose()
   }
 
-  const agentMargin =
-    parsed.adminPrice !== null && parsed.supplierCost !== null
-      ? parsed.adminPrice - parsed.supplierCost
-      : null
+  // Both measured against the recorded provider cost, which is the only honest
+  // baseline — a margin over a number James typed would just be a margin over
+  // his own optimism.
+  const agentMargin = parsed.adminPrice !== null ? parsed.adminPrice - product.supplierCost : null
   const directMargin =
-    parsed.standardPrice !== null && parsed.supplierCost !== null
-      ? parsed.standardPrice - parsed.supplierCost
-      : null
+    parsed.standardPrice !== null ? parsed.standardPrice - product.supplierCost : null
 
   return (
     <Modal open onClose={onClose} title={`Prices — ${product.name}`}>
@@ -272,7 +295,26 @@ function EditPricesModal({
           <span className="text-sm text-slate-500">{product.validity}</span>
         </div>
 
-        {(['supplierCost', 'adminPrice', 'standardPrice', 'maxRetailPrice'] as Tier[]).map(
+        {/* Read-only, because it is the provider's number and not ours. Shown
+            first because it is the floor the three editable tiers sit above. */}
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="text-sm font-semibold text-slate-700">
+              {TIER_LABELS.supplierCost.label}
+            </p>
+            <p className="tabular text-lg font-bold text-slate-900">
+              {cedis(product.supplierCost)}
+            </p>
+          </div>
+          <p className="mt-1 text-sm text-slate-500">
+            Comes from the provider catalogue, so it always matches what you are actually
+            invoiced. Change it under{' '}
+            <strong className="font-semibold text-slate-700">Settings → Provider catalogue</strong>{' '}
+            and it flows down here.
+          </p>
+        </div>
+
+        {EDITABLE_TIERS.map(
           (tier) => (
             <Field
               key={tier}
@@ -340,6 +382,19 @@ function EditPricesModal({
           </div>
         )}
 
+        {/* The point of letting the walk-up price float is that James chooses
+            which channel he earns more from. Say which one he has chosen, so the
+            consequence is on screen rather than worked out afterwards. */}
+        {agentMargin !== null && directMargin !== null && (
+          <p className="text-sm text-slate-500">
+            {directMargin > agentMargin
+              ? 'You earn more selling this yourself than through an agent.'
+              : directMargin < agentMargin
+                ? 'You earn more when an agent sells this than when you sell it yourself — your margin comes from agent volume.'
+                : 'You earn the same whether you sell this yourself or an agent does.'}
+          </p>
+        )}
+
         {error && (
           <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
             {error}
@@ -348,7 +403,7 @@ function EditPricesModal({
 
         <div className="flex gap-2">
           <Button block onClick={save}>
-            Save all four
+            Save prices
           </Button>
           <Button block variant="outline" onClick={onClose}>
             Cancel

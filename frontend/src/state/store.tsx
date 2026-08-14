@@ -2,25 +2,37 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
 import type {
+  AgentPrice,
   Earning,
   Network,
   Order,
   OrderSplit,
   PlatformUser,
   Product,
-  Role,
   Session,
   SplitShare,
+  SubAgent,
   Transaction,
   WithdrawalRequest,
   WithdrawalStatus,
 } from '../data/types'
-import * as mock from '../data/mock'
+import {
+  api,
+  ApiError,
+  newIdempotencyKey,
+  token,
+  type AdminOverview,
+  type AgentEarningsDay,
+  type MySummary,
+  type RevenueDay,
+} from '../lib/api'
 import {
   priceBandFor,
   retailPriceFor,
@@ -30,16 +42,18 @@ import {
 } from '../lib/pricing'
 
 /**
- * A single in-memory store standing in for the NestJS API.
+ * The single source of application state, backed entirely by the API.
  *
- * Every function maps to a use case in the planned backend (PlaceOrder,
- * TopUpWallet, SetAgentPrice, RequestWithdrawal, …) so integration means
- * replacing the body of each one with an HTTP call — the component tree does
- * not change.
+ * There is no mock and no demo mode: every balance, order and price on screen
+ * came out of Postgres. If the API cannot be reached the app says so rather than
+ * falling back to invented data — a shop that shows plausible prices while
+ * disconnected is worse than one that admits it is down, because someone will
+ * try to buy at those prices.
  *
- * Money model: split-at-sale. The buyer pays the platform, and each participant
- * in the referral chain is credited their own margin the moment the order
- * completes. Agents never pre-fund; their balance is an earnings account.
+ * Prices are the one thing computed in the browser, from the pure functions in
+ * lib/pricing over the chain returned by `/catalogue`. That is what lets a
+ * 40-product storefront render without a request per product (NFR-1.1). The
+ * server prices every order again on the way in and trusts nothing it is sent.
  */
 
 export interface Toast {
@@ -49,7 +63,7 @@ export interface Toast {
   detail?: string
 }
 
-/** Money owed back to a guest whose order failed (NFR-3.3). */
+/** Money owed back to a buyer whose order failed (NFR-3.3). */
 export interface ClaimableCredit {
   phone: string
   amount: number
@@ -66,9 +80,30 @@ export interface PlaceOrderInput {
   sellerCode: string | null
 }
 
+export interface RegisterInput {
+  name: string
+  phone: string
+  email: string
+  password: string
+  accountType: 'customer' | 'agent'
+  referralCode?: string
+}
+
 interface Store {
+  /** False until the first catalogue load finishes. */
+  ready: boolean
+  /**
+   * Set when the API could not be reached at all. Pages render an offline
+   * notice instead of an empty shop.
+   */
+  offline: string | null
+  /** Retry the initial load after a connection failure. */
+  reconnect: () => Promise<void>
+
   session: Session | null
-  login: (role: Role) => void
+  /** Email is the credential; the phone number stays on the account for delivery. */
+  login: (email: string, password: string) => Promise<Session>
+  register: (input: RegisterInput) => Promise<Session>
   logout: () => void
 
   /** The sell link currently in force, if the visitor arrived through one. */
@@ -79,7 +114,7 @@ interface Store {
   /** Spendable customer wallet. */
   customerBalance: number
   transactions: Transaction[]
-  topUpWallet: (amount: number, network: Network) => void
+  topUpWallet: (amount: number, network: Network) => Promise<void>
 
   /** Withdrawable agent earnings. Never topped up. */
   agentBalance: number
@@ -89,15 +124,17 @@ interface Store {
   balance: number
 
   orders: Order[]
-  placeOrder: (input: PlaceOrderInput) => Order
-  findOrder: (reference: string, phone: string) => Order | undefined
+  placeOrder: (input: PlaceOrderInput) => Promise<Order>
+  findOrder: (reference: string, phone: string) => Promise<Order | undefined>
+  /** Re-read everything for the signed-in user. */
+  refresh: () => Promise<void>
 
   products: Product[]
   updateProductTier: (
     productId: string,
     tier: 'supplierCost' | 'adminPrice' | 'standardPrice' | 'maxRetailPrice',
     value: number,
-  ) => void
+  ) => Promise<void>
 
   /** Pricing helpers, all backed by lib/pricing. */
   pricingAgents: PricingAgent[]
@@ -105,25 +142,42 @@ interface Store {
   myBand: (product: Product) => PriceBand
   myResalePrice: (product: Product) => number
   hasOwnPrice: (productId: string) => boolean
-  setAgentPrice: (productId: string, resalePrice: number) => void
+  setAgentPrice: (productId: string, resalePrice: number) => Promise<void>
   previewSplit: (product: Product, sellerCode: string | null) => OrderSplit
   myShareOf: (order: Order) => SplitShare | undefined
 
   withdrawals: WithdrawalRequest[]
-  requestWithdrawal: (amount: number, momoNetwork: Network) => void
-  decideWithdrawal: (id: string, status: WithdrawalStatus) => void
+  requestWithdrawal: (amount: number, momoNetwork: Network) => Promise<void>
+  decideWithdrawal: (id: string, status: WithdrawalStatus) => Promise<void>
 
   users: PlatformUser[]
-  toggleUserStatus: (id: string) => void
+  toggleUserStatus: (id: string) => Promise<void>
 
   claimableCredits: ClaimableCredit[]
 
-  /** FR-5.5 / NFR-5.2 — a toggle, not a rebuild. */
-  multiLevelReferral: boolean
-  setMultiLevelReferral: (on: boolean) => void
-  /** Demo-only switch used to show the FR-2.7 failure-and-refund path. */
-  simulateFailure: boolean
-  setSimulateFailure: (on: boolean) => void
+  /** FR-5.2 — the signed-in agent's downline. */
+  subAgents: SubAgent[]
+  /** FR-8.1 — platform turnover per day (admin). */
+  revenueByDay: RevenueDay[]
+  /** The agent's own earnings per day, split own vs downline. */
+  agentEarningsByDay: AgentEarningsDay[]
+  /** Headline admin numbers. Null until an admin loads them. */
+  adminOverview: AdminOverview | null
+  /**
+   * The signed-in user's own headline numbers, aggregated server-side. Null
+   * until loaded, and for admins, who read `adminOverview` instead.
+   */
+  mySummary: MySummary | null
+
+  /**
+   * FR-5.5 / NFR-5.2 — whether a referrer earns from the people they referred.
+   * One level: an agent has at most one referrer.
+   */
+  referralEnabled: boolean
+  /** The referrer's share of James's margin on their referral's sales. */
+  referralRatePercent: number
+  setReferralEnabled: (on: boolean) => Promise<void>
+  setReferralRatePercent: (percent: number) => Promise<void>
 
   toasts: Toast[]
   pushToast: (toast: Omit<Toast, 'id'>) => void
@@ -133,34 +187,40 @@ interface Store {
 const StoreContext = createContext<Store | null>(null)
 
 let toastSeq = 0
-let orderSeq = 0
-
-const nowIso = () => new Date().toISOString()
-const ref = (prefix: string) =>
-  `${prefix}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(() => {
-    const saved = localStorage.getItem('jdc.role') as Role | null
-    return saved && mock.sessions[saved] ? mock.sessions[saved] : null
-  })
+  const [ready, setReady] = useState(false)
+  const [offline, setOffline] = useState<string | null>(null)
+  const [session, setSession] = useState<Session | null>(null)
+
   const [sellerCode, setSellerCodeState] = useState<string | null>(() =>
     sessionStorage.getItem('jdc.seller'),
   )
+  const [sellerNameState, setSellerNameState] = useState<string | null>(null)
 
-  const [customerBalance, setCustomerBalance] = useState(mock.customerOpeningBalance)
-  const [transactions, setTransactions] = useState(mock.customerTransactions)
-  const [agentBalance, setAgentBalance] = useState(mock.agentOpeningBalance)
-  const [earnings, setEarnings] = useState(mock.agentEarnings)
+  const [customerBalance, setCustomerBalance] = useState(0)
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [agentBalance, setAgentBalance] = useState(0)
+  const [earnings, setEarnings] = useState<Earning[]>([])
 
-  const [orders, setOrders] = useState(mock.orders)
-  const [products, setProducts] = useState(mock.products)
-  const [prices, setPrices] = useState(mock.agentPrices)
-  const [withdrawals, setWithdrawals] = useState(mock.withdrawalRequests)
-  const [users, setUsers] = useState(mock.platformUsers)
+  const [orders, setOrders] = useState<Order[]>([])
+  const [products, setProducts] = useState<Product[]>([])
+  const [prices, setPrices] = useState<AgentPrice[]>([])
+  const [remoteAgents, setRemoteAgents] = useState<PricingAgent[]>([])
+  const [admin, setAdmin] = useState<{ userId: string; name: string }>({
+    userId: '',
+    name: 'JamesDataConsult',
+  })
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([])
+  const [users, setUsers] = useState<PlatformUser[]>([])
   const [claimableCredits, setClaimableCredits] = useState<ClaimableCredit[]>([])
-  const [multiLevelReferral, setMultiLevelReferral] = useState(false)
-  const [simulateFailure, setSimulateFailure] = useState(false)
+  const [subAgents, setSubAgents] = useState<SubAgent[]>([])
+  const [revenueByDay, setRevenueByDay] = useState<RevenueDay[]>([])
+  const [agentEarningsByDay, setAgentEarningsByDay] = useState<AgentEarningsDay[]>([])
+  const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
+  const [mySummary, setMySummary] = useState<MySummary | null>(null)
+  const [referralEnabled, setReferralEnabledState] = useState(true)
+  const [referralRatePercent, setReferralRateState] = useState(25)
   const [toasts, setToasts] = useState<Toast[]>([])
 
   // ── Toasts ────────────────────────────────────────────────────────────────
@@ -175,16 +235,175 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setToasts((current) => current.filter((t) => t.id !== id))
   }, [])
 
-  // ── Session ───────────────────────────────────────────────────────────────
+  /** One place that turns a thrown ApiError into a toast the user can read. */
+  const reportError = useCallback(
+    (error: unknown, fallback: string) => {
+      const message = error instanceof ApiError ? error.message : fallback
+      pushToast({ tone: 'error', title: message })
+    },
+    [pushToast],
+  )
 
-  const login = useCallback((role: Role) => {
-    localStorage.setItem('jdc.role', role)
-    setSession(mock.sessions[role])
+  // ── Loading ───────────────────────────────────────────────────────────────
+
+  const loadCatalogue = useCallback(async () => {
+    const snapshot = await api.catalogue()
+    setProducts(snapshot.products)
+    setRemoteAgents(snapshot.pricingAgents)
+    setAdmin(snapshot.admin)
+    setReferralEnabledState(snapshot.settings.referralEnabled)
+    setReferralRateState(snapshot.settings.referralRatePercent)
   }, [])
 
+  /**
+   * Everything that depends on who is signed in. Called after login, after a
+   * mutation that moves money, and on first load — so a dashboard is never a
+   * cached guess about a balance.
+   *
+   * Individual failures are swallowed per-request: one unavailable report should
+   * not blank the four panels beside it.
+   */
+  const loadForSession = useCallback(async (current: Session | null) => {
+    if (!current) {
+      setOrders([])
+      setTransactions([])
+      setEarnings([])
+      setWithdrawals([])
+      setUsers([])
+      setSubAgents([])
+      setAdminOverview(null)
+      setMySummary(null)
+      return
+    }
+
+    const tasks: Promise<unknown>[] = [api.orders().then(setOrders).catch(() => undefined)]
+
+    if (current.role !== 'admin') {
+      tasks.push(api.mySummary().then(setMySummary).catch(() => undefined))
+    }
+
+    if (current.role === 'customer') {
+      tasks.push(
+        api
+          .wallet()
+          .then(({ balance, transactions: rows }) => {
+            setCustomerBalance(balance)
+            setTransactions(rows)
+          })
+          .catch(() => undefined),
+      )
+    }
+
+    if (current.role === 'agent') {
+      tasks.push(
+        api
+          .earnings()
+          .then(({ balance, earnings: rows }) => {
+            setAgentBalance(balance)
+            setEarnings(rows)
+          })
+          .catch(() => undefined),
+        api.agentPrices().then(setPrices).catch(() => undefined),
+        api.downline().then(setSubAgents).catch(() => undefined),
+        api.withdrawals().then(setWithdrawals).catch(() => undefined),
+        api.myEarningsByDay(7).then(setAgentEarningsByDay).catch(() => undefined),
+      )
+    }
+
+    if (current.role === 'admin') {
+      tasks.push(
+        api.adminUsers().then(setUsers).catch(() => undefined),
+        api.withdrawals().then(setWithdrawals).catch(() => undefined),
+        api.revenueByDay(7).then(setRevenueByDay).catch(() => undefined),
+        api.adminOverview().then(setAdminOverview).catch(() => undefined),
+      )
+    }
+
+    await Promise.all(tasks)
+  }, [])
+
+  const bootstrap = useCallback(async () => {
+    setOffline(null)
+
+    try {
+      await loadCatalogue()
+    } catch (error) {
+      // The catalogue is the one request the shop cannot open without.
+      setOffline(
+        error instanceof ApiError
+          ? error.message
+          : 'We could not reach the server. Check your connection and try again.',
+      )
+      setReady(true)
+      return
+    }
+
+    if (token.get()) {
+      try {
+        const { user } = await api.me()
+        setSession(user)
+        await loadForSession(user)
+      } catch {
+        // An expired or revoked token. Dropping it lands the visitor on the
+        // public shop rather than a half-loaded signed-in page.
+        token.clear()
+        setSession(null)
+      }
+    }
+
+    setReady(true)
+  }, [loadCatalogue, loadForSession])
+
+  useEffect(() => {
+    void bootstrap()
+  }, [bootstrap])
+
+  const refresh = useCallback(async () => {
+    await Promise.all([loadCatalogue(), loadForSession(session)])
+  }, [loadCatalogue, loadForSession, session])
+
+  // ── Session ───────────────────────────────────────────────────────────────
+
+  const login = useCallback(
+    async (email: string, password: string): Promise<Session> => {
+      const result = await api.login(email, password)
+      token.set(result.accessToken)
+      setSession(result.user)
+      if (result.user.role === 'customer') setCustomerBalance(result.balance)
+      if (result.user.role === 'agent') setAgentBalance(result.balance)
+      await loadForSession(result.user)
+      return result.user
+    },
+    [loadForSession],
+  )
+
+  const register = useCallback(
+    async (input: RegisterInput): Promise<Session> => {
+      const result = await api.register(input)
+      token.set(result.accessToken)
+      setSession(result.user)
+      // Reload the catalogue too: a new agent joins the referral chain, which
+      // changes what prices resolve to.
+      await Promise.all([loadCatalogue(), loadForSession(result.user)])
+      return result.user
+    },
+    [loadCatalogue, loadForSession],
+  )
+
   const logout = useCallback(() => {
-    localStorage.removeItem('jdc.role')
+    token.clear()
     setSession(null)
+    setOrders([])
+    setTransactions([])
+    setEarnings([])
+    setWithdrawals([])
+    setUsers([])
+    setSubAgents([])
+    setAdminOverview(null)
+    setMySummary(null)
+    setCustomerBalance(0)
+    setAgentBalance(0)
+    setPrices([])
   }, [])
 
   const setSellerCode = useCallback((code: string | null) => {
@@ -195,21 +414,43 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // ── Pricing ───────────────────────────────────────────────────────────────
 
-  /** Rebuilt from live state so the agent's own edits take effect immediately. */
-  const pricingAgents = useMemo<PricingAgent[]>(
-    () =>
-      mock.pricingAgents.map((agent) =>
-        agent.referralCode === mock.sessions.agent.referralCode
-          ? { ...agent, prices }
-          : agent,
-      ),
-    [prices],
-  )
+  /**
+   * Rebuilt from live state so an agent's own edit takes effect immediately,
+   * before the server round trip has come back.
+   */
+  const pricingAgents = useMemo<PricingAgent[]>(() => {
+    const myCode = session?.referralCode
+    if (!myCode) return remoteAgents
+    return remoteAgents.map((agent) =>
+      agent.referralCode === myCode ? { ...agent, prices } : agent,
+    )
+  }, [remoteAgents, prices, session?.referralCode])
 
   const sellerName = useMemo(() => {
     if (!sellerCode) return null
-    return pricingAgents.find((a) => a.referralCode === sellerCode)?.name ?? null
-  }, [pricingAgents, sellerCode])
+    return pricingAgents.find((a) => a.referralCode === sellerCode)?.name ?? sellerNameState
+  }, [pricingAgents, sellerCode, sellerNameState])
+
+  // A sell link may point at an agent who is not in the loaded chain. Ask.
+  useEffect(() => {
+    if (!sellerCode) {
+      setSellerNameState(null)
+      return
+    }
+    if (pricingAgents.some((a) => a.referralCode === sellerCode)) return
+
+    let cancelled = false
+    void api
+      .seller(sellerCode)
+      .then(({ seller }) => {
+        if (!cancelled) setSellerNameState(seller?.name ?? null)
+      })
+      .catch(() => undefined)
+
+    return () => {
+      cancelled = true
+    }
+  }, [sellerCode, pricingAgents])
 
   const retailPrice = useCallback(
     (product: Product, code?: string | null) =>
@@ -225,14 +466,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const myBand = useCallback(
     (product: Product): PriceBand => {
       if (!meAsAgent) return { floor: product.adminPrice, ceiling: product.maxRetailPrice }
-      return priceBandFor(meAsAgent, product, pricingAgents)
+      return priceBandFor(meAsAgent, product)
     },
-    [meAsAgent, pricingAgents],
+    [meAsAgent],
   )
 
   const myResalePrice = useCallback(
     (product: Product) =>
-      meAsAgent ? retailPriceFor(meAsAgent.referralCode, product, pricingAgents) : product.standardPrice,
+      meAsAgent
+        ? retailPriceFor(meAsAgent.referralCode, product, pricingAgents)
+        : product.standardPrice,
     [meAsAgent, pricingAgents],
   )
 
@@ -242,320 +485,304 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const setAgentPrice = useCallback(
-    (productId: string, resalePrice: number) => {
+    async (productId: string, resalePrice: number) => {
+      // Optimistic, because an agent editing a price list edits several in a row
+      // and a round trip between each would make the page feel broken. A refusal
+      // rolls the value back and shows the server's own explanation.
+      const previous = prices
       setPrices((current) => {
         const existing = current.find((p) => p.productId === productId)
-        if (existing) {
-          return current.map((p) => (p.productId === productId ? { ...p, resalePrice } : p))
-        }
-        return [...current, { productId, resalePrice }]
+        return existing
+          ? current.map((p) => (p.productId === productId ? { ...p, resalePrice } : p))
+          : [...current, { productId, resalePrice }]
       })
-      pushToast({ tone: 'success', title: 'Price saved' })
+
+      try {
+        await api.setAgentPrice(productId, resalePrice)
+        pushToast({ tone: 'success', title: 'Price saved' })
+      } catch (error) {
+        setPrices(previous)
+        reportError(error, 'We could not save that price.')
+      }
     },
-    [pushToast],
+    [prices, pushToast, reportError],
   )
 
   const updateProductTier = useCallback(
-    (
+    async (
       productId: string,
       tier: 'supplierCost' | 'adminPrice' | 'standardPrice' | 'maxRetailPrice',
       value: number,
     ) => {
-      setProducts((current) =>
-        current.map((p) => (p.id === productId ? { ...p, [tier]: value } : p)),
-      )
-      pushToast({
-        tone: 'success',
-        title: 'Price updated',
-        detail: 'Past orders keep the prices they were sold at.',
-      })
+      try {
+        const updated = await api.setProductTier(productId, tier, value)
+        setProducts((current) => current.map((p) => (p.id === productId ? updated : p)))
+        pushToast({
+          tone: 'success',
+          title: 'Price updated',
+          detail: 'Past orders keep the prices they were sold at.',
+        })
+      } catch (error) {
+        reportError(error, 'We could not update that price.')
+      }
     },
-    [pushToast],
+    [pushToast, reportError],
   )
 
   const previewSplit = useCallback(
     (product: Product, code: string | null) =>
-      splitFor(product, code, pricingAgents, mock.admin),
-    [pricingAgents],
+      splitFor(product, code, pricingAgents, admin, {
+        enabled: referralEnabled,
+        ratePercent: referralRatePercent,
+      }),
+    [pricingAgents, admin, referralEnabled, referralRatePercent],
   )
 
   const myShareOf = useCallback(
-    (order: Order) => order.split.shares.find((share) => share.userId === session?.id),
+    (order: Order) => order.split?.shares.find((share) => share.userId === session?.id),
     [session?.id],
   )
 
   // ── Customer wallet ───────────────────────────────────────────────────────
 
   const topUpWallet = useCallback(
-    (amount: number, network: Network) => {
-      const next = customerBalance + amount
-      setCustomerBalance(next)
-      setTransactions((current) => [
-        {
-          id: `t-${Date.now()}`,
-          type: 'topup',
-          amount,
-          balanceAfter: next,
-          description: `Wallet top-up · ${momoLabel(network)}`,
-          reference: ref('PSK'),
-          createdAt: nowIso(),
-        },
-        ...current,
-      ])
-      // FR-7.1
-      pushToast({
-        tone: 'success',
-        title: 'Wallet topped up',
-        detail: `Your balance is now ${(next / 100).toFixed(2)} cedis.`,
-      })
+    async (amount: number, network: Network) => {
+      try {
+        const { balance, transaction } = await api.topUp(amount, network)
+        setCustomerBalance(balance)
+        setTransactions((current) => [transaction, ...current])
+        pushToast({
+          tone: 'success',
+          title: 'Wallet topped up',
+          detail: `Your balance is now ${(balance / 100).toFixed(2)} cedis.`,
+        })
+      } catch (error) {
+        reportError(error, 'We could not top up your wallet.')
+      }
     },
-    [customerBalance, pushToast],
+    [pushToast, reportError],
   )
 
   // ── Ordering ──────────────────────────────────────────────────────────────
 
+  /** Timers polling in-flight orders, so unmounting cannot leave one running. */
+  const pollers = useRef(new Map<string, number>())
+
+  useEffect(
+    () => () => {
+      pollers.current.forEach((timer) => window.clearInterval(timer))
+      pollers.current.clear()
+    },
+    [],
+  )
+
+  /**
+   * Follow an order until the provider answers.
+   *
+   * FR-4.4 — status moves from a provider callback, not from anything the browser
+   * did, so the browser has to ask. Polling rather than a socket because a lost
+   * poll is self-healing and a lost socket is not, and Ghana 4G loses things.
+   */
+  const watchOrder = useCallback(
+    (orderId: string) => {
+      if (pollers.current.has(orderId)) return
+
+      let attempts = 0
+      const timer = window.setInterval(() => {
+        attempts++
+
+        void api
+          .order(orderId)
+          .then((fresh) => {
+            setOrders((current) =>
+              current.some((o) => o.id === fresh.id)
+                ? current.map((o) => (o.id === fresh.id ? { ...o, ...fresh } : o))
+                : [fresh, ...current],
+            )
+
+            if (fresh.status !== 'completed' && fresh.status !== 'failed') return
+
+            window.clearInterval(timer)
+            pollers.current.delete(orderId)
+
+            if (fresh.status === 'completed') {
+              const share = fresh.split?.shares.find((s) => s.userId === session?.id)
+              pushToast({
+                tone: 'success',
+                title: `${fresh.productName} delivered`,
+                detail:
+                  share && share.margin > 0
+                    ? `Sent to ${fresh.recipient}. You earned ${(share.margin / 100).toFixed(2)} cedis.`
+                    : `Sent to ${fresh.recipient}. An SMS confirmation is on its way.`,
+              })
+            } else {
+              pushToast({
+                tone: 'error',
+                title: 'Order failed — the money is coming back',
+                detail:
+                  fresh.paidWith === 'wallet'
+                    ? `${(fresh.salePrice / 100).toFixed(2)} cedis went back to your wallet.`
+                    : `${(fresh.salePrice / 100).toFixed(2)} cedis is held for ${fresh.buyerPhone}. An SMS with the claim link is on its way.`,
+              })
+            }
+
+            // Balances and ledgers moved server-side when the order settled.
+            void loadForSession(session)
+            if (!session) {
+              void api
+                .credits(fresh.buyerPhone)
+                .then(setClaimableCredits)
+                .catch(() => undefined)
+            }
+          })
+          .catch(() => undefined)
+
+        // Roughly 90 seconds. Past that the provider is not going to answer in
+        // this page's lifetime, and the order stays visible on the orders list
+        // for the reconciliation job to close.
+        if (attempts > 60) {
+          window.clearInterval(timer)
+          pollers.current.delete(orderId)
+        }
+      }, 1500)
+
+      pollers.current.set(orderId, timer)
+    },
+    [loadForSession, pushToast, session],
+  )
+
   const placeOrder = useCallback(
-    ({ product, recipient, buyerName, buyerPhone, payWith, sellerCode: code }: PlaceOrderInput) => {
-      const split = splitFor(product, code, pricingAgents, mock.admin)
-      const salePrice = split.shares.find((s) => s.depth === 0)?.charged ?? product.standardPrice
-      const id = `o-new-${++orderSeq}`
-      const reference = `JDC-${Math.floor(900000 + Math.random() * 99999)}`
-
-      const order: Order = {
-        id,
-        reference,
+    async ({
+      product,
+      recipient,
+      buyerName,
+      buyerPhone,
+      payWith,
+      sellerCode: code,
+    }: PlaceOrderInput): Promise<Order> => {
+      const order = await api.placeOrder({
         productId: product.id,
-        productName: product.name,
-        network: product.network,
-        category: product.category,
         recipient,
-        salePrice,
-        split,
-        soldByCode: code,
-        status: 'processing',
-        createdAt: nowIso(),
-        paidWith: payWith,
-        buyer: buyerName,
         buyerPhone,
-      }
+        buyerName,
+        payWith,
+        sellerCode: code,
+        idempotencyKey: newIdempotencyKey(),
+      })
 
-      setOrders((current) => [order, ...current])
+      setOrders((current) => [order, ...current.filter((o) => o.id !== order.id)])
 
-      // FR-2.3 — a wallet payment is debited as the order is created.
       if (payWith === 'wallet') {
-        const after = customerBalance - salePrice
-        setCustomerBalance(after)
-        setTransactions((current) => [
-          {
-            id: `t-${Date.now()}`,
-            type: 'purchase',
-            amount: -salePrice,
-            balanceAfter: after,
-            description: `${product.name} → ${recipient}`,
-            reference,
-            createdAt: order.createdAt,
-          },
-          ...current,
-        ])
+        // The server has already debited inside the placing transaction. Reflect
+        // its number rather than recomputing one that could disagree.
+        setCustomerBalance((balance) => Math.max(0, balance - order.salePrice))
       }
 
-      const myShare = split.shares.find((s) => s.userId === session?.id)
-
-      // Stand-in for the DataHub GH callback (FR-4.4). The real app moves this
-      // status from a webhook; a timer plays the same part during a demo.
-      window.setTimeout(() => {
-        if (simulateFailure) {
-          setOrders((current) =>
-            current.map((o) => (o.id === id ? { ...o, status: 'failed', refunded: true } : o)),
-          )
-
-          if (payWith === 'wallet') {
-            // FR-2.7 — straight back to the wallet it came from.
-            setCustomerBalance((balance) => {
-              const after = balance + salePrice
-              setTransactions((current) => [
-                {
-                  id: `t-${Date.now()}-r`,
-                  type: 'refund',
-                  amount: salePrice,
-                  balanceAfter: after,
-                  description: `Refund · ${product.name} failed at provider`,
-                  reference,
-                  createdAt: nowIso(),
-                },
-                ...current,
-              ])
-              return after
-            })
-          } else {
-            // A Mobile Money payer has no wallet to credit, and reversing a MoMo
-            // collection is neither instant nor guaranteed. So the money is held
-            // as a claimable credit against their number and they are sent a
-            // link — NFR-3.3 without depending on a reversal.
-            setClaimableCredits((current) => [
-              { phone: buyerPhone, amount: salePrice, reference, createdAt: nowIso() },
-              ...current,
-            ])
-          }
-
-          // The chain's earnings are reversed too — nobody profits from a
-          // failed delivery.
-          if (myShare && myShare.margin > 0) {
-            setAgentBalance((balance) => {
-              const after = balance - myShare.margin
-              setEarnings((current) => [
-                {
-                  id: `e-${Date.now()}-r`,
-                  type: 'reversal',
-                  amount: -myShare.margin,
-                  balanceAfter: after,
-                  description: `Reversed · ${product.name} failed at provider`,
-                  productName: product.name,
-                  reference,
-                  depth: myShare.depth,
-                  createdAt: nowIso(),
-                },
-                ...current,
-              ])
-              return after
-            })
-          }
-
-          pushToast({
-            tone: 'error',
-            title: 'Order failed — the money is coming back',
-            detail:
-              payWith === 'wallet'
-                ? `${(salePrice / 100).toFixed(2)} cedis went back to the wallet.`
-                : `${(salePrice / 100).toFixed(2)} cedis is held for ${buyerPhone}. An SMS with the claim link is on its way.`,
-          })
-          return
-        }
-
-        setOrders((current) =>
-          current.map((o) =>
-            o.id === id
-              ? {
-                  ...o,
-                  status: 'completed',
-                  ...(product.category === 'checker'
-                    ? {
-                        voucher: {
-                          serial: `WA${Math.floor(10000000 + Math.random() * 89999999)}`,
-                          pin: `${Math.floor(1000000000 + Math.random() * 8999999999)}`,
-                        },
-                      }
-                    : {}),
-                }
-              : o,
-          ),
-        )
-
-        // Split-at-sale: credit the signed-in participant their own margin.
-        if (myShare && myShare.margin > 0) {
-          setAgentBalance((balance) => {
-            const after = balance + myShare.margin
-            setEarnings((current) => [
-              {
-                id: `e-${Date.now()}`,
-                type: myShare.depth === 0 ? 'sale' : 'downline',
-                amount: myShare.margin,
-                balanceAfter: after,
-                description:
-                  myShare.depth === 0
-                    ? `Your sale · ${product.name} → ${recipient}`
-                    : `Downline sale · ${product.name}`,
-                productName: product.name,
-                reference,
-                depth: myShare.depth,
-                createdAt: nowIso(),
-              },
-              ...current,
-            ])
-            return after
-          })
-        }
-
-        // FR-4.5 / FR-7.2
-        pushToast({
-          tone: 'success',
-          title: `${product.name} delivered`,
-          detail: myShare
-            ? `Sent to ${recipient}. You earned ${(myShare.margin / 100).toFixed(2)} cedis.`
-            : `Sent to ${recipient}. An SMS confirmation is on its way.`,
-        })
-      }, 2600)
-
+      watchOrder(order.id)
       return order
     },
-    [customerBalance, pricingAgents, pushToast, session?.id, simulateFailure],
+    [watchOrder],
   )
 
   const findOrder = useCallback(
-    (reference: string, phone: string) => {
-      const needle = reference.trim().toUpperCase()
-      const digits = phone.replace(/\D/g, '')
-      return orders.find(
-        (order) =>
-          order.reference.toUpperCase() === needle &&
-          (order.buyerPhone.endsWith(digits.slice(-9)) ||
-            order.recipient.endsWith(digits.slice(-9))),
-      )
+    async (reference: string, phone: string): Promise<Order | undefined> => {
+      try {
+        return await api.trackOrder(reference.trim(), phone.trim())
+      } catch {
+        // Not found is the expected outcome of a typo, and Track.tsx renders its
+        // own "we could not find that" state.
+        return undefined
+      }
     },
-    [orders],
+    [],
   )
 
   // ── Withdrawals ───────────────────────────────────────────────────────────
 
   const requestWithdrawal = useCallback(
-    (amount: number, momoNetwork: Network) => {
-      setWithdrawals((current) => [
-        {
-          id: `w-${Math.floor(1000 + Math.random() * 8999)}`,
-          agentName: session?.name ?? 'Agent',
-          agentPhone: session?.phone ?? '',
-          amount,
-          momoNetwork,
-          status: 'pending',
-          requestedAt: nowIso(),
-        },
-        ...current,
-      ])
-      // FR-2.6 — manual approval for v1, so we promise review, not payment.
-      pushToast({
-        tone: 'info',
-        title: 'Withdrawal request sent',
-        detail: 'James reviews requests within 24 hours.',
-      })
+    async (amount: number, momoNetwork: Network) => {
+      try {
+        const created = await api.requestWithdrawal(amount, momoNetwork)
+        setWithdrawals((current) => [created, ...current])
+        // The balance is held at request time, so re-read it rather than guess.
+        await loadForSession(session)
+        pushToast({
+          tone: 'info',
+          title: 'Withdrawal request sent',
+          detail: 'James reviews requests within 24 hours.',
+        })
+      } catch (error) {
+        reportError(error, 'We could not send that withdrawal request.')
+      }
     },
-    [pushToast, session?.name, session?.phone],
+    [loadForSession, pushToast, reportError, session],
   )
 
   const decideWithdrawal = useCallback(
-    (id: string, status: WithdrawalStatus) => {
-      setWithdrawals((current) => current.map((w) => (w.id === id ? { ...w, status } : w)))
-      pushToast({
-        tone: status === 'approved' ? 'success' : 'info',
-        title: status === 'approved' ? 'Withdrawal approved' : 'Withdrawal rejected',
-      })
+    async (id: string, status: WithdrawalStatus) => {
+      try {
+        const updated = await api.decideWithdrawal(id, status)
+        setWithdrawals((current) => current.map((w) => (w.id === id ? updated : w)))
+        pushToast({
+          tone: status === 'approved' ? 'success' : 'info',
+          title: status === 'approved' ? 'Withdrawal approved' : 'Withdrawal rejected',
+        })
+      } catch (error) {
+        reportError(error, 'We could not update that request.')
+      }
     },
-    [pushToast],
+    [pushToast, reportError],
   )
 
-  const toggleUserStatus = useCallback((id: string) => {
-    setUsers((current) =>
-      current.map((u) =>
-        u.id === id ? { ...u, status: u.status === 'active' ? 'suspended' : 'active' } : u,
-      ),
-    )
-  }, [])
+  const toggleUserStatus = useCallback(
+    async (id: string) => {
+      try {
+        const { status } = await api.toggleUserStatus(id)
+        setUsers((current) => current.map((u) => (u.id === id ? { ...u, status } : u)))
+      } catch (error) {
+        reportError(error, 'We could not change that account.')
+      }
+    },
+    [reportError],
+  )
+
+  const setReferralEnabled = useCallback(
+    async (on: boolean) => {
+      setReferralEnabledState(on)
+      try {
+        await api.setSetting('referralEnabled', on)
+      } catch (error) {
+        setReferralEnabledState(!on)
+        reportError(error, 'We could not change that setting.')
+      }
+    },
+    [reportError],
+  )
+
+  const setReferralRatePercent = useCallback(
+    async (percent: number) => {
+      const previous = referralRatePercent
+      setReferralRateState(percent)
+      try {
+        await api.setSetting('referralRatePercent', percent)
+      } catch (error) {
+        setReferralRateState(previous)
+        reportError(error, 'We could not save that rate.')
+      }
+    },
+    [referralRatePercent, reportError],
+  )
 
   const balance = session?.role === 'agent' ? agentBalance : customerBalance
 
   const value = useMemo<Store>(
     () => ({
+      ready,
+      offline,
+      reconnect: bootstrap,
       session,
       login,
+      register,
       logout,
       sellerCode,
       setSellerCode,
@@ -569,6 +796,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       orders,
       placeOrder,
       findOrder,
+      refresh,
       products,
       updateProductTier,
       pricingAgents,
@@ -585,17 +813,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       users,
       toggleUserStatus,
       claimableCredits,
-      multiLevelReferral,
-      setMultiLevelReferral,
-      simulateFailure,
-      setSimulateFailure,
+      subAgents,
+      revenueByDay,
+      agentEarningsByDay,
+      adminOverview,
+      mySummary,
+      referralEnabled,
+      referralRatePercent,
+      setReferralEnabled,
+      setReferralRatePercent,
       toasts,
       pushToast,
       dismissToast,
     }),
     [
+      adminOverview,
       agentBalance,
+      agentEarningsByDay,
       balance,
+      bootstrap,
       claimableCredits,
       customerBalance,
       decideWithdrawal,
@@ -605,24 +841,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       hasOwnPrice,
       login,
       logout,
-      multiLevelReferral,
       myBand,
       myResalePrice,
       myShareOf,
+      mySummary,
+      offline,
       orders,
       placeOrder,
       previewSplit,
       pricingAgents,
       products,
       pushToast,
+      ready,
+      refresh,
+      register,
       requestWithdrawal,
       retailPrice,
+      revenueByDay,
       sellerCode,
       sellerName,
       session,
+      referralEnabled,
+      referralRatePercent,
       setAgentPrice,
+      setReferralEnabled,
+      setReferralRatePercent,
       setSellerCode,
-      simulateFailure,
+      subAgents,
       toasts,
       toggleUserStatus,
       topUpWallet,

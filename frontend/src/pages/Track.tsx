@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../state/store'
+import { useRegisterPath, useShopPath } from '../lib/shopPath'
 import { cedis, dateTime } from '../lib/format'
 import { prettyPhone } from '../lib/networks'
 import type { Order } from '../data/types'
@@ -24,14 +25,25 @@ import { CertificateIcon, ReceiptIcon, SearchIcon } from '../components/icons'
  */
 export default function Track() {
   const { findOrder } = useStore()
+  const shopPath = useShopPath()
+  const registerPath = useRegisterPath()
   const [reference, setReference] = useState('')
   const [phone, setPhone] = useState('')
   const [result, setResult] = useState<Order | null>(null)
   const [searched, setSearched] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  const search = () => {
-    setSearched(true)
-    setResult(findOrder(reference, phone) ?? null)
+  const search = async () => {
+    setBusy(true)
+    try {
+      const found = await findOrder(reference, phone)
+      setResult(found ?? null)
+    } finally {
+      // Set last, so the "we could not find it" state cannot flash while the
+      // lookup is still in flight.
+      setSearched(true)
+      setBusy(false)
+    }
   }
 
   return (
@@ -51,7 +63,7 @@ export default function Track() {
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault()
-            search()
+            void search()
           }}
         >
           <Field label="Order reference" htmlFor="track-ref" hint="Looks like JDC-884120.">
@@ -75,7 +87,13 @@ export default function Track() {
             />
           </Field>
 
-          <Button type="submit" block size="lg" disabled={!reference.trim() || !phone.trim()}>
+          <Button
+            type="submit"
+            block
+            size="lg"
+            loading={busy}
+            disabled={busy || !reference.trim() || !phone.trim()}
+          >
             Find my order
           </Button>
         </form>
@@ -132,7 +150,7 @@ export default function Track() {
               <Row label="Paid with" value={result.paidWith === 'wallet' ? 'Wallet' : 'Mobile Money'} />
             </dl>
 
-            <Link to="/shop">
+            <Link to={shopPath('/shop')}>
               <Button block variant="outline">
                 <ReceiptIcon className="size-4" /> Buy another bundle
               </Button>
@@ -143,7 +161,7 @@ export default function Track() {
 
       <p className="mt-6 text-center text-sm text-slate-500">
         Buy often?{' '}
-        <Link to="/register" className="font-semibold text-brand-700 hover:underline">
+        <Link to={registerPath} className="font-semibold text-brand-700 hover:underline">
           Create an account
         </Link>{' '}
         and every order is saved automatically.

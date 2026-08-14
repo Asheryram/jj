@@ -1,9 +1,10 @@
+import type { ReactNode } from 'react'
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
-import { StoreProvider } from './state/store'
+import { StoreProvider, useStore } from './state/store'
 import { AppShell, PublicShell, RequireAuth } from './components/layout'
 import RouteMeta from './components/RouteMeta'
-import { Button, Card, EmptyState } from './components/ui'
-import { SearchIcon } from './components/icons'
+import { Button, Card, EmptyState, Spinner } from './components/ui'
+import { AlertIcon, SearchIcon } from './components/icons'
 
 import Home from './pages/Home'
 import Login from './pages/Login'
@@ -33,7 +34,8 @@ import Settings from './pages/admin/Settings'
 export default function App() {
   return (
     <StoreProvider>
-      <BrowserRouter>
+      <Boot>
+        <BrowserRouter>
         <RouteMeta />
         <Routes>
           {/* Public storefront — buyable without an account (FR-4.8) */}
@@ -43,12 +45,27 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/shop" element={<Shop />} />
-            {/* An agent's sell link (FR-5.7) */}
-            <Route path="/s/:code" element={<Storefront />} />
             <Route path="/checkers" element={<Checkers />} />
             <Route path="/track" element={<Track />} />
             {/* A guest must be able to complete a purchase (FR-4.8) */}
             <Route path="/buy/:productId" element={<Buy />} />
+
+            {/*
+              An agent's sell link (FR-5.7), and the whole shop beneath it.
+
+              The same pages as above, mounted a second time under `/s/:code`, so
+              a buyer in an agent's shop keeps the agent in the URL as they move
+              around. The pages are identical — `Storefront` only puts the code
+              into the store, and prices resolve from there. Nothing is
+              duplicated but the route table.
+            */}
+            <Route path="/s/:code" element={<Storefront />}>
+              <Route index element={<Home />} />
+              <Route path="shop" element={<Shop />} />
+              <Route path="checkers" element={<Checkers />} />
+              <Route path="track" element={<Track />} />
+              <Route path="buy/:productId" element={<Buy />} />
+            </Route>
           </Route>
 
           {/* Signed-in area — customers and agents (FR-1.5, NFR-2.5).
@@ -87,11 +104,57 @@ export default function App() {
             </Route>
           </Route>
 
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </Boot>
     </StoreProvider>
   )
+}
+
+/**
+ * Holds the app back until the catalogue has loaded, and says so plainly if the
+ * API cannot be reached.
+ *
+ * Worth a gate of its own rather than a spinner per page: without the catalogue
+ * there are no products and no referral chain, so every price on every screen
+ * would render as zero. A shop quoting GHS 0.00 is a worse failure than a shop
+ * that admits it is offline, because somebody will try to buy at that price.
+ */
+function Boot({ children }: { children: ReactNode }) {
+  const { ready, offline, reconnect } = useStore()
+
+  if (!ready) {
+    return (
+      <div
+        className="flex min-h-dvh items-center justify-center px-4"
+        role="status"
+        aria-live="polite"
+      >
+        <div className="text-center">
+          <Spinner className="mx-auto size-8 text-brand-600" />
+          <p className="mt-3 text-sm text-slate-500">Loading the shop…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (offline) {
+    return (
+      <div className="mx-auto flex min-h-dvh max-w-md items-center px-4">
+        <Card className="w-full">
+          <EmptyState
+            icon={<AlertIcon className="size-6" />}
+            title="We cannot reach the shop right now"
+            detail={offline}
+            action={<Button onClick={() => void reconnect()}>Try again</Button>}
+          />
+        </Card>
+      </div>
+    )
+  }
+
+  return <>{children}</>
 }
 
 function NotFound() {

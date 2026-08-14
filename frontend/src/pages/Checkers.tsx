@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useStore } from '../state/store'
+import { useShopPath } from '../lib/shopPath'
 import { cedis } from '../lib/format'
 import { Badge, Button, Callout, Card } from '../components/ui'
 import { CertificateIcon, CheckIcon, ShieldIcon } from '../components/icons'
@@ -7,6 +8,7 @@ import { CertificateIcon, CheckIcon, ShieldIcon } from '../components/icons'
 /** FR-3.1 (checker category), FR-4.7, NFR-7.1 */
 export default function Checkers() {
   const { products, retailPrice } = useStore()
+  const shopPath = useShopPath()
   const checkers = products.filter((p) => p.category === 'checker' && p.active)
 
   return (
@@ -49,7 +51,7 @@ export default function Checkers() {
                 </li>
               ))}
             </ul>
-            <Link to={`/buy/${product.id}`} className="mt-5">
+            <Link to={shopPath(`/buy/${product.id}`)} className="mt-5">
               <Button block size="lg" variant="cta">
                 Buy {product.name.replace(' Result Checker', '')} checker
               </Button>

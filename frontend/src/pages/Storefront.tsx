@@ -1,31 +1,43 @@
 import { useEffect } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, Outlet, useParams } from 'react-router-dom'
 import { useStore } from '../state/store'
-import { initials } from '../lib/format'
-import Catalogue from '../components/Catalogue'
 import { Button, Card, EmptyState } from '../components/ui'
-import { SearchIcon, ShieldIcon } from '../components/icons'
+import { SearchIcon } from '../components/icons'
 
 /**
- * An agent's sell link — `/s/KWAME77`.
+ * The agent-scoped branch of the public shop — everything under `/s/KWAME77`.
  *
- * This is the channel that makes the reseller chain work without the agent
- * handling money. A customer opens the link, buys at this agent's price, and
- * every upline is credited their own margin automatically (FR-5.7, FR-5.8).
- * Distinct from the referral link at `/register?ref=CODE`, which recruits
- * agents rather than selling to customers.
+ * This is the channel that makes the reseller network work without the agent
+ * handling money. A customer opens the link, buys at this agent's price, and the
+ * agent's margin is credited automatically (FR-5.7, FR-5.8). Distinct from the
+ * referral link at `/register?ref=CODE`, which recruits agents rather than
+ * selling to customers.
+ *
+ * It renders no chrome of its own. The pages beneath it are the same Home, Shop
+ * and Checkers the platform serves, priced through this agent — the only
+ * difference a buyer sees is the price and the URL. An earlier version put a
+ * branded agent header above the catalogue and a "shopping with…" banner on every
+ * page; both were removed as noise. The URL already says whose shop it is, and
+ * the disclosure that matters legally lives in the footer.
+ *
+ * Its one job is to put the code into the store before the children render, so
+ * they price against the right agent on first paint rather than flashing platform
+ * prices and correcting themselves.
  */
 export default function Storefront() {
   const { code } = useParams()
-  const { pricingAgents, setSellerCode, sellerCode } = useStore()
+  const { pricingAgents, setSellerCode, sellerCode, ready } = useStore()
 
-  const agent = pricingAgents.find(
-    (a) => a.referralCode.toUpperCase() === (code ?? '').toUpperCase(),
-  )
+  const wanted = (code ?? '').toUpperCase()
+  const agent = pricingAgents.find((a) => a.referralCode.toUpperCase() === wanted)
 
   useEffect(() => {
     if (agent && agent.referralCode !== sellerCode) setSellerCode(agent.referralCode)
   }, [agent, sellerCode, setSellerCode])
+
+  // The agent list arrives with the catalogue. Until it does, an unknown code is
+  // indistinguishable from a valid one, so wait rather than accuse the link.
+  if (!ready) return null
 
   if (!agent) {
     return (
@@ -46,29 +58,5 @@ export default function Storefront() {
     )
   }
 
-  return (
-    <>
-      {/* Agent's storefront header — the customer should know who they're buying from. */}
-      <div className="border-b border-slate-200 bg-brand-700">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-4 px-4 py-6">
-          <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-white/15 text-lg font-bold text-white">
-            {initials(agent.name)}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm text-brand-100">Authorised JamesDataConsult agent</p>
-            <p className="text-xl font-bold text-white">{agent.name}</p>
-            <p className="mt-0.5 font-mono text-xs text-brand-100/80">{agent.referralCode}</p>
-          </div>
-          <p className="flex items-center gap-1.5 text-xs text-brand-100">
-            <ShieldIcon className="size-4" />
-            Payments handled by Paystack
-          </p>
-        </div>
-      </div>
-      {/* Straight into the catalogue at this agent's prices. No account needed. */}
-      <div className="mx-auto max-w-6xl px-4 py-6 sm:py-8">
-        <Catalogue />
-      </div>
-    </>
-  )
+  return <Outlet />
 }

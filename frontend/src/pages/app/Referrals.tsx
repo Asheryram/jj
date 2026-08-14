@@ -1,6 +1,6 @@
 import { useStore } from '../../state/store'
+import { referralLinkFor, sellLinkFor } from '../../lib/origin'
 import { cedis, longDate } from '../../lib/format'
-import { subAgents } from '../../data/mock'
 import {
   Badge,
   Button,
@@ -17,16 +17,15 @@ import {
 } from '../../components/ui'
 import { StoreIcon, UsersIcon, WhatsAppIcon } from '../../components/icons'
 
-const ORIGIN = 'https://jamesdataconsult.com'
 
 /** FR-1.7, FR-5.1, FR-5.2, FR-5.4, FR-5.6, FR-5.7 */
 export default function Referrals() {
-  const { session, multiLevelReferral } = useStore()
+  const { session, referralEnabled, referralRatePercent, subAgents } = useStore()
   if (!session) return null
 
   // Two different links doing two different jobs.
-  const sellLink = `${ORIGIN}/s/${session.referralCode}`
-  const referralLink = `${ORIGIN}/register?ref=${session.referralCode}`
+  const sellLink = sellLinkFor(session.referralCode)
+  const referralLink = referralLinkFor(session.referralCode)
 
   const direct = subAgents.filter((a) => a.uplineCode === session.referralCode)
   const indirect = subAgents.filter((a) => a.uplineCode !== session.referralCode)
@@ -106,15 +105,16 @@ export default function Referrals() {
 
       {/* FR-5.4 / FR-5.5 / FR-5.6 */}
       <div className="mt-3">
-        {multiLevelReferral ? (
-          <Callout tone="success" title="Multi-level referral is on">
-            Agents you bring in can recruit their own agents, and you earn your margin on every sale
-            anywhere beneath you. The full chain is shown below.
+        {referralEnabled ? (
+          <Callout tone="success" title={`You earn a ${referralRatePercent}% bonus on their sales`}>
+            Every time an agent you brought in makes a sale, you are paid a bonus — and it comes out
+            of James's margin, not theirs. Your own selling price and theirs are untouched, so
+            inviting people costs you and them nothing.
           </Callout>
         ) : (
-          <Callout tone="info" title="Single-level referral">
-            You can invite agents directly, and you earn on their sales. They cannot recruit their
-            own agents yet — James can switch that on later without anything changing for you.
+          <Callout tone="info" title="Referral bonuses are switched off">
+            You can still invite agents and they will show up here, but no bonus is paid on their
+            sales at the moment. James can switch this on without anything changing for you.
           </Callout>
         )}
       </div>

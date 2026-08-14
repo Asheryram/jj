@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { momoLabel, useStore } from '../state/store'
+import { useShopPath } from '../lib/shopPath'
 import { cedis, dateTime } from '../lib/format'
 import { NETWORKS, checkPhone, prettyPhone } from '../lib/networks'
 import type { Network, OrderSplit } from '../data/types'
@@ -58,6 +59,8 @@ export default function Buy() {
     orders,
   } = useStore()
 
+  const shopPath = useShopPath()
+
   const product = products.find((p) => p.id === productId)
 
   const [step, setStep] = useState(1)
@@ -68,6 +71,8 @@ export default function Buy() {
   const [payChoice, setPayChoice] = useState<'wallet' | 'momo' | null>(null)
   const [momoNetwork, setMomoNetwork] = useState<Network>('MTN')
   const [orderId, setOrderId] = useState<string | null>(null)
+  const [placing, setPlacing] = useState(false)
+  const [failure, setFailure] = useState('')
 
   const placed = useMemo(
     () => (orderId ? orders.find((o) => o.id === orderId) : undefined),
@@ -83,7 +88,7 @@ export default function Buy() {
             title="We could not find that bundle"
             detail="It may have been removed or renamed. Pick another from the shop."
             action={
-              <Link to="/shop">
+              <Link to={shopPath('/shop')}>
                 <Button>Back to shop</Button>
               </Link>
             }
@@ -114,20 +119,37 @@ export default function Buy() {
   const payWith = payChoice ?? (canUseWallet ? 'wallet' : 'momo')
   const walletShort = isCustomer && customerBalance < price
 
-  const confirm = () => {
+  const confirm = async () => {
     if (!check?.ok) return
     if (!ownNumber && !receiptCheck?.ok) return
+    if (placing) return // guard the double-tap before the request even leaves
+
     const phone = ownNumber ? check.phone : (receiptCheck as { phone: string }).phone
-    const order = placeOrder({
-      product,
-      recipient: check.phone,
-      buyerName: session?.name ?? 'Guest',
-      buyerPhone: phone,
-      payWith,
-      sellerCode: effectiveSeller,
-    })
-    setOrderId(order.id)
-    setStep(3)
+    setPlacing(true)
+    setFailure('')
+
+    try {
+      const order = await placeOrder({
+        product,
+        recipient: check.phone,
+        buyerName: session?.name ?? 'Guest',
+        buyerPhone: phone,
+        payWith,
+        sellerCode: effectiveSeller,
+      })
+      setOrderId(order.id)
+      setStep(3)
+    } catch (caught) {
+      // Nothing was charged — the server places the order and debits inside one
+      // transaction. Stay on the confirm screen so the buyer can adjust and retry.
+      setFailure(
+        caught instanceof Error
+          ? caught.message
+          : 'We could not place that order. Please try again.',
+      )
+    } finally {
+      setPlacing(false)
+    }
   }
 
   return (
@@ -141,7 +163,7 @@ export default function Buy() {
       </h1>
       <button
         type="button"
-        onClick={() => (step <= 1 || step === 3 ? navigate('/shop') : setStep(step - 1))}
+        onClick={() => (step <= 1 || step === 3 ? navigate(shopPath('/shop')) : setStep(step - 1))}
         className="mb-4 -ml-1 flex items-center gap-1 rounded-lg px-1 py-1 text-sm font-semibold text-slate-500 hover:text-slate-800"
       >
         <ChevronLeftIcon className="size-4" />
@@ -382,18 +404,27 @@ export default function Buy() {
             </Callout>
           )}
 
+          {/* The order was refused before any money moved — an empty wallet, or a
+              bundle that went off sale while this screen was open. */}
+          {failure && (
+            <Callout tone="danger" className="mt-4" icon={<AlertIcon className="size-4" />}>
+              {failure}
+            </Callout>
+          )}
+
           <div className="mt-4 space-y-2">
             {/* The one highest-emphasis action in the whole product. */}
             <Button
               block
               size="lg"
               variant="cta"
-              disabled={!ownNumber && !receiptCheck?.ok}
-              onClick={confirm}
+              loading={placing}
+              disabled={placing || (!ownNumber && !receiptCheck?.ok)}
+              onClick={() => void confirm()}
             >
               Confirm and pay {cedis(price)}
             </Button>
-            <Button block variant="ghost" onClick={() => setStep(1)}>
+            <Button block variant="ghost" disabled={placing} onClick={() => setStep(1)}>
               Change number
             </Button>
           </div>
@@ -473,7 +504,7 @@ export default function Buy() {
                   <Callout tone="info" title="Keep your reference">
                     Save <strong className="font-mono font-bold">{placed.reference}</strong>. With
                     it and your phone number you can look this order up any time at{' '}
-                    <Link to="/track" className="font-semibold underline">
+                    <Link to={shopPath('/track')} className="font-semibold underline">
                       /track
                     </Link>
                     .
@@ -481,7 +512,7 @@ export default function Buy() {
                 )}
 
                 <div className="flex flex-col gap-2 sm:flex-row">
-                  <Link to="/shop" className="flex-1">
+                  <Link to={shopPath('/shop')} className="flex-1">
                     <Button block>Buy another</Button>
                   </Link>
                   <Link to={session ? '/app/orders' : '/track'} className="flex-1">
@@ -542,7 +573,7 @@ export default function Buy() {
                   >
                     <RefreshIcon className="size-4" /> Try again
                   </Button>
-                  <Link to="/shop" className="flex-1">
+                  <Link to={shopPath('/shop')} className="flex-1">
                     <Button block variant="outline">
                       Choose another bundle
                     </Button>

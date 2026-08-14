@@ -1,0 +1,45 @@
+# Local dev database for the JamesDataConsult API.
+#
+# Port 5433 on the host, not 5432 — a developer machine very often already has a
+# Postgres listening on 5432, and a silent connection to the wrong database is a
+# worse failure than a refused one.
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: jdc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jdc
+      POSTGRES_PASSWORD: jdc_dev_password
+      POSTGRES_DB: jdc
+      # Deterministic collation so ORDER BY on names does not drift between machines.
+      POSTGRES_INITDB_ARGS: '--locale=C --encoding=UTF8'
+    ports:
+      - '5433:5432'
+    volumes:
+      - jdc-pgdata:/var/lib/postgresql/data
+      # Mounted so `npm run constraints` can `psql -f` it without depending on
+      # shell stdin redirection, which differs between cmd.exe and sh.
+      - ./scripts:/scripts:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U jdc -d jdc']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Browse the data without installing a client. http://localhost:8081
+  adminer:
+    image: adminer:5
+    container_name: jdc-adminer
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - '8081:8080'
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+      ADMINER_DESIGN: dracula
+
+volumes:
+  jdc-pgdata:

@@ -1,5 +1,6 @@
 import { Link, useSearchParams } from 'react-router-dom'
 import { useStore } from '../state/store'
+import { useShopPath } from '../lib/shopPath'
 import { cedis } from '../lib/format'
 import { NETWORKS } from '../lib/networks'
 import type { Category, Network, Product } from '../data/types'
@@ -175,9 +176,11 @@ function ProductCard({
   price: number
   agentMargin: AgentMargin | null
 }) {
+  const shopPath = useShopPath()
+
   return (
     <Card as="li" className="transition-shadow hover:shadow-md">
-      <Link to={`/buy/${product.id}`} className="flex h-full flex-col p-4">
+      <Link to={shopPath(`/buy/${product.id}`)} className="flex h-full flex-col p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="font-semibold text-slate-900">{product.name}</p>
@@ -218,26 +221,3 @@ function ProductCard({
   )
 }
 
-/** Shown wherever a sell link is in force, so the buyer knows whose shop it is. */
-export function SellerBanner() {
-  const { sellerCode, sellerName, setSellerCode } = useStore()
-  if (!sellerCode || !sellerName) return null
-
-  return (
-    <Callout tone="success" className="mb-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span>
-          You are buying from <strong className="font-bold">{sellerName}</strong> — the prices here
-          are theirs.
-        </span>
-        <button
-          type="button"
-          onClick={() => setSellerCode(null)}
-          className="font-semibold underline"
-        >
-          Use standard prices instead
-        </button>
-      </div>
-    </Callout>
-  )
-}

@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import type { EarningType } from '../../data/types'
-import { agentEarningsByDay } from '../../data/mock'
 import { BarChart } from '../../components/charts'
 import {
   Badge,
@@ -43,7 +42,7 @@ const TYPE_META: Record<
  * top-up on this page by design.
  */
 export default function Earnings() {
-  const { agentBalance, earnings } = useStore()
+  const { agentBalance, earnings, agentEarningsByDay } = useStore()
   const [filter, setFilter] = useState<'all' | EarningType>('all')
 
   const visible = filter === 'all' ? earnings : earnings.filter((e) => e.type === filter)

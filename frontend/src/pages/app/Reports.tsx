@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useStore } from '../../state/store'
 import { cedis } from '../../lib/format'
-import { agentEarningsByDay } from '../../data/mock'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
 import { BarChart, Donut } from '../../components/charts'
 import {
@@ -23,7 +22,7 @@ type Range = '7d' | '30d' | 'custom'
 
 /** FR-8.2 — an agent's own sales summary for a chosen date range. */
 export default function Reports() {
-  const { orders, session, myShareOf } = useStore()
+  const { orders, session, myShareOf, agentEarningsByDay } = useStore()
   const isAgent = session?.role === 'agent'
   const [range, setRange] = useState<Range>('7d')
   const [from, setFrom] = useState('2026-08-01')

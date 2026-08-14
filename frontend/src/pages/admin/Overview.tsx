@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { cedis, cedisCompact, dateTime } from '../../lib/format'
-import { revenueByDay, subAgents } from '../../data/mock'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
 import { BarChart, Donut } from '../../components/charts'
 import {
@@ -59,7 +58,7 @@ function MoneyBand({
 
 /** FR-6.3 — all orders, all users, total revenue, system-wide statistics. */
 export default function Overview() {
-  const { orders, users, withdrawals } = useStore()
+  const { orders, users, withdrawals, revenueByDay, subAgents } = useStore()
 
   const weekRevenue = revenueByDay.reduce((sum, day) => sum + day.revenue, 0)
   const weekOrders = revenueByDay.reduce((sum, day) => sum + day.orders, 0)

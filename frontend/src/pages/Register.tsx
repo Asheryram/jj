@@ -9,7 +9,7 @@ type AccountType = 'customer' | 'agent'
 
 /** FR-1.1, FR-1.2, FR-1.6, FR-1.7, NFR-7.3 */
 export default function Register() {
-  const { login, pushToast } = useStore()
+  const { register, pushToast } = useStore()
   const navigate = useNavigate()
   const [params] = useSearchParams()
 
@@ -26,7 +26,7 @@ export default function Register() {
 
   const phoneCheck = phone.trim() ? checkPhone(phone) : null
 
-  const submit = () => {
+  const submit = async () => {
     const next: Record<string, string> = {}
     if (name.trim().length < 3) next.name = 'Enter your full name as it appears on your ID.'
     if (!phoneCheck?.ok) next.phone = phoneCheck?.ok === false ? phoneCheck.reason : 'Enter your phone number.'
@@ -38,8 +38,19 @@ export default function Register() {
     if (Object.keys(next).length > 0) return
 
     setBusy(true)
-    window.setTimeout(() => {
-      login(accountType)
+
+    try {
+      await register({
+        name: name.trim(),
+        // Normalised, so +233 and 0-prefixed forms both reach the API as
+        // 0XXXXXXXXX. The validation above guarantees `ok` here.
+        phone: phoneCheck?.ok ? phoneCheck.phone : phone.replace(/\D/g, ''),
+        email: email.trim(),
+        password,
+        accountType,
+        referralCode: referral.trim() || undefined,
+      })
+
       pushToast({
         tone: 'success',
         title: 'Account created',
@@ -49,7 +60,23 @@ export default function Register() {
             : 'Top up your wallet to place your first order.',
       })
       navigate('/app', { replace: true })
-    }, 600)
+    } catch (caught) {
+      // A duplicate number or an unknown referral code both land here, and the
+      // API already phrased them for this reader. Attach to the field it is
+      // about so the fix is where the eye already is.
+      const message =
+        caught instanceof Error ? caught.message : 'We could not create your account.'
+      const field = /referral/i.test(message)
+        ? 'referral'
+        : /phone|number/i.test(message)
+          ? 'phone'
+          : /email/i.test(message)
+            ? 'email'
+            : 'form'
+      setErrors({ [field]: message })
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -78,7 +105,7 @@ export default function Register() {
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault()
-            submit()
+            void submit()
           }}
         >
           {/* FR-1.6 */}
@@ -168,16 +195,25 @@ export default function Register() {
           <Field
             label="Referral code (optional)"
             htmlFor="reg-referral"
+            error={errors.referral}
             hint="If an agent invited you, put their code here."
           >
             <TextInput
               id="reg-referral"
               placeholder="KWAME77"
+              invalid={Boolean(errors.referral)}
               value={referral}
               onChange={(event) => setReferral(event.target.value.toUpperCase())}
               className="font-mono tracking-wide uppercase"
             />
           </Field>
+
+          {/* Anything the server rejected that does not belong to one field. */}
+          {errors.form && (
+            <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
+              {errors.form}
+            </Callout>
+          )}
 
           {/* NFR-7.3 */}
           <div>

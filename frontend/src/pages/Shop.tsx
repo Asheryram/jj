@@ -1,5 +1,5 @@
 import { useStore } from '../state/store'
-import Catalogue, { SellerBanner } from '../components/Catalogue'
+import Catalogue from '../components/Catalogue'
 import { PageHead } from '../components/ui'
 
 /**
@@ -21,7 +21,6 @@ export default function Shop() {
             : 'Pick a category, then a bundle. No account needed — pay with Mobile Money.'
         }
       />
-      <SellerBanner />
       <Catalogue />
     </div>
   )

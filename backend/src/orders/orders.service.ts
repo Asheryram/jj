@@ -1,0 +1,365 @@
+import { Injectable, Logger } from '@nestjs/common'
+import type { Order, Prisma } from '@prisma/client'
+import { PrismaService } from '../prisma/prisma.service'
+import { PricingService } from '../pricing/pricing.service'
+import { SettingsService } from '../settings/settings.service'
+import { FulfilmentService } from './fulfilment.service'
+import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
+import { toOrder, toTrackedOrder } from '../common/mappers'
+import {
+  ConflictError,
+  InsufficientBalanceError,
+  LedgerImbalanceError,
+  NotFoundError,
+  ValidationError,
+} from '../common/domain-errors'
+import type { AuthUser } from '../common/auth'
+import type { PlaceOrderDto, TrackOrderDto } from './orders.dto'
+
+@Injectable()
+export class OrdersService {
+  private readonly log = new Logger(OrdersService.name)
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly pricing: PricingService,
+    private readonly settings: SettingsService,
+    private readonly fulfilment: FulfilmentService,
+  ) {}
+
+  /**
+   * FR-4.3 — place an order.
+   *
+   * Everything that decides money happens inside one transaction: the chain is
+   * read, the split computed, the wallet debited, the order written. The provider
+   * call is deliberately NOT in here — never hold a transaction open across an
+   * outbound HTTP call (skills-breakdown.md §4.4.3). It is dispatched after
+   * commit, and the order sits in `processing` until it answers.
+   */
+  async place(dto: PlaceOrderDto, user: AuthUser | undefined) {
+    const sellerCode = await this.effectiveSeller(dto.sellerCode ?? null, user)
+
+    // Replaying a key returns the original rather than erroring: the client that
+    // retried cannot tell whether the first attempt was lost in the request or
+    // the response, and a 409 would leave a real order stranded.
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.order.findUnique({
+        where: { idempotencyKey: dto.idempotencyKey },
+      })
+      if (existing) return toOrder(existing)
+    }
+
+    const buyerPhone = dto.buyerPhone ?? dto.recipient
+    const reference = await this.freshReference()
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      const { product, salePrice, split } = await this.priceInside(tx, dto.productId, sellerCode)
+
+      // FR-2.3 — a wallet payment is debited as the order is created, and only a
+      // customer holds a spendable wallet. An agent's balance is earnings.
+      if (dto.payWith === 'wallet') {
+        if (!user || user.role !== 'customer') {
+          throw new ValidationError(
+            'Only a customer account holds a spendable wallet. Pay with Mobile Money instead.',
+          )
+        }
+        await this.debitWallet(tx, user.id, salePrice, reference, `${product.name} → ${dto.recipient}`)
+      }
+
+      return tx.order.create({
+        data: {
+          reference,
+          idempotencyKey: dto.idempotencyKey ?? null,
+          productId: product.id,
+          productName: product.name,
+          network: product.network,
+          category: product.category,
+          recipient: dto.recipient,
+          salePrice,
+          split: split as unknown as Prisma.InputJsonValue,
+          soldByCode: sellerCode,
+          status: 'processing',
+          paidWith: dto.payWith,
+          buyer: dto.buyerName?.trim() || user?.name || 'Guest',
+          buyerPhone,
+          buyerUserId: user?.id ?? null,
+        },
+      })
+    })
+
+    // Committed. Now ask the provider, and let the result land asynchronously —
+    // exactly the shape a real DataHub GH callback would arrive in (FR-4.4).
+    this.fulfilment.scheduleFor(order.id)
+
+    return toOrder(order)
+  }
+
+  /**
+   * Price the order from rows read inside the transaction.
+   *
+   * A price posted by the browser is never trusted. Even the price the browser
+   * *displayed* is only a quote — if an upline changed theirs a second ago, the
+   * authoritative number is this one, computed here.
+   */
+  private async priceInside(tx: Prisma.TransactionClient, productId: string, sellerCode: string | null) {
+    const row = await tx.product.findUnique({ where: { id: productId } })
+    if (!row) throw new NotFoundError('We could not find that bundle.')
+    if (!row.active) {
+      throw new ConflictError(
+        'PRODUCT_INACTIVE',
+        `${row.name} is not on sale at the moment. Pick another bundle.`,
+      )
+    }
+
+    // The referral policy is applied inside `quote`, from rows read in this same
+    // transaction — so the rate cannot move between pricing and writing.
+    const { salePrice, split } = await this.pricing.quote(productId, sellerCode, tx)
+
+    // The invariant, checked before anything is written: the buyer's money is
+    // exactly the supplier's cost plus every margin. A mismatch means the pricing
+    // domain and the ledger disagree, and committing would create or destroy
+    // money. Roll back loudly instead.
+    const discrepancy = splitDiscrepancy(salePrice, split)
+    if (discrepancy !== 0) {
+      this.log.error(
+        `split imbalance of ${discrepancy}p on ${productId} via ${sellerCode ?? 'no seller'}`,
+      )
+      throw new LedgerImbalanceError(discrepancy, productId)
+    }
+
+    return { product: row, salePrice, split }
+  }
+
+  /**
+   * FR-2.5 / NFR-3.3 — debit without a read-check-write race.
+   *
+   * A naive `read balance → compare → write` lets two concurrent orders both
+   * pass the check and overdraw. This is a single conditional UPDATE: Postgres
+   * decides, and an affected-row count of zero means the balance was not
+   * sufficient at the moment of the write. `CHECK (balance >= 0)` in
+   * scripts/constraints.sql backs it up if this is ever bypassed.
+   */
+  private async debitWallet(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    amount: number,
+    reference: string,
+    description: string,
+  ): Promise<void> {
+    // `id` is TEXT, not uuid — Prisma maps String @id to text, so no cast here.
+    const affected = await tx.$executeRaw`
+      UPDATE users SET balance = balance - ${amount}
+      WHERE id = ${userId} AND balance >= ${amount}
+    `
+
+    if (affected === 0) {
+      const current = await tx.user.findUnique({
+        where: { id: userId },
+        select: { balance: true },
+      })
+      throw new InsufficientBalanceError(current?.balance ?? 0, amount)
+    }
+
+    const after = await tx.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { balance: true },
+    })
+
+    await tx.transaction.create({
+      data: {
+        userId,
+        type: 'purchase',
+        amount: -amount,
+        balanceAfter: after.balance,
+        description,
+        reference,
+      },
+    })
+  }
+
+  /**
+   * An agent shopping through their own link sells to themselves, which nets them
+   * down to their own cost. That is intended (it is how an agent buys at cost),
+   * so an explicit link always wins; their own code is only the fallback.
+   */
+  private async effectiveSeller(
+    posted: string | null,
+    user: AuthUser | undefined,
+  ): Promise<string | null> {
+    const code = posted?.trim().toUpperCase() || null
+    if (code) {
+      const seller = await this.prisma.user.findUnique({
+        where: { referralCode: code },
+        select: { role: true, status: true },
+      })
+      // An unknown or suspended seller falls back to the standard price rather
+      // than failing the sale — the buyer did nothing wrong and should still be
+      // able to buy (FR-3.5).
+      if (!seller || seller.role !== 'agent' || seller.status !== 'active') return null
+      return code
+    }
+    return user?.role === 'agent' ? user.referralCode : null
+  }
+
+  /**
+   * A human-quotable reference (FR-4.9 — a guest tracks an order with this and
+   * their phone number). Six digits, checked for collisions rather than trusted.
+   */
+  private async freshReference(): Promise<string> {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = `JDC-${Math.floor(100_000 + Math.random() * 899_999)}`
+      const taken = await this.prisma.order.findUnique({
+        where: { reference: candidate },
+        select: { id: true },
+      })
+      if (!taken) return candidate
+    }
+    return `JDC-${Date.now().toString().slice(-9)}`
+  }
+
+  // ── Reads ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Orders visible to the caller. NFR-2.5 — row-level scoping, not just a role
+   * check, so agent A cannot read agent B's orders by changing a query param.
+   */
+  async list(user: AuthUser, limit = 100) {
+    const where = await this.scopeFor(user)
+    const rows = await this.prisma.order.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 500),
+    })
+    return rows.map(toOrder)
+  }
+
+  private async scopeFor(user: AuthUser): Promise<Prisma.OrderWhereInput> {
+    if (user.role === 'admin') return {}
+
+    if (user.role === 'customer') {
+      // Their own purchases, including ones made as a guest before they signed
+      // up — matched on the phone number they registered with.
+      return { OR: [{ buyerUserId: user.id }, { buyerPhone: user.phone }] }
+    }
+
+    // An agent sees what they sold, plus what their downline sold, because their
+    // earnings depend on it. Resolved to codes rather than joined, so a deep
+    // chain stays one indexed IN query.
+    const codes = await this.downlineCodes(user.referralCode)
+    return { OR: [{ soldByCode: { in: codes } }, { buyerUserId: user.id }] }
+  }
+
+  /** The seller's own code plus every code beneath it, breadth-first. */
+  private async downlineCodes(rootCode: string): Promise<string[]> {
+    const codes = new Set<string>([rootCode])
+    let frontier = [rootCode]
+
+    // Bounded to match MAX_CHAIN_DEPTH in the pricing domain — a cycle in the
+    // referral graph must not turn a list request into an infinite loop.
+    for (let depth = 0; depth < 10 && frontier.length > 0; depth++) {
+      const children: { referralCode: string }[] = await this.prisma.user.findMany({
+        where: { uplineCode: { in: frontier }, role: 'agent' },
+        select: { referralCode: true },
+      })
+      frontier = children.map((c) => c.referralCode).filter((c) => !codes.has(c))
+      frontier.forEach((c) => codes.add(c))
+    }
+
+    return [...codes]
+  }
+
+  async byId(id: string, user: AuthUser | undefined) {
+    const row = await this.prisma.order.findUnique({ where: { id } })
+    if (!row) throw new NotFoundError('We could not find that order.')
+
+    // A guest polling their own just-placed order has no session, so ownership is
+    // proven by the reference in the URL plus nothing else — the id is a uuid and
+    // unguessable, which is the same bearer-token logic a payment link uses.
+    if (!user) return toTrackedOrder(row)
+
+    if (user.role === 'admin') return toOrder(row)
+
+    const mine =
+      row.buyerUserId === user.id ||
+      row.buyerPhone === user.phone ||
+      (row.soldByCode !== null && (await this.downlineCodes(user.referralCode)).includes(row.soldByCode))
+
+    return mine ? toOrder(row) : toTrackedOrder(row)
+  }
+
+  /** FR-4.9 — a guest looks up an order with its reference and their number. */
+  async track(dto: TrackOrderDto) {
+    const reference = dto.reference.trim().toUpperCase()
+    const digits = dto.phone.replace(/\D/g, '')
+    // Match on the last 9 digits so 0244…, 233244… and +233244… all work.
+    const tail = digits.slice(-9)
+
+    const row = await this.prisma.order.findFirst({
+      where: {
+        reference,
+        OR: [{ buyerPhone: { endsWith: tail } }, { recipient: { endsWith: tail } }],
+      },
+    })
+
+    if (!row) {
+      // One message for "no such reference" and "wrong phone number" together.
+      // Distinguishing them would let anyone with a reference list confirm which
+      // are real and probe for the number attached to them.
+      throw new NotFoundError(
+        'We could not find an order with that reference and phone number. Check both and try again.',
+      )
+    }
+
+    return toTrackedOrder(row)
+  }
+
+  /** NFR-3.3 — money held for a Mobile Money payer whose order failed. */
+  async claimableCredits(phone: string) {
+    const tail = phone.replace(/\D/g, '').slice(-9)
+    if (tail.length < 9) return []
+    const rows = await this.prisma.claimableCredit.findMany({
+      where: { phone: { endsWith: tail }, claimed: false },
+      orderBy: { createdAt: 'desc' },
+    })
+    return rows.map((row) => ({
+      phone: row.phone,
+      amount: row.amount,
+      reference: row.reference,
+      createdAt: row.createdAt.toISOString(),
+    }))
+  }
+
+  /** Admin view of what we asked the provider and what it said. */
+  async dispatchesFor(orderId: string) {
+    const rows = await this.prisma.supplierDispatch.findMany({
+      where: { orderId },
+      orderBy: { createdAt: 'asc' },
+    })
+    return rows.map((row) => ({
+      id: row.id,
+      supplierCode: row.supplierCode,
+      recipient: row.recipient,
+      costPrice: row.costPrice,
+      outcome: row.outcome,
+      reason: row.reason,
+      simulated: row.simulated,
+      attempt: row.attempt,
+      createdAt: row.createdAt.toISOString(),
+    }))
+  }
+
+  /** Used by the fulfilment worker on boot to pick up orders left mid-flight. */
+  async stuckOrderIds(olderThanMs: number): Promise<string[]> {
+    const cutoff = new Date(Date.now() - olderThanMs)
+    const rows = await this.prisma.order.findMany({
+      where: { status: { in: ['pending', 'processing'] }, createdAt: { lt: cutoff } },
+      select: { id: true },
+      take: 200,
+    })
+    return rows.map((r) => r.id)
+  }
+
+  toResponse(order: Order) {
+    return toOrder(order)
+  }
+}

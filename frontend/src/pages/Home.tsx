@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom'
 import { useStore } from '../state/store'
+import { useRegisterPath, useShopPath } from '../lib/shopPath'
 import { cedis } from '../lib/format'
-import Catalogue, { SellerBanner } from '../components/Catalogue'
+import Catalogue from '../components/Catalogue'
 import { Badge, Button, Card, cn } from '../components/ui'
 import {
   CertificateIcon,
@@ -40,6 +41,8 @@ const AGENT_BENEFITS = [
  */
 export default function Home() {
   const { products, retailPrice, sellerName, sellerCode } = useStore()
+  const shopPath = useShopPath()
+  const registerPath = useRegisterPath()
 
   // The agent-margin example is driven by real catalogue data so it can never
   // drift from what an agent actually sees.
@@ -86,7 +89,6 @@ export default function Home() {
 
       {/* ── The shop, immediately. ── */}
       <section className="mx-auto max-w-6xl px-4 py-6 sm:py-8">
-        <SellerBanner />
         <Catalogue />
       </section>
 
@@ -143,7 +145,7 @@ export default function Home() {
           </ol>
           <p className="mt-6 text-sm text-slate-500">
             Bought something already?{' '}
-            <Link to="/track" className="font-semibold text-brand-700 hover:underline">
+            <Link to={shopPath('/track')} className="font-semibold text-brand-700 hover:underline">
               Track your order
             </Link>{' '}
             with your reference and phone number.
@@ -178,7 +180,7 @@ export default function Home() {
               ))}
             </ul>
             <div className="mt-7 flex flex-wrap gap-3">
-              <Link to="/register">
+              <Link to={registerPath}>
                 <Button size="lg">Create an agent account</Button>
               </Link>
               <Link to="/login">

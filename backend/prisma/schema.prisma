@@ -1,0 +1,385 @@
+// JamesDataConsult — persistence model.
+//
+// Money is ALWAYS an integer number of pesewas, never a float and never
+// Decimal-with-scale-2 pretending to be money. GHS 12.50 is 1250. This mirrors
+// the `Pesewas` type in the frontend's data/types.ts, and it is the reason every
+// amount below is `Int`.
+//
+// CHECK constraints that the schema language cannot express (balance >= 0,
+// resale_price >= floor, the split-balances invariant) live in
+// scripts/constraints.sql and are applied by `npm run setup`.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  customer
+  agent
+  admin
+}
+
+enum UserStatus {
+  active
+  suspended
+}
+
+enum Category {
+  data
+  airtime
+  voice
+  sms
+  afa
+  checker
+}
+
+enum Network {
+  MTN
+  Telecel
+  AirtelTigo
+}
+
+/// FR-4.4 — the only legal order states.
+enum OrderStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum PaidWith {
+  wallet
+  momo
+}
+
+/// Movements against a customer wallet (FR-2.4).
+enum TxType {
+  topup
+  purchase
+  refund
+}
+
+/// Movements against an agent's earnings account.
+enum EarningType {
+  sale
+  downline
+  reversal
+  withdrawal
+}
+
+enum WithdrawalStatus {
+  pending
+  approved
+  rejected
+}
+
+model User {
+  id           String     @id @default(uuid())
+  name         String
+  phone        String     @unique
+  email        String     @unique
+  passwordHash String?    @map("password_hash")
+  role         Role
+  status       UserStatus @default(active)
+
+  /// FR-1.7 — unique per user, and the handle a sell link is built from.
+  referralCode String  @unique @map("referral_code")
+  /// null means this agent sits directly under James (the admin root).
+  uplineCode   String? @map("upline_code")
+
+  /// Default markup over this agent's own cost, as a percentage. Applied to any
+  /// product the agent has not priced explicitly.
+  markupPercent Int @default(8) @map("markup_percent")
+
+  /// Customers: spendable wallet. Agents: withdrawable earnings. One column,
+  /// because a user holds exactly one role. Guarded by CHECK (balance >= 0).
+  balance Int @default(0)
+
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  prices       AgentPrice[]
+  orders       Order[]
+  transactions Transaction[]
+  earnings     Earning[]
+  withdrawals  Withdrawal[]
+
+  @@index([uplineCode])
+  @@index([role])
+  @@map("users")
+}
+
+/// Stands in for the DataHub GH catalogue until the real API keys arrive.
+///
+/// This is the provider's data, not ours: their SKU code, their price, and
+/// whether they currently have the bundle. Keeping it in its own table means the
+/// seam is honest — when the live keys land, this table becomes a cache of the
+/// API response and nothing downstream of `supplierCode` has to change.
+///
+/// During acceptance testing it is also the lever that makes the failure path
+/// reproducible: set `available = false` and the next order for that bundle
+/// fails at the provider and refunds, exactly as a real outage would.
+model SupplierProduct {
+  /// The provider's own SKU. What we would send in the fulfilment call.
+  code     String @id
+  provider String @default("datahub-gh")
+
+  category Category
+  network  Network?
+  name     String
+  validity String
+
+  /// What James pays the provider. The single source of truth for cost —
+  /// `products.supplier_cost` is synced from here, never typed in by hand.
+  costPrice Int @map("cost_price")
+
+  /// False when the provider is out of stock or the SKU is withdrawn.
+  available Boolean @default(true)
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  products   Product[]
+  dispatches SupplierDispatch[]
+
+  @@index([category])
+  @@index([available])
+  @@map("supplier_products")
+}
+
+/// Every fulfilment attempt against the provider, request and outcome.
+///
+/// A real integration would log the HTTP call here. The simulated one logs the
+/// same shape, which is what makes acceptance testing legible: a tester says
+/// "my bundle never arrived" and this table says what we asked for and what came
+/// back, without anyone reading application logs.
+model SupplierDispatch {
+  id           String @id @default(uuid())
+  orderId      String @map("order_id")
+  orderRef     String @map("order_ref")
+  supplierCode String @map("supplier_code")
+
+  recipient String
+  /// What we paid the provider for this dispatch, at dispatch time.
+  costPrice Int    @map("cost_price")
+
+  /// 'delivered' | 'rejected'. Free text because a real provider returns its own
+  /// vocabulary and we should not lose it in a narrow enum.
+  outcome String
+  /// The provider's reason when it rejects. Shown to admin, never to the buyer.
+  reason  String?
+
+  /// True while the real DataHub GH keys are absent. Makes it unambiguous which
+  /// rows in this table were real money and which were the stand-in.
+  simulated Boolean @default(true)
+
+  attempt   Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  supplier SupplierProduct @relation(fields: [supplierCode], references: [code])
+  order    Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([outcome])
+  @@map("supplier_dispatches")
+}
+
+model Product {
+  id       String   @id
+  category Category
+  /// null for products that are not network-specific (result checkers).
+  network  Network?
+  name     String
+  /// Short descriptor shown under the name, e.g. "Non-expiry".
+  validity String
+
+  /// Which provider SKU fulfils this product.
+  supplierCode String?          @map("supplier_code")
+  supplier     SupplierProduct? @relation(fields: [supplierCode], references: [code])
+
+  /// What James pays DataHub GH / the voucher supplier. Admin-only.
+  /// Synced from `supplier_products.cost_price`.
+  supplierCost   Int @map("supplier_cost")
+  /// What James charges agents — a top-level agent's cost floor.
+  adminPrice     Int @map("admin_price")
+  /// What a walk-up customer pays with no agent link (FR-3.5).
+  standardPrice  Int @map("standard_price")
+  /// Ceiling on retail, so a deep chain cannot price the product out of market.
+  maxRetailPrice Int @map("max_retail_price")
+
+  active Boolean @default(true)
+
+  prices AgentPrice[]
+  orders Order[]
+
+  @@index([category])
+  @@index([network])
+  @@index([supplierCode])
+  @@map("products")
+}
+
+/// An agent's chosen resale price for one product (FR-3.4).
+model AgentPrice {
+  userId      String @map("user_id")
+  productId   String @map("product_id")
+  resalePrice Int    @map("resale_price")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([userId, productId])
+  @@map("agent_prices")
+}
+
+model Order {
+  id        String @id @default(uuid())
+  reference String @unique
+
+  /// Idempotency key from the client (§4.4). A retried double-click on a flaky
+  /// Ghana 4G connection must not produce a second debit or a second delivery.
+  idempotencyKey String? @unique @map("idempotency_key")
+
+  productId String   @map("product_id")
+  /// Denormalised so a renamed or deleted product cannot rewrite history.
+  productName String @map("product_name")
+  network     Network?
+  category    Category
+
+  recipient String
+
+  /// What the buyer actually paid.
+  salePrice Int @map("sale_price")
+  /// How that money was divided, snapshotted at purchase time. Shape matches
+  /// the frontend's OrderSplit exactly.
+  split     Json
+
+  /// Referral code of the agent whose sell link was used, if any.
+  soldByCode String? @map("sold_by_code")
+
+  status   OrderStatus @default(processing)
+  paidWith PaidWith    @map("paid_with")
+
+  /// Display name of the buyer; 'Guest' for an account-less purchase (FR-4.8).
+  buyer      String
+  buyerPhone String  @map("buyer_phone")
+  /// Set only when a signed-in user bought. Guests have no row to point at.
+  buyerUserId String? @map("buyer_user_id")
+
+  /// Present only for result-checker orders (FR-4.7).
+  voucherSerial String? @map("voucher_serial")
+  voucherPin    String? @map("voucher_pin")
+
+  /// Set when the order failed and the buyer was made whole (FR-2.7).
+  refunded Boolean @default(false)
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  product    Product            @relation(fields: [productId], references: [id])
+  buyerUser  User?              @relation(fields: [buyerUserId], references: [id])
+  dispatches SupplierDispatch[]
+
+  @@index([soldByCode])
+  @@index([status])
+  @@index([createdAt])
+  @@index([buyerPhone])
+  @@index([reference, buyerPhone])
+  @@map("orders")
+}
+
+/// Customer wallet ledger (FR-2.4). Append-only: a correction is a new row.
+model Transaction {
+  id           String @id @default(uuid())
+  userId       String @map("user_id")
+  type         TxType
+  /// Signed: negative for a purchase, positive for a top-up or refund.
+  amount       Int
+  balanceAfter Int    @map("balance_after")
+  description  String
+  reference    String
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Idempotency: one wallet movement per (user, reference, type). A replayed
+  /// provider callback cannot credit twice.
+  @@unique([userId, reference, type])
+  @@index([userId, createdAt])
+  @@map("transactions")
+}
+
+/// Agent earnings ledger. Credited by sales, debited by withdrawals.
+model Earning {
+  id           String      @id @default(uuid())
+  userId       String      @map("user_id")
+  type         EarningType
+  amount       Int
+  balanceAfter Int         @map("balance_after")
+  description  String
+  reference    String
+  productName  String?     @map("product_name")
+  /// 0 = their own sale; 1+ = a sale made by someone below them.
+  depth        Int         @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, reference, type])
+  @@index([userId, createdAt])
+  @@map("earnings")
+}
+
+model Withdrawal {
+  id     String @id @default(uuid())
+  userId String @map("user_id")
+
+  /// Denormalised for the admin queue, which must still render if a user row
+  /// is later suspended or renamed.
+  agentName  String @map("agent_name")
+  agentPhone String @map("agent_phone")
+
+  amount      Int
+  momoNetwork Network          @map("momo_network")
+  status      WithdrawalStatus @default(pending)
+
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  decidedAt   DateTime? @map("decided_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([userId])
+  @@map("withdrawals")
+}
+
+/// NFR-3.3 — money owed back to a Mobile Money payer whose order failed.
+///
+/// Reversing a MoMo collection is neither instant nor guaranteed, and a guest
+/// has no wallet to credit. So the amount is held against their number and they
+/// are sent a claim link. Nothing is ever silently lost.
+model ClaimableCredit {
+  id        String   @id @default(uuid())
+  phone     String
+  amount    Int
+  reference String   @unique
+  claimed   Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([phone])
+  @@map("claimable_credits")
+}
+
+/// Runtime platform switches (FR-5.5 / NFR-5.2 multi-level referral, plus the
+/// demo failure toggle). A row per key so a new flag needs no migration.
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}

@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react'
-import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useStore, type Toast } from '../state/store'
+import { useRegisterPath, useShopPath } from '../lib/shopPath'
 import { cedis, initials } from '../lib/format'
 import type { Role } from '../data/types'
-import { Badge, Button, Modal, Segmented, Toggle, cn } from './ui'
+import { Badge, Button, Modal, cn } from './ui'
 import {
   AlertIcon,
   CashIcon,
@@ -24,9 +25,20 @@ import {
 
 // ─── Brand ──────────────────────────────────────────────────────────────────
 
+/**
+ * The wordmark, and the way home.
+ *
+ * "Home" means the agent's storefront whenever a sell link is in force. Linking
+ * it to `/` would walk a buyer out of the shop that brought them and into the
+ * platform's own — the agent loses the sale they generated, which is the fastest
+ * way to make agents stop sharing their links.
+ */
 export function Logo({ compact }: { compact?: boolean }) {
+  const { sellerCode } = useStore()
+  const home = sellerCode ? `/s/${sellerCode}` : '/'
+
   return (
-    <Link to="/" className="flex items-center gap-2.5">
+    <Link to={home} className="flex items-center gap-2.5">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-700 text-base font-bold text-white">
         J
       </span>
@@ -42,125 +54,6 @@ export function Logo({ compact }: { compact?: boolean }) {
   )
 }
 
-// ─── Demo bar ───────────────────────────────────────────────────────────────
-
-/**
- * Present-mode controls. Not part of the product — it exists so the whole
- * platform can be walked through in one sitting without seeding accounts, and
- * so the failure-and-refund path (FR-2.7) can be demonstrated on demand.
- */
-/** Who you are viewing as. A buyer is simply nobody — no account at all. */
-type Viewer = 'buyer' | 'agent' | 'admin'
-
-export function DemoBar() {
-  const { session, login, logout, simulateFailure, setSimulateFailure } = useStore()
-  const [open, setOpen] = useState(false)
-  const navigate = useNavigate()
-
-  const viewer: Viewer =
-    session?.role === 'admin' ? 'admin' : session?.role === 'agent' ? 'agent' : 'buyer'
-
-  return (
-    <div className="sticky top-0 z-40 bg-slate-900 text-white">
-      <div className="mx-auto flex h-9 max-w-7xl items-center gap-3 px-3 text-xs sm:px-4">
-        <span className="flex items-center gap-1.5 font-semibold tracking-wide text-amber-300 uppercase">
-          <AlertIcon className="size-3.5" /> Demo
-        </span>
-        {/* slate-400 on slate-900 is 6.0:1. Bumping it to slate-500 as we did on
-            white surfaces would DROP it to 3.7:1 — on a dark ground, lighter is
-            the accessible direction. */}
-        <span className="hidden text-slate-400 sm:inline">
-          Mock data — no live payments or DataHub GH calls
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {simulateFailure && (
-            <span className="hidden rounded bg-red-500/20 px-1.5 py-0.5 font-semibold text-red-300 sm:inline">
-              Failure mode on
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="rounded-md bg-white/10 px-2 py-1 font-semibold hover:bg-white/20"
-          >
-            View as: {viewer}
-          </button>
-        </div>
-      </div>
-
-      <Modal open={open} onClose={() => setOpen(false)} title="Demo controls">
-        <div className="space-y-5 text-slate-800">
-          <div>
-            <p className="mb-2 text-sm font-medium text-slate-700">View the site as</p>
-            <Segmented<Viewer>
-              className="w-full"
-              options={[
-                { value: 'buyer', label: 'Buyer' },
-                { value: 'agent', label: 'Agent' },
-                { value: 'admin', label: 'Admin' },
-              ]}
-              value={viewer}
-              onChange={(next) => {
-                setOpen(false)
-                if (next === 'buyer') {
-                  // A buyer is nobody: no account, no login. Straight to the shop.
-                  logout()
-                  navigate('/')
-                  return
-                }
-                login(next)
-                navigate(next === 'admin' ? '/admin' : '/app')
-              }}
-            />
-            <p className="mt-2 text-sm text-slate-500">
-              A <strong className="font-semibold">buyer</strong> has no account at all — that is the
-              main path through the site. Accounts exist for people who want to{' '}
-              <strong className="font-semibold">sell</strong> (agent) or run the platform (admin).
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 p-3.5">
-            <p className="text-sm font-semibold text-slate-800">Optional: the customer wallet</p>
-            <p className="mt-0.5 text-sm text-slate-500">
-              A frequent buyer can register to keep a topped-up balance and skip the Mobile Money
-              prompt (FR-2.1, FR-2.2). It is not required to buy anything.
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                login('customer')
-                setOpen(false)
-                navigate('/app/wallet')
-              }}
-              className="mt-2 text-sm font-semibold text-brand-700 hover:underline"
-            >
-              View as a wallet holder
-            </button>
-          </div>
-
-          <div className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 p-3.5">
-            <div className="min-w-0">
-              <label htmlFor="sim-fail" className="block text-sm font-semibold text-slate-800">
-                Simulate upstream failure
-              </label>
-              <p className="mt-0.5 text-sm text-slate-500">
-                The next order fails at the provider and is refunded to the wallet — the FR-2.7 and
-                NFR-3.3 path.
-              </p>
-            </div>
-            <Toggle
-              id="sim-fail"
-              label="Simulate upstream failure"
-              checked={simulateFailure}
-              onChange={setSimulateFailure}
-            />
-          </div>
-        </div>
-      </Modal>
-    </div>
-  )
-}
-
 // ─── Navigation model ───────────────────────────────────────────────────────
 
 interface NavItem {
@@ -170,7 +63,17 @@ interface NavItem {
   end?: boolean
 }
 
-function navFor(role: Role): NavItem[] {
+/**
+ * `shopPath` scopes shop links to the sell link in force, if any.
+ *
+ * Applied to a customer's "Buy" but deliberately NOT to an agent's "Browse
+ * shop". They look like the same destination and are not: a customer shopping
+ * through an agent's link must stay attributed to that agent, whereas an agent
+ * opening the shop is reviewing their own catalogue — the margin column in
+ * `Catalogue` only appears when no sell link is active, so scoping it would hide
+ * from them the very numbers they went there to see.
+ */
+function navFor(role: Role, shopPath: (path: string) => string): NavItem[] {
   if (role === 'admin') {
     return [
       { to: '/admin', label: 'Overview', icon: HomeIcon, end: true },
@@ -190,6 +93,7 @@ function navFor(role: Role): NavItem[] {
       { to: '/app/earnings', label: 'Earnings', icon: WalletIcon },
       { to: '/app/orders', label: 'Sales', icon: ReceiptIcon },
       { to: '/app/pricing', label: 'My prices', icon: TagIcon },
+      // Unscoped on purpose — see the note above navFor.
       { to: '/shop', label: 'Browse shop', icon: UsersIcon },
       { to: '/app/reports', label: 'Reports', icon: ChartIcon },
       { to: '/app/withdrawals', label: 'Withdraw', icon: CashIcon },
@@ -198,7 +102,7 @@ function navFor(role: Role): NavItem[] {
 
   return [
     { to: '/app', label: 'Dashboard', icon: HomeIcon, end: true },
-    { to: '/shop', label: 'Buy', icon: StoreIcon },
+    { to: shopPath('/shop'), label: 'Buy', icon: StoreIcon },
     { to: '/app/wallet', label: 'Wallet', icon: WalletIcon },
     { to: '/app/orders', label: 'Orders', icon: ReceiptIcon },
     { to: '/app/reports', label: 'My spending', icon: ChartIcon },
@@ -226,19 +130,19 @@ export function RequireAuth({ role }: { role?: Role }) {
 
 export function AppShell() {
   const { session, balance, logout } = useStore()
+  const shopPath = useShopPath()
   const [moreOpen, setMoreOpen] = useState(false)
   if (!session) return null
 
-  const items = navFor(session.role)
+  const items = navFor(session.role, shopPath)
   const primary = items.slice(0, 4)
   const overflow = items.slice(4)
 
   return (
     <div className="min-h-dvh bg-slate-50">
       <SkipLink />
-      <DemoBar />
 
-      <header className="sticky top-9 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-3 sm:px-4">
           <Logo compact />
           <span className="hidden font-bold tracking-tight text-slate-900 sm:block">
@@ -277,7 +181,7 @@ export function AppShell() {
       </header>
 
       <div className="mx-auto flex max-w-7xl gap-6 px-3 sm:px-4">
-        <aside className="sticky top-24 hidden h-fit w-56 shrink-0 py-5 lg:block">
+        <aside className="sticky top-15 hidden h-fit w-56 shrink-0 py-5 lg:block">
           <nav className="space-y-1">
             {items.map((item) => (
               <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
@@ -366,29 +270,30 @@ export function SkipLink() {
 
 export function PublicShell() {
   const { session } = useStore()
+  const shopPath = useShopPath()
+  const registerPath = useRegisterPath()
 
   return (
     <div className="min-h-dvh bg-white">
       <SkipLink />
-      <DemoBar />
-      <header className="sticky top-9 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4">
           <Logo />
           <nav className="ml-auto flex items-center gap-2 sm:gap-3">
             <Link
-              to="/shop"
+              to={shopPath('/shop')}
               className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:block"
             >
               Buy data
             </Link>
             <Link
-              to="/checkers"
+              to={shopPath('/checkers')}
               className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:block"
             >
               Result checkers
             </Link>
             <Link
-              to="/track"
+              to={shopPath('/track')}
               className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 lg:block"
             >
               Track order
@@ -404,7 +309,7 @@ export function PublicShell() {
                     Log in
                   </Button>
                 </Link>
-                <Link to="/register">
+                <Link to={registerPath}>
                   {/* Room is tight at 390px — the label shortens rather than wraps. */}
                   <Button size="sm">
                     <span className="sm:hidden">Sell with us</span>
@@ -426,6 +331,9 @@ export function PublicShell() {
 }
 
 export function PublicFooter() {
+  const shopPath = useShopPath()
+  const registerPath = useRegisterPath()
+
   return (
     <footer className="mt-16 border-t border-slate-200 bg-slate-50">
       <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:grid-cols-2 lg:grid-cols-4">
@@ -439,16 +347,16 @@ export function PublicFooter() {
         <FooterColumn
           title="Shop"
           links={[
-            ['Data bundles', '/shop'],
-            ['Airtime', '/shop'],
-            ['Result checkers', '/checkers'],
-            ['Track an order', '/track'],
+            ['Data bundles', shopPath('/shop')],
+            ['Airtime', shopPath('/shop')],
+            ['Result checkers', shopPath('/checkers')],
+            ['Track an order', shopPath('/track')],
           ]}
         />
         <FooterColumn
           title="Agents"
           links={[
-            ['Become an agent', '/register'],
+            ['Become an agent', registerPath],
             ['Log in', '/login'],
           ]}
         />
@@ -541,7 +449,7 @@ function VisualToasts({
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none fixed inset-x-3 top-12 z-50 flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:top-auto sm:w-80"
+      className="pointer-events-none fixed inset-x-3 top-3 z-50 flex flex-col gap-2 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:top-auto sm:w-80"
     >
       {toasts.map((toast) => (
         <div

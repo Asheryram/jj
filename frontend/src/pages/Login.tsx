@@ -1,38 +1,52 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useStore } from '../state/store'
-import type { Role } from '../data/types'
-import { Button, Callout, Card, Field, Segmented, TextInput } from '../components/ui'
+import { Button, Callout, Card, Field, TextInput } from '../components/ui'
 import { AlertIcon } from '../components/icons'
 
 /**
  * FR-1.3.
  *
  * Logging in is for people who sell or administer, not for people who buy —
- * buying needs no account (FR-4.8). The role picker exists only because there
- * is no API yet; once the NestJS backend is wired in the role comes back inside
- * the JWT and this control disappears.
+ * buying needs no account (FR-4.8). The destination comes from the role inside
+ * the token, so there is no role picker: the server decides what you are.
  */
 export default function Login() {
   const { login } = useStore()
   const navigate = useNavigate()
-  const [phone, setPhone] = useState('0551234567')
-  const [password, setPassword] = useState('demo1234')
-  const [role, setRole] = useState<Role>('agent')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const submit = () => {
-    if (!phone.trim() || !password) {
-      setError('Enter your phone number and password to continue.')
+  const submit = async () => {
+    if (!email.trim() || !password) {
+      setError('Enter your email and password to continue.')
       return
     }
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+      setError('That does not look like an email address.')
+      return
+    }
+
     setError('')
     setBusy(true)
-    window.setTimeout(() => {
-      login(role)
-      navigate(role === 'admin' ? '/admin' : '/app', { replace: true })
-    }, 500)
+
+    try {
+      // Trimmed and lowercased here as well as server-side: a phone keyboard
+      // will happily capitalise the first letter of an address.
+      const session = await login(email.trim().toLowerCase(), password)
+      navigate(session.role === 'admin' ? '/admin' : '/app', { replace: true })
+    } catch (caught) {
+      // The API's message is already written for this reader (NFR-4.3).
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : 'We could not sign you in. Please try again.',
+      )
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -51,18 +65,23 @@ export default function Login() {
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault()
-            submit()
+            void submit()
           }}
         >
-          <Field label="Phone number" htmlFor="login-phone">
+          <Field label="Email address" htmlFor="login-email">
             <TextInput
-              id="login-phone"
-              type="tel"
-              inputMode="numeric"
-              autoComplete="tel"
-              placeholder="024 000 0000"
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
+              id="login-email"
+              type="email"
+              // `email` keyboard and no auto-capitalisation: on a phone the
+              // default would capitalise the first letter of the address.
+              inputMode="email"
+              autoComplete="email"
+              autoCapitalize="none"
+              spellCheck={false}
+              placeholder="you@example.com"
+              invalid={Boolean(error)}
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
             />
           </Field>
 
@@ -75,19 +94,6 @@ export default function Login() {
               onChange={(event) => setPassword(event.target.value)}
             />
           </Field>
-
-          <div>
-            <p className="mb-2 text-sm font-medium text-slate-700">Demo account type</p>
-            <Segmented<Role>
-              className="w-full"
-              options={[
-                { value: 'agent', label: 'Agent' },
-                { value: 'admin', label: 'Admin' },
-              ]}
-              value={role}
-              onChange={setRole}
-            />
-          </div>
 
           {error && (
             <Callout tone="danger" icon={<AlertIcon className="size-4" />}>

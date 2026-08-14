@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom'
 import { useStore } from '../../state/store'
+import { sellLinkFor } from '../../lib/origin'
+import { useShopPath } from '../../lib/shopPath'
 import { cedis, dateTime } from '../../lib/format'
-import { agentEarningsByDay, subAgents } from '../../data/mock'
 import { Sparkline } from '../../components/charts'
 import {
   Button,
@@ -27,28 +28,43 @@ import {
 
 /** FR-6.1 — order history, balance and referred agents in one place. */
 export default function Dashboard() {
-  const { session, agentBalance, customerBalance, orders, myShareOf } = useStore()
+  const {
+    session,
+    agentBalance,
+    customerBalance,
+    orders,
+    myShareOf,
+    subAgents,
+    agentEarningsByDay,
+    mySummary,
+  } = useStore()
   if (!session) return null
 
   const isAgent = session.role === 'agent'
-  const today = '2026-08-12'
 
-  // NFR-2.5 — only what belongs to this user.
+  // NFR-2.5 — only what belongs to this user. Used for the recent-activity list,
+  // which is genuinely a "latest few" view.
   const mine = isAgent
-    ? orders.filter((o) => o.split.shares.some((s) => s.userId === session.id))
-    : orders.filter((o) => o.buyer === session.name)
+    ? orders.filter((o) => o.split?.shares.some((s) => s.userId === session.id))
+    : orders.filter((o) => o.buyerPhone === session.phone || o.buyer === session.name)
 
-  const todays = mine.filter((o) => o.createdAt.startsWith(today))
-  const completed = mine.filter((o) => o.status === 'completed')
-
-  // FR-5.3 — profit is the gap between what you paid and what you charged.
-  const earnedToday = todays
-    .filter((o) => o.status === 'completed')
-    .reduce((sum, o) => sum + (myShareOf(o)?.margin ?? 0), 0)
-  const earnedAllTime = completed.reduce((sum, o) => sum + (myShareOf(o)?.margin ?? 0), 0)
-  const spendToday = todays.reduce((sum, o) => sum + o.salePrice, 0)
-  const activeSubAgents = subAgents.filter((a) => a.status === 'active').length
-  const sellLink = `https://jamesdataconsult.com/s/${session.referralCode}`
+  /**
+   * Totals come from the server, not from `orders`.
+   *
+   * The orders list is capped, so summing it undercounts as soon as an agent
+   * passes the cap — and it would do so silently, which is the worst kind of
+   * wrong number on a page about money. Zeroes show only until the first load
+   * lands.
+   */
+  const earnedToday = mySummary?.earnedToday ?? 0
+  const earnedAllTime = mySummary?.earnedAllTime ?? 0
+  const spendToday = mySummary?.spentToday ?? 0
+  const ordersToday = mySummary?.ordersToday ?? 0
+  const ordersCompleted = mySummary?.ordersCompleted ?? 0
+  const ordersTotal = mySummary?.ordersTotal ?? 0
+  const activeSubAgents = mySummary?.activeSubAgents ?? subAgents.filter((a) => a.status === 'active').length
+  const sellLink = sellLinkFor(session.referralCode)
+  const shopPath = useShopPath()
 
   return (
     <div>
@@ -95,7 +111,7 @@ export default function Dashboard() {
                     <WalletIcon className="size-4" /> Top up
                   </Button>
                 </Link>
-                <Link to="/shop">
+                <Link to={shopPath('/shop')}>
                   <Button variant="onBrandOutline">
                     <StoreIcon className="size-4" /> Buy
                   </Button>
@@ -134,7 +150,7 @@ export default function Dashboard() {
             <StatTile
               label="Earned today"
               value={cedis(earnedToday)}
-              hint={`${todays.length} orders in your chain`}
+              hint={`${plural(ordersToday, 'order')} in your chain`}
               tone="brand"
               icon={<TrendUpIcon className="size-5" />}
             />
@@ -146,8 +162,8 @@ export default function Dashboard() {
             />
             <StatTile
               label="Orders completed"
-              value={String(completed.length)}
-              hint={`${mine.length} total`}
+              value={String(ordersCompleted)}
+              hint={`${ordersTotal} total`}
               icon={<ReceiptIcon className="size-5" />}
             />
             <StatTile
@@ -162,18 +178,19 @@ export default function Dashboard() {
             <StatTile
               label="Spent today"
               value={cedis(spendToday)}
-              hint={`${todays.length} orders`}
+              hint={plural(ordersToday, 'order')}
               tone="brand"
               icon={<CashIcon className="size-5" />}
             />
             <StatTile
               label="Orders completed"
-              value={String(completed.length)}
+              value={String(ordersCompleted)}
               icon={<ReceiptIcon className="size-5" />}
             />
             <StatTile
               label="Data bought"
-              value={`${completed.filter((o) => o.category === 'data').length} bundles`}
+              value={`${mine.filter((o) => o.status === 'completed' && o.category === 'data').length} bundles`}
+              hint="In your recent orders"
               icon={<DataIcon className="size-5" />}
             />
             <StatTile
@@ -277,7 +294,7 @@ export default function Dashboard() {
             <div className="divide-y divide-slate-100">
               {/* Keyed by label, not route — two agent actions deliberately
                   point at the same page from different angles. */}
-              {quickActions(isAgent).map((action) => (
+              {quickActions(isAgent, shopPath).map((action) => (
                 <Link
                   key={action.label}
                   to={action.to}
@@ -308,6 +325,11 @@ export default function Dashboard() {
   )
 }
 
+/** "1 order", "2 orders". A stat tile reading "1 orders" undermines the number. */
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`
+}
+
 function greeting() {
   const hour = new Date().getHours()
   if (hour < 12) return 'Good morning'
@@ -315,7 +337,9 @@ function greeting() {
   return 'Good evening'
 }
 
-function quickActions(isAgent: boolean) {
+/** `shopPath` keeps a customer's shop shortcuts attributed to the agent whose
+ *  link they arrived on. The agent branch has no shop links to scope. */
+function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
   if (isAgent) {
     return [
       {
@@ -351,7 +375,7 @@ function quickActions(isAgent: boolean) {
 
   return [
     {
-      to: '/shop?category=data',
+      to: shopPath('/shop?category=data'),
       label: 'Buy data',
       hint: 'MTN, Telecel, AirtelTigo',
       icon: DataIcon,
