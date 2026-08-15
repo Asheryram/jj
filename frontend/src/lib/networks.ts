@@ -1,17 +1,30 @@
 import type { Network } from '../data/types'
 
 /**
- * FR-4.2 — validate the recipient number and detect its network.
+ * Prefix → network, used ONLY to show a network chip beside the input.
  *
- * The prefix table is DATA, not logic (NFR-5.1). In production this comes from
- * the API so James can add a newly allocated prefix without a deployment.
- * Confirm current allocations with the NCA before launch.
+ * Never a gate, and that is deliberate. Two things make a prefix table unable to
+ * decide whether a number can receive a bundle:
+ *
+ *  · **Number portability.** Ghana lets a subscriber keep their number when they
+ *    change carrier, so a 024 line can genuinely be on AirtelTigo. No prefix
+ *    table can be right about that, ever.
+ *  · **New allocations.** The NCA hands carriers new ranges, and every one we
+ *    have not heard about turns a real customer away at checkout. That is what
+ *    happened with 053, a live MTN range this table originally missed.
+ *
+ * So deliverability is answered by the people who actually deliver: DataHub's
+ * /verify where it applies, and failing that the order itself, which refunds if
+ * the network rejects it. This table only decorates.
  */
-export const NETWORK_PREFIXES: Record<Network, string[]> = {
-  MTN: ['024', '025', '054', '055', '059'],
+const NETWORK_HINTS: Record<Network, string[]> = {
+  MTN: ['024', '025', '053', '054', '055', '059'],
   Telecel: ['020', '050'],
   AirtelTigo: ['026', '027', '056', '057'],
 }
+
+/** @deprecated Cosmetic only — see NETWORK_HINTS. Kept for the Settings page. */
+export const NETWORK_PREFIXES = NETWORK_HINTS
 
 export const NETWORKS: Network[] = ['MTN', 'Telecel', 'AirtelTigo']
 
@@ -48,35 +61,35 @@ export function detectNetwork(input: string): Network | null {
   if (phone.length < 3) return null
   const prefix = phone.slice(0, 3)
   for (const network of NETWORKS) {
-    if (NETWORK_PREFIXES[network].includes(prefix)) return network
+    if (NETWORK_HINTS[network].includes(prefix)) return network
   }
   return null
 }
 
 export type PhoneCheck =
-  | { ok: true; phone: string; network: Network }
+  | { ok: true; phone: string; network: Network | null }
   | { ok: false; reason: string }
 
 /**
+ * Check the shape of a Ghana mobile number. Shape only.
+ *
+ * Ten digits starting with a zero is the entire claim being made here, because
+ * it is the only claim this side can make correctly. It used to also reject an
+ * unrecognised prefix, and reject a number whose prefix disagreed with the
+ * bundle's network — both were wrong, and both turned away customers who could
+ * have been served. See NETWORK_HINTS for why.
+ *
+ * `network` comes back as a hint for the chip, and is null when the prefix is
+ * unfamiliar. Null means "we do not know", never "this will not work".
+ *
  * NFR-4.3 — the reasons returned here are the exact words shown to the user.
- * No error codes, no "validation failed".
  */
-export function checkPhone(input: string, expected?: Network | null): PhoneCheck {
+export function checkPhone(input: string): PhoneCheck {
   const phone = normalisePhone(input)
   if (!phone) return { ok: false, reason: 'Enter the number that should receive this bundle.' }
   if (phone.length < 10) return { ok: false, reason: 'A Ghana number needs 10 digits.' }
   if (phone.length > 10) return { ok: false, reason: "That's more than 10 digits — check it again." }
-  const network = detectNetwork(phone)
-  if (!network) {
-    return { ok: false, reason: `${phone.slice(0, 3)} isn't a network we recognise.` }
-  }
-  if (expected && network !== expected) {
-    return {
-      ok: false,
-      reason: `That's a ${network} number, but you selected a ${expected} bundle.`,
-    }
-  }
-  return { ok: true, phone, network }
+  return { ok: true, phone, network: detectNetwork(phone) }
 }
 
 /** Pretty-print for confirmation screens: 024 411 8820 */

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError, type SupplierSku } from '../../lib/api'
 import { useStore } from '../../state/store'
-import { cedis, parseCedis } from '../../lib/format'
+import { cedis } from '../../lib/format'
 import type { Category } from '../../data/types'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
 import {
@@ -10,6 +10,7 @@ import {
   Callout,
   Card,
   CardHead,
+  EmptyState,
   Field,
   Modal,
   NetworkChip,
@@ -19,29 +20,36 @@ import {
   Td,
   TextInput,
   Th,
-  Toggle,
   cn,
 } from '../../components/ui'
 import { AlertIcon, RefreshIcon } from '../../components/icons'
 
 /**
- * The provider's own catalogue — DataHub GH for airtime and bundles, the voucher
- * wholesaler for result checkers.
+ * What our suppliers sell, as they report it.
  *
- * This exists because "what you pay" is not James's number to invent. It is what
- * he is invoiced, and it is the baseline every margin in the platform is measured
- * from, so it lives on the provider's record and flows down to our products. The
- * Prices page shows it read-only for exactly that reason.
+ * Read-only, all of it, and that is the design rather than an omission. This
+ * screen used to let James type a cost and flip an in-stock switch, and both
+ * were ways for the platform to assert something the supplier had not:
  *
- * Once real API keys are configured this screen becomes a read-only view of the
- * provider's price list, and the editing here goes away.
+ *  · A typed cost drifts from the invoice. Every margin on every screen is
+ *    measured from `supplier_cost`, so a number nobody was charged quietly
+ *    misstates the whole business.
+ *  · A hand-set stock flag can say a SKU is available after the supplier has
+ *    withdrawn it — which sells a customer something that cannot be delivered.
+ *
+ * It began as seed data: 36 invented SKUs with invented costs, of which DataHub
+ * really sells none. Sync is the only way anything here changes now.
+ *
+ * A newly imported SKU arrives priced at cost and NOT on sale. A default markup
+ * would put a number we made up in front of customers as James's price, so he
+ * sets one — here for everything waiting, or per product on the Prices page.
  */
 export default function ProviderCatalogue() {
-  const { refresh, pushToast } = useStore()
+  const { refresh, pushToast, products } = useStore()
   const [skus, setSkus] = useState<SupplierSku[] | null>(null)
   const [category, setCategory] = useState<Category>('data')
-  const [editing, setEditing] = useState<SupplierSku | null>(null)
-  const [busyCode, setBusyCode] = useState<string | null>(null)
+  const [publishing, setPublishing] = useState(false)
+  const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -49,7 +57,9 @@ export default function ProviderCatalogue() {
       setSkus(await api.supplierCatalogue())
       setError('')
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'We could not load the provider catalogue.')
+      setError(
+        caught instanceof ApiError ? caught.message : 'We could not load the supplier catalogue.',
+      )
     }
   }, [])
 
@@ -57,84 +67,70 @@ export default function ProviderCatalogue() {
     void load()
   }, [load])
 
-  const visible = useMemo(
-    () => (skus ?? []).filter((s) => s.category === category),
-    [skus, category],
+  const all = skus ?? []
+  const categories = useMemo(
+    () => CATEGORY_ORDER.filter((key) => all.some((sku) => sku.category === key)),
+    [all],
   )
-  const unavailable = (skus ?? []).filter((s) => !s.available)
+  const shown = categories.includes(category) ? category : (categories[0] ?? 'data')
+  const visible = all.filter((sku) => sku.category === shown)
 
-  const setAvailability = async (sku: SupplierSku, available: boolean) => {
-    setBusyCode(sku.code)
-    try {
-      await api.setSupplierAvailability(sku.code, available)
-      setSkus((current) =>
-        (current ?? []).map((s) => (s.code === sku.code ? { ...s, available } : s)),
-      )
-      pushToast({
-        tone: available ? 'success' : 'info',
-        title: available ? `${sku.name} back in stock` : `${sku.name} marked out of stock`,
-        detail: available
-          ? 'Orders for it will be fulfilled again.'
-          : 'Orders for it will fail at the provider and be refunded.',
-      })
-    } catch (caught) {
-      pushToast({
-        tone: 'error',
-        title: caught instanceof ApiError ? caught.message : 'We could not change that.',
-      })
-    } finally {
-      setBusyCode(null)
-    }
-  }
-
-  const saveCost = async (sku: SupplierSku, costPrice: number) => {
-    const result = await api.setSupplierCost(sku.code, costPrice)
-    setSkus((current) =>
-      (current ?? []).map((s) => (s.code === sku.code ? { ...s, costPrice } : s)),
-    )
-    // Product tiers may have been lifted to stay above the new cost, so re-read
-    // the catalogue rather than leaving the Prices page showing the old floor.
-    await refresh()
-    pushToast({
-      tone: 'success',
-      title: 'Provider cost updated',
-      detail:
-        result.productsUpdated > 0
-          ? `${result.productsUpdated} product${result.productsUpdated === 1 ? '' : 's'} repriced from it.`
-          : 'No product prices needed changing.',
-    })
-  }
+  const outOfStock = all.filter((sku) => !sku.available)
+  const unfulfillable = all.filter((sku) => !sku.autoFulfillable)
+  // Imported from a supplier and still waiting for a price: they sit at cost and
+  // inactive until James says what they sell for.
+  const unpriced = products.filter((p) => !p.active && p.supplierCost === p.adminPrice)
 
   const sync = async () => {
-    setBusyCode('__sync__')
+    setSyncing(true)
     try {
-      const { updated } = await api.syncSupplierCosts()
+      const result = await api.syncSuppliers()
+      await load()
       await refresh()
-      pushToast({
-        tone: 'success',
-        title: 'Synced from the provider',
-        detail:
-          updated > 0
-            ? `${updated} product cost${updated === 1 ? '' : 's'} updated.`
-            : 'Everything was already up to date.',
-      })
+
+      const failed = result.sources.filter((source) => source.error)
+      if (failed.length > 0) {
+        pushToast({
+          tone: 'error',
+          title: `${failed.map((f) => f.label).join(', ')} could not be reached`,
+          detail: `${failed[0].error} Nothing from them was changed.`,
+        })
+      }
+
+      const parts = [
+        result.created > 0 && `${result.created} new`,
+        result.repriced > 0 && `${result.repriced} repriced`,
+        result.withdrawn > 0 && `${result.withdrawn} withdrawn`,
+      ].filter(Boolean)
+
+      const ok = result.sources.filter((source) => !source.error)
+      if (ok.length > 0) {
+        pushToast({
+          tone: 'success',
+          title: `Read ${ok.map((source) => source.label).join(', ')}`,
+          detail:
+            parts.length > 0
+              ? `${parts.join(', ')}.${result.unpriced > 0 ? ` ${result.unpriced} need a price before they go on sale.` : ''}`
+              : 'Their catalogue matches yours already.',
+        })
+      }
     } catch (caught) {
       pushToast({
         tone: 'error',
-        title: caught instanceof ApiError ? caught.message : 'We could not sync.',
+        title: caught instanceof ApiError ? caught.message : 'We could not reach the suppliers.',
       })
     } finally {
-      setBusyCode(null)
+      setSyncing(false)
     }
   }
 
   return (
     <Card className="mt-3">
       <CardHead
-        title="Provider catalogue"
-        subtitle="What DataHub GH and the voucher wholesaler charge you, and what they have in stock."
+        title="Supplier catalogue"
+        subtitle="What each supplier sells, what they charge you, and what they have in stock. All of it theirs to report."
         action={
-          <Button size="sm" variant="outline" loading={busyCode === '__sync__'} onClick={() => void sync()}>
+          <Button size="sm" variant="outline" loading={syncing} onClick={() => void sync()}>
             <RefreshIcon className="size-4" /> Sync
           </Button>
         }
@@ -147,48 +143,86 @@ export default function ProviderCatalogue() {
           </Callout>
         )}
 
-        <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-          This is the only place <strong className="font-semibold">what you pay</strong> can change.
-          Every margin in the platform is measured from it, so it belongs to the provider's record —
-          not to the Prices page, where it is shown read-only.
-        </Callout>
-
-        {unavailable.length > 0 && (
-          <Callout
-            tone="warning"
-            title={`${unavailable.length} SKU${unavailable.length === 1 ? '' : 's'} out of stock`}
-            icon={<AlertIcon className="size-4" />}
-          >
-            Orders for {unavailable.map((s) => s.name).join(', ')} will fail at the provider and be
-            refunded automatically.
-          </Callout>
-        )}
-
         {skus === null ? (
           <div className="py-8 text-center">
             <Spinner className="mx-auto size-6 text-brand-600" />
           </div>
+        ) : all.length === 0 ? (
+          <EmptyState
+            title="Nothing here yet"
+            detail="Press Sync to read what your suppliers currently sell. Until then there is no catalogue — nothing is invented on your behalf."
+            action={
+              <Button loading={syncing} onClick={() => void sync()}>
+                <RefreshIcon className="size-4" /> Sync now
+              </Button>
+            }
+          />
         ) : (
           <>
-            <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
-              <Segmented<Category>
-                options={CATEGORY_ORDER.map((key) => ({
-                  value: key,
-                  label: CATEGORY_META[key].short,
-                }))}
-                value={category}
-                onChange={setCategory}
-              />
-            </div>
+            {unpriced.length > 0 && (
+              <Callout
+                tone="info"
+                title={`${unpriced.length} product${unpriced.length === 1 ? '' : 's'} are not on sale yet`}
+                icon={<AlertIcon className="size-4" />}
+              >
+                <p>
+                  They arrived with the supplier's real cost and no price, because what they sell
+                  for is your decision, not ours. Set a markup to put them all on sale — you can
+                  adjust any individual price afterwards on the Prices page.
+                </p>
+                <Button size="sm" className="mt-2.5" onClick={() => setPublishing(true)}>
+                  Set a markup and publish
+                </Button>
+              </Callout>
+            )}
 
-            <TableWrap caption="Provider SKUs and their cost">
+            {unfulfillable.length > 0 && (
+              <Callout
+                tone="warning"
+                title={`${unfulfillable.length} cannot be delivered automatically`}
+                icon={<AlertIcon className="size-4" />}
+              >
+                Anything marked <strong className="font-semibold">manual only</strong> has no
+                automated fulfilment path, so it is refused at checkout rather than sold and left
+                undeliverable.
+              </Callout>
+            )}
+
+            {outOfStock.length > 0 && (
+              <Callout
+                tone="warning"
+                title={`${outOfStock.length} out of stock at the supplier`}
+                icon={<AlertIcon className="size-4" />}
+              >
+                {outOfStock
+                  .slice(0, 6)
+                  .map((sku) => sku.name)
+                  .join(', ')}
+                {outOfStock.length > 6 && ` and ${outOfStock.length - 6} more`} — withdrawn from
+                sale until the supplier lists them again.
+              </Callout>
+            )}
+
+            {categories.length > 1 && (
+              <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
+                <Segmented<Category>
+                  options={categories.map((key) => ({
+                    value: key,
+                    label: CATEGORY_META[key].short,
+                  }))}
+                  value={shown}
+                  onChange={setCategory}
+                />
+              </div>
+            )}
+
+            <TableWrap caption="Supplier SKUs, their cost and their stock">
               <thead>
                 <tr>
                   <Th>SKU</Th>
                   <Th>Product</Th>
                   <Th align="right">You pay</Th>
-                  <Th align="right">In stock</Th>
-                  <Th align="right" />
+                  <Th align="right">Stock</Th>
                 </tr>
               </thead>
               <tbody>
@@ -203,30 +237,27 @@ export default function ProviderCatalogue() {
                     </Td>
                     <Td>
                       <p className="font-medium text-slate-900">{sku.name}</p>
-                      <div className="mt-1 flex items-center gap-2">
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
                         <NetworkChip network={sku.network} />
                         {sku.mappedTo.length === 0 && <Badge tone="warning">not mapped</Badge>}
+                        {sku.autoFulfillable ? (
+                          <Badge tone="neutral">
+                            {sku.networkKey} · {sku.capacityGb}GB
+                          </Badge>
+                        ) : (
+                          <Badge tone="warning">manual only</Badge>
+                        )}
                       </div>
                     </Td>
                     <Td align="right" className="tabular font-bold text-slate-900">
                       {cedis(sku.costPrice)}
                     </Td>
                     <Td align="right">
-                      <div className="flex justify-end">
-                        <Toggle
-                          id={`stock-${sku.code}`}
-                          // The switch has no visible text of its own, so the
-                          // accessible name has to say which SKU it controls.
-                          label={`${sku.name} in stock at ${sku.provider}`}
-                          checked={sku.available}
-                          onChange={(next) => void setAvailability(sku, next)}
-                        />
-                      </div>
-                    </Td>
-                    <Td align="right">
-                      <Button size="sm" variant="outline" onClick={() => setEditing(sku)}>
-                        Edit cost
-                      </Button>
+                      {/* The supplier's answer, not a switch. Nothing on this
+                          screen can make a withdrawn SKU look available. */}
+                      <Badge tone={sku.available ? 'success' : 'warning'}>
+                        {sku.available ? 'In stock' : 'Out of stock'}
+                      </Badge>
                     </Td>
                   </tr>
                 ))}
@@ -236,93 +267,132 @@ export default function ProviderCatalogue() {
         )}
       </div>
 
-      <EditCostModal sku={editing} onClose={() => setEditing(null)} onSave={saveCost} />
+      <PublishModal
+        open={publishing}
+        count={unpriced.length}
+        onClose={() => setPublishing(false)}
+        onPublished={async () => {
+          await load()
+          await refresh()
+        }}
+      />
     </Card>
   )
 }
 
-function EditCostModal({
-  sku,
+/**
+ * One markup across everything still waiting for a price.
+ *
+ * Two numbers rather than one, because they answer different questions — what an
+ * agent buys at, and what a stranger pays at the counter — and James may set the
+ * walk-up one lower if he would rather earn from agent volume than his own
+ * counter.
+ */
+function PublishModal({
+  open,
+  count,
   onClose,
-  onSave,
+  onPublished,
 }: {
-  sku: SupplierSku | null
+  open: boolean
+  count: number
   onClose: () => void
-  onSave: (sku: SupplierSku, costPrice: number) => Promise<void>
+  onPublished: () => Promise<void>
 }) {
-  const [value, setValue] = useState('')
-  const [error, setError] = useState('')
+  const { pushToast } = useStore()
+  const [agent, setAgent] = useState('15')
+  const [walkup, setWalkup] = useState('25')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
 
-  const key = sku?.code ?? 'none'
-  const [lastKey, setLastKey] = useState(key)
-  if (key !== lastKey) {
-    setLastKey(key)
-    setValue(sku ? (sku.costPrice / 100).toFixed(2) : '')
-    setError('')
-  }
-
-  if (!sku) return null
+  if (!open) return null
 
   const submit = async () => {
-    const parsed = parseCedis(value)
-    if (parsed === null || parsed <= 0) {
-      setError('Enter what the provider charges you, like 5.50.')
+    const agentPercent = Number(agent)
+    const walkupPercent = Number(walkup)
+    if (
+      !Number.isFinite(agentPercent) ||
+      !Number.isFinite(walkupPercent) ||
+      agentPercent < 0 ||
+      walkupPercent < 0
+    ) {
+      setError('Enter percentages like 15 and 25.')
       return
     }
 
     setBusy(true)
     try {
-      await onSave(sku, parsed)
+      const { updated } = await api.applyMarkup({
+        agentPercent,
+        walkupPercent,
+        scope: 'unpriced',
+      })
+      await onPublished()
+      pushToast({
+        tone: 'success',
+        title: `${updated} product${updated === 1 ? '' : 's'} now on sale`,
+        detail: `Agents pay cost + ${agent}%, walk-up customers cost + ${walkup}%.`,
+      })
       onClose()
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'We could not save that.')
+      setError(caught instanceof ApiError ? caught.message : 'We could not publish those.')
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Modal open onClose={onClose} title={`Provider cost — ${sku.name}`}>
+    <Modal open onClose={onClose} title={`Put ${count} product${count === 1 ? '' : 's'} on sale`}>
       <div className="space-y-4">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-sm">
-          <p className="font-mono text-xs font-semibold text-slate-700">{sku.code}</p>
-          <p className="mt-1 text-slate-500">
-            {sku.provider} · {sku.validity}
-          </p>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Agents pay cost +" htmlFor="agent-markup">
+            <div className="relative">
+              <TextInput
+                id="agent-markup"
+                inputMode="decimal"
+                className="pr-9 font-bold"
+                value={agent}
+                onChange={(event) => {
+                  setAgent(event.target.value)
+                  setError('')
+                }}
+              />
+              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500">
+                %
+              </span>
+            </div>
+          </Field>
+
+          <Field label="Walk-up pays cost +" htmlFor="walkup-markup">
+            <div className="relative">
+              <TextInput
+                id="walkup-markup"
+                inputMode="decimal"
+                className="pr-9 font-bold"
+                invalid={Boolean(error)}
+                value={walkup}
+                onChange={(event) => {
+                  setWalkup(event.target.value)
+                  setError('')
+                }}
+              />
+              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500">
+                %
+              </span>
+            </div>
+          </Field>
         </div>
 
-        <Field
-          label="What the provider charges you"
-          htmlFor="supplier-cost"
-          error={error}
-          hint="Your price tiers are lifted automatically if this rises above one of them."
-        >
-          <div className="relative">
-            <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
-              GHS
-            </span>
-            <TextInput
-              id="supplier-cost"
-              inputMode="decimal"
-              className="pl-13 font-bold"
-              invalid={Boolean(error)}
-              value={value}
-              onChange={(event) => {
-                setValue(event.target.value)
-                setError('')
-              }}
-            />
-          </div>
-        </Field>
+        {error && <p className="text-sm font-medium text-red-600">{error}</p>}
 
-        <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
-          Past orders keep the cost they were sold at. This only affects margins from here on.
+        <Callout tone="info" icon={<AlertIcon className="size-4" />}>
+          The markup is remembered, so when a supplier changes what something costs these prices move
+          with it and your margin holds. Only products with no price yet are touched.
         </Callout>
 
         <div className="flex gap-2">
           <Button block loading={busy} onClick={() => void submit()}>
-            Save cost
+            Put on sale
           </Button>
           <Button block variant="outline" disabled={busy} onClick={onClose}>
             Cancel

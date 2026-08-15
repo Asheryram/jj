@@ -1,6 +1,15 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
-import { IsBoolean, IsIn, IsInt, IsOptional, Max, Min, ValidateIf } from 'class-validator'
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  Max,
+  Min,
+  ValidateIf,
+} from 'class-validator'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { AdminService, type Tier } from './admin.service'
 
@@ -20,16 +29,38 @@ export class SetActiveDto {
   active!: boolean
 }
 
-export class SetAvailabilityDto {
-  @IsBoolean()
-  available!: boolean
-}
+export class ApplyMarkupDto {
+  /**
+   * Percentage over supplier cost. Fractional is allowed — a price of GHS 6.40
+   * against a cost of GHS 4.70 is a markup of 36.17%, and forcing that to a
+   * whole number would move the price every time the cost is refreshed.
+   *
+   * Two of them, because they answer different questions: what an agent buys at,
+   * and what a stranger pays at the counter. The walk-up one is allowed to sit
+   * below the agent one — James chooses whether he would rather earn from his
+   * own counter or from agent volume.
+   */
+  @IsNumber({}, { message: 'Enter a percentage, like 15 or 12.5.' })
+  @Min(0)
+  @Max(500)
+  agentPercent!: number
 
-export class SetSupplierCostDto {
-  /** Integer pesewas — what the provider charges us for this SKU. */
-  @IsInt({ message: 'Enter what the provider charges you, like 5.50.' })
-  @Min(1)
-  costPrice!: number
+  @IsNumber({}, { message: 'Enter a percentage, like 25 or 22.5.' })
+  @Min(0)
+  @Max(500)
+  walkupPercent!: number
+
+  /**
+   * `unpriced` touches only products that arrived from a supplier and have never
+   * been on sale. `all` re-prices everything in scope.
+   */
+  @IsIn(['unpriced', 'all'])
+  scope!: 'unpriced' | 'all'
+
+  /** Restrict to one category. Omitted means every category. */
+  @IsOptional()
+  @IsIn(['data', 'airtime', 'voice', 'sms', 'afa', 'checker'])
+  category?: 'data' | 'airtime' | 'voice' | 'sms' | 'afa' | 'checker'
 }
 
 export class SetSettingDto {
@@ -85,30 +116,40 @@ export class AdminController {
     return this.admin.setProductActive(id, dto.active)
   }
 
-  /** The DataHub GH stand-in catalogue. */
+  /**
+   * What our suppliers sell, as they report it.
+   *
+   * Read-only, and there are deliberately no writes beside it. Cost and stock
+   * used to be editable here — a hand-typed cost meant our idea of what we pay
+   * could drift from the invoice, and a hand-set stock flag meant the shop could
+   * claim a SKU was available when the supplier had withdrawn it. Both are the
+   * supplier's to state; `sync` below is how they change.
+   */
   @Get('supplier')
   supplier() {
     return this.admin.supplierCatalogue()
   }
 
-  /** Switch a provider SKU out of stock to exercise the refund path. */
-  @Patch('supplier/:code/availability')
-  setAvailability(@Param('code') code: string, @Body() dto: SetAvailabilityDto) {
-    return this.admin.setSupplierAvailability(code, dto.available)
+  /** Re-read every configured supplier's catalogue. */
+  @Post('supplier/sync')
+  sync() {
+    return this.admin.syncFromProvider()
   }
 
   /**
-   * The one place `supplier_cost` can change. Stands in for the DataHub GH
-   * price-list call; `PATCH /products/:id/tier` refuses that tier on purpose.
+   * Put products on sale at a markup over supplier cost.
+   *
+   * The markup is stored, not just the price it produces, so the next time a
+   * supplier's cost moves the price moves with it and the margin holds.
    */
-  @Patch('supplier/:code/cost')
-  setSupplierCost(@Param('code') code: string, @Body() dto: SetSupplierCostDto) {
-    return this.admin.setSupplierCost(code, dto.costPrice)
-  }
-
-  @Post('supplier/sync')
-  sync() {
-    return this.admin.syncSupplierCosts()
+  @Post('products/markup')
+  markup(@Body() dto: ApplyMarkupDto) {
+    return this.admin.applyMarkup({
+      agentPercent: dto.agentPercent,
+      walkupPercent: dto.walkupPercent,
+      scope: dto.scope,
+      category: dto.category,
+    })
   }
 
   @Get('settings')

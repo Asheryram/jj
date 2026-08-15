@@ -180,7 +180,14 @@ export interface MySummary {
   activeSubAgents: number
 }
 
-/** One SKU in the provider's catalogue — the DataHub GH stand-in. */
+export interface PlatformSettings {
+  referralEnabled: boolean
+  referralRatePercent: number
+  simulateFailure: boolean
+  registrationOpen: boolean
+}
+
+/** One SKU in the provider's catalogue. */
 export interface SupplierSku {
   code: string
   provider: string
@@ -193,6 +200,12 @@ export interface SupplierSku {
   updatedAt: string
   /** Our product ids fulfilled by this SKU. */
   mappedTo: string[]
+  /** DataHub's network identifier, e.g. YELLO. Null when they cannot sell it. */
+  networkKey: string | null
+  /** Size in GB as their API wants it. Null when there is no whole-GB form. */
+  capacityGb: string | null
+  /** False means an order for this is refused at checkout while live. */
+  autoFulfillable: boolean
 }
 
 export interface ClaimableCreditDto {
@@ -248,6 +261,18 @@ export const api = {
 
   // Orders
   placeOrder: (body: PlaceOrderBody) => request<Order>('/orders', { method: 'POST', body }),
+
+  /**
+   * Ask the provider whether they will deliver to this number, before paying.
+   * `checked: false` means the question did not apply — simulated fulfilment, or
+   * a network their check does not cover.
+   */
+  verifyRecipient: (productId: string, recipient: string) =>
+    request<{ checked: boolean; verified: boolean; message: string }>('/orders/verify-recipient', {
+      method: 'POST',
+      body: { productId, recipient },
+      auth: false,
+    }),
 
   orders: () => request<Order[]>('/orders'),
 
@@ -330,32 +355,55 @@ export const api = {
     key: 'referralEnabled' | 'referralRatePercent' | 'simulateFailure' | 'registrationOpen',
     value: boolean | number,
   ) =>
-    request<{
-      referralEnabled: boolean
-      referralRatePercent: number
-      simulateFailure: boolean
-      registrationOpen: boolean
-    }>(
+    request<PlatformSettings>(
       '/admin/settings',
       { method: 'PATCH', body: { key, value } },
     ),
 
+  adminSettings: () => request<PlatformSettings>('/admin/settings'),
+
   supplierCatalogue: () => request<SupplierSku[]>('/admin/supplier'),
 
-  setSupplierAvailability: (code: string, available: boolean) =>
-    request<{ code: string; available: boolean }>(
-      `/admin/supplier/${encodeURIComponent(code)}/availability`,
-      { method: 'PATCH', body: { available } },
-    ),
+  /**
+   * Re-read every configured supplier's catalogue and make ours match.
+   *
+   * Each supplier is reported separately, and one that cannot be reached carries
+   * an `error` while its rows are left exactly as they were — an outage at one
+   * must not withdraw a catalogue that is fine.
+   */
+  syncSuppliers: () =>
+    request<{
+      sources: {
+        provider: string
+        label: string
+        created: number
+        updated: number
+        repriced: number
+        withdrawn: number
+        unpriced: number
+        /** Set when that supplier could not be reached; its rows are untouched. */
+        error?: string
+      }[]
+      created: number
+      updated: number
+      repriced: number
+      withdrawn: number
+      unpriced: number
+      productsUpdated: number
+    }>('/admin/supplier/sync', { method: 'POST' }),
 
-  /** The only way `supplierCost` can change — see admin.service.ts setTier. */
-  setSupplierCost: (code: string, costPrice: number) =>
-    request<{ code: string; costPrice: number; productsUpdated: number }>(
-      `/admin/supplier/${encodeURIComponent(code)}/cost`,
-      { method: 'PATCH', body: { costPrice } },
-    ),
-
-  syncSupplierCosts: () => request<{ updated: number }>('/admin/supplier/sync', { method: 'POST' }),
+  /**
+   * Set one markup across many products at once, and price them from it.
+   *
+   * `unpriced` catches products freshly imported from a supplier; `all` re-prices
+   * a whole category deliberately.
+   */
+  applyMarkup: (input: {
+    agentPercent: number
+    walkupPercent: number
+    scope: 'unpriced' | 'all'
+    category?: string
+  }) => request<{ updated: number }>('/admin/products/markup', { method: 'POST', body: input }),
 }
 
 /**

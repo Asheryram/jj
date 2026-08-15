@@ -61,6 +61,9 @@ export default function Settings() {
     health !== null &&
     (health.providers.datahub !== 'live' || health.providers.paystack !== 'live')
 
+  /** The server's own word on fulfilment. Read-only here by design. */
+  const datahubState = health?.providers.datahub ?? 'simulated'
+
   return (
     <div>
       <PageHead title="Settings" subtitle="Platform-wide switches and integration details." />
@@ -290,7 +293,69 @@ export default function Settings() {
         </div>
       </Card>
 
+      {/* ── Live fulfilment: status only. The switch is DATAHUB_LIVE in the
+             server's environment, deliberately not a button here. ── */}
+      <Card className="mt-3">
+        <CardHead
+          title="Live fulfilment"
+          subtitle="Whether orders are really sent to DataHub GH."
+          action={
+            <Badge
+              tone={
+                datahubState === 'live'
+                  ? 'danger'
+                  : datahubState === 'live-requested-no-key'
+                    ? 'warning'
+                    : 'neutral'
+              }
+            >
+              {datahubState === 'live'
+                ? 'LIVE — spending money'
+                : datahubState === 'live-requested-no-key'
+                  ? 'Misconfigured'
+                  : 'Simulated'}
+            </Badge>
+          }
+        />
+        <div className="space-y-3 p-4 sm:p-5">
+          {datahubState === 'live' ? (
+            <Callout tone="danger" title="Every data order is buying a real bundle">
+              Each completed order calls DataHub GH and debits your prepaid float — including orders
+              placed by anyone testing the site. Set{' '}
+              <strong className="font-mono font-semibold">DATAHUB_LIVE=false</strong> and restart to
+              stop.
+            </Callout>
+          ) : datahubState === 'live-requested-no-key' ? (
+            <Callout tone="warning" title="Asked to go live, but there is no API key">
+              <strong className="font-mono font-semibold">DATAHUB_LIVE</strong> is true while{' '}
+              <strong className="font-mono font-semibold">DATAHUB_API_KEY</strong> is empty, so
+              orders are still simulated. Set the key and restart.
+            </Callout>
+          ) : (
+            <Callout tone="info" title="Orders are simulated">
+              Nothing is bought and no bundle is sent. To go live, set{' '}
+              <strong className="font-mono font-semibold">DATAHUB_LIVE=true</strong> in the server's
+              environment and restart.
+            </Callout>
+          )}
+
+          <p className="text-sm text-slate-500">
+            This is an environment setting rather than a button, on purpose: going live spends real
+            money on every order, so it should take a deliberate change and a restart — not a click,
+            and not something a stolen admin session can do.
+          </p>
+
+          <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
+            DataHub GH sells <strong className="font-semibold">data bundles only</strong>. Airtime,
+            voice, SMS, AFA registration and result checkers have no automated fulfilment — when
+            live, an order for one of those is refused and refunded rather than quietly marked
+            delivered.
+          </Callout>
+        </div>
+      </Card>
+
       <ProviderCatalogue />
+
 
       {/* ── NFR-5.1 — network prefixes are data, editable without a deploy ── */}
       <Card className="mt-3">

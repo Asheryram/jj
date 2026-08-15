@@ -11,8 +11,8 @@ import { AgentsModule } from './agents/agents.module'
 import { WithdrawalsModule } from './withdrawals/withdrawals.module'
 import { AdminModule } from './admin/admin.module'
 import { HealthController } from './health/health.controller'
-import { SupplierService } from './supplier/supplier.service'
-import { SettingsService } from './settings/settings.service'
+import { SupplierModule } from './supplier/supplier.module'
+import { SettingsModule } from './settings/settings.module'
 import { AuthGuard } from './common/auth'
 
 @Module({
@@ -38,6 +38,8 @@ import { AuthGuard } from './common/auth'
       },
     }),
     PrismaModule,
+    SettingsModule,
+    SupplierModule,
     PricingModule,
     AuthModule,
     CatalogueModule,
@@ -49,8 +51,6 @@ import { AuthGuard } from './common/auth'
   ],
   controllers: [HealthController],
   providers: [
-    SupplierService,
-    SettingsService,
     // Global so a new controller is authenticated by default. A route is public
     // only by omitting @Roles(), which is a visible choice in the code.
     { provide: APP_GUARD, useClass: AuthGuard },

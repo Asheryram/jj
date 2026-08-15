@@ -21,6 +21,8 @@ import {
   cn,
 } from '../../components/ui'
 import { AlertIcon, TagIcon, TrendUpIcon } from '../../components/icons'
+import { api, ApiError } from '../../lib/api'
+import { formatMarkup, priceFromMarkup } from '../../lib/pricing'
 
 type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice'
 
@@ -62,9 +64,10 @@ const TIER_LABELS: Record<Tier, { label: string; help: string }> = {
  * not capped. See EDITABLE_TIERS above.
  */
 export default function CostPrices() {
-  const { products, updateProductTier } = useStore()
+  const { products, updateProductTier, refresh, pushToast } = useStore()
   const [category, setCategory] = useState<Category>('data')
   const [editing, setEditing] = useState<Product | null>(null)
+  const [marking, setMarking] = useState(false)
 
   const visible = products.filter((p) => p.category === category)
   const agentMargin = products.reduce((sum, p) => sum + (p.adminPrice - p.supplierCost), 0)
@@ -133,7 +136,17 @@ export default function CostPrices() {
       </div>
 
       <Card className="mt-3">
-        <CardHead title={CATEGORY_META[category].label} subtitle={`${visible.length} products`} />
+        <CardHead
+          title={CATEGORY_META[category].label}
+          subtitle={`${visible.length} products`}
+          action={
+            visible.length > 0 && (
+              <Button size="sm" variant="outline" onClick={() => setMarking(true)}>
+                <TrendUpIcon className="size-4" /> Set markup
+              </Button>
+            )
+          }
+        />
         <TableWrap caption="Product price tiers">
           <thead>
             <tr>
@@ -142,6 +155,7 @@ export default function CostPrices() {
               <Th align="right">Agents pay</Th>
               <Th align="right">Your margin</Th>
               <Th align="right">Walk-up price</Th>
+              <Th align="right">Markup</Th>
               <Th align="right" />
             </tr>
           </thead>
@@ -180,6 +194,15 @@ export default function CostPrices() {
                     {cedis(product.standardPrice)}
                   </Td>
                   <Td align="right">
+                    {/* Agent / walk-up. This is what survives a provider price
+                        change, so it is worth seeing next to the prices. */}
+                    <span className="tabular text-xs text-slate-500">
+                      {product.agentMarkupBp === undefined
+                        ? '—'
+                        : `${formatMarkup(product.agentMarkupBp)} / ${formatMarkup(product.walkupMarkupBp ?? 0)}`}
+                    </span>
+                  </Td>
+                  <Td align="right">
                     <Button size="sm" variant="outline" onClick={() => setEditing(product)}>
                       Edit
                     </Button>
@@ -190,6 +213,21 @@ export default function CostPrices() {
           </tbody>
         </TableWrap>
       </Card>
+
+      <MarkupModal
+        open={marking}
+        category={category}
+        count={visible.length}
+        onClose={() => setMarking(false)}
+        onApplied={async (updated, agent, walkup) => {
+          await refresh()
+          pushToast({
+            tone: 'success',
+            title: `${updated} product${updated === 1 ? '' : 's'} repriced`,
+            detail: `Agents pay cost + ${agent}%, walk-up cost + ${walkup}%.`,
+          })
+        }}
+      />
 
       <EditPricesModal
         product={editing}
@@ -388,6 +426,161 @@ function EditPricesModal({
             Save prices
           </Button>
           <Button block variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * One markup across a whole category, set as two separate percentages.
+ *
+ * Separate because they answer different questions — what an agent buys at, and
+ * what a stranger pays at the counter — and James is free to set the walk-up one
+ * lower if he would rather earn from agent volume than from his own sales.
+ *
+ * Setting a markup here is also what protects the margin. Prices are re-derived
+ * from it whenever DataHub changes a cost, so a supplier price rise moves the
+ * shelf price — rather than the price being nudged up to meet the new cost and
+ * the margin quietly going to nothing.
+ */
+function MarkupModal({
+  open,
+  category,
+  count,
+  onClose,
+  onApplied,
+}: {
+  open: boolean
+  category: Category
+  count: number
+  onClose: () => void
+  onApplied: (updated: number, agent: string, walkup: string) => Promise<void>
+}) {
+  const { products } = useStore()
+  const [agent, setAgent] = useState('15')
+  const [walkup, setWalkup] = useState('25')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  if (!open) return null
+
+  const agentPercent = Number(agent)
+  const walkupPercent = Number(walkup)
+  const valid =
+    agent.trim() !== '' &&
+    walkup.trim() !== '' &&
+    Number.isFinite(agentPercent) &&
+    Number.isFinite(walkupPercent) &&
+    agentPercent >= 0 &&
+    walkupPercent >= 0
+
+  // Previewed against the cheapest bundle in view, so the effect is concrete
+  // before anything is committed.
+  const sample = products
+    .filter((p) => p.category === category)
+    .sort((a, b) => a.supplierCost - b.supplierCost)[0]
+
+  const submit = async () => {
+    if (!valid) {
+      setError('Enter percentages like 15 and 25.')
+      return
+    }
+
+    setBusy(true)
+    try {
+      const { updated } = await api.applyMarkup({
+        agentPercent,
+        walkupPercent,
+        scope: 'all',
+        category,
+      })
+      await onApplied(updated, agent, walkup)
+      onClose()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'We could not apply that markup.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Set markup — ${CATEGORY_META[category].label}`}>
+      <div className="space-y-4">
+        <p className="text-sm text-slate-600">
+          Reprices all {count} product{count === 1 ? '' : 's'} in this category from what the
+          provider charges you.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Agents pay cost +" htmlFor="bulk-agent">
+            <div className="relative">
+              <TextInput
+                id="bulk-agent"
+                inputMode="decimal"
+                className="pr-9 font-bold"
+                value={agent}
+                onChange={(event) => {
+                  setAgent(event.target.value)
+                  setError('')
+                }}
+              />
+              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500">
+                %
+              </span>
+            </div>
+          </Field>
+
+          <Field label="Walk-up pays cost +" htmlFor="bulk-walkup">
+            <div className="relative">
+              <TextInput
+                id="bulk-walkup"
+                inputMode="decimal"
+                className="pr-9 font-bold"
+                invalid={Boolean(error)}
+                value={walkup}
+                onChange={(event) => {
+                  setWalkup(event.target.value)
+                  setError('')
+                }}
+              />
+              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500">
+                %
+              </span>
+            </div>
+          </Field>
+        </div>
+
+        {error && <p className="text-sm font-medium text-red-600">{error}</p>}
+
+        {sample && valid && (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-sm">
+            <p className="font-medium text-slate-900">{sample.name}</p>
+            <p className="mt-1 text-slate-600">
+              You pay {cedis(sample.supplierCost)} → agents{' '}
+              <strong className="font-semibold text-slate-900">
+                {cedis(priceFromMarkup(sample.supplierCost, Math.round(agentPercent * 100)))}
+              </strong>
+              , walk-up{' '}
+              <strong className="font-semibold text-slate-900">
+                {cedis(priceFromMarkup(sample.supplierCost, Math.round(walkupPercent * 100)))}
+              </strong>
+            </p>
+          </div>
+        )}
+
+        <Callout tone="info" icon={<AlertIcon className="size-4" />}>
+          The markup is remembered. When DataHub changes what a bundle costs, these prices move with
+          it and your margin holds.
+        </Callout>
+
+        <div className="flex gap-2">
+          <Button block loading={busy} onClick={() => void submit()}>
+            Apply to {count}
+          </Button>
+          <Button block variant="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
         </div>

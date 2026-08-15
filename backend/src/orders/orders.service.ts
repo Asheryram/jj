@@ -4,7 +4,10 @@ import { PrismaService } from '../prisma/prisma.service'
 import { PricingService } from '../pricing/pricing.service'
 import { SettingsService } from '../settings/settings.service'
 import { FulfilmentService } from './fulfilment.service'
+import { SupplierService } from '../supplier/supplier.service'
+import { DatahubClient } from '../supplier/datahub.client'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
+import { networkMismatch } from '../domain/networks'
 import { toOrder, toTrackedOrder } from '../common/mappers'
 import {
   ConflictError,
@@ -16,6 +19,13 @@ import {
 import type { AuthUser } from '../common/auth'
 import type { PlaceOrderDto, TrackOrderDto } from './orders.dto'
 
+/**
+ * The networks DataHub's /verify can answer for. Their docs list it as
+ * recommended for MTN and required for MTN XPRESS; it is silent on the rest, and
+ * asking about a network it does not cover would turn "no answer" into "no".
+ */
+const VERIFIABLE_NETWORK_KEYS = ['YELLO', 'mtn_xpress']
+
 @Injectable()
 export class OrdersService {
   private readonly log = new Logger(OrdersService.name)
@@ -25,6 +35,8 @@ export class OrdersService {
     private readonly pricing: PricingService,
     private readonly settings: SettingsService,
     private readonly fulfilment: FulfilmentService,
+    private readonly supplier: SupplierService,
+    private readonly datahub: DatahubClient,
   ) {}
 
   /**
@@ -53,7 +65,7 @@ export class OrdersService {
     const reference = await this.freshReference()
 
     const order = await this.prisma.$transaction(async (tx) => {
-      const { product, salePrice, split } = await this.priceInside(tx, dto.productId, sellerCode)
+      const { product, salePrice, split } = await this.priceInside(tx, dto.productId, sellerCode, dto.recipient)
 
       // FR-2.3 — a wallet payment is debited as the order is created, and only a
       // customer holds a spendable wallet. An agent's balance is earnings.
@@ -101,7 +113,12 @@ export class OrdersService {
    * *displayed* is only a quote — if an upline changed theirs a second ago, the
    * authoritative number is this one, computed here.
    */
-  private async priceInside(tx: Prisma.TransactionClient, productId: string, sellerCode: string | null) {
+  private async priceInside(
+    tx: Prisma.TransactionClient,
+    productId: string,
+    sellerCode: string | null,
+    recipient: string,
+  ) {
     const row = await tx.product.findUnique({ where: { id: productId } })
     if (!row) throw new NotFoundError('We could not find that bundle.')
     if (!row.active) {
@@ -109,6 +126,79 @@ export class OrdersService {
         'PRODUCT_INACTIVE',
         `${row.name} is not on sale at the moment. Pick another bundle.`,
       )
+    }
+
+    // An MTN bundle cannot be delivered to a Telecel line.
+    //
+    // Refused here rather than warned about, because the alternative is taking
+    // money for a bundle the network will reject: the buyer waits, the order
+    // fails, and the refund makes them whole in cash but not in time. The client
+    // checks this too — this is the copy that decides.
+    //
+    // The cost of the rule is a ported number, which keeps its old prefix and is
+    // turned away wrongly. That is accepted deliberately, and it is the reason an
+    // *unknown* prefix is let through instead: see domain/networks.ts. DataHub's
+    // /verify cannot rescue the ported case — it reports whether a number is on
+    // their beneficiary list, not which network carries it.
+    const mismatch = networkMismatch(recipient, row.network)
+    if (mismatch) {
+      throw new ConflictError(
+        'RECIPIENT_WRONG_NETWORK',
+        `${prettyGhanaPhone(recipient)} is a ${mismatch.detected} number and ${row.name} is a ` +
+          `${row.network} bundle. Choose a ${mismatch.detected} bundle for this number.`,
+      )
+    }
+
+    // Do not take money for something we cannot deliver.
+    //
+    // While live, a product whose provider SKU has no network/capacity mapping
+    // can never be fulfilled — DataHub sells whole-GB data bundles and nothing
+    // else. Dispatch used to catch this, but only after the buyer had paid: the
+    // order failed, the money came back, and the customer was left wondering
+    // what they had done wrong. Refusing here costs them nothing.
+    if (this.supplier.isLive) {
+      const supplier = await tx.product
+        .findUnique({ where: { id: productId }, select: { supplier: true } })
+        .then((r) => r?.supplier ?? null)
+
+      if (!supplier?.networkKey || !supplier?.capacityGb) {
+        throw new ConflictError(
+          'NO_AUTOMATED_FULFILMENT',
+          `${row.name} cannot be delivered automatically at the moment. Please choose another bundle.`,
+        )
+      }
+      if (!supplier.available) {
+        throw new ConflictError(
+          'PRODUCT_OUT_OF_STOCK',
+          `${row.name} is out of stock with our delivery partner right now. Please choose another bundle.`,
+        )
+      }
+
+      // DataHub will not sell to a number that is not on their beneficiary list.
+      //
+      // Observed, not assumed: a live purchase for an unlisted number comes back
+      // `Phone number not verified` and is refused outright. So an order for one
+      // is certain to fail, and taking the money first only adds a wait and a
+      // refund to the disappointment.
+      //
+      // `/verify` answers exactly this question, and only for MTN — which is why
+      // the check is scoped to their MTN keys rather than run blindly. A failure
+      // to reach them is NOT treated as a refusal: our own outage must not close
+      // the shop, so an unreachable check lets the order through to the normal
+      // dispatch-and-refund path.
+      if (VERIFIABLE_NETWORK_KEYS.includes(supplier.networkKey)) {
+        const result = await this.datahub
+          .verify(supplier.networkKey, recipient)
+          .catch(() => null)
+
+        if (result && !result.verified) {
+          throw new ConflictError(
+            'RECIPIENT_NOT_REGISTERED',
+            `${prettyGhanaPhone(recipient)} is not on our delivery partner's approved list, so ` +
+              'this bundle cannot be sent to it yet. Contact support to have the number added.',
+          )
+        }
+      }
     }
 
     // The referral policy is applied inside `quote`, from rows read in this same
@@ -313,6 +403,47 @@ export class OrdersService {
     return toTrackedOrder(row)
   }
 
+  /**
+   * Ask DataHub GH whether they will actually deliver to this number.
+   *
+   * Local validation (10 digits, a recognised prefix) only proves the number is
+   * well-formed. DataHub keeps its own beneficiary list, and an MTN number that
+   * is not on it fails *after* the customer has paid — the money then has to be
+   * refunded and everybody's time is wasted. Asking first turns that into a
+   * warning before checkout instead of a failure after it.
+   *
+   * Advisory, never blocking. Three reasons a "no" should not stop a sale:
+   * their check covers MTN only, it can be unavailable, and a number can be
+   * submitted for approval and start working. Refusing the sale on their say-so
+   * would lose orders that would have gone through.
+   */
+  async verifyRecipient(productId: string, recipient: string) {
+    const supplier = await this.prisma.product
+      .findUnique({ where: { id: productId }, select: { supplier: true } })
+      .then((p) => p?.supplier ?? null)
+
+    // Only meaningful when we are actually going to call them, and only for the
+    // networks their /verify covers.
+    const checkable =
+      this.supplier.isLive &&
+      supplier?.networkKey !== undefined &&
+      supplier?.networkKey !== null &&
+      VERIFIABLE_NETWORK_KEYS.includes(supplier.networkKey)
+
+    if (!checkable) {
+      return { checked: false, verified: true, message: '' }
+    }
+
+    const result = await this.datahub.verify(supplier.networkKey as string, recipient)
+    return {
+      checked: true,
+      verified: result.verified,
+      message: result.verified
+        ? ''
+        : `${prettyGhanaPhone(recipient)} is not on our delivery partner's approved list, so this bundle cannot be sent to it yet. Contact support to have the number added.`,
+    }
+  }
+
   /** NFR-3.3 — money held for a Mobile Money payer whose order failed. */
   async claimableCredits(phone: string) {
     const tail = phone.replace(/\D/g, '').slice(-9)
@@ -362,4 +493,10 @@ export class OrdersService {
   toResponse(order: Order) {
     return toOrder(order)
   }
+}
+
+/** 024 411 8820 — for a message a person reads, not a log line. */
+function prettyGhanaPhone(phone: string): string {
+  const p = phone.replace(/\D/g, '')
+  return p.length === 10 ? `${p.slice(0, 3)} ${p.slice(3, 6)} ${p.slice(6)}` : phone
 }

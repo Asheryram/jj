@@ -23,6 +23,7 @@ import { splitFor, type Admin, type OrderSplit, type PricingAgent } from '../src
 
 const prisma = new PrismaClient()
 
+
 const PASSWORD = process.env.SEED_PASSWORD ?? 'demo1234'
 
 /**
@@ -39,128 +40,20 @@ const PASSWORD = process.env.SEED_PASSWORD ?? 'demo1234'
  */
 const WITH_HISTORY = process.argv.includes('--with-history')
 
-// ─── Supplier catalogue (stands in for DataHub GH) ───────────────────────────
-
-interface SupplierSeed {
-  code: string
-  category: Category
-  network: Network | null
-  name: string
-  validity: string
-  costPrice: number
-}
-
-const sku = (network: string | null, kind: string, size: string) =>
-  `DH-${(network ?? 'GEN').toUpperCase()}-${kind.toUpperCase()}-${size.toUpperCase()}`
-
-const dataSku = (network: Network, size: string, costPrice: number): SupplierSeed => ({
-  code: sku(network, 'data', size),
-  category: 'data',
-  network,
-  name: `${size} Data`,
-  validity: 'Non-expiry',
-  costPrice,
-})
-
-/** Airtime is thin-margin everywhere: nobody pays a premium for face value. */
-const airtimeSku = (network: Network, cedisValue: number): SupplierSeed => ({
-  code: sku(network, 'airtime', String(cedisValue)),
-  category: 'airtime',
-  network,
-  name: `GHS ${cedisValue} Airtime`,
-  validity: 'Instant top-up',
-  costPrice: Math.round(cedisValue * 100 * 0.94),
-})
-
-const otherSku = (
-  code: string,
-  category: Category,
-  network: Network | null,
-  name: string,
-  validity: string,
-  costPrice: number,
-): SupplierSeed => ({ code, category, network, name, validity, costPrice })
-
-const SUPPLIER_CATALOGUE: SupplierSeed[] = [
-  dataSku('MTN', '500MB', 350),
-  dataSku('MTN', '1GB', 550),
-  dataSku('MTN', '2GB', 1050),
-  dataSku('MTN', '3GB', 1550),
-  dataSku('MTN', '5GB', 2400),
-  dataSku('MTN', '10GB', 4600),
-  dataSku('MTN', '20GB', 9000),
-  dataSku('Telecel', '1GB', 500),
-  dataSku('Telecel', '2GB', 950),
-  dataSku('Telecel', '5GB', 2250),
-  dataSku('Telecel', '10GB', 4400),
-  dataSku('Telecel', '20GB', 8600),
-  dataSku('AirtelTigo', '1GB', 470),
-  dataSku('AirtelTigo', '2GB', 900),
-  dataSku('AirtelTigo', '5GB', 2150),
-  dataSku('AirtelTigo', '10GB', 4200),
-  dataSku('AirtelTigo', '25GB', 9500),
-  airtimeSku('MTN', 5),
-  airtimeSku('MTN', 10),
-  airtimeSku('MTN', 20),
-  airtimeSku('MTN', 50),
-  airtimeSku('MTN', 100),
-  airtimeSku('Telecel', 10),
-  airtimeSku('Telecel', 20),
-  airtimeSku('Telecel', 50),
-  airtimeSku('AirtelTigo', 10),
-  airtimeSku('AirtelTigo', 20),
-  airtimeSku('AirtelTigo', 50),
-  otherSku('DH-MTN-VOICE-50', 'voice', 'MTN', '50 Minutes', '7 days', 300),
-  otherSku('DH-MTN-VOICE-150', 'voice', 'MTN', '150 Minutes', '30 days', 800),
-  otherSku('DH-TELECEL-VOICE-200', 'voice', 'Telecel', '200 Minutes', '30 days', 950),
-  otherSku('DH-AIRTELTIGO-VOICE-400', 'voice', 'AirtelTigo', '400 Minutes', '30 days', 1900),
-  otherSku('DH-MTN-SMS-100', 'sms', 'MTN', '100 SMS', '30 days', 200),
-  otherSku('DH-MTN-SMS-500', 'sms', 'MTN', '500 SMS', '30 days', 850),
-  otherSku('DH-TELECEL-SMS-250', 'sms', 'Telecel', '250 SMS', '30 days', 450),
-  otherSku('DH-MTN-AFA-REG', 'afa', 'MTN', 'MTN AFA Registration', 'One-time', 1200),
-  // Result checkers come from a voucher wholesaler, not DataHub GH.
-  { ...otherSku('VW-CHECKER-BECE', 'checker', null, 'BECE Result Checker', 'Single use voucher', 1800) },
-  { ...otherSku('VW-CHECKER-WASSCE', 'checker', null, 'WASSCE Result Checker', 'Single use voucher', 2500) },
-]
-
-const VOUCHER_PROVIDER = 'voucher-wholesale-gh'
-
-// ─── Our price tiers, derived from supplier cost ─────────────────────────────
-
-const round10 = (value: number) => Math.round(value / 10) * 10
-
-/**
- * James takes ~8% to agents and sells to walk-up customers at ~16%. No ceiling —
- * agents price their own stock above their cost, however they like.
- */
-const tiers = (supplierCost: number) => ({
-  supplierCost,
-  adminPrice: round10(supplierCost * 1.08),
-  standardPrice: round10(supplierCost * 1.16),
-})
-
-const airtimeTiers = (supplierCost: number, faceValue: number) => ({
-  supplierCost,
-  adminPrice: Math.round(faceValue * 0.97),
-  standardPrice: faceValue,
-})
-
-/** Our product id, kept identical to the frontend's mock ids so links survive. */
-function productIdFor(seed: SupplierSeed): string {
-  if (seed.category === 'checker') {
-    return seed.code === 'VW-CHECKER-BECE' ? 'checker-bece' : 'checker-wassce'
-  }
-  const network = String(seed.network).toLowerCase()
-  if (seed.category === 'data') {
-    return `${network}-data-${seed.name.split(' ')[0].toLowerCase()}`
-  }
-  if (seed.category === 'airtime') {
-    return `${network}-airtime-${seed.name.replace(/\D/g, '')}`
-  }
-  if (seed.category === 'voice') return `${network}-voice-${seed.name.replace(/\D/g, '')}`
-  if (seed.category === 'sms') return `${network}-sms-${seed.name.replace(/\D/g, '')}`
-  return `${network}-afa-reg`
-}
+// ─── Supplier catalogue ──────────────────────────────────────────────────────
+//
+// There isn't one here any more, and that is the point.
+//
+// This file used to invent 36 SKUs — bundles, airtime, voice, SMS, AFA and
+// result checkers — with hand-written costs, so the app looked stocked before
+// anyone had an API key. Once the key arrived, the fiction showed: DataHub GH's
+// real catalogue has no 500MB bundle, no Telecel under 10GB, and no airtime at
+// all through their API, and every cost we had invented was above their real
+// one. Since `products.supplier_cost` is what every margin in the platform is
+// measured from, the whole pricing model rested on those numbers.
+//
+// So the catalogue is imported from `GET /bundles` below, and what DataHub does
+// not sell simply does not exist here.
 
 // ─── People ──────────────────────────────────────────────────────────────────
 
@@ -410,44 +303,13 @@ async function main(): Promise<void> {
 
   await wipe()
 
-  // 1 — the provider's catalogue.
-  for (const seed of SUPPLIER_CATALOGUE) {
-    await prisma.supplierProduct.create({
-      data: {
-        code: seed.code,
-        provider: seed.category === 'checker' ? VOUCHER_PROVIDER : 'datahub-gh',
-        category: seed.category,
-        network: seed.network,
-        name: seed.name,
-        validity: seed.validity,
-        costPrice: seed.costPrice,
-        available: true,
-      },
-    })
-  }
-  console.log(`  ${SUPPLIER_CATALOGUE.length} supplier SKUs`)
-
-  // 2 — our catalogue, priced from theirs.
-  for (const seed of SUPPLIER_CATALOGUE) {
-    const id = productIdFor(seed)
-    const faceValue = seed.category === 'airtime' ? Number(seed.name.replace(/\D/g, '')) * 100 : 0
-
-    await prisma.product.create({
-      data: {
-        id,
-        category: seed.category,
-        network: seed.network,
-        name: seed.name,
-        validity: seed.validity,
-        supplierCode: seed.code,
-        ...(seed.category === 'airtime'
-          ? airtimeTiers(seed.costPrice, faceValue)
-          : tiers(seed.costPrice)),
-        active: true,
-      },
-    })
-  }
-  console.log(`  ${SUPPLIER_CATALOGUE.length} products`)
+  // 1 — no catalogue. Sign in as the admin and press Sync.
+  //
+  // Nothing here knows what a supplier sells, and inventing it is what got us
+  // into trouble: 36 fabricated SKUs with fabricated costs, of which DataHub
+  // really sells none. An empty catalogue is the honest starting state — the
+  // shop has nothing to sell until a supplier has been asked what is for sale.
+  console.log('  0 products — sync from the provider catalogue to populate')
 
   // 3 — people. Everyone shares one password so testers are not blocked on it.
   const passwordHash = await bcrypt.hash(PASSWORD, 10)
@@ -479,6 +341,12 @@ async function main(): Promise<void> {
   // 4 — Kwame's explicit prices.
   const kwameId = ids.get('kwame')!
   for (const [productId, resalePrice] of Object.entries(KWAME_PRICES)) {
+    // The catalogue comes from DataHub now, so a hard-coded id here may simply
+    // not exist — they do not sell a 1GB Telecel bundle, for one. Skip rather
+    // than fail: these are illustrative agent prices, not part of the contract.
+    if (!(await prisma.product.findUnique({ where: { id: productId }, select: { id: true } }))) {
+      continue
+    }
     await prisma.agentPrice.create({ data: { userId: kwameId, productId, resalePrice } })
   }
 
@@ -598,10 +466,19 @@ async function seedOrders(
   admin: Admin,
 ): Promise<void> {
   // Oldest first: a ledger only makes sense written forwards.
+  // Which products actually exist. The history was written against a fabricated
+  // catalogue, and the real one from DataHub has no airtime, no result checkers
+  // and no small Telecel bundles — so a seeded order can name something that is
+  // no longer for sale.
+  const live = new Set(
+    (await prisma.product.findMany({ select: { id: true } })).map((p) => p.id),
+  )
+
   const ordered = [...generateBacklog(), ...ORDER_SEEDS]
     // Drop anything naming a person the trimmed USERS list no longer contains.
     .filter((o) => (o.sellerKey === null || KNOWN.has(o.sellerKey)) &&
                    (o.buyerKey === null || KNOWN.has(o.buyerKey)))
+    .filter((o) => live.has(o.productId))
     .sort((a, b) => b.hoursAgo - a.hoursAgo)
   let sequence = 0
 

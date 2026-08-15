@@ -30,7 +30,10 @@ export class FulfilmentService implements OnApplicationBootstrap {
    */
   async onApplicationBootstrap(): Promise<void> {
     const stranded = await this.prisma.order.findMany({
-      where: { status: { in: ['pending', 'processing'] } },
+      // Only orders the provider never accepted. One that already has a
+      // providerReference is theirs now, and re-dispatching it would buy a
+      // second bundle — their API has no idempotency key to protect us.
+      where: { status: { in: ['pending', 'processing'] }, providerReference: null },
       select: { id: true, reference: true },
       take: 200,
     })
@@ -73,7 +76,42 @@ export class FulfilmentService implements OnApplicationBootstrap {
     if (order.status === 'completed' || order.status === 'failed') return
 
     const result = await this.supplier.dispatch(order)
+
+    // Only terminal outcomes settle. `pending` means DataHub has the order and
+    // will report back; `unknown` means we cannot tell what happened and must
+    // not guess in either direction. Both leave the order in `processing`, where
+    // the webhook or the reconciler will find it.
+    if (result.outcome === 'pending') {
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: { providerReference: result.providerReference ?? null },
+      })
+      return
+    }
+
+    if (result.outcome === 'unknown') {
+      // Deliberately no refund and no retry — see DispatchResult.outcome.
+      this.log.error(
+        `${order.reference} left unresolved and needs manual checking: ${result.reason ?? ''}`,
+      )
+      return
+    }
+
     await this.settle(orderId, result.outcome, result.reason, result.voucher)
+  }
+
+  /**
+   * Settle from an outside signal — DataHub's webhook, or the reconciler having
+   * asked them directly. Public because both live outside this class, and both
+   * must land in exactly the same ledger code as a simulated settlement.
+   */
+  async settleFromProvider(
+    orderId: string,
+    outcome: 'delivered' | 'rejected',
+    reason?: string,
+    voucher?: { serial: string; pin: string },
+  ): Promise<void> {
+    await this.settle(orderId, outcome, reason, voucher)
   }
 
   /**

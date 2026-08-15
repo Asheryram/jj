@@ -1,0 +1,12 @@
+{
+  // `nest build` uses this file when it exists; the root tsconfig is for editors
+  // and `tsc --noEmit`, which also typechecks prisma/seed.ts.
+  //
+  // Keeping prisma/ out of the *emit* is what matters. Including it there made
+  // the inferred root the package folder rather than src/, so output landed in
+  // dist/src/main.js while `start:prod` looked for dist/main.js and found
+  // nothing. The build still exited 0, so it looked like it had worked.
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "prisma", "**/*.spec.ts"]
+}

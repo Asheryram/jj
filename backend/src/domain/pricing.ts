@@ -335,3 +335,36 @@ export function validateResalePrice(price: Pesewas | null, band: PriceBand): str
   // No upper bound: an agent may charge whatever they think the market will bear.
   return null
 }
+
+// ─── Markup ──────────────────────────────────────────────────────────────────
+
+/**
+ * Basis points, not percent. 1500 = 15.00%.
+ *
+ * Percent as an integer is too coarse — a price typed as GHS 6.40 against a cost
+ * of GHS 4.70 is a markup of 36.17%, and rounding that to 36% moves the price by
+ * a pesewa every time the cost is refreshed. Basis points hold it still.
+ */
+export type BasisPoints = number
+
+/** The price a markup implies, floored at cost. */
+export function priceFromMarkup(cost: Pesewas, markupBp: BasisPoints): Pesewas {
+  return Math.max(cost, Math.round((cost * (10_000 + markupBp)) / 10_000))
+}
+
+/**
+ * The markup a price implies. The inverse of the above, give or take rounding.
+ *
+ * Zero when cost is zero: no markup is meaningful over nothing, and dividing
+ * would give Infinity.
+ */
+export function markupFromPrice(cost: Pesewas, price: Pesewas): BasisPoints {
+  if (cost <= 0) return 0
+  return Math.max(0, Math.round((price / cost - 1) * 10_000))
+}
+
+/** For display: 1517 → "15.17%", 1500 → "15%". */
+export function formatMarkup(markupBp: BasisPoints): string {
+  const percent = markupBp / 100
+  return `${Number.isInteger(percent) ? percent : percent.toFixed(2)}%`
+}

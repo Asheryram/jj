@@ -3,8 +3,9 @@ import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
 import { toProduct } from '../common/mappers'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
-import type { OrderSplit } from '../domain/pricing'
-import type { Role } from '@prisma/client'
+import { markupFromPrice, priceFromMarkup, type OrderSplit } from '../domain/pricing'
+import { CatalogueImportService } from '../supplier/catalogue-import.service'
+import type { Category, Role } from '@prisma/client'
 
 export type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice'
 
@@ -15,6 +16,7 @@ export class AdminService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
+    private readonly catalogueImport: CatalogueImportService,
   ) {}
 
   // ── Users (FR-6.4) ────────────────────────────────────────────────────────
@@ -128,12 +130,21 @@ export class AdminService {
     }
 
 
+    // Re-derive the markup from the price just typed. The price is what James
+    // decided; the markup records the intent behind it, so the next time a
+    // supplier's cost moves this price moves with it rather than being flattened
+    // up to meet the new cost.
+    const markupField = tier === 'adminPrice' ? 'agentMarkupBp' : 'walkupMarkupBp'
+
     const updated = await this.prisma.product.update({
       where: { id: productId },
-      data: { [tier]: value },
+      data: {
+        [tier]: value,
+        [markupField]: markupFromPrice(row.supplierCost, value),
+      },
     })
 
-    this.log.log(`tier ${tier} on ${productId} → ${value}p`)
+    this.log.log(`tier ${tier} on ${productId} → ${value}p (markup ${updated[markupField]}bp)`)
     return toProduct(updated)
   }
 
@@ -165,59 +176,91 @@ export class AdminService {
       available: row.available,
       updatedAt: row.updatedAt.toISOString(),
       mappedTo: row.products.map((p) => p.id),
+      networkKey: row.networkKey,
+      capacityGb: row.capacityGb,
+      /** Whether the supplier can actually deliver this without a human. */
+      autoFulfillable: Boolean(row.networkKey && row.capacityGb),
     }))
   }
 
   /**
-   * Mark a provider SKU in or out of stock.
+   * Re-read every configured supplier and make our catalogue match.
    *
-   * This is the lever that makes the FR-2.7 failure path reproducible during
-   * acceptance testing: switch a bundle off, buy it, and watch the refund land.
+   * There is nothing beside this — no hand-typed cost, no hand-set stock flag.
+   * Both used to exist here, and both were ways for the platform to state
+   * something the supplier had not: a cost that could drift from the invoice
+   * every margin is measured against, and an in-stock badge that could claim a
+   * SKU was available after the supplier had withdrawn it.
    */
-  async setSupplierAvailability(code: string, available: boolean) {
-    const updated = await this.prisma.supplierProduct
-      .update({ where: { code }, data: { available } })
-      .catch(() => {
-        throw new NotFoundError('We could not find that provider SKU.')
-      })
-
-    this.log.warn(`supplier ${code} availability → ${available}`)
-    return { code: updated.code, available: updated.available }
-  }
-
-  /**
-   * Record a new cost price from the provider.
-   *
-   * Stands in for the DataHub GH price-list call while there are no keys: James
-   * types what they actually charge him, here, on the provider's own record —
-   * then it flows down to every product mapped to that SKU. The distinction
-   * matters because `supplier_cost` is the baseline every margin is measured
-   * from, so it has to trace back to a real invoice rather than a guess typed
-   * into a pricing screen.
-   */
-  async setSupplierCost(code: string, costPrice: number) {
-    if (!Number.isInteger(costPrice) || costPrice <= 0) {
-      throw new ValidationError('Enter what the provider charges you, like 5.50.')
-    }
-
-    const supplier = await this.prisma.supplierProduct.findUnique({ where: { code } })
-    if (!supplier) throw new NotFoundError('We could not find that provider SKU.')
-
-    await this.prisma.supplierProduct.update({ where: { code }, data: { costPrice } })
-
-    // Push it straight through, so the catalogue is never knowingly stale.
+  async syncFromProvider() {
+    const imported = await this.catalogueImport.importFromProvider()
+    // Costs may have moved under products the import did not itself touch, so
+    // run the downward pass afterwards.
     const { updated } = await this.syncSupplierCosts()
-
-    this.log.log(`supplier ${code} cost → ${costPrice}p, ${updated} product(s) resynced`)
-    return { code, costPrice, productsUpdated: updated }
+    return { ...imported, productsUpdated: updated }
   }
 
   /**
-   * Pull the provider's cost into our catalogue.
+   * Put products on sale at a markup over supplier cost, and remember the markup.
    *
-   * Live, this is where the DataHub GH price-list call would land. Here it copies
-   * `supplier_products.cost_price` onto the products mapped to it, then lifts any
-   * tier that the new cost has overtaken so the ordering constraint still holds.
+   * Remembering it is the point. The import deliberately leaves a new SKU
+   * inactive and priced at cost, because what it sells for is James's decision —
+   * but that is dozens of products to price by hand after a single sync, and a
+   * price with no recorded intent behind it cannot survive a cost change.
+   */
+  async applyMarkup(input: {
+    agentPercent: number
+    walkupPercent: number
+    scope: 'unpriced' | 'all'
+    category?: Category
+  }) {
+    const { agentPercent, walkupPercent, scope, category } = input
+
+    const targets = await this.prisma.product.findMany({
+      where: {
+        supplier: { available: true },
+        ...(category ? { category } : {}),
+        // 'unpriced' is the state a freshly imported SKU is in: it exists, its
+        // cost is real, and nobody has said what it sells for. 'all' is the
+        // deliberate re-pricing of a whole category.
+        ...(scope === 'unpriced' ? { active: false } : {}),
+      },
+      select: { id: true, supplierCost: true },
+    })
+
+    if (targets.length === 0) return { updated: 0 }
+
+    const agentBp = Math.round(agentPercent * 100)
+    const walkupBp = Math.round(walkupPercent * 100)
+
+    await this.prisma.$transaction(
+      targets.map((product) =>
+        this.prisma.product.update({
+          where: { id: product.id },
+          data: {
+            agentMarkupBp: agentBp,
+            walkupMarkupBp: walkupBp,
+            adminPrice: priceFromMarkup(product.supplierCost, agentBp),
+            standardPrice: priceFromMarkup(product.supplierCost, walkupBp),
+            // Anything being priced is by definition ready to sell.
+            active: true,
+          },
+        }),
+      ),
+    )
+
+    this.log.log(
+      `markup ${scope}${category ? ` (${category})` : ''}: ${targets.length} product(s) at ` +
+        `+${agentPercent}% agent / +${walkupPercent}% walk-up`,
+    )
+    return { updated: targets.length }
+  }
+
+  /**
+   * Push each supplier cost down onto the products priced from it.
+   *
+   * Both selling prices are re-derived from the markup James set, so a cost
+   * change moves them and leaves his margin intact.
    */
   async syncSupplierCosts() {
     const suppliers = await this.prisma.supplierProduct.findMany({
@@ -231,18 +274,19 @@ export class AdminService {
         if (product.supplierCost === supplier.costPrice) continue
 
         const cost = supplier.costPrice
-        // Raising a cost above a selling price would make the row illegal and the
-        // sale loss-making. Push each tier up only as far as its own rule needs:
-        // the two selling prices clear cost independently, and the cap clears the
-        // agent price. Notably `standardPrice` is NOT lifted to `adminPrice` —
-        // James is allowed to retail below what he charges agents.
-        const adminPrice = Math.max(product.adminPrice, cost)
+        // This was `max(price, cost)`, which only guaranteed the sale was not
+        // loss-making: a cost rise past the price pinned the two together and the
+        // margin became exactly zero, on every affected product, with nothing on
+        // any screen to say so. Deriving from the markup keeps the margin.
+        //
+        // `standardPrice` is still not lifted to meet `adminPrice` — James is
+        // allowed to retail below what he charges agents.
         await this.prisma.product.update({
           where: { id: product.id },
           data: {
             supplierCost: cost,
-            adminPrice,
-            standardPrice: Math.max(product.standardPrice, cost),
+            adminPrice: priceFromMarkup(cost, product.agentMarkupBp),
+            standardPrice: priceFromMarkup(cost, product.walkupMarkupBp),
           },
         })
         changed++

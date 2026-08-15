@@ -137,6 +137,16 @@ model SupplierProduct {
   /// `products.supplier_cost` is synced from here, never typed in by hand.
   costPrice Int @map("cost_price")
 
+  /// How DataHub GH identifies this bundle: a network key plus a size in GB.
+  ///
+  /// Their API takes `{ networkKey, capacity }` rather than a SKU code, so these
+  /// two columns are what an order is actually placed with. Both null means the
+  /// SKU has no automated fulfilment — airtime, voice, SMS, AFA and result
+  /// checkers all sit in that category, because DataHub sells data only.
+  networkKey String? @map("network_key")
+  /// Data size in GB, as their API expects it: "1", "2", "5".
+  capacityGb String? @map("capacity_gb")
+
   /// False when the provider is out of stock or the SKU is withdrawn.
   available Boolean @default(true)
 
@@ -172,9 +182,25 @@ model SupplierDispatch {
   /// The provider's reason when it rejects. Shown to admin, never to the buyer.
   reason  String?
 
-  /// True while the real DataHub GH keys are absent. Makes it unambiguous which
-  /// rows in this table were real money and which were the stand-in.
+  /// True while fulfilment is simulated. Makes it unambiguous which rows in this
+  /// table were real money and which were the stand-in.
   simulated Boolean @default(true)
+
+  /// The provider's own order reference, returned by POST /data-purchase. The
+  /// only handle we have on their side of the transaction.
+  providerReference String? @map("provider_reference")
+  /// Their status verbatim: INITIATED, PENDING, PROCESSING, SUCCESSFUL, FAILED,
+  /// CANCELLED. Stored raw rather than mapped, so a new value of theirs shows up
+  /// in the log instead of being silently coerced into ours.
+  providerStatus String? @map("provider_status")
+
+  /// What the provider ACTUALLY debited, in pesewas, from their reply.
+  ///
+  /// `costPrice` above is what we believed the bundle cost; this is what it cost.
+  /// They are seeded from estimates rather than a real price list, so until a
+  /// live purchase proves otherwise every margin in the platform is measured
+  /// from a guess. Recording both makes the guess falsifiable.
+  providerCharged Int? @map("provider_charged")
 
   attempt   Int      @default(1)
   createdAt DateTime @default(now()) @map("created_at")
@@ -207,6 +233,21 @@ model Product {
   adminPrice     Int @map("admin_price")
   /// What a walk-up customer pays with no agent link (FR-3.5).
   standardPrice  Int @map("standard_price")
+
+  /// The intent behind the two prices above, in basis points over cost
+  /// (1500 = 15.00%).
+  ///
+  /// Prices are derived from these whenever the provider's cost moves, and that
+  /// is the whole reason they exist. A cost rise used to be absorbed by lifting
+  /// the price to meet it — `max(price, cost)` — which kept the sale legal and
+  /// silently set the margin to exactly zero, on every affected bundle, without
+  /// telling anyone. Storing the markup means a cost change moves the price and
+  /// leaves the margin intact.
+  ///
+  /// Kept in sync when a price is typed in directly: the number James enters is
+  /// still the price, and the markup is re-derived from it.
+  agentMarkupBp  Int @map("agent_markup_bp")
+  walkupMarkupBp Int @map("walkup_markup_bp")
 
   active Boolean @default(true)
 
@@ -272,6 +313,13 @@ model Order {
 
   /// Set when the order failed and the buyer was made whole (FR-2.7).
   refunded Boolean @default(false)
+
+  /// DataHub GH's reference for this order, once they have accepted it.
+  ///
+  /// Unique because it is what an inbound webhook is matched on: two orders
+  /// sharing one provider reference would make a status update ambiguous, and
+  /// ambiguity here means crediting the wrong agent.
+  providerReference String? @unique @map("provider_reference")
 
   createdAt   DateTime  @default(now()) @map("created_at")
   completedAt DateTime? @map("completed_at")

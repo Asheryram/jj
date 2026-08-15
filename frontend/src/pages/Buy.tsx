@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { momoLabel, useStore } from '../state/store'
 import { useShopPath } from '../lib/shopPath'
+import { api } from '../lib/api'
 import { cedis, dateTime } from '../lib/format'
 import { NETWORKS, checkPhone, prettyPhone } from '../lib/networks'
 import type { Network, OrderSplit } from '../data/types'
@@ -73,6 +74,14 @@ export default function Buy() {
   const [orderId, setOrderId] = useState<string | null>(null)
   const [placing, setPlacing] = useState(false)
   const [failure, setFailure] = useState('')
+  // What the delivery partner says about this number.
+  //
+  // No longer advisory. A number that is not on their approved list is refused
+  // at purchase — observed, not guessed — so continuing past this only buys the
+  // customer a wait and a refund. The server refuses it too; this stops them a
+  // screen earlier.
+  const [checking, setChecking] = useState(false)
+  const [deliveryBlock, setDeliveryBlock] = useState('')
 
   const placed = useMemo(
     () => (orderId ? orders.find((o) => o.id === orderId) : undefined),
@@ -105,7 +114,34 @@ export default function Buy() {
   const split = previewSplit(product, effectiveSeller)
   const myShare = split.shares.find((s) => s.userId === session?.id)
 
-  const check = recipient.trim() ? checkPhone(recipient, product.network) : null
+  const check = recipient.trim() ? checkPhone(recipient) : null
+
+  /**
+   * The number belongs to a different carrier than the bundle. This stops the
+   * order.
+   *
+   * It used to be a warning the buyer could click past, on the grounds that a
+   * ported number keeps its old prefix and would still work. That reasoning is
+   * sound and the outcome was still wrong: almost everyone who saw it was about
+   * to send an MTN bundle to a Telecel line, pay for it, wait, and get a refund
+   * instead of data.
+   *
+   * A ported number is refused by this rule, and there is no check that can
+   * rescue it — DataHub's /verify reports beneficiary-list membership, not which
+   * network carries a number. An unrecognised prefix is deliberately NOT blocked:
+   * `check.network` is null there, and not knowing a range is our gap rather
+   * than the customer's.
+   *
+   * The server enforces this too, in orders.service. This copy only saves the
+   * buyer a round trip.
+   */
+  const wrongNetwork =
+    check?.ok && check.network && product.network && check.network !== product.network
+      ? {
+          detected: check.network,
+          message: `${prettyPhone(check.phone)} is a ${check.network} number and this is a ${product.network} bundle. Choose a ${check.network} bundle for this number.`,
+        }
+      : null
   const receiptCheck = ownNumber ? check : buyerPhone.trim() ? checkPhone(buyerPhone) : null
 
   const isCustomer = session?.role === 'customer'
@@ -203,7 +239,11 @@ export default function Buy() {
           <Field
             label={isChecker ? 'Phone number for the voucher SMS' : 'Recipient phone number'}
             htmlFor="recipient"
-            error={touched && check?.ok === false ? check.reason : undefined}
+            error={
+              touched && check?.ok === false
+                ? check.reason
+                : (wrongNetwork?.message ?? undefined)
+            }
             hint={
               isChecker
                 ? 'We send the serial and PIN here, and show them on screen.'
@@ -218,8 +258,11 @@ export default function Buy() {
                 autoComplete="tel"
                 placeholder="024 000 0000"
                 value={recipient}
-                invalid={touched && check?.ok === false}
-                onChange={(event) => setRecipient(event.target.value)}
+                invalid={(touched && check?.ok === false) || Boolean(wrongNetwork)}
+                onChange={(event) => {
+                  setRecipient(event.target.value)
+                  setDeliveryBlock('')
+                }}
                 onBlur={() => setTouched(true)}
                 className="pr-28 text-lg tracking-wide"
               />
@@ -231,14 +274,47 @@ export default function Buy() {
             </div>
           </Field>
 
+          {deliveryBlock && (
+            <Callout
+              tone="danger"
+              className="mt-3"
+              title="This number cannot receive the bundle"
+              icon={<AlertIcon className="size-4" />}
+            >
+              {deliveryBlock}
+            </Callout>
+          )}
+
           <Button
             block
             size="lg"
             className="mt-4"
-            disabled={!check?.ok}
+            loading={checking}
+            disabled={checking || !check?.ok || Boolean(wrongNetwork)}
             onClick={() => {
               setTouched(true)
-              if (check?.ok) setStep(2)
+              if (!check?.ok || wrongNetwork) return
+
+              // Ask the provider before taking money. Their check covers MTN
+              // only; when it does answer and the answer is no, the purchase
+              // will be refused, so we stop here rather than advancing.
+              //
+              // An unreachable check is not a refusal — our outage must not
+              // close the shop — so a failed request advances as normal and the
+              // order takes the ordinary dispatch-and-refund path.
+              setChecking(true)
+              setDeliveryBlock('')
+              void api
+                .verifyRecipient(product.id, check.phone)
+                .then((result) => {
+                  if (result.checked && !result.verified) {
+                    setDeliveryBlock(result.message)
+                    return
+                  }
+                  setStep(2)
+                })
+                .catch(() => setStep(2))
+                .finally(() => setChecking(false))
             }}
           >
             Continue
@@ -531,8 +607,14 @@ export default function Buy() {
                   <XIcon className="size-7" strokeWidth={2.4} />
                 </span>
                 <p className="mt-3 text-lg font-bold">Order could not be delivered</p>
+                {/* Deliberately does not name a cause. This used to read "the
+                    network rejected it after two attempts", which was invented
+                    copy: most failures never reach the network, and there is no
+                    retry. Claiming a specific reason we do not have sends the
+                    buyer chasing the wrong thing — and sent us chasing it too.
+                    The real reason is on the order's dispatch log, for admin. */}
                 <p className="mt-0.5 text-sm text-red-100">
-                  The network rejected it after two attempts.
+                  Nothing was taken from you — your money is on its way back.
                 </p>
               </div>
               <div className="space-y-4 p-5">

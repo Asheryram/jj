@@ -24,7 +24,23 @@ export default function Catalogue() {
   const { products, session, retailPrice, myBand, hasOwnPrice, sellerCode } = useStore()
   const [params, setParams] = useSearchParams()
 
-  const category = (params.get('category') as Category | null) ?? 'data'
+  /**
+   * Only categories that actually have something on sale get a tab.
+   *
+   * The six were hard-coded when the catalogue was seed data and every category
+   * was guaranteed to be full. It is supplier-driven now — DataHub GH sells data
+   * bundles, so airtime, voice, SMS, AFA and result checkers have nothing behind
+   * them, and a tab leading to an empty grid reads as a broken shop rather than
+   * as a service James does not currently offer. Wire up a supplier for one and
+   * its tab comes back on its own.
+   */
+  const categories = CATEGORY_ORDER.filter((key) =>
+    products.some((product) => product.active && product.category === key),
+  )
+
+  const requested = params.get('category') as Category | null
+  const category =
+    requested && categories.includes(requested) ? requested : (categories[0] ?? 'data')
   const network = params.get('network') as Network | null
 
   const setParam = (key: string, value: string | null) => {
@@ -61,10 +77,12 @@ export default function Catalogue() {
 
   return (
     <>
-      {/* Category tabs — horizontally scrollable on phones */}
+      {/* Category tabs — horizontally scrollable on phones. Hidden entirely when
+          only one category is on sale: a lone tab is a label, not a choice. */}
+      {categories.length > 1 && (
       <div className="-mx-4 mb-4 overflow-x-auto px-4 pb-1">
         <div className="flex gap-2">
-          {CATEGORY_ORDER.map((key) => {
+          {categories.map((key) => {
             const meta = CATEGORY_META[key]
             const active = key === category
             return (
@@ -87,6 +105,7 @@ export default function Catalogue() {
           })}
         </div>
       </div>
+      )}
 
       {/* Network filter (FR-3.2) */}
       {networksInCategory.length > 1 && (

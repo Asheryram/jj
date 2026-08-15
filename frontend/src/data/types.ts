@@ -46,6 +46,18 @@ export interface Product {
   adminPrice: Pesewas
   /** What a walk-up customer pays with no agent link (FR-3.5). */
   standardPrice: Pesewas
+  /**
+   * The markup behind each price, in basis points over cost (1500 = 15%).
+   *
+   * Admin-only, and for the same reason `supplierCost` is: a price divided by
+   * its markup gives the cost back. Undefined for everyone else, because the
+   * server strips both together.
+   *
+   * These are what keeps a margin alive across a provider price change — the
+   * prices above are re-derived from them on every catalogue sync.
+   */
+  agentMarkupBp?: number
+  walkupMarkupBp?: number
   active: boolean
 }
 

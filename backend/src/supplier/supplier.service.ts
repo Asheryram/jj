@@ -1,15 +1,35 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { Order } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
+import { DatahubClient } from './datahub.client'
 
 export interface DispatchResult {
-  outcome: 'delivered' | 'rejected'
+  /**
+   * `delivered` and `rejected` are terminal. The other two are not, and the
+   * difference matters more than it looks:
+   *
+   *  · `pending` — DataHub accepted the order and will report the real outcome
+   *    by webhook. The order stays in `processing`; nothing is credited or
+   *    refunded yet.
+   *  · `unknown` — we never got a usable reply. The order may or may not have
+   *    been placed and the float may or may not have been debited. It must NOT
+   *    be refunded (the bundle may have arrived) and must NOT be retried (there
+   *    is no idempotency key, so a retry can deliver twice). It is parked for a
+   *    human.
+   */
+  outcome: 'delivered' | 'rejected' | 'pending' | 'unknown'
   /** The provider's reason for a rejection. For admin eyes, not the buyer's. */
   reason?: string
   /** FR-4.7 — result-checker orders come back with a voucher. */
   voucher?: { serial: string; pin: string }
+  /** DataHub's own reference, once they have accepted the order. */
+  providerReference?: string
+  /** Their status verbatim, for the dispatch log. */
+  providerStatus?: string
+  /** Pesewas the provider actually debited, when they told us. */
+  providerCharged?: number
 }
 
 /**
@@ -26,18 +46,64 @@ export interface DispatchResult {
  * product. An order fails only for a stated reason.
  */
 @Injectable()
-export class SupplierService {
+export class SupplierService implements OnModuleInit {
   private readonly log = new Logger(SupplierService.name)
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
     private readonly config: ConfigService,
+    private readonly datahub: DatahubClient,
   ) {}
 
-  /** True once real credentials exist. Reported on /api/health so it is visible. */
+  /** Credentials are present. Necessary for live fulfilment, not sufficient. */
+  get hasCredentials(): boolean {
+    return this.datahub.configured
+  }
+
+  /**
+   * Whether real orders go to DataHub GH.
+   *
+   * Two independent conditions, and both are deliberate:
+   *
+   *  · `DATAHUB_LIVE` must be explicitly "true". Anything else — absent, empty,
+   *    "1", "yes" — is false. A money switch should have exactly one spelling
+   *    that turns it on, so a typo fails safe rather than starting to spend.
+   *  · Credentials must exist, or there is nothing to call with.
+   *
+   * Read from the environment rather than the database on purpose. Going live is
+   * a deploy-time decision that costs money on every order, so it takes a
+   * deliberate file change and a restart — not a click, and not something a
+   * stolen admin session can do.
+   */
   get isLive(): boolean {
-    return Boolean(this.config.get<string>('DATAHUB_API_KEY'))
+    return this.hasCredentials && this.config.get<string>('DATAHUB_LIVE')?.trim() === 'true'
+  }
+
+  /** What `/api/health` reports, so the state is never ambiguous to a tester. */
+  get providerState(): 'live' | 'simulated' | 'simulated-live-off' | 'live-requested-no-key' {
+    if (this.isLive) return 'live'
+    // Configured to go live but with nothing to call. Called out separately
+    // because it is a misconfiguration, not a choice.
+    if (this.config.get<string>('DATAHUB_LIVE')?.trim() === 'true') return 'live-requested-no-key'
+    return this.hasCredentials ? 'simulated-live-off' : 'simulated'
+  }
+
+  onModuleInit(): void {
+    if (this.isLive) {
+      this.log.warn('DATAHUB_LIVE=true — orders WILL spend real money at DataHub GH.')
+      return
+    }
+    if (this.providerState === 'live-requested-no-key') {
+      this.log.error('DATAHUB_LIVE=true but no DATAHUB_API_KEY — falling back to simulated.')
+      return
+    }
+    if (this.hasCredentials) {
+      this.log.warn(
+        'DataHub credentials present, DATAHUB_LIVE is not true — orders are simulated ' +
+          'and no bundles are being sent.',
+      )
+    }
   }
 
   /** How long the provider takes to confirm, in ms. */
@@ -51,7 +117,8 @@ export class SupplierService {
    * refund path either way.
    */
   async dispatch(order: Order, attempt = 1): Promise<DispatchResult> {
-    const result = await this.decide(order)
+    const live = this.isLive
+    const result = live ? await this.dispatchLive(order) : await this.decide(order)
 
     // The supplier code is nullable on products (a checker has no DataHub SKU
     // until one is mapped), but the dispatch log needs something to point at.
@@ -67,10 +134,25 @@ export class SupplierService {
           costPrice: (order.split as { supplierCost?: number })?.supplierCost ?? 0,
           outcome: result.outcome,
           reason: result.reason,
-          simulated: !this.isLive,
+          simulated: !live,
+          providerReference: result.providerReference ?? null,
+          providerStatus: result.providerStatus ?? null,
+          providerCharged: result.providerCharged ?? null,
           attempt,
         },
       })
+    }
+
+    // Our seeded cost is an estimate until a live purchase contradicts it. When
+    // one does, say so — every margin on this order was computed from the wrong
+    // baseline, and silence would let the error repeat on every future sale.
+    const believedCost = (order.split as { supplierCost?: number })?.supplierCost ?? 0
+    if (result.providerCharged != null && result.providerCharged !== believedCost) {
+      this.log.warn(
+        `COST MISMATCH ${order.reference} (${order.productName}): we priced from ` +
+          `GHS ${(believedCost / 100).toFixed(2)} but ${supplierCode ?? 'the provider'} charged ` +
+          `GHS ${(result.providerCharged / 100).toFixed(2)}. Correct it on the provider catalogue.`,
+      )
     }
 
     this.log.log(
@@ -80,6 +162,77 @@ export class SupplierService {
     )
 
     return result
+  }
+
+  /**
+   * Place the order with DataHub GH for real.
+   *
+   * Data bundles only — their API sells nothing else, so anything without a
+   * mapped `networkKey` and `capacityGb` is refused here rather than being
+   * quietly marked delivered. That refusal is a real refund, which is the honest
+   * outcome: we took money for something we cannot fulfil automatically.
+   */
+  private async dispatchLive(order: Order): Promise<DispatchResult> {
+    // The admin test switch still wins, so the refund path stays reproducible
+    // without spending money at the provider.
+    if (await this.settings.get('simulateFailure')) {
+      return { outcome: 'rejected', reason: 'Forced failure — admin test switch is on.' }
+    }
+
+    const supplier = await this.prisma.product
+      .findUnique({ where: { id: order.productId }, select: { supplier: true } })
+      .then((p) => p?.supplier ?? null)
+
+    if (!supplier) {
+      return { outcome: 'rejected', reason: 'No provider SKU is mapped to this product.' }
+    }
+    if (!supplier.available) {
+      return {
+        outcome: 'rejected',
+        reason: `${supplier.name} is out of stock at ${supplier.provider}.`,
+      }
+    }
+    if (!supplier.networkKey || !supplier.capacityGb) {
+      return {
+        outcome: 'rejected',
+        reason: `${supplier.name} has no automated fulfilment — DataHub GH sells data bundles only.`,
+      }
+    }
+
+    const result = await this.datahub.purchase({
+      networkKey: supplier.networkKey,
+      recipient: order.recipient,
+      capacity: supplier.capacityGb,
+    })
+
+    if (result.kind === 'accepted') {
+      // Their reply means "queued", never "delivered". The real outcome arrives
+      // by webhook, or the reconciler goes and asks.
+      return {
+        outcome: 'pending',
+        providerReference: result.providerReference,
+        providerStatus: result.providerStatus,
+        // Pesewas. Their `deducted` is in cedis, like every money field they send.
+        providerCharged:
+          result.deducted == null ? undefined : Math.round(result.deducted * 100),
+      }
+    }
+
+    if (result.kind === 'unknown') {
+      // Ambiguous. Refunding could hand back money for a bundle that did arrive;
+      // retrying could send a second one. Park it and tell a human.
+      this.log.error(
+        `UNRESOLVED dispatch for ${order.reference} → ${order.recipient}: ${result.reason}`,
+      )
+      return { outcome: 'unknown', reason: result.reason }
+    }
+
+    if (result.insufficientBalance) {
+      this.log.error(
+        'DataHub float is empty — every order will fail until it is topped up.',
+      )
+    }
+    return { outcome: 'rejected', reason: result.reason }
   }
 
   private async decide(order: Order): Promise<DispatchResult> {

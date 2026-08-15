@@ -58,3 +58,11 @@ export class TrackOrderDto {
   @MinLength(4, { message: 'Enter the phone number used for the order.' })
   phone!: string
 }
+
+export class VerifyRecipientDto {
+  @IsString()
+  productId!: string
+
+  @Matches(GH_PHONE, { message: 'A Ghana number needs 10 digits.' })
+  recipient!: string
+}

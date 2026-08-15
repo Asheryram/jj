@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { OrdersService } from './orders.service'
-import { PlaceOrderDto, TrackOrderDto } from './orders.dto'
+import { PlaceOrderDto, TrackOrderDto, VerifyRecipientDto } from './orders.dto'
 
 @ApiTags('orders')
 @Controller('orders')
@@ -17,6 +17,15 @@ export class OrdersController {
   @Post()
   place(@Body() dto: PlaceOrderDto, @CurrentUser() user: AuthUser | undefined) {
     return this.orders.place(dto, user)
+  }
+
+  /**
+   * Ask the provider whether they will deliver to this number, before the buyer
+   * pays. Public, because the checkout it protects is public (FR-4.8).
+   */
+  @Post('verify-recipient')
+  verifyRecipient(@Body() dto: VerifyRecipientDto) {
+    return this.orders.verifyRecipient(dto.productId, dto.recipient)
   }
 
   /** FR-4.9 — reference plus phone number, no account needed. */

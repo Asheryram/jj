@@ -27,6 +27,8 @@ export function toProduct(row: Product) {
     supplierCost: row.supplierCost,
     adminPrice: row.adminPrice,
     standardPrice: row.standardPrice,
+    agentMarkupBp: row.agentMarkupBp,
+    walkupMarkupBp: row.walkupMarkupBp,
     active: row.active,
   }
 }
@@ -36,9 +38,18 @@ export function toProduct(row: Product) {
  * agent seeing it can work out exactly what James makes. Admin-only (FR-6.x),
  * so every non-admin caller gets the field stripped rather than zeroed, which
  * would read as free.
+ *
+ * The markups go with it, and not as a matter of taste: a price and the markup
+ * behind it give up the cost by division. Stripping one and keeping the other
+ * would publish the same secret in two steps.
  */
 export function toPublicProduct(row: Product) {
-  const { supplierCost: _hidden, ...rest } = toProduct(row)
+  const {
+    supplierCost: _cost,
+    agentMarkupBp: _agentBp,
+    walkupMarkupBp: _walkupBp,
+    ...rest
+  } = toProduct(row)
   return rest
 }
 

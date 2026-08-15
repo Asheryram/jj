@@ -34,7 +34,10 @@ export class HealthController {
       database,
       databaseLatencyMs: Date.now() - started,
       providers: {
-        datahub: this.supplier.isLive ? 'live' : 'simulated',
+        // Reports what actually happens, not what is configured. A key in .env
+        // does not make an integration exist, and saying "live" when nothing is
+        // sent would be the most expensive kind of wrong.
+        datahub: this.supplier.providerState,
         paystack: process.env.PAYSTACK_SECRET_KEY ? 'live' : 'simulated',
       },
       uptimeSeconds: Math.round(process.uptime()),
