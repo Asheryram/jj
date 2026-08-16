@@ -122,14 +122,17 @@ export default function CostPrices() {
           title="Changing a price does not rewrite history"
           icon={<AlertIcon className="size-4" />}
         >
-          Every order stores the split it was actually sold at. Past reports, agent earnings and your
-          own margin stay exactly as they were — only future orders use the new price.
+          Every order stores the split it was actually sold at. Past reports, agent earnings and
+          your own margin stay exactly as they were — only future orders use the new price.
         </Callout>
       </div>
 
       <div className="mt-4 -mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
         <Segmented<Category>
-          options={CATEGORY_ORDER.map((key) => ({ value: key, label: CATEGORY_META[key].short }))}
+          options={CATEGORY_ORDER.map((key) => ({
+            value: key,
+            label: CATEGORY_META[key].short,
+          }))}
           value={category}
           onChange={setCategory}
         />
@@ -319,47 +322,46 @@ function EditPricesModal({
             first because it is the floor the three editable tiers sit above. */}
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
           <div className="flex items-baseline justify-between gap-3">
-            <p className="text-sm font-semibold text-slate-700">
-              {TIER_LABELS.supplierCost.label}
-            </p>
+            <p className="text-sm font-semibold text-slate-700">{TIER_LABELS.supplierCost.label}</p>
             <p className="tabular text-lg font-bold text-slate-900">
               {cedis(product.supplierCost)}
             </p>
           </div>
           <p className="mt-1 text-sm text-slate-500">
-            Comes from the provider catalogue, so it always matches what you are actually
-            invoiced. Change it under{' '}
+            Comes from the provider catalogue, so it always matches what you are actually invoiced.
+            Change it under{' '}
             <strong className="font-semibold text-slate-700">Settings → Provider catalogue</strong>{' '}
             and it flows down here.
           </p>
         </div>
 
-        {EDITABLE_TIERS.map(
-          (tier) => (
-            <Field
-              key={tier}
-              label={TIER_LABELS[tier].label}
-              htmlFor={`tier-${tier}`}
-              hint={TIER_LABELS[tier].help}
-            >
-              <div className="relative">
-                <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
-                  GHS
-                </span>
-                <TextInput
-                  id={`tier-${tier}`}
-                  inputMode="decimal"
-                  className="pl-13 font-bold"
-                  value={values[tier]}
-                  onChange={(event) => {
-                    setValues((current) => ({ ...current, [tier]: event.target.value }))
-                    setError('')
-                  }}
-                />
-              </div>
-            </Field>
-          ),
-        )}
+        {EDITABLE_TIERS.map((tier) => (
+          <Field
+            key={tier}
+            label={TIER_LABELS[tier].label}
+            htmlFor={`tier-${tier}`}
+            hint={TIER_LABELS[tier].help}
+          >
+            <div className="relative">
+              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
+                GHS
+              </span>
+              <TextInput
+                id={`tier-${tier}`}
+                inputMode="decimal"
+                className="pl-13 font-bold"
+                value={values[tier]}
+                onChange={(event) => {
+                  setValues((current) => ({
+                    ...current,
+                    [tier]: event.target.value,
+                  }))
+                  setError('')
+                }}
+              />
+            </div>
+          </Field>
+        ))}
 
         {agentMargin !== null && directMargin !== null && (
           <div className="grid grid-cols-2 gap-3">

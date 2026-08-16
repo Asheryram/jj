@@ -64,7 +64,9 @@ export class OrdersService {
     const buyerPhone = dto.buyerPhone ?? dto.recipient
     const reference = await this.freshReference()
 
-    const order = await this.prisma.$transaction(async (tx) => {
+    let order: Order
+    try {
+      order = await this.prisma.$transaction(async (tx) => {
       const { product, salePrice, split } = await this.priceInside(tx, dto.productId, sellerCode, dto.recipient)
 
       // FR-2.3 — a wallet payment is debited as the order is created, and only a
@@ -97,13 +99,57 @@ export class OrdersService {
           buyerUserId: user?.id ?? null,
         },
       })
-    })
+      })
+    } catch (error) {
+      // A refused sale is still information: somebody wanted this bundle and
+      // could not have it because their number is not approved. Recorded here
+      // rather than at the throw site because the throw unwinds the transaction,
+      // and a note written inside it would roll back with everything else.
+      if (error instanceof ConflictError && error.code === 'RECIPIENT_NOT_REGISTERED') {
+        await this.noteApprovalNeeded(dto.productId, dto.recipient).catch(() => undefined)
+      }
+      throw error
+    }
 
     // Committed. Now ask the provider, and let the result land asynchronously —
     // exactly the shape a real DataHub GH callback would arrive in (FR-4.4).
     this.fulfilment.scheduleFor(order.id)
 
     return toOrder(order)
+  }
+
+  /**
+   * Remember a number DataHub has not approved, so somebody can go and approve it.
+   *
+   * Their `/beneficiaries` endpoint 502s, so this cannot be automated — the only
+   * route is James doing it by hand in their dashboard, and he can only do that
+   * if he knows which numbers to enter. `attempts` counts how many sales each
+   * one has cost, which is the order to work through them in.
+   */
+  private async noteApprovalNeeded(productId: string, recipient: string): Promise<void> {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { name: true, standardPrice: true, supplier: { select: { networkKey: true } } },
+    })
+
+    await this.prisma.beneficiaryRequest.upsert({
+      where: { phone: recipient },
+      create: {
+        phone: recipient,
+        networkKey: product?.supplier?.networkKey ?? 'YELLO',
+        lastProduct: product?.name ?? null,
+        lastValue: product?.standardPrice ?? null,
+      },
+      update: {
+        attempts: { increment: 1 },
+        lastProduct: product?.name ?? null,
+        lastValue: product?.standardPrice ?? null,
+        // A number approved earlier and refused again is pending once more.
+        approvedAt: null,
+      },
+    })
+
+    this.log.warn(`${recipient} needs DataHub approval — sale refused`)
   }
 
   /**
@@ -174,31 +220,15 @@ export class OrdersService {
         )
       }
 
-      // DataHub will not sell to a number that is not on their beneficiary list.
+      // An unapproved recipient is deliberately NOT refused here.
       //
-      // Observed, not assumed: a live purchase for an unlisted number comes back
-      // `Phone number not verified` and is refused outright. So an order for one
-      // is certain to fail, and taking the money first only adds a wait and a
-      // refund to the disappointment.
-      //
-      // `/verify` answers exactly this question, and only for MTN — which is why
-      // the check is scoped to their MTN keys rather than run blindly. A failure
-      // to reach them is NOT treated as a refusal: our own outage must not close
-      // the shop, so an unreachable check lets the order through to the normal
-      // dispatch-and-refund path.
-      if (VERIFIABLE_NETWORK_KEYS.includes(supplier.networkKey)) {
-        const result = await this.datahub
-          .verify(supplier.networkKey, recipient)
-          .catch(() => null)
-
-        if (result && !result.verified) {
-          throw new ConflictError(
-            'RECIPIENT_NOT_REGISTERED',
-            `${prettyGhanaPhone(recipient)} is not on our delivery partner's approved list, so ` +
-              'this bundle cannot be sent to it yet. Contact support to have the number added.',
-          )
-        }
-      }
+      // DataHub will not deliver to a number that is not on their beneficiary
+      // list, and this used to reject the sale at checkout. That was safe and it
+      // was also the wrong trade: it turned away every first-time MTN customer
+      // with a message about somebody else's approved list, and lost the sale
+      // outright. The order is taken instead, held in `awaiting_approval`, and
+      // either delivered once the number is approved or refunded automatically
+      // when the hold expires. See FulfilmentService.
     }
 
     // The referral policy is applied inside `quote`, from rows read in this same

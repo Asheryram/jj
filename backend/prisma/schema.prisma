@@ -48,6 +48,14 @@ enum Network {
 enum OrderStatus {
   pending
   processing
+  /// Paid for, but the recipient's number is not yet approved by the provider.
+  ///
+  /// A real state of its own, not a flavour of `processing`: nothing is in
+  /// flight at DataHub, so the reconciler must not ask them about it, and it is
+  /// not `failed` because the money is still held and the bundle is still
+  /// coming. It resolves when the number is approved and the order is retried,
+  /// or it is refunded automatically once the hold expires.
+  awaiting_approval
   completed
   failed
 }
@@ -436,4 +444,39 @@ model Setting {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
+}
+
+/// An MTN number a customer tried to buy for, that DataHub GH has not approved.
+///
+/// DataHub will not deliver to a number that is not on their beneficiary list,
+/// and their `/beneficiaries` submission endpoint has been returning 502 since
+/// we integrated — so the only way to get a number approved is for James to do
+/// it by hand in their dashboard.
+///
+/// He cannot do that if he does not know who tried. Without this table a refused
+/// checkout left no trace at all: the customer saw "contact support", and
+/// nothing on any admin screen said a sale had just been lost or whose number to
+/// go and approve. Each row is one person waiting.
+model BeneficiaryRequest {
+  /// The recipient number. One row per number, however many times it is tried.
+  phone      String  @id
+  /// Which DataHub network it needs approving on — YELLO or mtn_xpress.
+  networkKey String  @map("network_key")
+
+  /// How many purchases this number has cost so far. A high count is a customer
+  /// trying repeatedly, and worth approving first.
+  attempts   Int     @default(1)
+  /// The bundle most recently attempted, for context on the admin screen.
+  lastProduct String? @map("last_product")
+  /// Pesewas of the most recent attempt — the value of the sale being lost.
+  lastValue   Int?    @map("last_value")
+
+  firstSeenAt DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime  @updatedAt @map("last_seen_at")
+  /// Set once /verify confirms DataHub accepted it. Kept rather than deleted so
+  /// the same number is not re-submitted on a later attempt.
+  approvedAt  DateTime? @map("approved_at")
+
+  @@index([approvedAt])
+  @@map("beneficiary_requests")
 }

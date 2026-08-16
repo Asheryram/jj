@@ -353,6 +353,71 @@ export class DatahubClient {
   }
 
   /**
+   * Submit MTN numbers to be added to their beneficiary list.
+   *
+   * Their ceiling is 30 numbers per request and 20 requests a minute. Approval
+   * is not instant and not guaranteed — the reply means "queued for review", so
+   * nothing here may report a number as usable. `/verify` is what answers that,
+   * later.
+   *
+   * Known broken at the time of writing: every valid payload returns 502 with an
+   * HTML page from `jesscostore.com`, their upstream, while an empty body still
+   * returns their documented 400. Validation passes and then their downstream
+   * fails, so this is theirs to fix and no payload shape avoids it. Kept wired
+   * up because it will start working the day they repair it.
+   */
+  async submitBeneficiaries(
+    numbers: string[],
+  ): Promise<{ ok: true; submitted: number } | { ok: false; reason: string }> {
+    const key = this.apiKey
+    if (!key) return { ok: false, reason: 'No DataHub API key configured.' }
+    if (numbers.length === 0) return { ok: true, submitted: 0 }
+    if (numbers.length > 30) {
+      return { ok: false, reason: 'DataHub accepts at most 30 numbers per request.' }
+    }
+
+    let response: Response
+    try {
+      response = await this.fetchRepeatable(
+        this.externalUrl('/beneficiaries'),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-API-Key': key },
+          body: JSON.stringify({ numbers }),
+          signal: AbortSignal.timeout(25_000),
+        },
+        'beneficiaries',
+        2,
+      )
+    } catch (error) {
+      return { ok: false, reason: `Could not reach DataHub GH: ${String(error)}` }
+    }
+
+    const text = await response.text().catch(() => '')
+    let body: (DatahubEnvelope & { data?: { submitted?: number } }) | null = null
+    try {
+      body = JSON.parse(text) as DatahubEnvelope & { data?: { submitted?: number } }
+    } catch {
+      body = null
+    }
+
+    if (!response.ok || body?.success === false) {
+      // Their error field can itself contain an HTML page. Printing that at a
+      // user would be noise, so it is collapsed to something readable and the
+      // detail stays in the log.
+      const raw = body?.error ?? body?.message ?? text
+      const reason = /<!DOCTYPE|<html/i.test(raw ?? '')
+        ? `DataHub GH returned ${response.status} from their upstream instead of a reply. ` +
+          'Their beneficiary service is down — numbers must be approved by hand in their dashboard.'
+        : (raw ?? `HTTP ${response.status}`)
+      this.log.warn(`beneficiaries ${response.status}: ${String(text).slice(0, 200)}`)
+      return { ok: false, reason }
+    }
+
+    return { ok: true, submitted: body?.data?.submitted ?? numbers.length }
+  }
+
+  /**
    * Their live catalogue: every network they sell, and every bundle under it
    * with the price they will actually charge.
    *

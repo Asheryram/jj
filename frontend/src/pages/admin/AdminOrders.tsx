@@ -438,7 +438,11 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
         )}
 
         {attempts?.length === 0 && (
-          <Callout tone="info" title="No delivery was attempted" icon={<AlertIcon className="size-4" />}>
+          <Callout
+            tone="info"
+            title="No delivery was attempted"
+            icon={<AlertIcon className="size-4" />}
+          >
             The order was stopped before it reached the delivery partner, so nothing was sent and
             nothing was charged.
           </Callout>

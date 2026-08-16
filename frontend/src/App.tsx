@@ -29,6 +29,7 @@ import AdminOrders from './pages/admin/AdminOrders'
 import Users from './pages/admin/Users'
 import CostPrices from './pages/admin/CostPrices'
 import AdminWithdrawals from './pages/admin/AdminWithdrawals'
+import NumberApprovals from './pages/admin/NumberApprovals'
 import Settings from './pages/admin/Settings'
 
 export default function App() {
@@ -100,6 +101,7 @@ export default function App() {
               <Route path="/admin/users" element={<Users />} />
               <Route path="/admin/prices" element={<CostPrices />} />
               <Route path="/admin/withdrawals" element={<AdminWithdrawals />} />
+              <Route path="/admin/approvals" element={<NumberApprovals />} />
               <Route path="/admin/settings" element={<Settings />} />
             </Route>
           </Route>

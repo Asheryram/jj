@@ -12,7 +12,13 @@ export type Network = 'MTN' | 'Telecel' | 'AirtelTigo'
 export type Category = 'data' | 'airtime' | 'voice' | 'sms' | 'afa' | 'checker'
 
 /** FR-4.4 — the only legal order states. */
-export type OrderStatus = 'pending' | 'processing' | 'completed' | 'failed'
+export type OrderStatus =
+  | 'pending'
+  | 'processing'
+  /** Paid for, held until the provider approves the recipient's number. */
+  | 'awaiting_approval'
+  | 'completed'
+  | 'failed'
 
 /** FR-1.5 — Customer and Agent, with Admin as a separate elevated role. */
 export type Role = 'customer' | 'agent' | 'admin'

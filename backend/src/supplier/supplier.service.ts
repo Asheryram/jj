@@ -19,7 +19,7 @@ export interface DispatchResult {
    *    is no idempotency key, so a retry can deliver twice). It is parked for a
    *    human.
    */
-  outcome: 'delivered' | 'rejected' | 'pending' | 'unknown'
+  outcome: 'delivered' | 'rejected' | 'pending' | 'unknown' | 'needs_approval'
   /** The provider's reason for a rejection. For admin eyes, not the buyer's. */
   reason?: string
   /** FR-4.7 — result-checker orders come back with a voucher. */
@@ -32,6 +32,22 @@ export interface DispatchResult {
   providerCharged?: number
   /** Their reply verbatim, so a failure can be diagnosed after the fact. */
   providerResponse?: string
+}
+
+/**
+ * DataHub's way of saying the recipient is not on their beneficiary list.
+ *
+ * Matched on their words because they send no machine-readable code for it —
+ * `/verify` answers `Phone number not verified`, and `/data-purchase` returns the
+ * same text with a 422. Both mean the order is deliverable later, once a human
+ * approves the number, so both must produce `needs_approval` rather than the
+ * plain rejection that would refund and close it.
+ */
+/** The networks DataHub's /verify can answer for. */
+const VERIFIABLE_KEYS = ['YELLO', 'mtn_xpress']
+
+export function isApprovalProblem(reason: string): boolean {
+  return /not verified|beneficiary list/i.test(reason)
 }
 
 /**
@@ -202,6 +218,17 @@ export class SupplierService implements OnModuleInit {
       }
     }
 
+    // Ask before buying, for the networks they can answer about. Cheaper than a
+    // 422 and it keeps a doomed purchase off their rate limit — but it is only
+    // an optimisation: the purchase reply is checked for the same thing below,
+    // because /verify covers MTN alone.
+    if (VERIFIABLE_KEYS.includes(supplier.networkKey)) {
+      const check = await this.datahub.verify(supplier.networkKey, order.recipient).catch(() => null)
+      if (check && !check.verified) {
+        return { outcome: 'needs_approval', reason: check.message }
+      }
+    }
+
     const result = await this.datahub.purchase({
       networkKey: supplier.networkKey,
       recipient: order.recipient,
@@ -236,6 +263,18 @@ export class SupplierService implements OnModuleInit {
         'DataHub float is empty — every order will fail until it is topped up.',
       )
     }
+
+    // Recoverable: the bundle is fine, the number just is not approved yet.
+    // Refunding here would close an order that will deliver perfectly well in an
+    // hour, so it is held instead.
+    if (isApprovalProblem(result.reason)) {
+      return {
+        outcome: 'needs_approval',
+        reason: result.reason,
+        providerResponse: result.raw,
+      }
+    }
+
     return { outcome: 'rejected', reason: result.reason, providerResponse: result.raw }
   }
 

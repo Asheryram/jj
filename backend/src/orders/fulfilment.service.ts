@@ -97,7 +97,63 @@ export class FulfilmentService implements OnApplicationBootstrap {
       return
     }
 
+    if (result.outcome === 'needs_approval') {
+      await this.holdForApproval(order, result.reason ?? '')
+      return
+    }
+
     await this.settle(orderId, result.outcome, result.reason, result.voucher)
+  }
+
+  /**
+   * Park a paid order until the provider approves the recipient's number.
+   *
+   * The money stays where it is. That is the whole point of the state: the
+   * bundle is fine, the customer paid, and the only thing missing is a one-time
+   * approval that somebody has to grant. Refunding would close a sale that will
+   * go through perfectly well in an hour.
+   *
+   * It is also why the hold has an expiry. Approval is manual on DataHub's side
+   * with no promised turnaround, and holding a stranger's money indefinitely on
+   * the strength of "it should come through" is not a trade the customer agreed
+   * to. `ReconcilerService` refunds anything still waiting past
+   * APPROVAL_HOLD_HOURS.
+   */
+  private async holdForApproval(
+    order: { id: string; reference: string; recipient: string; productName: string },
+    reason: string,
+  ): Promise<void> {
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: { status: 'awaiting_approval' },
+    })
+
+    const supplier = await this.prisma.order
+      .findUnique({
+        where: { id: order.id },
+        select: { product: { select: { supplier: { select: { networkKey: true } } } } },
+      })
+      .then((row) => row?.product?.supplier ?? null)
+
+    // The registry the admin screen reads. Upserted rather than inserted because
+    // one number can hold up several orders.
+    await this.prisma.beneficiaryRequest.upsert({
+      where: { phone: order.recipient },
+      create: {
+        phone: order.recipient,
+        networkKey: supplier?.networkKey ?? 'YELLO',
+        lastProduct: order.productName,
+      },
+      update: {
+        attempts: { increment: 1 },
+        lastProduct: order.productName,
+        approvedAt: null,
+      },
+    })
+
+    this.log.warn(
+      `${order.reference} held: ${order.recipient} needs DataHub approval (${reason})`,
+    )
   }
 
   /**

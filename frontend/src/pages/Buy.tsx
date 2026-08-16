@@ -26,6 +26,7 @@ import {
   CertificateIcon,
   CheckIcon,
   ChevronLeftIcon,
+  ClockIcon,
   ReceiptIcon,
   RefreshIcon,
   SearchIcon,
@@ -74,14 +75,18 @@ export default function Buy() {
   const [orderId, setOrderId] = useState<string | null>(null)
   const [placing, setPlacing] = useState(false)
   const [failure, setFailure] = useState('')
-  // What the delivery partner says about this number.
-  //
-  // No longer advisory. A number that is not on their approved list is refused
-  // at purchase — observed, not guessed — so continuing past this only buys the
-  // customer a wait and a refund. The server refuses it too; this stops them a
-  // screen earlier.
+  /**
+   * Whether this number needs the provider's one-time setup before it can
+   * receive anything.
+   *
+   * Informational, never a block. It used to stop the sale outright, on the
+   * reasoning that DataHub refuses to deliver to an unapproved number — true,
+   * but the wrong response to it: it turned away every first-time MTN customer
+   * with a message about somebody else's approved list. The order is taken and
+   * held instead, and this just sets the expectation before they pay.
+   */
   const [checking, setChecking] = useState(false)
-  const [deliveryBlock, setDeliveryBlock] = useState('')
+  const [needsSetup, setNeedsSetup] = useState(false)
 
   const placed = useMemo(
     () => (orderId ? orders.find((o) => o.id === orderId) : undefined),
@@ -212,7 +217,10 @@ export default function Buy() {
       <Card className="mt-5 p-4">
         <div className="flex items-start gap-3.5">
           <span
-            className={cn('flex size-11 shrink-0 items-center justify-center rounded-xl', meta.accent)}
+            className={cn(
+              'flex size-11 shrink-0 items-center justify-center rounded-xl',
+              meta.accent,
+            )}
           >
             <meta.icon className="size-5.5" />
           </span>
@@ -240,9 +248,7 @@ export default function Buy() {
             label={isChecker ? 'Phone number for the voucher SMS' : 'Recipient phone number'}
             htmlFor="recipient"
             error={
-              touched && check?.ok === false
-                ? check.reason
-                : (wrongNetwork?.message ?? undefined)
+              touched && check?.ok === false ? check.reason : (wrongNetwork?.message ?? undefined)
             }
             hint={
               isChecker
@@ -261,7 +267,7 @@ export default function Buy() {
                 invalid={(touched && check?.ok === false) || Boolean(wrongNetwork)}
                 onChange={(event) => {
                   setRecipient(event.target.value)
-                  setDeliveryBlock('')
+                  setNeedsSetup(false)
                 }}
                 onBlur={() => setTouched(true)}
                 className="pr-28 text-lg tracking-wide"
@@ -274,47 +280,34 @@ export default function Buy() {
             </div>
           </Field>
 
-          {deliveryBlock && (
-            <Callout
-              tone="danger"
-              className="mt-3"
-              title="This number cannot receive the bundle"
-              icon={<AlertIcon className="size-4" />}
-            >
-              {deliveryBlock}
-            </Callout>
-          )}
-
           <Button
             block
             size="lg"
             className="mt-4"
             loading={checking}
             disabled={checking || !check?.ok || Boolean(wrongNetwork)}
+            /* `needsSetup` deliberately does NOT disable this. It is something to
+               know before paying, not a reason to be turned away. */
             onClick={() => {
               setTouched(true)
               if (!check?.ok || wrongNetwork) return
 
-              // Ask the provider before taking money. Their check covers MTN
-              // only; when it does answer and the answer is no, the purchase
-              // will be refused, so we stop here rather than advancing.
+              // Ask the provider whether this number is set up yet, purely so
+              // the next screen can say so before any money changes hands.
               //
-              // An unreachable check is not a refusal — our outage must not
-              // close the shop — so a failed request advances as normal and the
-              // order takes the ordinary dispatch-and-refund path.
+              // Every path advances. Their check covers MTN only and can be
+              // unavailable, and neither a "no" nor an outage is a reason to
+              // refuse a sale we can hold and complete later.
               setChecking(true)
-              setDeliveryBlock('')
+              setNeedsSetup(false)
               void api
                 .verifyRecipient(product.id, check.phone)
-                .then((result) => {
-                  if (result.checked && !result.verified) {
-                    setDeliveryBlock(result.message)
-                    return
-                  }
+                .then((result) => setNeedsSetup(result.checked && !result.verified))
+                .catch(() => undefined)
+                .finally(() => {
+                  setChecking(false)
                   setStep(2)
                 })
-                .catch(() => setStep(2))
-                .finally(() => setChecking(false))
             }}
           >
             Continue
@@ -350,6 +343,26 @@ export default function Buy() {
             continue.
           </Callout>
 
+          {/* Said before they pay, not after.
+              A first purchase to a number needs a one-time setup with the
+              delivery partner, and it is not instant. Nobody should find that
+              out from a receipt — but it is also not a reason to stop them, so
+              it sits here as something to know, with the refund promise
+              attached. */}
+          {needsSetup && (
+            <Callout
+              tone="info"
+              className="mt-3"
+              title="This number needs a quick one-time setup"
+              icon={<ClockIcon className="size-4" />}
+            >
+              It is the first bundle going to {prettyPhone(check.phone)}, so our delivery partner has
+              to set it up before anything can be sent. That usually takes a few hours, and your
+              bundle goes out the moment it is ready. If the setup does not complete, your money
+              comes back automatically.
+            </Callout>
+          )}
+
           {/* Where the receipt goes. Defaults to the recipient so most buyers
               never touch this — it keeps the flow inside its step budget. */}
           <div className="mt-4 border-t border-slate-100 pt-4">
@@ -368,9 +381,7 @@ export default function Buy() {
               >
                 {ownNumber && <CheckIcon className="size-3.5" strokeWidth={3} />}
               </span>
-              <span className="text-sm text-slate-600">
-                Send my receipt to this same number
-              </span>
+              <span className="text-sm text-slate-600">Send my receipt to this same number</span>
             </button>
 
             {!ownNumber && (
@@ -515,7 +526,35 @@ export default function Buy() {
       {/* ── Step 4: result (FR-4.4, FR-4.5, FR-4.7, FR-2.7) ── */}
       {step === 3 && placed && (
         <>
-          {placed.status === 'processing' || placed.status === 'pending' ? (
+          {placed.status === 'awaiting_approval' ? (
+            /* A first purchase to this number.
+               Said without the plumbing: the customer does not have a
+               "beneficiary list", has done nothing wrong, and cannot act on any
+               of it. What they need is that their money is safe, that the bundle
+               is coming, and that they are not required to sit and watch. */
+            <Card className="mt-3 p-8 text-center" role="status" aria-live="polite">
+              <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                <ClockIcon className="size-7" />
+              </span>
+              <p className="mt-4 font-semibold text-slate-900">
+                Setting up {prettyPhone(placed.recipient)}
+              </p>
+              <p className="mt-1.5 text-sm text-slate-600">
+                This is the first bundle sent to this number, so it needs a one-time setup with our
+                delivery partner. It usually finishes within a few hours, and your bundle is sent
+                the moment it does.
+              </p>
+              <p className="mt-3 text-sm font-medium text-slate-800">
+                Your {cedis(placed.salePrice)} is safe. If the setup does not complete, it comes
+                back to you automatically — you do not need to ask.
+              </p>
+              <p className="mt-3 text-sm text-slate-500">
+                You can close this page. We will text {prettyPhone(placed.buyerPhone)} when it is
+                delivered.
+              </p>
+              <p className="tabular mt-4 text-xs text-slate-500">Reference {placed.reference}</p>
+            </Card>
+          ) : placed.status === 'processing' || placed.status === 'pending' ? (
             /* The status flips from a provider callback, not from a click, so it
                needs announcing (WCAG 4.1.3). */
             <Card className="mt-3 p-8 text-center" role="status" aria-live="polite">
@@ -524,11 +563,8 @@ export default function Buy() {
                 Sending to {prettyPhone(placed.recipient)}
               </p>
               <p className="mt-1.5 text-sm text-slate-500">
-                {placed.paidWith === 'wallet'
-                  ? 'Paid from your wallet.'
-                  : 'Payment confirmed.'}{' '}
-                We are waiting for the network to confirm delivery — this usually takes a few
-                seconds.
+                {placed.paidWith === 'wallet' ? 'Paid from your wallet.' : 'Payment confirmed.'} We
+                are waiting for the network to confirm delivery — this usually takes a few seconds.
               </p>
               <p className="tabular mt-4 text-xs text-slate-500">Reference {placed.reference}</p>
             </Card>
@@ -553,8 +589,8 @@ export default function Buy() {
                       title="Your voucher"
                       icon={<CertificateIcon className="size-4" />}
                     >
-                      Keep these safe — a checker voucher can only be used a limited number of times.
-                      We have also sent them by SMS.
+                      Keep these safe — a checker voucher can only be used a limited number of
+                      times. We have also sent them by SMS.
                     </Callout>
                     <CopyField label="Serial number" value={placed.voucher.serial} mono />
                     <CopyField label="PIN" value={placed.voucher.pin} mono />

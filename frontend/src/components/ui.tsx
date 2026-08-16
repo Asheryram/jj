@@ -272,6 +272,16 @@ export function StatusBadge({ status }: { status: OrderStatus }) {
       </Badge>
     )
   }
+  if (status === 'awaiting_approval') {
+    // Deliberately not "Failed" and not "Processing". The money is held and the
+    // bundle is still coming, but nothing is in flight at the provider — and an
+    // admin scanning this column needs to see that difference at a glance.
+    return (
+      <Badge tone="warning">
+        <ClockIcon className="size-3.5" /> Setting up number
+      </Badge>
+    )
+  }
   return (
     <Badge tone="warning">
       <ClockIcon className="size-3.5" /> Pending

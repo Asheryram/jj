@@ -34,6 +34,26 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    */
   private readonly graceMs = 90_000
 
+  /**
+   * How long a paid order may wait for the recipient's number to be approved
+   * before the money goes back.
+   *
+   * There has to be a limit. Approval is manual on DataHub's side with no
+   * promised turnaround, and their submission endpoint is currently down
+   * entirely — so "it will come through shortly" is a hope, not a fact, and
+   * holding a stranger's money on it indefinitely is not something the customer
+   * agreed to. Six hours is long enough for a same-day approval to land and
+   * short enough that nobody is left wondering overnight.
+   *
+   * Set APPROVAL_HOLD_HOURS to change it; 0 disables the hold entirely and
+   * refunds immediately, which is the conservative setting if approvals turn out
+   * to be slow.
+   */
+  private get approvalHoldMs(): number {
+    const hours = Number(process.env.APPROVAL_HOLD_HOURS ?? 6)
+    return (Number.isFinite(hours) ? Math.max(0, hours) : 6) * 3_600_000
+  }
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly datahub: DatahubClient,
@@ -50,6 +70,40 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
 
   onModuleDestroy(): void {
     if (this.timer) clearInterval(this.timer)
+  }
+
+  /**
+   * Refund orders that have waited too long for an approval that never came.
+   *
+   * The customer paid for a bundle we could not deliver. Whatever the reason
+   * sits with the provider, the obligation is ours, and it is settled through
+   * the ordinary rejection path so the refund lands in exactly the same ledger
+   * code as any other failed order.
+   */
+  private async expireStaleApprovals(): Promise<number> {
+    const holdMs = this.approvalHoldMs
+    const expired = await this.prisma.order.findMany({
+      where: {
+        status: 'awaiting_approval',
+        createdAt: { lt: new Date(Date.now() - holdMs) },
+      },
+      select: { id: true, reference: true, recipient: true },
+      take: 25,
+      orderBy: { createdAt: 'asc' },
+    })
+
+    for (const order of expired) {
+      this.log.warn(
+        `${order.reference}: ${order.recipient} was never approved within the hold — refunding`,
+      )
+      await this.fulfilment.settleFromProvider(
+        order.id,
+        'rejected',
+        'The recipient number was not approved for delivery in time.',
+      )
+    }
+
+    return expired.length
   }
 
   /**
@@ -73,6 +127,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     })
 
     let settled = 0
+    settled += await this.expireStaleApprovals()
 
     for (const order of waiting) {
       const result = await this.datahub.orderStatus(order.providerReference as string)

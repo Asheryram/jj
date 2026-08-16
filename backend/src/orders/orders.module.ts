@@ -5,6 +5,7 @@ import { FulfilmentService } from './fulfilment.service'
 import { SupplierModule } from '../supplier/supplier.module'
 import { DatahubWebhookController } from '../supplier/datahub-webhook.controller'
 import { ReconcilerService } from '../supplier/reconciler.service'
+import { ApprovalsService } from './approvals.service'
 
 @Module({
   imports: [SupplierModule],
@@ -17,7 +18,8 @@ import { ReconcilerService } from '../supplier/reconciler.service'
     OrdersService,
     FulfilmentService,
     ReconcilerService,
+    ApprovalsService,
   ],
-  exports: [OrdersService, FulfilmentService, ReconcilerService],
+  exports: [OrdersService, FulfilmentService, ReconcilerService, ApprovalsService],
 })
 export class OrdersModule {}

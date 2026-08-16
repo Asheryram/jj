@@ -12,6 +12,7 @@ import {
 } from 'class-validator'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { AdminService, type Tier } from './admin.service'
+import { ApprovalsService } from '../orders/approvals.service'
 
 const TIERS = ['supplierCost', 'adminPrice', 'standardPrice'] as const
 
@@ -89,7 +90,10 @@ export class ReportQueryDto {
 @Controller('admin')
 @Roles('admin')
 export class AdminController {
-  constructor(private readonly admin: AdminService) {}
+  constructor(
+    private readonly admin: AdminService,
+    private readonly approvals: ApprovalsService,
+  ) {}
 
   @Get('overview')
   overview() {
@@ -150,6 +154,29 @@ export class AdminController {
       scope: dto.scope,
       category: dto.category,
     })
+  }
+
+  /**
+   * Numbers a customer tried to buy for that DataHub has not approved.
+   *
+   * Their submission endpoint is down, so this is the list James works through
+   * by hand in their dashboard.
+   */
+  @Get('beneficiaries')
+  beneficiaries() {
+    return this.approvals.pending()
+  }
+
+  /** Ask DataHub which of them have been approved since we last looked. */
+  @Post('beneficiaries/recheck')
+  recheckBeneficiaries() {
+    return this.approvals.recheck()
+  }
+
+  /** Try their submission API. Reports the failure rather than hiding it. */
+  @Post('beneficiaries/submit')
+  submitBeneficiaries() {
+    return this.approvals.submit()
   }
 
   @Get('settings')

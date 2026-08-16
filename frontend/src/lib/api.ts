@@ -208,6 +208,17 @@ export interface DispatchAttempt {
   providerResponse: string | null
 }
 
+export interface PendingApproval {
+  phone: string
+  networkKey: string
+  /** Paid orders parked against this number, waiting to be delivered. */
+  ordersHeld: number
+  /** Pesewas of customer money held up by it. */
+  valueHeld: number
+  lastProduct: string | null
+  waitingSince: string
+}
+
 export interface SupplierSku {
   code: string
   provider: string
@@ -392,6 +403,26 @@ export const api = {
   adminSettings: () => request<PlatformSettings>('/admin/settings'),
 
   supplierCatalogue: () => request<SupplierSku[]>('/admin/supplier'),
+
+  /**
+   * Numbers a customer tried to buy for that DataHub has not approved yet.
+   *
+   * Every row is a refused sale. Their submission API is down, so these get
+   * approved by hand in DataHub's dashboard.
+   */
+  pendingApprovals: () => request<PendingApproval[]>('/admin/beneficiaries'),
+
+  /** Ask DataHub which of them have since been approved. */
+  recheckApprovals: () =>
+    request<{ checked: number; approved: string[]; released: number }>('/admin/beneficiaries/recheck', {
+      method: 'POST',
+    }),
+
+  /** Try their submission API. Returns the reason when it refuses. */
+  submitApprovals: () =>
+    request<{ submitted: number; error: string | null }>('/admin/beneficiaries/submit', {
+      method: 'POST',
+    }),
 
   /**
    * Re-read every configured supplier's catalogue and make ours match.

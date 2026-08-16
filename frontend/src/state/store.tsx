@@ -286,10 +286,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return
     }
 
-    const tasks: Promise<unknown>[] = [api.orders().then(setOrders).catch(() => undefined)]
+    const tasks: Promise<unknown>[] = [
+      api
+        .orders()
+        .then(setOrders)
+        .catch(() => undefined),
+    ]
 
     if (current.role !== 'admin') {
-      tasks.push(api.mySummary().then(setMySummary).catch(() => undefined))
+      tasks.push(
+        api
+          .mySummary()
+          .then(setMySummary)
+          .catch(() => undefined),
+      )
     }
 
     if (current.role === 'customer') {
@@ -313,19 +323,43 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             setEarnings(rows)
           })
           .catch(() => undefined),
-        api.agentPrices().then(setPrices).catch(() => undefined),
-        api.downline().then(setSubAgents).catch(() => undefined),
-        api.withdrawals().then(setWithdrawals).catch(() => undefined),
-        api.myEarningsByDay(7).then(setAgentEarningsByDay).catch(() => undefined),
+        api
+          .agentPrices()
+          .then(setPrices)
+          .catch(() => undefined),
+        api
+          .downline()
+          .then(setSubAgents)
+          .catch(() => undefined),
+        api
+          .withdrawals()
+          .then(setWithdrawals)
+          .catch(() => undefined),
+        api
+          .myEarningsByDay(7)
+          .then(setAgentEarningsByDay)
+          .catch(() => undefined),
       )
     }
 
     if (current.role === 'admin') {
       tasks.push(
-        api.adminUsers().then(setUsers).catch(() => undefined),
-        api.withdrawals().then(setWithdrawals).catch(() => undefined),
-        api.revenueByDay(7).then(setRevenueByDay).catch(() => undefined),
-        api.adminOverview().then(setAdminOverview).catch(() => undefined),
+        api
+          .adminUsers()
+          .then(setUsers)
+          .catch(() => undefined),
+        api
+          .withdrawals()
+          .then(setWithdrawals)
+          .catch(() => undefined),
+        api
+          .revenueByDay(7)
+          .then(setRevenueByDay)
+          .catch(() => undefined),
+        api
+          .adminOverview()
+          .then(setAdminOverview)
+          .catch(() => undefined),
       )
     }
 
