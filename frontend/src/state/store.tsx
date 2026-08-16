@@ -188,6 +188,16 @@ const StoreContext = createContext<Store | null>(null)
 
 let toastSeq = 0
 
+/**
+ * ~5 minutes: 10 polls at 1.5s, then every 5s.
+ *
+ * Past this the page stops asking, but the order is NOT abandoned — the
+ * reconciler settles it server-side and the receipt stays retrievable from
+ * Track order. Nothing is lost by the screen giving up; the customer just has to
+ * be told that, which is what the receipt copy does.
+ */
+const MAX_ORDER_POLLS = 65
+
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
   const [offline, setOffline] = useState<string | null>(null)
@@ -597,8 +607,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (pollers.current.has(orderId)) return
 
       let attempts = 0
-      const timer = window.setInterval(() => {
+      /**
+       * Poll fast at first, then ease off, and keep watching for five minutes.
+       *
+       * This was a flat 1.5s interval that gave up after 60 tries — exactly 90
+       * seconds, which is exactly the reconciler's grace period. The customer's
+       * screen therefore stopped watching at the precise moment the server-side
+       * fallback became eligible to settle the order, so a slow delivery could
+       * never resolve on screen no matter how long they waited.
+       *
+       * Most orders land in the first few seconds, which is what the tight
+       * opening interval is for. But DataHub can genuinely sit in PROCESSING for
+       * minutes, and hammering them 200 times would only burn rate limit — so
+       * after the first ~15s it drops to every 5s.
+       */
+      const tick = () => {
         attempts++
+        const nextDelay = attempts < 10 ? 1500 : 5000
 
         void api
           .order(orderId)
@@ -611,8 +636,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
             if (fresh.status !== 'completed' && fresh.status !== 'failed') return
 
-            window.clearInterval(timer)
-            pollers.current.delete(orderId)
+            stop()
 
             if (fresh.status === 'completed') {
               const share = fresh.split?.shares.find((s) => s.userId === session?.id)
@@ -651,17 +675,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             }
           })
           .catch(() => undefined)
+          .finally(() => {
+            // Re-arm only if this watcher is still the live one. Settling calls
+            // stop(), which removes it from the map, and without this check a
+            // settled order would keep polling forever.
+            if (pollers.current.get(orderId) === undefined) return
+            if (attempts > MAX_ORDER_POLLS) {
+              stop()
+              return
+            }
+            pollers.current.set(orderId, window.setTimeout(tick, nextDelay))
+          })
+      }
 
-        // Roughly 90 seconds. Past that the provider is not going to answer in
-        // this page's lifetime, and the order stays visible on the orders list
-        // for the reconciliation job to close.
-        if (attempts > 60) {
-          window.clearInterval(timer)
-          pollers.current.delete(orderId)
-        }
-      }, 1500)
+      const stop = () => {
+        const handle = pollers.current.get(orderId)
+        if (handle !== undefined) window.clearTimeout(handle)
+        pollers.current.delete(orderId)
+      }
 
-      pollers.current.set(orderId, timer)
+      // A placeholder so the re-arm check above has something to find, and so a
+      // second watchOrder for the same id is refused by the guard at the top.
+      pollers.current.set(orderId, window.setTimeout(tick, 1500))
     },
     [loadForSession, pushToast, session],
   )

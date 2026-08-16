@@ -188,6 +188,26 @@ export interface PlatformSettings {
 }
 
 /** One SKU in the provider's catalogue. */
+/** One attempt to have a supplier deliver an order. */
+export interface DispatchAttempt {
+  id: string
+  supplierCode: string
+  recipient: string
+  costPrice: number
+  outcome: 'delivered' | 'rejected' | 'pending' | 'unknown'
+  reason: string | null
+  /** True when nothing left the building — the provider was stubbed. */
+  simulated: boolean
+  attempt: number
+  createdAt: string
+  providerReference: string | null
+  providerStatus: string | null
+  /** Pesewas the provider actually debited, when they said. */
+  providerCharged: number | null
+  /** Their reply verbatim, truncated to 2KB. */
+  providerResponse: string | null
+}
+
 export interface SupplierSku {
   code: string
   provider: string
@@ -277,6 +297,15 @@ export const api = {
   orders: () => request<Order[]>('/orders'),
 
   order: (id: string) => request<Order>(`/orders/${id}`),
+
+  /**
+   * What we asked the provider for this order and what it answered. Admin only.
+   *
+   * The order itself only carries `status`, which flattens every way a delivery
+   * can go wrong into the single word "failed". This is where the difference
+   * lives: an empty float, an unapproved recipient, a withdrawn bundle.
+   */
+  orderDispatches: (id: string) => request<DispatchAttempt[]>(`/orders/${id}/dispatches`),
 
   trackOrder: (reference: string, phone: string) =>
     request<Order>('/orders/track', { method: 'POST', body: { reference, phone }, auth: false }),

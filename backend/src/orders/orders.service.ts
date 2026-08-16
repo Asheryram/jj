@@ -476,6 +476,13 @@ export class OrdersService {
       simulated: row.simulated,
       attempt: row.attempt,
       createdAt: row.createdAt.toISOString(),
+      // What the provider said and did, rather than only our reading of it.
+      // Without these an admin sees "failed" and has to guess between a dead
+      // float, an unapproved recipient and a bundle the provider dropped.
+      providerReference: row.providerReference,
+      providerStatus: row.providerStatus,
+      providerCharged: row.providerCharged,
+      providerResponse: row.providerResponse,
     }))
   }
 

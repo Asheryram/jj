@@ -202,6 +202,14 @@ model SupplierDispatch {
   /// from a guess. Recording both makes the guess falsifiable.
   providerCharged Int? @map("provider_charged")
 
+  /// The provider's reply, verbatim, truncated to 2KB.
+  ///
+  /// `reason` above is our one-line reading of it and is lossy: "Insufficient
+  /// balance" says what class of failure it was but not what they wanted or what
+  /// was there. This is the column to read when an order fails and the first
+  /// question is what the provider actually said.
+  providerResponse String? @map("provider_response")
+
   attempt   Int      @default(1)
   createdAt DateTime @default(now()) @map("created_at")
 

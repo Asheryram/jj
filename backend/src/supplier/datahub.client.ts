@@ -22,11 +22,26 @@ import { ConfigService } from '@nestjs/config'
  *     separately so it can be alerted on rather than looking like a bad request.
  */
 
+/**
+ * Every outcome carries `raw`: the provider's reply, verbatim.
+ *
+ * `reason` is our one-line reading of it, and it is lossy by design — a bare
+ * "Insufficient balance" tells you the class of failure but not the amount they
+ * wanted or the amount you had. When an order fails in production the first
+ * question is always "what did they actually say", and reconstructing it after
+ * the fact is impossible. So it is stored, not summarised away.
+ */
 export type PurchaseOutcome =
-  | { kind: 'accepted'; providerReference: string; providerStatus: string; deducted: number | null }
-  | { kind: 'rejected'; reason: string; insufficientBalance: boolean }
+  | {
+      kind: 'accepted'
+      providerReference: string
+      providerStatus: string
+      deducted: number | null
+      raw: string
+    }
+  | { kind: 'rejected'; reason: string; insufficientBalance: boolean; raw: string }
   /** The request may or may not have been executed. Never retry on this. */
-  | { kind: 'unknown'; reason: string }
+  | { kind: 'unknown'; reason: string; raw: string }
 
 export type StatusOutcome =
   | { kind: 'found'; providerStatus: string; raw: unknown }
@@ -40,9 +55,32 @@ interface DatahubEnvelope {
   data?: {
     reference?: string
     status?: string
+    price?: number
     [k: string]: unknown
   }
   balance?: { previous?: number; current?: number; deducted?: number }
+}
+
+/**
+ * What the provider charged, in cedis, from whichever field they populated.
+ *
+ * Three sources in order of directness. `deducted` is documented but not always
+ * sent; `previous - current` is arithmetic on the balance they always report;
+ * `data.price` is the bundle's list price, which is what they charge unless a
+ * promotion applies.
+ *
+ * Null when none are present — better than a zero that would read as free and
+ * make every margin on the order look like pure profit.
+ */
+function deductedFrom(body: DatahubEnvelope): number | null {
+  const { deducted, previous, current } = body.balance ?? {}
+  if (typeof deducted === 'number') return deducted
+  if (typeof previous === 'number' && typeof current === 'number') {
+    const difference = previous - current
+    // A balance that went up is a top-up racing our order, not a charge.
+    if (difference > 0) return Number(difference.toFixed(2))
+  }
+  return typeof body.data?.price === 'number' ? body.data.price : null
 }
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -157,7 +195,14 @@ export class DatahubClient {
     capacity: string
   }): Promise<PurchaseOutcome> {
     const key = this.apiKey
-    if (!key) return { kind: 'rejected', reason: 'No DataHub API key configured.', insufficientBalance: false }
+    if (!key) {
+      return {
+        kind: 'rejected',
+        reason: 'No DataHub API key configured.',
+        insufficientBalance: false,
+        raw: '',
+      }
+    }
 
     let response: Response
     try {
@@ -170,10 +215,25 @@ export class DatahubClient {
     } catch (error) {
       const reason = (error as Error)?.name === 'TimeoutError' ? 'timed out' : String(error)
       this.log.error(`purchase to ${input.recipient} ${reason} — outcome unknown, NOT retrying`)
-      return { kind: 'unknown', reason: `Request ${reason} before a reply arrived.` }
+      return {
+        kind: 'unknown',
+        reason: `Request ${reason} before a reply arrived.`,
+        raw: String(error),
+      }
     }
 
-    const body = (await response.json().catch(() => ({}))) as DatahubEnvelope
+    // Read the body as text first, then parse. A non-JSON reply — their HTML
+    // error page, a proxy's 502 — is exactly the case worth keeping, and
+    // `response.json()` would throw it away.
+    const rawText = await response.text().catch(() => '')
+    const raw = `HTTP ${response.status} ${rawText}`.slice(0, 2000)
+
+    let body: DatahubEnvelope = {}
+    try {
+      body = JSON.parse(rawText) as DatahubEnvelope
+    } catch {
+      body = {}
+    }
 
     if (!response.ok || body.success === false) {
       const reason = body.error ?? body.message ?? `HTTP ${response.status}`
@@ -187,23 +247,36 @@ export class DatahubClient {
       // A 5xx is not a clean rejection — they may have taken the order before
       // failing to answer. Treat it as unknown so nothing is refunded prematurely.
       if (response.status >= 500) {
-        return { kind: 'unknown', reason: `Provider returned ${response.status}: ${reason}` }
+        return { kind: 'unknown', reason: `Provider returned ${response.status}: ${reason}`, raw }
       }
-      return { kind: 'rejected', reason, insufficientBalance }
+      return { kind: 'rejected', reason, insufficientBalance, raw }
     }
 
     const providerReference = body.data?.reference
     if (!providerReference) {
       // Accepted but unidentifiable. We cannot reconcile what we cannot name, so
       // this is escalated rather than assumed good.
-      return { kind: 'unknown', reason: 'Provider accepted the order but returned no reference.' }
+      return {
+        kind: 'unknown',
+        reason: 'Provider accepted the order but returned no reference.',
+        raw,
+      }
     }
 
     return {
       kind: 'accepted',
       providerReference,
       providerStatus: body.data?.status ?? 'PROCESSING',
-      deducted: body.balance?.deducted ?? null,
+      // What they actually took, in cedis.
+      //
+      // Their spec documents `deducted`, but live replies have been seen with
+      // only `previous` and `current` — so the difference is the fallback, and
+      // `data.price` the last resort. Getting this right is what powers the
+      // cost-mismatch alarm: the first real order was priced from a catalogue
+      // cost of GHS 4.70 and actually charged GHS 4.20, and reading only
+      // `deducted` missed it entirely.
+      deducted: deductedFrom(body),
+      raw,
     }
   }
 

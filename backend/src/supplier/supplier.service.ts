@@ -30,6 +30,8 @@ export interface DispatchResult {
   providerStatus?: string
   /** Pesewas the provider actually debited, when they told us. */
   providerCharged?: number
+  /** Their reply verbatim, so a failure can be diagnosed after the fact. */
+  providerResponse?: string
 }
 
 /**
@@ -138,6 +140,7 @@ export class SupplierService implements OnModuleInit {
           providerReference: result.providerReference ?? null,
           providerStatus: result.providerStatus ?? null,
           providerCharged: result.providerCharged ?? null,
+          providerResponse: result.providerResponse ?? null,
           attempt,
         },
       })
@@ -215,6 +218,7 @@ export class SupplierService implements OnModuleInit {
         // Pesewas. Their `deducted` is in cedis, like every money field they send.
         providerCharged:
           result.deducted == null ? undefined : Math.round(result.deducted * 100),
+        providerResponse: result.raw,
       }
     }
 
@@ -224,7 +228,7 @@ export class SupplierService implements OnModuleInit {
       this.log.error(
         `UNRESOLVED dispatch for ${order.reference} → ${order.recipient}: ${result.reason}`,
       )
-      return { outcome: 'unknown', reason: result.reason }
+      return { outcome: 'unknown', reason: result.reason, providerResponse: result.raw }
     }
 
     if (result.insufficientBalance) {
@@ -232,7 +236,7 @@ export class SupplierService implements OnModuleInit {
         'DataHub float is empty — every order will fail until it is topped up.',
       )
     }
-    return { outcome: 'rejected', reason: result.reason }
+    return { outcome: 'rejected', reason: result.reason, providerResponse: result.raw }
   }
 
   private async decide(order: Order): Promise<DispatchResult> {

@@ -1,0 +1,368 @@
+{
+  "success": true,
+  "userRole": "USER",
+  "networks": [
+    {
+      "id": "cme5hceil0007sbgj3t209jun",
+      "name": "AT BIG TIME",
+      "displayName": "Airteltigo-Bigtime",
+      "networkKey": "AT_BIGTIME",
+      "isActive": true,
+      "isInstant": false,
+      "bundles": [
+        {
+          "id": "cme6wv3vd0001sb9du18a4h4b",
+          "size": "30GB",
+          "sizeInMB": 30720,
+          "price": 75,
+          "isActive": true
+        },
+        {
+          "id": "cme6wv4at0003sb9dqaiqwx5f",
+          "size": "40GB",
+          "sizeInMB": 40960,
+          "price": 90,
+          "isActive": true
+        },
+        {
+          "id": "cme6wv4jj0005sb9drlrb96gm",
+          "size": "50GB",
+          "sizeInMB": 51200,
+          "price": 100,
+          "isActive": true
+        },
+        {
+          "id": "cme6wv4s30007sb9dkaawfs5a",
+          "size": "60GB",
+          "sizeInMB": 61440,
+          "price": 110,
+          "isActive": true
+        },
+        {
+          "id": "cme6wv51t0009sb9d1bcykld0",
+          "size": "80GB",
+          "sizeInMB": 81920,
+          "price": 150,
+          "isActive": true
+        },
+        {
+          "id": "cme6wv5k3000bsb9dciguggz4",
+          "size": "100GB",
+          "sizeInMB": 102400,
+          "price": 170,
+          "isActive": true
+        },
+        {
+          "id": "cme6wv5u4000dsb9dj2uix8ot",
+          "size": "200GB",
+          "sizeInMB": 204800,
+          "price": 330,
+          "isActive": true
+        },
+        {
+          "id": "cme6wv62e000fsb9dqs4473x6",
+          "size": "250GB",
+          "sizeInMB": 256000,
+          "price": 375,
+          "isActive": true
+        },
+        {
+          "id": "cme6wv6bx000hsb9d52gn9vog",
+          "size": "400GB",
+          "sizeInMB": 409600,
+          "price": 620,
+          "isActive": true
+        },
+        {
+          "id": "cme6wv6l3000jsb9d1uslrqli",
+          "size": "500GB",
+          "sizeInMB": 512000,
+          "price": 730,
+          "isActive": true
+        }
+      ]
+    },
+    {
+      "id": "cme5hcdvz0006sbgj5hu13p5s",
+      "name": "AirtelTigo-iShare",
+      "displayName": "AirtelTigo-iShare",
+      "networkKey": "AT_PREMIUM",
+      "isActive": true,
+      "isInstant": false,
+      "bundles": [
+        {
+          "id": "cme5hcq1k000zsbgjmnfgaamn",
+          "size": "1GB",
+          "sizeInMB": 1024,
+          "price": 3.85,
+          "isActive": true
+        },
+        {
+          "id": "cme5hcqr20011sbgj572rz0eq",
+          "size": "2GB",
+          "sizeInMB": 2048,
+          "price": 7.85,
+          "isActive": true
+        },
+        {
+          "id": "cme6whksq0001sbvc3sv9gq7n",
+          "size": "3GB",
+          "sizeInMB": 3072,
+          "price": 11.5,
+          "isActive": true
+        },
+        {
+          "id": "cme6whl630003sbvcoe57zvui",
+          "size": "4GB",
+          "sizeInMB": 4096,
+          "price": 15,
+          "isActive": true
+        },
+        {
+          "id": "cme6whlf70005sbvcvp7jgi39",
+          "size": "5GB",
+          "sizeInMB": 5120,
+          "price": 19.05,
+          "isActive": true
+        },
+        {
+          "id": "cme6whlp40007sbvcxpsvytxz",
+          "size": "6GB",
+          "sizeInMB": 6144,
+          "price": 22.85,
+          "isActive": true
+        },
+        {
+          "id": "cme6whly00009sbvcr95p7c8s",
+          "size": "7GB",
+          "sizeInMB": 7168,
+          "price": 26.5,
+          "isActive": true
+        },
+        {
+          "id": "cme6whm60000bsbvccdnddu6l",
+          "size": "8GB",
+          "sizeInMB": 8192,
+          "price": 29.5,
+          "isActive": true
+        },
+        {
+          "id": "cme6whmes000dsbvcrnuapwq6",
+          "size": "9GB",
+          "sizeInMB": 9216,
+          "price": 34.4,
+          "isActive": true
+        },
+        {
+          "id": "cme6whmmt000fsbvc5ho44a5i",
+          "size": "10GB",
+          "sizeInMB": 10240,
+          "price": 38.5,
+          "isActive": true
+        },
+        {
+          "id": "cme6whmva000hsbvcb8f61aby",
+          "size": "12GB",
+          "sizeInMB": 12288,
+          "price": 45.7,
+          "isActive": true
+        },
+        {
+          "id": "cme6whn4p000jsbvc6cfs1thf",
+          "size": "15GB",
+          "sizeInMB": 15360,
+          "price": 56.25,
+          "isActive": true
+        },
+        {
+          "id": "cme6whndv000lsbvc6l6nwmva",
+          "size": "20GB",
+          "sizeInMB": 20480,
+          "price": 77.6,
+          "isActive": true
+        }
+      ]
+    },
+    {
+      "id": "cme5hccaf0004sbgjw825cmif",
+      "name": "MTN",
+      "displayName": "MTN",
+      "networkKey": "YELLO",
+      "isActive": true,
+      "isInstant": false,
+      "bundles": [
+        {
+          "id": "cme5hcioq000fsbgj4y4fxsrn",
+          "size": "1GB",
+          "sizeInMB": 1024,
+          "price": 4.7,
+          "isActive": true
+        },
+        {
+          "id": "cme5hcjdq000hsbgjeq16q8en",
+          "size": "2GB",
+          "sizeInMB": 2048,
+          "price": 9.5,
+          "isActive": true
+        },
+        {
+          "id": "cme6w8k270001sb7lig7orsrw",
+          "size": "3GB",
+          "sizeInMB": 3072,
+          "price": 14,
+          "isActive": true
+        },
+        {
+          "id": "cme6w8km90003sb7l87c22gdr",
+          "size": "4GB",
+          "sizeInMB": 4096,
+          "price": 18.5,
+          "isActive": true
+        },
+        {
+          "id": "cme5hck2o000jsbgjqgni87a0",
+          "size": "5GB",
+          "sizeInMB": 5120,
+          "price": 22.5,
+          "isActive": true
+        },
+        {
+          "id": "cme6w8li00005sb7lqm7bvckq",
+          "size": "6GB",
+          "sizeInMB": 6144,
+          "price": 27.5,
+          "isActive": true
+        },
+        {
+          "id": "cme6w8lsq0007sb7ly5r72kfl",
+          "size": "8GB",
+          "sizeInMB": 8192,
+          "price": 36,
+          "isActive": true
+        },
+        {
+          "id": "cme6w8m1l0009sb7ljad4yhzg",
+          "size": "10GB",
+          "sizeInMB": 10240,
+          "price": 43,
+          "isActive": true
+        },
+        {
+          "id": "cme6w8m9z000bsb7lwgu5g6pv",
+          "size": "15GB",
+          "sizeInMB": 15360,
+          "price": 63.5,
+          "isActive": true
+        },
+        {
+          "id": "cme6w8mtf000dsb7lv6nbuc5v",
+          "size": "20GB",
+          "sizeInMB": 20480,
+          "price": 82,
+          "isActive": true
+        },
+        {
+          "id": "cme6w8n20000fsb7lzl5o0drm",
+          "size": "25GB",
+          "sizeInMB": 25600,
+          "price": 102,
+          "isActive": true
+        },
+        {
+          "id": "cme6w8nb9000hsb7lcvoe2tmu",
+          "size": "30GB",
+          "sizeInMB": 30720,
+          "price": 122,
+          "isActive": true
+        },
+        {
+          "id": "cme6w8njk000jsb7l5le73jpz",
+          "size": "40GB",
+          "sizeInMB": 40960,
+          "price": 164,
+          "isActive": true
+        },
+        {
+          "id": "cme6w8o2w000lsb7lmyeb2971",
+          "size": "50GB",
+          "sizeInMB": 51200,
+          "price": 195,
+          "isActive": true
+        },
+        {
+          "id": "cme6wc77a0001sbip4l9s8lky",
+          "size": "100GB",
+          "sizeInMB": 102400,
+          "price": 375,
+          "isActive": true
+        }
+      ]
+    },
+    {
+      "id": "cme5hcd9r0005sbgj6iq35k9n",
+      "name": "TELECEL",
+      "displayName": "TELECEL",
+      "networkKey": "TELECEL",
+      "isActive": true,
+      "isInstant": false,
+      "bundles": [
+        {
+          "id": "cme6wbxgr0003sbft563gol3x",
+          "size": "10GB",
+          "sizeInMB": 10240,
+          "price": 42,
+          "isActive": true
+        },
+        {
+          "id": "cme6wbxp70005sbfto67e6keu",
+          "size": "15GB",
+          "sizeInMB": 15360,
+          "price": 62,
+          "isActive": true
+        },
+        {
+          "id": "cme6wbxxq0007sbftff6xjfxk",
+          "size": "20GB",
+          "sizeInMB": 20480,
+          "price": 82.5,
+          "isActive": true
+        },
+        {
+          "id": "cme6wby6b0009sbftk3veuaf6",
+          "size": "25GB",
+          "sizeInMB": 25600,
+          "price": 101,
+          "isActive": true
+        },
+        {
+          "id": "cme6wbypq000bsbftzq7h8xrp",
+          "size": "30GB",
+          "sizeInMB": 30720,
+          "price": 120,
+          "isActive": true
+        },
+        {
+          "id": "cme6wbyyw000dsbftdfanlvwo",
+          "size": "40GB",
+          "sizeInMB": 40960,
+          "price": 160,
+          "isActive": true
+        },
+        {
+          "id": "cme6wbzi4000fsbftqa1ejvve",
+          "size": "50GB",
+          "sizeInMB": 51200,
+          "price": 198,
+          "isActive": true
+        },
+        {
+          "id": "cme6wbzqw000hsbft97d53ok1",
+          "size": "100GB",
+          "sizeInMB": 102400,
+          "price": 370,
+          "isActive": true
+        }
+      ]
+    }
+  ]
+}
