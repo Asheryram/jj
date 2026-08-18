@@ -56,13 +56,21 @@ export class ApiError extends Error {
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   body?: unknown
+  /**
+   * A multipart upload, for the one thing that needs it — a logo.
+   *
+   * Mutually exclusive with `body`. The Content-Type header is deliberately NOT
+   * set: the browser has to add its own multipart boundary, and setting the type
+   * by hand strips it and produces a body the server cannot parse.
+   */
+  form?: FormData
   /** Send the stored token. On by default; login and register opt out. */
   auth?: boolean
   signal?: AbortSignal
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, auth = true, signal } = options
+  const { method = 'GET', body, form, auth = true, signal } = options
   const headers: Record<string, string> = {}
 
   if (body !== undefined) headers['Content-Type'] = 'application/json'
@@ -75,7 +83,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     response = await fetch(`${API_URL}${path}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
       signal,
     })
   } catch (error) {
@@ -206,6 +214,44 @@ export interface DispatchAttempt {
   providerCharged: number | null
   /** Their reply verbatim, truncated to 2KB. */
   providerResponse: string | null
+}
+
+import type { BrandRamp } from './branding'
+
+export interface PublicBranding {
+  shopName: string
+  /** The colour as chosen. The ramp below may darken its 700 step for contrast. */
+  brandColor: string
+  /** Every Tailwind step, keyed '50' through '900'. */
+  ramp: BrandRamp
+  logoUrl: string | null
+  /** True when this is an agent's own branding rather than the platform's. */
+  custom: boolean
+}
+
+export interface MyBranding {
+  live: { shopName: string | null; brandColor: string | null; hasLogo: boolean } | null
+  pending: {
+    id: string
+    shopName: string | null
+    brandColor: string | null
+    hasLogo: boolean
+    createdAt: string
+  } | null
+  lastDecision: { status: string; note: string | null; decidedAt: string | null } | null
+}
+
+export interface BrandingRequestRow {
+  id: string
+  agentName: string
+  agentCode: string
+  shopName: string | null
+  brandColor: string | null
+  logoUrl: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  note: string | null
+  createdAt: string
+  decidedAt: string | null
 }
 
 export interface RefundRequest {
@@ -454,6 +500,40 @@ export const api = {
    * The figure that decides whether supplier float can be topped up without
    * spending an agent's earnings.
    */
+  /**
+   * A shop's name, mark and colour. Unauthenticated: a guest shopping through an
+   * agent's link has no account, and the shop still has to render for them.
+   */
+  branding: (seller?: string | null) =>
+    request<PublicBranding>(seller ? `/branding?seller=${encodeURIComponent(seller)}` : '/branding', {
+      auth: false,
+    }),
+
+  /** What the signed-in agent has live, and anything awaiting review. */
+  myBranding: () => request<MyBranding>('/branding/mine'),
+
+  /** Propose branding. Reviewed before it goes live. */
+  submitBranding: (form: FormData) =>
+    request<{ id: string; status: string }>('/branding/mine', { method: 'POST', form }),
+
+  /** The platform owner's own branding. Applies immediately. */
+  setPlatformBranding: (form: FormData) =>
+    request<PublicBranding>('/admin/branding', { method: 'POST', form }),
+
+  brandingQueue: (status: 'pending' | 'approved' | 'rejected' = 'pending') =>
+    request<BrandingRequestRow[]>(`/admin/branding/requests?status=${status}`),
+
+  approveBranding: (id: string) =>
+    request<{ id: string; status: string }>(`/admin/branding/requests/${id}/approve`, {
+      method: 'POST',
+    }),
+
+  rejectBranding: (id: string, note: string) =>
+    request<{ id: string; status: string }>(`/admin/branding/requests/${id}/reject`, {
+      method: 'POST',
+      body: { note },
+    }),
+
   reservePosition: () => request<ReservePosition>('/admin/finance/position'),
 
   /**

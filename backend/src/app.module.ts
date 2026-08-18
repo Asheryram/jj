@@ -15,6 +15,7 @@ import { SupplierModule } from './supplier/supplier.module'
 import { SettingsModule } from './settings/settings.module'
 import { PaymentsModule } from './payments/payments.module'
 import { FinanceModule } from './finance/finance.module'
+import { BrandingModule } from './branding/branding.module'
 import { AuthGuard } from './common/auth'
 
 @Module({
@@ -89,6 +90,7 @@ import { AuthGuard } from './common/auth'
     WithdrawalsModule,
     AdminModule,
     PaymentsModule,
+    BrandingModule,
   ],
   controllers: [HealthController],
   providers: [

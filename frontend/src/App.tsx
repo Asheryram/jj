@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
-import { BrowserRouter, Link, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-dom'
 import { StoreProvider, useStore } from './state/store'
+import { BrandingProvider } from './state/branding'
 import { AppShell, PublicShell, RequireAuth } from './components/layout'
 import RouteMeta from './components/RouteMeta'
 import { Button, Card, EmptyState, Spinner } from './components/ui'
@@ -21,6 +22,7 @@ import Earnings from './pages/app/Earnings'
 import Orders from './pages/app/Orders'
 import Pricing from './pages/app/Pricing'
 import Referrals from './pages/app/Referrals'
+import ShopBranding from './pages/app/ShopBranding'
 import Reports from './pages/app/Reports'
 import Withdrawals from './pages/app/Withdrawals'
 
@@ -32,13 +34,40 @@ import AdminWithdrawals from './pages/admin/AdminWithdrawals'
 import NumberApprovals from './pages/admin/NumberApprovals'
 import PaymentReturn from './pages/PaymentReturn'
 import Refunds from './pages/admin/Refunds'
+import BrandingReview from './pages/admin/BrandingReview'
 import Settings from './pages/admin/Settings'
+
+/**
+ * Decides whose branding the current page wears.
+ *
+ * Read from the URL, deliberately NOT from the store's `sellerCode`. That value
+ * is sticky by design — it lives in sessionStorage so a buyer who arrives through
+ * an agent's link keeps buying from that agent as they move around — and theming
+ * from it meant an admin who had once opened an agent's shop kept the agent's
+ * colours on their own admin pages for the rest of the session.
+ *
+ * So: only `/s/<code>` paths wear an agent's brand. The admin screens, the agent
+ * dashboard and the platform's own storefront are the platform's, whatever link
+ * somebody arrived by.
+ */
+function ShopTheme({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation()
+  const shopCode = pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null
+  return (
+    <BrandingProvider sellerCode={shopCode ? decodeURIComponent(shopCode) : null}>
+      {children}
+    </BrandingProvider>
+  )
+}
 
 export default function App() {
   return (
     <StoreProvider>
       <Boot>
         <BrowserRouter>
+        {/* Inside the router because it themes from the /s/<code> route, and
+            inside the store because that is what resolves the code. */}
+        <ShopTheme>
         <RouteMeta />
         <Routes>
           {/* Public storefront — buyable without an account (FR-4.8) */}
@@ -93,6 +122,7 @@ export default function App() {
               <Route element={<RequireAuth role="agent" />}>
                 <Route path="/app/earnings" element={<Earnings />} />
                 <Route path="/app/pricing" element={<Pricing />} />
+                <Route path="/app/shop-look" element={<ShopBranding />} />
                 <Route path="/app/referrals" element={<Referrals />} />
                 <Route path="/app/withdrawals" element={<Withdrawals />} />
               </Route>
@@ -109,12 +139,14 @@ export default function App() {
               <Route path="/admin/withdrawals" element={<AdminWithdrawals />} />
               <Route path="/admin/approvals" element={<NumberApprovals />} />
               <Route path="/admin/refunds" element={<Refunds />} />
+              <Route path="/admin/branding" element={<BrandingReview />} />
               <Route path="/admin/settings" element={<Settings />} />
             </Route>
           </Route>
 
             <Route path="*" element={<NotFound />} />
           </Routes>
+        </ShopTheme>
         </BrowserRouter>
       </Boot>
     </StoreProvider>

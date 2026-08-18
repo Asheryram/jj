@@ -118,12 +118,14 @@ model User {
 
   joinedAt DateTime @default(now()) @map("joined_at")
 
-  prices       AgentPrice[]
-  orders       Order[]
-  transactions Transaction[]
-  earnings     Earning[]
-  withdrawals  Withdrawal[]
-  payments     Payment[]
+  prices           AgentPrice[]
+  orders           Order[]
+  transactions     Transaction[]
+  earnings         Earning[]
+  withdrawals      Withdrawal[]
+  payments         Payment[]
+  branding         Branding?
+  brandingRequests BrandingRequest[]
 
   @@index([uplineCode])
   @@index([role])
@@ -727,4 +729,90 @@ model RefundRequest {
 
   @@index([status])
   @@map("refund_requests")
+}
+
+enum BrandingStatus {
+  /// Submitted by an agent, waiting for the platform owner to look at it.
+  pending
+  approved
+  rejected
+}
+
+/// The branding a shop is currently showing.
+///
+/// One row per shop: `userId` null is the platform's own, and an agent's row
+/// overrides it on their `/s/<code>` pages. Absent or partial rows fall back to
+/// the platform's, so an agent who sets only a name keeps the default colour.
+///
+/// This table holds only what is **live**. An agent's proposed change lives in
+/// `BrandingRequest` until it is approved, so a shop can never display something
+/// nobody has looked at — which matters because this is a page that asks for
+/// money, and a convincing bank logo on it is somebody else's liability.
+model Branding {
+  id String @id @default(uuid())
+
+  /// Null for the platform. Unique so a shop cannot have two live brandings.
+  userId String? @unique @map("user_id")
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// What the shop calls itself. Null means use the platform's name.
+  shopName String? @map("shop_name")
+
+  /// The colour as chosen, in #rrggbb. The ten-step ramp is derived from it on
+  /// read rather than stored: the derivation includes a contrast correction, and
+  /// storing its output would freeze today's rules into every existing shop.
+  brandColor String? @map("brand_color")
+
+  /// The logo, in the database rather than on a disk or in a bucket.
+  ///
+  /// A shop logo is a few kilobytes, and the alternatives both cost more than
+  /// they are worth here: a local directory does not survive a redeploy on most
+  /// hosts, and object storage means another account and another bill for
+  /// something smaller than a single product photo. Capped and type-checked on
+  /// the way in.
+  logoMime  String? @map("logo_mime")
+  logoBytes Bytes?  @map("logo_bytes")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("branding")
+}
+
+/// An agent's proposed branding, awaiting the platform owner's decision.
+///
+/// Deliberately the same shape as `RefundRequest`: something is proposed, a
+/// person decides, and a refusal keeps its reason. Reusing the pattern means the
+/// review screen behaves the way the refund queue already does.
+///
+/// The reason for the queue is impersonation. An agent shop takes card and Mobile
+/// Money details, so an agent who names theirs after a bank or uploads a network's
+/// logo is a fraud risk carried by the platform, not by them. Nothing goes live
+/// unseen.
+model BrandingRequest {
+  id String @id @default(uuid())
+
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Denormalised so the queue still reads if the agent is later suspended.
+  agentName String @map("agent_name")
+  agentCode String @map("agent_code")
+
+  shopName   String? @map("shop_name")
+  brandColor String? @map("brand_color")
+  logoMime   String? @map("logo_mime")
+  logoBytes  Bytes?  @map("logo_bytes")
+
+  status BrandingStatus @default(pending)
+  /// Required on a refusal, and kept: the agent is told why, and the record
+  /// survives being asked about later.
+  note   String?
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  decidedAt DateTime? @map("decided_at")
+  decidedBy String?   @map("decided_by")
+
+  @@index([status])
+  @@index([userId])
+  @@map("branding_requests")
 }

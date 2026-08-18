@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useStore, type Toast } from '../state/store'
+import { useBranding } from '../state/branding'
 import { useRegisterPath, useShopPath } from '../lib/shopPath'
 import { cedis, initials } from '../lib/format'
 import type { Role } from '../data/types'
@@ -35,16 +36,30 @@ import {
  */
 export function Logo({ compact }: { compact?: boolean }) {
   const { sellerCode } = useStore()
+  const branding = useBranding()
   const home = sellerCode ? `/s/${sellerCode}` : '/'
 
   return (
     <Link to={home} className="flex items-center gap-2.5">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-700 text-base font-bold text-white">
-        J
-      </span>
+      {/* An uploaded mark where there is one, and the shop's own initial where
+          there is not — a hardcoded "J" on an agent's own shop reads as somebody
+          else's brand. */}
+      {branding.logoUrl ? (
+        <img
+          src={branding.logoUrl}
+          alt={branding.shopName}
+          className="size-9 shrink-0 rounded-xl object-contain"
+        />
+      ) : (
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-700 text-base font-bold text-white">
+          {branding.shopName.trim().charAt(0).toUpperCase() || 'J'}
+        </span>
+      )}
       {!compact && (
         <span className="leading-tight">
-          <span className="block font-bold tracking-tight text-slate-900">JamesDataConsult</span>
+          <span className="block font-bold tracking-tight text-slate-900">
+            {branding.shopName}
+          </span>
           <span className="block text-[11px] font-medium text-slate-500">
             Data · Airtime · Checkers
           </span>
@@ -82,6 +97,7 @@ function navFor(role: Role, shopPath: (path: string) => string): NavItem[] {
       { to: '/admin/users', label: 'Users', icon: UsersIcon },
       { to: '/admin/prices', label: 'Cost prices', icon: TagIcon },
       { to: '/admin/refunds', label: 'Refunds', icon: ReceiptIcon },
+      { to: '/admin/branding', label: 'Branding', icon: StoreIcon },
       { to: '/admin/withdrawals', label: 'Withdrawals', icon: CashIcon },
       { to: '/admin/settings', label: 'Settings', icon: SettingsIcon },
     ]
@@ -95,6 +111,7 @@ function navFor(role: Role, shopPath: (path: string) => string): NavItem[] {
       { to: '/app/earnings', label: 'Earnings', icon: WalletIcon },
       { to: '/app/orders', label: 'Sales', icon: ReceiptIcon },
       { to: '/app/pricing', label: 'My prices', icon: TagIcon },
+      { to: '/app/shop-look', label: 'Shop look', icon: StoreIcon },
       // Unscoped on purpose — see the note above navFor.
       { to: '/shop', label: 'Browse shop', icon: UsersIcon },
       { to: '/app/reports', label: 'Reports', icon: ChartIcon },
@@ -131,6 +148,7 @@ export function RequireAuth({ role }: { role?: Role }) {
 }
 
 export function AppShell() {
+  const branding = useBranding()
   const { session, balance, logout } = useStore()
   const shopPath = useShopPath()
   const [moreOpen, setMoreOpen] = useState(false)
@@ -148,7 +166,7 @@ export function AppShell() {
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-3 sm:px-4">
           <Logo compact />
           <span className="hidden font-bold tracking-tight text-slate-900 sm:block">
-            JamesDataConsult
+            {branding.shopName}
           </span>
 
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
