@@ -157,7 +157,7 @@ export class AdminService {
     return toProduct(updated)
   }
 
-  // ── Supplier catalogue (the DataHub GH stand-in) ───────────────────────────
+  // ── Supplier catalogue, imported from the suppliers themselves ─────────────
 
   async supplierCatalogue() {
     const rows = await this.prisma.supplierProduct.findMany({
@@ -511,10 +511,26 @@ export class AdminService {
     const orders = completed._count._all
     const revenue = completed._sum.salePrice ?? 0
 
+    /**
+     * What the payment processor kept, over the same window.
+     *
+     * Reported separately because it is a real cost that appears nowhere else:
+     * the customer paid `salePrice`, agents are credited their margin in full,
+     * and the supplier is paid its cost — so Paystack's cut comes out of what is
+     * left, which is James's. A margin figure that ignores it overstates his
+     * earnings on every card and Mobile Money sale.
+     */
+    const fees = await this.prisma.payment.aggregate({
+      where: { status: 'paid', paidAt: { gte: since } },
+      _sum: { fee: true },
+    })
+
     return {
       windowDays: 30,
       orders,
       revenue,
+      /** Pesewas Paystack kept over the window. */
+      paymentFees: fees._sum.fee ?? 0,
       failedOrders: failed,
       /** NFR-3.1 — delivery success rate over the window. */
       successRate: orders + failed > 0 ? orders / (orders + failed) : 1,

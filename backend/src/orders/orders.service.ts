@@ -4,10 +4,10 @@ import { PrismaService } from '../prisma/prisma.service'
 import { PricingService } from '../pricing/pricing.service'
 import { SettingsService } from '../settings/settings.service'
 import { FulfilmentService } from './fulfilment.service'
+import { PaymentsService } from '../payments/payments.service'
 import { SupplierService } from '../supplier/supplier.service'
 import { DatahubClient } from '../supplier/datahub.client'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
-import { networkMismatch } from '../domain/networks'
 import { toOrder, toTrackedOrder } from '../common/mappers'
 import {
   ConflictError,
@@ -35,6 +35,7 @@ export class OrdersService {
     private readonly pricing: PricingService,
     private readonly settings: SettingsService,
     private readonly fulfilment: FulfilmentService,
+    private readonly payments: PaymentsService,
     private readonly supplier: SupplierService,
     private readonly datahub: DatahubClient,
   ) {}
@@ -58,11 +59,33 @@ export class OrdersService {
       const existing = await this.prisma.order.findUnique({
         where: { idempotencyKey: dto.idempotencyKey },
       })
-      if (existing) return toOrder(existing)
+      if (existing) {
+        // An unpaid replay needs the payment link back, not a receipt. Dropping
+        // it here left a customer who reloaded checkout looking at an order with
+        // no way to pay for it.
+        if (existing.status === 'awaiting_payment') {
+          const paymentUrl = await this.payments.paymentUrlForOrder(existing.id)
+          if (paymentUrl) return { ...toOrder(existing), paymentUrl }
+        }
+        return toOrder(existing)
+      }
     }
 
     const buyerPhone = dto.buyerPhone ?? dto.recipient
     const reference = await this.freshReference()
+
+    /**
+     * Whether real money has to be collected before this order moves.
+     *
+     * A wallet payment is already money in hand — it was collected when the
+     * wallet was topped up — so it is debited inside the transaction below and
+     * the order proceeds. Mobile Money means Paystack, and nothing proceeds
+     * until they say it arrived.
+     *
+     * With no Paystack key this is false and Mobile Money is simulated, which is
+     * the right stand-in for acceptance testing and is announced at boot.
+     */
+    const needsPayment = dto.payWith === 'momo' && this.payments.live
 
     let order: Order
     try {
@@ -92,7 +115,11 @@ export class OrdersService {
           salePrice,
           split: split as unknown as Prisma.InputJsonValue,
           soldByCode: sellerCode,
-          status: 'processing',
+          // `awaiting_payment` and nothing else until Paystack confirms the
+          // money. Not `pending`: the restart-recovery sweep dispatches anything
+          // pending-without-a-provider-reference, so an unpaid order parked there
+          // was delivered free on the next reboot.
+          status: needsPayment ? 'awaiting_payment' : 'processing',
           paidWith: dto.payWith,
           buyer: dto.buyerName?.trim() || user?.name || 'Guest',
           buyerPhone,
@@ -111,8 +138,23 @@ export class OrdersService {
       throw error
     }
 
-    // Committed. Now ask the provider, and let the result land asynchronously —
-    // exactly the shape a real DataHub GH callback would arrive in (FR-4.4).
+    if (needsPayment) {
+      // Hand back somewhere to pay rather than a receipt. Fulfilment is started
+      // by the payment being confirmed, not by this request returning.
+      const { paymentUrl } = await this.payments.startOrderPayment({
+        id: order.id,
+        reference: order.reference,
+        salePrice: order.salePrice,
+        buyerPhone,
+        productName: order.productName,
+        recipient: order.recipient,
+        buyerUserId: order.buyerUserId,
+      })
+      return { ...toOrder(order), paymentUrl }
+    }
+
+    // Committed and paid for. Now ask the provider, and let the result land
+    // asynchronously — the shape a real DataHub GH callback arrives in (FR-4.4).
     this.fulfilment.scheduleFor(order.id)
 
     return toOrder(order)
@@ -174,27 +216,14 @@ export class OrdersService {
       )
     }
 
-    // An MTN bundle cannot be delivered to a Telecel line.
+    // There is no prefix check here.
     //
-    // Refused here rather than warned about, because the alternative is taking
-    // money for a bundle the network will reject: the buyer waits, the order
-    // fails, and the refund makes them whole in cash but not in time. The client
-    // checks this too — this is the copy that decides.
-    //
-    // The cost of the rule is a ported number, which keeps its old prefix and is
-    // turned away wrongly. That is accepted deliberately, and it is the reason an
-    // *unknown* prefix is let through instead: see domain/networks.ts. DataHub's
-    // /verify cannot rescue the ported case — it reports whether a number is on
-    // their beneficiary list, not which network carries it.
-    const mismatch = networkMismatch(recipient, row.network)
-    if (mismatch) {
-      throw new ConflictError(
-        'RECIPIENT_WRONG_NETWORK',
-        `${prettyGhanaPhone(recipient)} is a ${mismatch.detected} number and ${row.name} is a ` +
-          `${row.network} bundle. Choose a ${mismatch.detected} bundle for this number.`,
-      )
-    }
-
+    // One used to refuse an order whose number looked like the wrong carrier, on
+    // a table mapping 024 → MTN and so on. Ghana's number portability makes that
+    // table unable to be right — a 020 line can genuinely be on MTN — so it
+    // turned away customers who could have been served, and a new NCA range did
+    // the same to everyone on it. Deliverability is the supplier's answer to give:
+    // it refuses what it cannot send, and a refused order refunds.
     // Do not take money for something we cannot deliver.
     //
     // While live, a product whose provider SKU has no network/capacity mapping

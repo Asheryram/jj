@@ -13,6 +13,8 @@ import { AdminModule } from './admin/admin.module'
 import { HealthController } from './health/health.controller'
 import { SupplierModule } from './supplier/supplier.module'
 import { SettingsModule } from './settings/settings.module'
+import { PaymentsModule } from './payments/payments.module'
+import { FinanceModule } from './finance/finance.module'
 import { AuthGuard } from './common/auth'
 
 @Module({
@@ -34,10 +36,48 @@ import { AuthGuard } from './common/auth'
         if (String(env.JWT_SECRET).length < 16) {
           throw new Error('JWT_SECRET must be at least 16 characters.')
         }
+
+        /**
+         * In production, refuse to boot on a development default.
+         *
+         * Every item below is safe locally and dangerous live, and each fails
+         * silently rather than loudly: the seed password is published in
+         * .env.example, a wide-open CORS origin lets any site spend a logged-in
+         * customer's wallet, and a missing PUBLIC_APP_URL sends every paying
+         * customer back to localhost after Paystack — where their receipt does
+         * not exist. Better to not start than to start wrong.
+         */
+        if (env.NODE_ENV === 'production') {
+          const unsafe: string[] = []
+
+          if (!env.SEED_PASSWORD || env.SEED_PASSWORD === 'demo1234') {
+            unsafe.push('SEED_PASSWORD is the published example value')
+          }
+          if (String(env.JWT_SECRET).length < 32) {
+            unsafe.push('JWT_SECRET should be at least 32 characters in production')
+          }
+          if (!env.CORS_ORIGINS) {
+            unsafe.push('CORS_ORIGINS must name the real front-end origin(s)')
+          }
+          if (!env.PUBLIC_APP_URL) {
+            unsafe.push('PUBLIC_APP_URL must be the address customers return to after paying')
+          }
+          if (env.PAYSTACK_SECRET_KEY && String(env.PAYSTACK_SECRET_KEY).startsWith('sk_test')) {
+            unsafe.push('PAYSTACK_SECRET_KEY is a test key — no real money would be collected')
+          }
+
+          if (unsafe.length > 0) {
+            throw new Error(
+              ['Refusing to start in production:', ...unsafe.map((line) => `  · ${line}`)].join('\n'),
+            )
+          }
+        }
+
         return env
       },
     }),
     PrismaModule,
+    FinanceModule,
     SettingsModule,
     SupplierModule,
     PricingModule,
@@ -48,6 +88,7 @@ import { AuthGuard } from './common/auth'
     AgentsModule,
     WithdrawalsModule,
     AdminModule,
+    PaymentsModule,
   ],
   controllers: [HealthController],
   providers: [

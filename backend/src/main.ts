@@ -6,10 +6,12 @@ import { AppModule } from './app.module'
 import { DomainExceptionFilter } from './common/domain-exception.filter'
 
 async function bootstrap() {
-  // rawBody so a real Paystack webhook could verify its HMAC over the unparsed
-  // body later (skills-breakdown.md §4.1). This build has no live keys, but the
-  // flag has to be set at creation time — retrofitting it means touching main.
+  // rawBody is required, not optional: Paystack's webhook signature is an HMAC
+  // over the unparsed body, and a re-serialised object does not match. It has to
+  // be set at creation time, so this line is load-bearing for every payment.
   const app = await NestFactory.create(AppModule, { rawBody: true })
+
+  const isProduction = process.env.NODE_ENV === 'production'
 
   const origins = (process.env.CORS_ORIGINS ?? 'http://localhost:5173')
     .split(',')
@@ -45,22 +47,33 @@ async function bootstrap() {
   // friendly copy, never as a stack trace.
   app.useGlobalFilters(new DomainExceptionFilter())
 
-  const swagger = new DocumentBuilder()
-    .setTitle('JamesDataConsult API')
-    .setDescription(
-      'Dummy backend for local testing. Fulfilment and Mobile Money are simulated in-process — there are no DataHub GH or Paystack credentials.',
-    )
-    .setVersion('0.0.1')
-    .addBearerAuth()
-    .build()
-  SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swagger))
+  /**
+   * API docs, but not in production.
+   *
+   * Swagger publishes every route, its shape and its auth requirement. That is
+   * exactly the reconnaissance an attacker would otherwise have to guess at, and
+   * it is of no use to a customer — so it is a development tool and stays one.
+   */
+  if (!isProduction) {
+    const swagger = new DocumentBuilder()
+      .setTitle('JamesDataConsult API')
+      .setDescription(
+        'Ghana data-bundle and airtime reseller platform. Fulfilment goes through ' +
+          'DataHub GH and payments through Paystack; both fall back to in-process ' +
+          'simulation when their credentials are absent.',
+      )
+      .setVersion('1.0.0')
+      .addBearerAuth()
+      .build()
+    SwaggerModule.setup('api/docs', app, SwaggerModule.createDocument(app, swagger))
+  }
 
   const port = Number(process.env.PORT ?? 3001)
   await app.listen(port, '0.0.0.0')
 
   const log = new Logger('bootstrap')
   log.log(`API      http://localhost:${port}/api`)
-  log.log(`Swagger  http://localhost:${port}/api/docs`)
+  if (!isProduction) log.log(`Swagger  http://localhost:${port}/api/docs`)
   log.log(`Health   http://localhost:${port}/api/health`)
 }
 

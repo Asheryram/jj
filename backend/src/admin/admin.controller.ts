@@ -6,13 +6,19 @@ import {
   IsInt,
   IsNumber,
   IsOptional,
+  IsString,
   Max,
+  MaxLength,
   Min,
+  MinLength,
   ValidateIf,
 } from 'class-validator'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { AdminService, type Tier } from './admin.service'
 import { ApprovalsService } from '../orders/approvals.service'
+import { LedgerService } from '../finance/ledger.service'
+import { RefundsService } from '../orders/refunds.service'
+import { SolvencyService } from '../finance/solvency.service'
 
 const TIERS = ['supplierCost', 'adminPrice', 'standardPrice'] as const
 
@@ -64,6 +70,17 @@ export class ApplyMarkupDto {
   category?: 'data' | 'airtime' | 'voice' | 'sms' | 'afa' | 'checker'
 }
 
+export class RejectRefundDto {
+  /**
+   * Why the refund is being refused. Required, and kept: this is a decision not
+   * to return money somebody paid, and it has to survive being questioned later.
+   */
+  @IsString()
+  @MinLength(5, { message: 'Give a reason for refusing this refund.' })
+  @MaxLength(500)
+  note!: string
+}
+
 export class SetSettingDto {
   @IsIn(['referralEnabled', 'referralRatePercent', 'simulateFailure', 'registrationOpen'])
   key!: 'referralEnabled' | 'referralRatePercent' | 'simulateFailure' | 'registrationOpen'
@@ -93,6 +110,9 @@ export class AdminController {
   constructor(
     private readonly admin: AdminService,
     private readonly approvals: ApprovalsService,
+    private readonly ledger: LedgerService,
+    private readonly solvency: SolvencyService,
+    private readonly refunds: RefundsService,
   ) {}
 
   @Get('overview')
@@ -177,6 +197,63 @@ export class AdminController {
   @Post('beneficiaries/submit')
   submitBeneficiaries() {
     return this.approvals.submit()
+  }
+
+  /**
+   * Profit and loss, and the cash that moved alongside it.
+   *
+   * Read from the ledger rather than recomputed from orders: the ledger is the
+   * only place that knows what the supplier actually charged and what the payment
+   * processor kept, and it is idempotent, so this figure cannot be inflated by a
+   * retried webhook.
+   */
+  @Get('finance/statement')
+  statement(@Query('days') days?: string) {
+    const window = Math.min(365, Math.max(1, Number(days) || 30))
+    const since = new Date(Date.now() - window * 86_400_000)
+    return this.ledger.statement(since)
+  }
+
+  /** The individual lines, newest first. */
+  /**
+   * What is owed against what Paystack is holding.
+   *
+   * The figure that decides whether the float can be topped up or profit drawn
+   * without spending an agent's earnings.
+   */
+  /**
+   * Money owed back to customers, waiting on a decision.
+   *
+   * Refunds are not automatic — a failed delivery records the debt and stops, so
+   * this queue is the only way the money moves.
+   */
+  @Get('refunds')
+  refundQueue(@Query('status') status?: 'pending' | 'approved' | 'rejected') {
+    return this.refunds.list(status)
+  }
+
+  @Post('refunds/:id/approve')
+  approveRefund(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.refunds.approve(id, user.id)
+  }
+
+  @Post('refunds/:id/reject')
+  rejectRefund(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: RejectRefundDto,
+  ) {
+    return this.refunds.reject(id, user.id, dto.note)
+  }
+
+  @Get('finance/position')
+  position() {
+    return this.solvency.position()
+  }
+
+  @Get('finance/entries')
+  ledgerEntries(@Query('limit') limit?: string) {
+    return this.ledger.entries(Math.min(500, Math.max(1, Number(limit) || 200)))
   }
 
   @Get('settings')

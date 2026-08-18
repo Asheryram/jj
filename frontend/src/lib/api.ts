@@ -208,6 +208,60 @@ export interface DispatchAttempt {
   providerResponse: string | null
 }
 
+export interface RefundRequest {
+  id: string
+  orderRef: string
+  productName: string
+  buyerName: string
+  buyerPhone: string
+  amount: number
+  /** `wallet` credits directly; `claimable` issues a link to claim. */
+  method: 'wallet' | 'claimable'
+  /** Why the order failed, in the words shown to whoever decides. */
+  reason: string
+  status: 'pending' | 'approved' | 'rejected'
+  /** Set only on a refusal: why it was refused. */
+  note: string | null
+  createdAt: string
+  decidedAt: string | null
+}
+
+export interface ReservePosition {
+  /** Pesewas Paystack holds. Null when they could not be reached — not zero. */
+  balance: number | null
+  balanceError: string | null
+  liabilities: {
+    agentEarnings: number
+    customerMoney: number
+    undeliveredOrders: number
+    total: number
+  }
+  pendingPayouts: { count: number; amount: number }
+  unclaimedRefunds: { count: number; amount: number }
+  /** Owed back and waiting on approval. Already counted in the liabilities. */
+  pendingRefunds: { count: number; amount: number }
+  /** Balance less every obligation. Null when the balance is unknown. */
+  available: number | null
+  covered: boolean | null
+}
+
+export interface FinanceStatement {
+  since: string
+  revenue: number
+  costs: {
+    supplier: number
+    paymentFees: number
+    agentMargins: number
+    referralBonuses: number
+    refunds: number
+    payoutFees: number
+  }
+  profit: number
+  cashMovement: number
+  settlements: { payouts: number; walletTopUps: number }
+  marginRate: number | null
+}
+
 export interface PendingApproval {
   phone: string
   networkKey: string
@@ -291,7 +345,29 @@ export const api = {
     ),
 
   // Orders
-  placeOrder: (body: PlaceOrderBody) => request<Order>('/orders', { method: 'POST', body }),
+  /**
+   * Place an order.
+   *
+   * With Paystack collecting the money the reply carries `paymentUrl` and the
+   * order is `awaiting_payment` — the caller must send the customer there, not
+   * show them a receipt.
+   */
+  placeOrder: (body: PlaceOrderBody) =>
+    request<Order & { paymentUrl?: string }>('/orders', { method: 'POST', body }),
+
+  /**
+   * Ask the server to check a payment with Paystack.
+   *
+   * Sends only a reference, which the browser already knows. Everything is
+   * decided from a server-to-Paystack call, because the page coming back from a
+   * payment is the one party with a motive to claim it succeeded.
+   */
+  confirmPayment: (reference: string) =>
+    request<{ status: 'paid' | 'pending' | 'failed' }>('/payments/confirm', {
+      method: 'POST',
+      body: { reference },
+      auth: false,
+    }),
 
   /**
    * Ask the provider whether they will deliver to this number, before paying.
@@ -371,6 +447,37 @@ export const api = {
 
   // Admin
   adminOverview: () => request<AdminOverview>('/admin/overview'),
+
+  /**
+   * What is owed against what Paystack is holding.
+   *
+   * The figure that decides whether supplier float can be topped up without
+   * spending an agent's earnings.
+   */
+  reservePosition: () => request<ReservePosition>('/admin/finance/position'),
+
+  /**
+   * Money owed back to customers, waiting on a decision.
+   *
+   * Refunds are not automatic: a failed delivery records the debt and stops, so
+   * approving here is the only thing that moves the money.
+   */
+  refundQueue: (status: 'pending' | 'approved' | 'rejected' = 'pending') =>
+    request<RefundRequest[]>(`/admin/refunds?status=${status}`),
+
+  approveRefund: (id: string) =>
+    request<{ id: string; status: 'approved' }>(`/admin/refunds/${id}/approve`, { method: 'POST' }),
+
+  /** Refusing needs a reason, and it is kept on the record. */
+  rejectRefund: (id: string, note: string) =>
+    request<{ id: string; status: 'rejected' }>(`/admin/refunds/${id}/reject`, {
+      method: 'POST',
+      body: { note },
+    }),
+
+  /** Profit and loss from the ledger, over a window of days. */
+  financeStatement: (days = 30) =>
+    request<FinanceStatement>(`/admin/finance/statement?days=${days}`),
 
   adminUsers: () => request<PlatformUser[]>('/admin/users'),
 

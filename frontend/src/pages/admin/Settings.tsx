@@ -3,7 +3,6 @@ import { useStore } from '../../state/store'
 import { api } from '../../lib/api'
 import { cedis } from '../../lib/format'
 import ProviderCatalogue from './ProviderCatalogue'
-import { NETWORK_PREFIXES, NETWORKS } from '../../lib/networks'
 import {
   Badge,
   Button,
@@ -355,44 +354,6 @@ export default function Settings() {
       </Card>
 
       <ProviderCatalogue />
-
-
-      {/* ── NFR-5.1 — network prefixes are data, editable without a deploy ── */}
-      <Card className="mt-3">
-        <CardHead
-          title="Network prefixes"
-          subtitle="Used to detect a recipient's network. Editable without a code change."
-        />
-        <div className="space-y-3 p-4 sm:p-5">
-          {NETWORKS.map((network) => (
-            <div key={network} className="flex flex-wrap items-center gap-3">
-              <span className="w-24 shrink-0 text-sm font-semibold text-slate-700">{network}</span>
-              <div className="flex flex-wrap gap-1.5">
-                {NETWORK_PREFIXES[network].map((prefix) => (
-                  <span
-                    key={prefix}
-                    className="tabular rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-sm text-slate-700"
-                  >
-                    0{prefix.slice(1)}
-                  </span>
-                ))}
-                <button
-                  type="button"
-                  className="rounded-lg border border-dashed border-slate-300 px-2.5 py-1 text-sm text-slate-500 hover:border-brand-400 hover:text-brand-700"
-                >
-                  + Add
-                </button>
-              </div>
-            </div>
-          ))}
-          <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-            Confirm current allocations with the NCA before launch. New prefixes can be added here as
-            networks are assigned them — no deployment needed.
-          </Callout>
-        </div>
-      </Card>
-
-
     </div>
   )
 }

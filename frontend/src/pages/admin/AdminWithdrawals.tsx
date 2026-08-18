@@ -22,7 +22,13 @@ import { AlertIcon, CashIcon, CheckIcon, ClockIcon, XIcon } from '../../componen
 
 type Filter = 'pending' | 'all'
 
-/** FR-2.6, FR-6.4, FR-7.3 — manual approval queue for v1. */
+/**
+ * FR-2.6, FR-6.4, FR-7.3 — the payout queue.
+ *
+ * Approving debits the agent and records the payout; the MoMo transfer is still
+ * made by hand on Paystack. The balance is checked first, so an agent is never
+ * told they have been paid out of money that is not there.
+ */
 export default function AdminWithdrawals() {
   const { withdrawals, decideWithdrawal } = useStore()
   const [filter, setFilter] = useState<Filter>('pending')

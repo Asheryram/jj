@@ -46,6 +46,14 @@ enum Network {
 
 /// FR-4.4 — the only legal order states.
 enum OrderStatus {
+  /// Placed, but the customer has not paid yet.
+  ///
+  /// A state of its own rather than a flavour of `pending`, and the reason is a
+  /// bug this caused: the restart-recovery sweep dispatches anything `pending`
+  /// with no provider reference, so reusing `pending` for "unpaid" handed out
+  /// free bundles on every reboot. Nothing sweeps this status, and nothing may:
+  /// an order leaves it only when Paystack confirms the money.
+  awaiting_payment
   pending
   processing
   /// Paid for, but the recipient's number is not yet approved by the provider.
@@ -115,6 +123,7 @@ model User {
   transactions Transaction[]
   earnings     Earning[]
   withdrawals  Withdrawal[]
+  payments     Payment[]
 
   @@index([uplineCode])
   @@index([role])
@@ -200,7 +209,7 @@ model SupplierDispatch {
   /// Their status verbatim: INITIATED, PENDING, PROCESSING, SUCCESSFUL, FAILED,
   /// CANCELLED. Stored raw rather than mapped, so a new value of theirs shows up
   /// in the log instead of being silently coerced into ours.
-  providerStatus String? @map("provider_status")
+  providerStatus    String? @map("provider_status")
 
   /// What the provider ACTUALLY debited, in pesewas, from their reply.
   ///
@@ -244,11 +253,11 @@ model Product {
 
   /// What James pays DataHub GH / the voucher supplier. Admin-only.
   /// Synced from `supplier_products.cost_price`.
-  supplierCost   Int @map("supplier_cost")
+  supplierCost  Int @map("supplier_cost")
   /// What James charges agents — a top-level agent's cost floor.
-  adminPrice     Int @map("admin_price")
+  adminPrice    Int @map("admin_price")
   /// What a walk-up customer pays with no agent link (FR-3.5).
-  standardPrice  Int @map("standard_price")
+  standardPrice Int @map("standard_price")
 
   /// The intent behind the two prices above, in basis points over cost
   /// (1500 = 15.00%).
@@ -297,16 +306,16 @@ model Order {
   /// Ghana 4G connection must not produce a second debit or a second delivery.
   idempotencyKey String? @unique @map("idempotency_key")
 
-  productId String   @map("product_id")
+  productId   String   @map("product_id")
   /// Denormalised so a renamed or deleted product cannot rewrite history.
-  productName String @map("product_name")
+  productName String   @map("product_name")
   network     Network?
   category    Category
 
   recipient String
 
   /// What the buyer actually paid.
-  salePrice Int @map("sale_price")
+  salePrice Int  @map("sale_price")
   /// How that money was divided, snapshotted at purchase time. Shape matches
   /// the frontend's OrderSplit exactly.
   split     Json
@@ -318,8 +327,8 @@ model Order {
   paidWith PaidWith    @map("paid_with")
 
   /// Display name of the buyer; 'Guest' for an account-less purchase (FR-4.8).
-  buyer      String
-  buyerPhone String  @map("buyer_phone")
+  buyer       String
+  buyerPhone  String  @map("buyer_phone")
   /// Set only when a signed-in user bought. Guests have no row to point at.
   buyerUserId String? @map("buyer_user_id")
 
@@ -343,6 +352,12 @@ model Order {
   product    Product            @relation(fields: [productId], references: [id])
   buyerUser  User?              @relation(fields: [buyerUserId], references: [id])
   dispatches SupplierDispatch[]
+
+  /// What was paid for this order, when payment is collected up front.
+  payment Payment?
+
+  /// Money owed back on this order, once a human has authorised it.
+  refundRequest RefundRequest?
 
   @@index([soldByCode])
   @@index([status])
@@ -459,13 +474,13 @@ model Setting {
 /// go and approve. Each row is one person waiting.
 model BeneficiaryRequest {
   /// The recipient number. One row per number, however many times it is tried.
-  phone      String  @id
+  phone      String @id
   /// Which DataHub network it needs approving on — YELLO or mtn_xpress.
-  networkKey String  @map("network_key")
+  networkKey String @map("network_key")
 
   /// How many purchases this number has cost so far. A high count is a customer
   /// trying repeatedly, and worth approving first.
-  attempts   Int     @default(1)
+  attempts    Int     @default(1)
   /// The bundle most recently attempted, for context on the admin screen.
   lastProduct String? @map("last_product")
   /// Pesewas of the most recent attempt — the value of the sale being lost.
@@ -479,4 +494,237 @@ model BeneficiaryRequest {
 
   @@index([approvedAt])
   @@map("beneficiary_requests")
+}
+
+enum PaymentPurpose {
+  /// Paying for a specific order.
+  order
+  /// Adding money to a customer wallet.
+  topup
+}
+
+enum PaymentStatus {
+  /// Initialised with Paystack. Nobody has paid anything yet.
+  pending
+  /// Paystack confirmed the money arrived, and we checked the amount ourselves.
+  paid
+  /// Paystack said it failed, or it was abandoned and later verified as unpaid.
+  failed
+}
+
+/// Money we asked a customer for, and whether it arrived.
+///
+/// Separate from `Order` and from `Transaction` on purpose. Both of those record
+/// something that has already happened; this records an *expectation*, which is
+/// the state a payment spends most of its life in and the only state a webhook
+/// can be matched against.
+///
+/// The rule this table exists to enforce: nothing is delivered and no wallet is
+/// credited until a row here says `paid`, and a row only says `paid` because
+/// Paystack told our server so — either through a signed webhook or through our
+/// own verify call. A browser reporting success is not evidence; it is the one
+/// party in the exchange with a motive to lie.
+model Payment {
+  /// The reference we hand Paystack. For an order it IS the order reference, so
+  /// the two are impossible to mismatch; top-ups get their own.
+  reference String         @id
+  purpose   PaymentPurpose
+  status    PaymentStatus  @default(pending)
+
+  /// Pesewas we asked for. Checked against what Paystack says arrived, because
+  /// a partial payment must never complete an order.
+  amount Int
+
+  /// Whose payment. Null for a guest buying without an account.
+  userId String? @map("user_id")
+  user   User?   @relation(fields: [userId], references: [id])
+
+  /// The order this pays for. Null for a wallet top-up.
+  orderId String? @unique @map("order_id")
+  order   Order?  @relation(fields: [orderId], references: [id])
+
+  /// Where the money came from once known: mobile_money, card, bank.
+  channel String?
+
+  /// What Paystack kept, in pesewas, as reported by them.
+  ///
+  /// Read from their verify response rather than computed from a rate we believe
+  /// in: the rate varies by channel, they change it, and a hardcoded percentage
+  /// would silently misstate every margin the day it moved. The same reason
+  /// `supplier_dispatches.provider_charged` exists.
+  ///
+  /// This is James's cost, not the customer's and not the agents'. The customer
+  /// paid `amount`; agents are credited their margin in full; what Paystack takes
+  /// comes out of what is left, which is his. So it is deliberately NOT part of
+  /// the order split — that records the sale, and the invariant
+  /// `salePrice = supplierCost + Σ margins` must keep holding.
+  fee Int?
+
+  /// Their transaction id, for looking a dispute up in their dashboard.
+  providerId String? @map("provider_id")
+
+  /// The Paystack page this payment was started on.
+  ///
+  /// Stored so a customer who reloads checkout is handed the same link back
+  /// instead of a receipt for an order they have not paid for. Paystack rejects
+  /// a second initialise on the same reference, so without this the link is
+  /// simply lost and the sale with it.
+  authorizationUrl String? @map("authorization_url")
+
+  /// Their reply verbatim, truncated. The provider's own words survive our
+  /// reading of them — the same reason supplier_dispatches keeps one.
+  providerResponse String? @map("provider_response")
+
+  paidAt    DateTime? @map("paid_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@index([userId])
+  @@map("payments")
+}
+
+enum LedgerKind {
+  /// A customer paid for an order. Cash in, and revenue.
+  revenue
+  /// What the payment processor kept on collection.
+  payment_fee
+  /// What the supplier actually charged to deliver it.
+  supplier_cost
+  /// An agent's margin on a sale, accrued the moment it completes.
+  agent_margin
+  /// A referral bonus, funded out of James's margin.
+  referral_bonus
+  /// Money given back for an order that could not be delivered.
+  refund
+  /// Money sent to an agent. Settles an accrued margin — not a new cost.
+  payout
+  /// What the processor kept on a payout.
+  payout_fee
+  /// A customer adding money to their wallet. Cash in, but theirs, not revenue.
+  topup
+}
+
+/// Every movement of money, once.
+///
+/// The books were previously spread across three tables that each knew part of
+/// the story — `orders.split` for margins, `payments.fee` for processor charges,
+/// `supplier_dispatches.provider_charged` for cost — so "what did this business
+/// actually make" required joining all three and getting the accrual rules right
+/// by hand, every time. This is the one place that answers it.
+///
+/// Two properties make it trustworthy:
+///
+///  · **Idempotent by construction.** `idempotencyKey` is unique and derived from
+///    the event, not from when it was written — `order:JDC-1:supplier_cost` can
+///    only exist once. Paystack retries webhooks, the reconciler re-checks
+///    orders, and a settlement can be attempted twice; none of that can
+///    double-count, because the second write collides and is dropped.
+///
+///  · **Cash and profit are separated.** `amount` is the cash movement; a payout
+///    or a top-up moves cash without being a profit or loss, so `affectsProfit`
+///    marks the lines that belong in a P&L. Summing the wrong one is the classic
+///    way to double-count an agent's margin — once when it is earned and again
+///    when it is paid.
+model LedgerEntry {
+  id String @id @default(uuid())
+
+  /// Derived from the event: `<source>:<reference>:<kind>`. Unique, so replaying
+  /// any settlement path is a no-op rather than a second entry.
+  idempotencyKey String @unique @map("idempotency_key")
+
+  kind LedgerKind
+
+  /// Signed pesewas, from the business's point of view. Positive is money in.
+  amount Int
+
+  /// Whether this line belongs in profit and loss.
+  ///
+  /// False for movements that settle an existing obligation or hold someone
+  /// else's money — a payout against an already-accrued margin, a wallet top-up.
+  /// Counting those as costs would charge the same margin twice.
+  affectsProfit Boolean @default(true) @map("affects_profit")
+
+  /// Human-readable, for the statement.
+  description String
+
+  /// What this entry is about. All optional: a top-up has no order, a supplier
+  /// cost has no payment.
+  orderRef     String? @map("order_ref")
+  paymentRef   String? @map("payment_ref")
+  withdrawalId String? @map("withdrawal_id")
+  /// The agent or customer this entry concerns, when it concerns one.
+  userId       String? @map("user_id")
+
+  /// When the money actually moved, which is not always when this was written —
+  /// a backfilled or reconciled entry is dated by its event.
+  occurredAt DateTime @map("occurred_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([kind])
+  @@index([occurredAt])
+  @@index([orderRef])
+  @@index([userId])
+  @@map("ledger_entries")
+}
+
+enum RefundStatus {
+  /// Money is owed and nobody has authorised paying it back yet.
+  pending
+  /// Authorised. The wallet has been credited, or a claim link issued.
+  approved
+  /// Refused, with a reason. No money moved.
+  rejected
+}
+
+enum RefundMethod {
+  /// Straight back into the customer's wallet.
+  wallet
+  /// Held against their phone number for them to claim — a Mobile Money payer
+  /// has no wallet, and reversing a MoMo collection is neither instant nor
+  /// guaranteed.
+  claimable
+}
+
+/// Money owed back to a customer, awaiting authorisation.
+///
+/// Refunds used to happen automatically the moment a delivery failed. That is
+/// kinder to the customer and it removes the one control that matters on an
+/// outbound payment: a person deciding it is owed. The cost of not having it was
+/// not hypothetical — a rule that credited every failed order handed eight
+/// customers GHS 196 they had never paid, and nothing stood between that bug and
+/// the money.
+///
+/// So a failure now records a debt and stops. The money is still owed from the
+/// moment it is written, which is why `SolvencyService` counts pending requests
+/// as a liability — the delay is in paying, not in owing.
+model RefundRequest {
+  id String @id @default(uuid())
+
+  /// One per order. A second failure on the same order does not owe twice.
+  orderId String @unique @map("order_id")
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Denormalised so the queue still renders if the order is later archived.
+  orderRef    String @map("order_ref")
+  productName String @map("product_name")
+  buyerName   String @map("buyer_name")
+  buyerPhone  String @map("buyer_phone")
+
+  amount Int
+  method RefundMethod
+  /// Why the order failed, in the words shown to the admin deciding.
+  reason String
+
+  status RefundStatus @default(pending)
+
+  /// Null until decided. Who decided, and what they said if they refused.
+  decidedAt DateTime? @map("decided_at")
+  decidedBy String?   @map("decided_by")
+  note      String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([status])
+  @@map("refund_requests")
 }

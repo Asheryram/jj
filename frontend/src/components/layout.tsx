@@ -81,6 +81,7 @@ function navFor(role: Role, shopPath: (path: string) => string): NavItem[] {
       { to: '/admin/approvals', label: 'Approvals', icon: ShieldIcon },
       { to: '/admin/users', label: 'Users', icon: UsersIcon },
       { to: '/admin/prices', label: 'Cost prices', icon: TagIcon },
+      { to: '/admin/refunds', label: 'Refunds', icon: ReceiptIcon },
       { to: '/admin/withdrawals', label: 'Withdrawals', icon: CashIcon },
       { to: '/admin/settings', label: 'Settings', icon: SettingsIcon },
     ]

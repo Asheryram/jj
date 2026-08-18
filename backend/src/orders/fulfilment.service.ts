@@ -2,6 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common'
 import type { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { SupplierService } from '../supplier/supplier.service'
+import { LedgerService, type LedgerDraft } from '../finance/ledger.service'
 import type { OrderSplit, SplitShare } from '../domain/pricing'
 
 /**
@@ -21,6 +22,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
   constructor(
     private readonly prisma: PrismaService,
     private readonly supplier: SupplierService,
+    private readonly ledger: LedgerService,
   ) {}
 
   /**
@@ -33,6 +35,9 @@ export class FulfilmentService implements OnApplicationBootstrap {
       // Only orders the provider never accepted. One that already has a
       // providerReference is theirs now, and re-dispatching it would buy a
       // second bundle — their API has no idempotency key to protect us.
+      //
+      // `awaiting_payment` is deliberately absent: nobody has paid for those, and
+      // sweeping them here is exactly how an unpaid order got delivered free.
       where: { status: { in: ['pending', 'processing'] }, providerReference: null },
       select: { id: true, reference: true },
       take: 200,
@@ -157,6 +162,73 @@ export class FulfilmentService implements OnApplicationBootstrap {
   }
 
   /**
+   * Book the costs of a delivered order.
+   *
+   * Two costs, and they are recognised here rather than at payment because this
+   * is the moment they become real: nothing is owed to a supplier or an agent for
+   * an order that failed.
+   *
+   * The supplier figure prefers what the provider actually charged over what we
+   * expected to pay. The two differ in practice — DataHub's catalogue listed a
+   * bundle at GHS 4.70 and billed GHS 4.20 — and a margin measured against the
+   * estimate is wrong by the difference on every single sale.
+   */
+  private async recordDelivered(
+    tx: Prisma.TransactionClient,
+    order: { id: string; reference: string; productName: string },
+    split: OrderSplit,
+    agentShares: OrderSplit['shares'],
+  ): Promise<void> {
+    const dispatch = await tx.supplierDispatch.findFirst({
+      where: { orderId: order.id },
+      orderBy: { createdAt: 'desc' },
+      select: { providerCharged: true, costPrice: true, supplierCode: true },
+    })
+
+    const actualCost = dispatch?.providerCharged ?? dispatch?.costPrice ?? split.supplierCost
+    const estimated = split.supplierCost
+
+    const entries: (LedgerDraft & { idempotencyKey: string })[] = [
+      {
+        idempotencyKey: LedgerService.key('order', order.reference, 'supplier_cost'),
+        kind: 'supplier_cost',
+        amount: -actualCost,
+        description:
+          `Bundle cost · ${order.productName}` +
+          (actualCost !== estimated
+            ? ` (expected ${(estimated / 100).toFixed(2)}, charged ${(actualCost / 100).toFixed(2)})`
+            : ''),
+        orderRef: order.reference,
+        occurredAt: new Date(),
+      },
+    ]
+
+    for (const share of agentShares) {
+      entries.push({
+        // Keyed per user, so one order with a seller and a referrer books two
+        // distinct entries and neither can overwrite the other.
+        idempotencyKey: LedgerService.key(
+          'order',
+          order.reference,
+          share.depth === 0 ? 'agent_margin' : 'referral_bonus',
+          share.userId,
+        ),
+        kind: share.depth === 0 ? 'agent_margin' : 'referral_bonus',
+        amount: -share.margin,
+        description:
+          share.depth === 0
+            ? `Agent margin · ${share.name}`
+            : `Referral bonus · ${share.name}`,
+        orderRef: order.reference,
+        userId: share.userId,
+        occurredAt: new Date(),
+      })
+    }
+
+    await this.ledger.record(entries, tx)
+  }
+
+  /**
    * Settle from an outside signal — DataHub's webhook, or the reconciler having
    * asked them directly. Public because both live outside this class, and both
    * must land in exactly the same ledger code as a simulated settlement.
@@ -206,31 +278,70 @@ export class FulfilmentService implements OnApplicationBootstrap {
         for (const share of agentShares) {
           await this.creditAgent(tx, share, order.reference, order.productName, order.recipient)
         }
+
+        await this.recordDelivered(tx, order, split, agentShares)
         return
       }
 
+      /**
+       * Was any money actually taken for this order?
+       *
+       * Everything below turns on it. A wallet order was paid when the wallet was
+       * topped up; a Mobile Money order was paid only if Paystack says so. An
+       * order that failed *before* payment — an abandoned checkout, a recipient
+       * the supplier refused while the customer was still on the payment page —
+       * took nothing, so there is nothing to give back.
+       *
+       * Getting this wrong is not a rounding error. It told eight customers they
+       * were owed GHS 196 they had never paid, put that on the books as a
+       * liability, and would have sent each of them a claim link for it.
+       */
+      const collected =
+        order.paidWith === 'wallet' ||
+        (await tx.payment.findUnique({
+          where: { orderId: order.id },
+          select: { status: true },
+        }))?.status === 'paid'
+
       await tx.order.update({
         where: { id: orderId },
-        data: { status: 'failed', refunded: true },
+        // `refunded` says on the receipt that money has gone back. It has not
+        // yet — it is owed, and a person has to authorise paying it.
+        data: { status: 'failed', refunded: false },
       })
 
-      // FR-2.7 — the buyer's money goes back before anything else is considered.
-      if (order.paidWith === 'wallet' && order.buyerUserId) {
-        await this.refundWallet(tx, order.buyerUserId, order.salePrice, order.reference, order.productName)
-      } else {
-        // A Mobile Money payer has no wallet to credit, and reversing a MoMo
-        // collection is neither instant nor guaranteed. So the amount is held
-        // against their number as a claimable credit and they are sent a link —
-        // NFR-3.3 without depending on a reversal that may never land.
-        await tx.claimableCredit.upsert({
-          where: { reference: order.reference },
+      /**
+       * FR-2.7 — the debt is recorded here; paying it is a decision.
+       *
+       * This used to credit the wallet or issue a claim link immediately, which
+       * was faster for the customer and removed the only control that matters on
+       * money leaving: somebody deciding it is owed. That mattered in practice —
+       * a rule that refunded every failed order paid eight customers GHS 196 they
+       * had never paid, and nothing stood between the bug and the money.
+       *
+       * The obligation starts now, not at approval: `SolvencyService` counts a
+       * pending request against the balance, so the money is never treated as
+       * spendable while it is queued.
+       */
+      if (collected) {
+        await tx.refundRequest.upsert({
+          where: { orderId: order.id },
           create: {
-            phone: order.buyerPhone,
+            orderId: order.id,
+            orderRef: order.reference,
+            productName: order.productName,
+            buyerName: order.buyer,
+            buyerPhone: order.buyerPhone,
             amount: order.salePrice,
-            reference: order.reference,
+            method: order.paidWith === 'wallet' && order.buyerUserId ? 'wallet' : 'claimable',
+            reason: reason ?? 'The delivery partner could not complete this order.',
           },
+          // A second failure on the same order does not owe twice.
           update: {},
         })
+        this.log.warn(
+          `${order.reference}: GHS ${(order.salePrice / 100).toFixed(2)} owed back — awaiting approval`,
+        )
       }
 
       // Nobody profits from a failed delivery.
@@ -238,7 +349,12 @@ export class FulfilmentService implements OnApplicationBootstrap {
         await this.reverseAgent(tx, share, order.reference, order.productName)
       }
 
-      this.log.warn(`refunded ${order.reference}: ${reason ?? 'provider rejected'}`)
+      // No refund entry on the ledger yet. The money has not moved, and booking
+      // a cost for a payment nobody has authorised would misstate profit for as
+      // long as the request sits in the queue. `RefundsService` writes it when the
+      // refund is actually paid.
+
+      this.log.warn(`failed ${order.reference}: ${reason ?? 'provider rejected'}`)
     })
   }
 

@@ -30,6 +30,8 @@ import Users from './pages/admin/Users'
 import CostPrices from './pages/admin/CostPrices'
 import AdminWithdrawals from './pages/admin/AdminWithdrawals'
 import NumberApprovals from './pages/admin/NumberApprovals'
+import PaymentReturn from './pages/PaymentReturn'
+import Refunds from './pages/admin/Refunds'
 import Settings from './pages/admin/Settings'
 
 export default function App() {
@@ -48,6 +50,10 @@ export default function App() {
             <Route path="/shop" element={<Shop />} />
             <Route path="/checkers" element={<Checkers />} />
             <Route path="/track" element={<Track />} />
+            {/* Where Paystack sends the customer back to. Public: a guest paying
+                with Mobile Money has no account, and the reference in the URL is
+                checked with Paystack rather than believed. */}
+            <Route path="/pay/return" element={<PaymentReturn />} />
             {/* A guest must be able to complete a purchase (FR-4.8) */}
             <Route path="/buy/:productId" element={<Buy />} />
 
@@ -102,6 +108,7 @@ export default function App() {
               <Route path="/admin/prices" element={<CostPrices />} />
               <Route path="/admin/withdrawals" element={<AdminWithdrawals />} />
               <Route path="/admin/approvals" element={<NumberApprovals />} />
+              <Route path="/admin/refunds" element={<Refunds />} />
               <Route path="/admin/settings" element={<Settings />} />
             </Route>
           </Route>

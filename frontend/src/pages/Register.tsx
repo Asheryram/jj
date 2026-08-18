@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useStore } from '../state/store'
 import { checkPhone } from '../lib/networks'
-import { Button, Callout, Card, Field, NetworkChip, Segmented, TextInput, cn } from '../components/ui'
+import { Button, Callout, Card, Field, Segmented, TextInput, cn } from '../components/ui'
 import { AlertIcon, CheckIcon, UsersIcon } from '../components/icons'
 
 type AccountType = 'customer' | 'agent'
@@ -154,13 +154,7 @@ export default function Register() {
                 invalid={Boolean(errors.phone)}
                 value={phone}
                 onChange={(event) => setPhone(event.target.value)}
-                className={phoneCheck?.ok ? 'pr-28' : undefined}
               />
-              {phoneCheck?.ok && (
-                <span className="absolute inset-y-0 right-2.5 flex items-center">
-                  <NetworkChip network={phoneCheck.network} />
-                </span>
-              )}
             </div>
           </Field>
 

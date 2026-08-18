@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { momoLabel, useStore } from '../state/store'
 import { useShopPath } from '../lib/shopPath'
 import { api } from '../lib/api'
@@ -58,10 +58,12 @@ export default function Buy() {
     retailPrice,
     previewSplit,
     placeOrder,
+    watchOrder,
     orders,
   } = useStore()
 
   const shopPath = useShopPath()
+  const [params] = useSearchParams()
 
   const product = products.find((p) => p.id === productId)
 
@@ -93,6 +95,22 @@ export default function Buy() {
     [orderId, orders],
   )
 
+  /**
+   * Re-enter at the receipt: /buy/:productId?order=<id>.
+   *
+   * Used by the return trip from Paystack, so a paid order lands on the same
+   * receipt — with the same delivery watching and the same wording — as one paid
+   * from the wallet. The alternative was a second copy of this screen on the
+   * payment page, which would drift out of step with this one.
+   */
+  const resumeId = params.get('order')
+  useEffect(() => {
+    if (!resumeId || orderId) return
+    setOrderId(resumeId)
+    setStep(3)
+    watchOrder(resumeId)
+  }, [resumeId, orderId, watchOrder])
+
   if (!product) {
     return (
       <div className="mx-auto max-w-lg px-4 py-16">
@@ -121,32 +139,6 @@ export default function Buy() {
 
   const check = recipient.trim() ? checkPhone(recipient) : null
 
-  /**
-   * The number belongs to a different carrier than the bundle. This stops the
-   * order.
-   *
-   * It used to be a warning the buyer could click past, on the grounds that a
-   * ported number keeps its old prefix and would still work. That reasoning is
-   * sound and the outcome was still wrong: almost everyone who saw it was about
-   * to send an MTN bundle to a Telecel line, pay for it, wait, and get a refund
-   * instead of data.
-   *
-   * A ported number is refused by this rule, and there is no check that can
-   * rescue it — DataHub's /verify reports beneficiary-list membership, not which
-   * network carries a number. An unrecognised prefix is deliberately NOT blocked:
-   * `check.network` is null there, and not knowing a range is our gap rather
-   * than the customer's.
-   *
-   * The server enforces this too, in orders.service. This copy only saves the
-   * buyer a round trip.
-   */
-  const wrongNetwork =
-    check?.ok && check.network && product.network && check.network !== product.network
-      ? {
-          detected: check.network,
-          message: `${prettyPhone(check.phone)} is a ${check.network} number and this is a ${product.network} bundle. Choose a ${check.network} bundle for this number.`,
-        }
-      : null
   const receiptCheck = ownNumber ? check : buyerPhone.trim() ? checkPhone(buyerPhone) : null
 
   const isCustomer = session?.role === 'customer'
@@ -178,6 +170,21 @@ export default function Buy() {
         payWith,
         sellerCode: effectiveSeller,
       })
+      if (order.paymentUrl) {
+        // Off to Paystack to actually pay. `replace` rather than `assign` so the
+        // back button does not land them on a confirm screen for an order that
+        // already exists — they would place a second one.
+        //
+        // The reference is remembered because the return trip carries only that,
+        // and the receipt has to be findable again afterwards.
+        window.sessionStorage.setItem(
+          'jdc.pendingOrder',
+          JSON.stringify({ orderId: order.id, productId: product.id }),
+        )
+        window.location.replace(order.paymentUrl)
+        return
+      }
+
       setOrderId(order.id)
       setStep(3)
     } catch (caught) {
@@ -247,9 +254,7 @@ export default function Buy() {
           <Field
             label={isChecker ? 'Phone number for the voucher SMS' : 'Recipient phone number'}
             htmlFor="recipient"
-            error={
-              touched && check?.ok === false ? check.reason : (wrongNetwork?.message ?? undefined)
-            }
+            error={touched && check?.ok === false ? check.reason : undefined}
             hint={
               isChecker
                 ? 'We send the serial and PIN here, and show them on screen.'
@@ -264,19 +269,14 @@ export default function Buy() {
                 autoComplete="tel"
                 placeholder="024 000 0000"
                 value={recipient}
-                invalid={(touched && check?.ok === false) || Boolean(wrongNetwork)}
+                invalid={touched && check?.ok === false}
                 onChange={(event) => {
                   setRecipient(event.target.value)
                   setNeedsSetup(false)
                 }}
                 onBlur={() => setTouched(true)}
-                className="pr-28 text-lg tracking-wide"
+                className="text-lg tracking-wide"
               />
-              {check?.ok && (
-                <span className="absolute inset-y-0 right-2.5 flex items-center">
-                  <NetworkChip network={check.network} />
-                </span>
-              )}
             </div>
           </Field>
 
@@ -285,12 +285,12 @@ export default function Buy() {
             size="lg"
             className="mt-4"
             loading={checking}
-            disabled={checking || !check?.ok || Boolean(wrongNetwork)}
+            disabled={checking || !check?.ok}
             /* `needsSetup` deliberately does NOT disable this. It is something to
                know before paying, not a reason to be turned away. */
             onClick={() => {
               setTouched(true)
-              if (!check?.ok || wrongNetwork) return
+              if (!check?.ok) return
 
               // Ask the provider whether this number is set up yet, purely so
               // the next screen can say so before any money changes hands.
@@ -334,7 +334,7 @@ export default function Buy() {
               {prettyPhone(check.phone)}
             </p>
             <div className="mt-2 flex justify-center">
-              <NetworkChip network={check.network} />
+              <NetworkChip network={product.network} />
             </div>
           </div>
 
@@ -650,11 +650,30 @@ export default function Buy() {
                     buyer chasing the wrong thing — and sent us chasing it too.
                     The real reason is on the order's dispatch log, for admin. */}
                 <p className="mt-0.5 text-sm text-red-100">
-                  Nothing was taken from you — your money is on its way back.
+                  {placed.refunded
+                    ? 'Nothing was lost — your money has been returned.'
+                    : 'Nothing was lost — your money is owed back to you.'}
                 </p>
               </div>
               <div className="space-y-4 p-5">
-                {placed.paidWith === 'wallet' ? (
+                {/* Two different truths, and saying the wrong one is the problem.
+                    A refund is authorised by a person now, so until that happens
+                    the money is *owed*, not returned — and telling a customer it
+                    is already back when it is not is the fastest way to lose
+                    their trust twice. */}
+                {!placed.refunded ? (
+                  <Callout
+                    tone="info"
+                    title="Your refund is being arranged"
+                    icon={<ClockIcon className="size-4" />}
+                  >
+                    {cedis(placed.salePrice)} is owed back to you and has been logged for approval.
+                    Refunds are checked by a person rather than sent automatically, so this usually
+                    takes a few hours. You do not need to ask — we will text{' '}
+                    <strong className="tabular font-bold">{placed.buyerPhone}</strong> when it is
+                    done.
+                  </Callout>
+                ) : placed.paidWith === 'wallet' ? (
                   <Callout
                     tone="success"
                     title="Refunded to your wallet"
@@ -666,7 +685,7 @@ export default function Buy() {
                 ) : (
                   <Callout
                     tone="success"
-                    title="Your money is being returned"
+                    title="Your money is ready to claim"
                     icon={<CheckIcon className="size-4" />}
                   >
                     {cedis(placed.salePrice)} is held as credit against{' '}
@@ -678,7 +697,11 @@ export default function Buy() {
                 <dl className="space-y-2.5 text-sm">
                   <Line label="Reference" value={placed.reference} />
                   <Line label="Recipient" value={prettyPhone(placed.recipient)} />
-                  <Line label="Being returned" value={cedis(placed.salePrice)} strong />
+                  <Line
+                    label={placed.refunded ? 'Returned' : 'Owed back to you'}
+                    value={cedis(placed.salePrice)}
+                    strong
+                  />
                 </dl>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Button

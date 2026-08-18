@@ -22,7 +22,13 @@ import {
 } from '../../components/ui'
 import { AlertIcon, CashIcon, ClockIcon } from '../../components/icons'
 
-/** FR-2.6 — request a payout; approval is manual for v1. */
+/**
+ * FR-2.6 — request a payout.
+ *
+ * The amount leaves the agent's balance when the request is made, so it cannot be
+ * spent twice while it waits. James approves it and sends the MoMo; a rejection
+ * puts it straight back.
+ */
 export default function Withdrawals() {
   const { agentBalance: balance, withdrawals, requestWithdrawal, session } = useStore()
   const [open, setOpen] = useState(false)

@@ -124,8 +124,16 @@ interface Store {
   balance: number
 
   orders: Order[]
-  placeOrder: (input: PlaceOrderInput) => Promise<Order>
+  /** Resolves with `paymentUrl` set when the customer still has to pay. */
+  placeOrder: (input: PlaceOrderInput) => Promise<Order & { paymentUrl?: string }>
   findOrder: (reference: string, phone: string) => Promise<Order | undefined>
+  /**
+   * Start polling an order until it settles.
+   *
+   * Exposed for the return trip from Paystack: the order was placed on a previous
+   * page load, so nothing is watching it, and the receipt has to pick that up.
+   */
+  watchOrder: (orderId: string) => void
   /** Re-read everything for the signed-in user. */
   refresh: () => Promise<void>
 
@@ -683,13 +691,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     : `Sent to ${fresh.recipient}. An SMS confirmation is on its way.`,
               })
             } else {
+              // Careful with the tense. A refund is authorised by a person, so
+              // at this moment the money is owed rather than returned.
               pushToast({
                 tone: 'error',
-                title: 'Order failed — the money is coming back',
-                detail:
-                  fresh.paidWith === 'wallet'
+                title: fresh.refunded
+                  ? 'Order failed — your money is back'
+                  : 'Order failed — your money is owed back to you',
+                detail: fresh.refunded
+                  ? fresh.paidWith === 'wallet'
                     ? `${(fresh.salePrice / 100).toFixed(2)} cedis went back to your wallet.`
-                    : `${(fresh.salePrice / 100).toFixed(2)} cedis is held for ${fresh.buyerPhone}. An SMS with the claim link is on its way.`,
+                    : `${(fresh.salePrice / 100).toFixed(2)} cedis is held for ${fresh.buyerPhone}. An SMS with the claim link is on its way.`
+                  : `${(fresh.salePrice / 100).toFixed(2)} cedis is logged for refund. We will text you when it is done.`,
               })
             }
 
@@ -743,7 +756,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       buyerPhone,
       payWith,
       sellerCode: code,
-    }: PlaceOrderInput): Promise<Order> => {
+    }: PlaceOrderInput): Promise<Order & { paymentUrl?: string }> => {
       const order = await api.placeOrder({
         productId: product.id,
         recipient,
@@ -762,7 +775,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setCustomerBalance((balance) => Math.max(0, balance - order.salePrice))
       }
 
-      watchOrder(order.id)
+      // Only watch an order that is actually on its way. One waiting to be paid
+      // for resolves through the payment return, not by polling — and polling it
+      // would just burn requests until the watcher gave up.
+      if (order.status !== 'awaiting_payment') watchOrder(order.id)
       return order
     },
     [watchOrder],
@@ -879,6 +895,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       balance,
       orders,
       placeOrder,
+      watchOrder,
       findOrder,
       refresh,
       products,
@@ -957,6 +974,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       topUpWallet,
       transactions,
       updateProductTier,
+      watchOrder,
       users,
       withdrawals,
     ],

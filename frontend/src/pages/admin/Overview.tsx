@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import ReservePanel from './ReservePanel'
 import { useStore } from '../../state/store'
 import { cedis, cedisCompact, dateTime } from '../../lib/format'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
@@ -161,6 +162,8 @@ export default function Overview() {
           icon={<ReceiptIcon className="size-5" />}
         />
       </div>
+
+      <ReservePanel />
 
       <div className="mt-3 grid gap-3 lg:grid-cols-5">
         <Card className="lg:col-span-3">

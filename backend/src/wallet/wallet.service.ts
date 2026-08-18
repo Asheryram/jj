@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { Network } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
+import { PaymentsService } from '../payments/payments.service'
 import { toTransaction } from '../common/mappers'
 import { ValidationError } from '../common/domain-errors'
 
@@ -16,6 +17,7 @@ export class WalletService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly payments: PaymentsService,
   ) {}
 
   private get paystackLive(): boolean {
@@ -42,13 +44,15 @@ export class WalletService {
   /**
    * FR-2.2 — top up.
    *
-   * With no Paystack key this credits the wallet directly, which is the correct
-   * stand-in for acceptance testing but is NOT the production flow. Live, the
-   * client initialises a transaction, the user pays, and the wallet is credited
-   * only from the verified webhook — the browser saying "it worked" is never
-   * proof of payment (skills-breakdown.md §4.4.2). The seam is here: swap the
-   * body of this method for `initialise()` returning an authorisation URL, and
-   * move the credit into the webhook handler.
+   * With a Paystack key this returns somewhere to pay and credits nothing: the
+   * wallet moves only when Paystack tells our server the money arrived, through
+   * a signed webhook or our own verify call. The browser saying "it worked" is
+   * never proof of payment (skills-breakdown.md §4.4.2).
+   *
+   * Without a key it credits directly, which is the right stand-in for
+   * acceptance testing and is announced at boot. It used to *refuse* when a key
+   * was present, which was the safe half of the job and left the wallet unusable
+   * the moment real credentials arrived.
    */
   async topUp(userId: string, amount: number, network: Network) {
     if (!Number.isInteger(amount) || amount < MIN_TOPUP) {
@@ -61,12 +65,14 @@ export class WalletService {
     }
 
     if (this.paystackLive) {
-      // Refuse rather than credit for free. If a key is configured, somebody
-      // expects real money to move, and silently faking it here would be the
-      // free-money bug the skills doc warns about.
-      throw new ValidationError(
-        'Paystack is configured, so top-ups must go through the payment flow. Direct crediting is disabled.',
-      )
+      // Real money. Hand back a payment page; the credit happens on confirmation.
+      const user = await this.prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { id: true, phone: true, email: true },
+      })
+      const { reference, paymentUrl } = await this.payments.startTopUp(user, amount)
+      this.log.log(`top-up ${reference} started: ${amount}p for ${userId}`)
+      return { paymentUrl, reference }
     }
 
     const reference = `PSK-${Date.now().toString(36).toUpperCase()}${Math.floor(Math.random() * 90 + 10)}`

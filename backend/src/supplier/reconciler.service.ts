@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { FulfilmentService } from '../orders/fulfilment.service'
+import { PaymentsService } from '../payments/payments.service'
 import { SupplierService } from './supplier.service'
 import { DatahubClient, mapProviderStatus } from './datahub.client'
 
@@ -59,6 +60,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     private readonly datahub: DatahubClient,
     private readonly supplier: SupplierService,
     private readonly fulfilment: FulfilmentService,
+    private readonly payments: PaymentsService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -73,12 +75,47 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
-   * Refund orders that have waited too long for an approval that never came.
+   * Close out checkouts nobody paid for — and rescue the ones they did.
    *
-   * The customer paid for a bundle we could not deliver. Whatever the reason
-   * sits with the provider, the obligation is ours, and it is settled through
-   * the ordinary rejection path so the refund lands in exactly the same ledger
-   * code as any other failed order.
+   * A customer who opens the Paystack page and walks away leaves an order in
+   * `awaiting_payment` for ever, which clutters every report with sales that
+   * never happened. Asking Paystack settles it either way: they say `abandoned`
+   * and the order closes, or they say `success` — a payment whose webhook went
+   * missing — and it is fulfilled, late but correctly.
+   *
+   * Deliberately generous with the delay. Mobile Money in Ghana involves the
+   * customer leaving the browser to approve a prompt on their handset, and
+   * closing an order out from under someone still typing their PIN would be
+   * worse than leaving it open a while.
+   */
+  private async resolveAbandonedPayments(): Promise<number> {
+    const cutoff = new Date(Date.now() - 15 * 60_000)
+    const stale = await this.prisma.order.findMany({
+      where: { status: 'awaiting_payment', createdAt: { lt: cutoff } },
+      select: { reference: true },
+      take: 25,
+      orderBy: { createdAt: 'asc' },
+    })
+
+    let resolved = 0
+    for (const order of stale) {
+      const result = await this.payments.confirm(order.reference).catch(() => null)
+      if (!result || result.status === 'pending') continue
+      this.log.log(`${order.reference}: checkout resolved as ${result.status}`)
+      resolved++
+    }
+
+    return resolved
+  }
+
+  /**
+   * Give up on approvals that never came, and record what is owed.
+   *
+   * The customer paid for a bundle we could not deliver. Whatever the reason sits
+   * with the provider, the obligation is ours — so this closes the order through
+   * the ordinary rejection path, which queues a refund request for authorisation.
+   * It does not pay anybody: money leaving is a decision, and a background job on
+   * a timer is not in a position to make it.
    */
   private async expireStaleApprovals(): Promise<number> {
     const holdMs = this.approvalHoldMs
@@ -94,7 +131,8 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
 
     for (const order of expired) {
       this.log.warn(
-        `${order.reference}: ${order.recipient} was never approved within the hold — refunding`,
+        `${order.reference}: ${order.recipient} was never approved within the hold — ` +
+          'closing the order and queueing a refund for approval',
       )
       await this.fulfilment.settleFromProvider(
         order.id,
@@ -111,7 +149,13 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * test, rather than only on the clock.
    */
   async sweep(): Promise<{ checked: number; settled: number }> {
-    if (!this.supplier.isLive) return { checked: 0, settled: 0 }
+    // Payments do not depend on the supplier being live — money can be owed and
+    // owing whether or not DataHub is simulated — so these run before the guard
+    // below rather than being switched off with it.
+    let settled = await this.resolveAbandonedPayments()
+    settled += await this.expireStaleApprovals()
+
+    if (!this.supplier.isLive) return { checked: 0, settled }
 
     const cutoff = new Date(Date.now() - this.graceMs)
     const waiting = await this.prisma.order.findMany({
@@ -125,9 +169,6 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       take: 25,
       orderBy: { createdAt: 'asc' },
     })
-
-    let settled = 0
-    settled += await this.expireStaleApprovals()
 
     for (const order of waiting) {
       const result = await this.datahub.orderStatus(order.providerReference as string)

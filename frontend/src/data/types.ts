@@ -13,6 +13,8 @@ export type Category = 'data' | 'airtime' | 'voice' | 'sms' | 'afa' | 'checker'
 
 /** FR-4.4 — the only legal order states. */
 export type OrderStatus =
+  /** Placed, but the customer has not paid yet. Nothing is delivered from here. */
+  | 'awaiting_payment'
   | 'pending'
   | 'processing'
   /** Paid for, held until the provider approves the recipient's number. */
