@@ -25,6 +25,29 @@ export const API_URL = (
   (import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
 ).replace(/\/$/, '')
 
+/**
+ * Is the API behind a free dev tunnel?
+ *
+ * ngrok's free plan answers the first request from a browser with its own HTML
+ * interstitial instead of passing it through. To `fetch` that is a 200 full of
+ * HTML where JSON was expected, so every call fails in a way that looks like the
+ * API is broken rather than like a tunnel is in the way. One documented header
+ * opts out of it.
+ *
+ * Matched on the host rather than sent always, so a real deployment does not
+ * carry a header addressed to a vendor that is not involved.
+ */
+const THROUGH_TUNNEL =
+  /\.(ngrok-free\.(app|dev)|ngrok\.(app|io)|trycloudflare\.com|loca\.lt)$/.test(
+    (() => {
+      try {
+        return new URL(API_URL).hostname
+      } catch {
+        return '' // a relative '/api' — same origin, no tunnel involved
+      }
+    })(),
+  )
+
 const TOKEN_KEY = 'jdc.token'
 
 export const token = {
@@ -74,6 +97,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const headers: Record<string, string> = {}
 
   if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (THROUGH_TUNNEL) headers['ngrok-skip-browser-warning'] = 'true'
 
   const stored = auth ? token.get() : null
   if (stored) headers.Authorization = `Bearer ${stored}`
