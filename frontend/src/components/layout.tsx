@@ -89,7 +89,7 @@ interface NavItem {
  * from them the very numbers they went there to see.
  */
 function navFor(role: Role, shopPath: (path: string) => string): NavItem[] {
-  if (role === 'admin') {
+  if (role === 'admin' || role === 'superadmin') {
     return [
       { to: '/admin', label: 'Overview', icon: HomeIcon, end: true },
       { to: '/admin/orders', label: 'All orders', icon: ReceiptIcon },
@@ -100,6 +100,11 @@ function navFor(role: Role, shopPath: (path: string) => string): NavItem[] {
       { to: '/admin/branding', label: 'Branding', icon: StoreIcon },
       { to: '/admin/withdrawals', label: 'Withdrawals', icon: CashIcon },
       { to: '/admin/settings', label: 'Settings', icon: SettingsIcon },
+      // Platform access belongs to the operator, not the business owner. An
+      // admin must not be shown a door they cannot open.
+      ...(role === 'superadmin'
+        ? [{ to: '/admin/team', label: 'Platform team', icon: ShieldIcon }]
+        : []),
     ]
   }
 
@@ -119,10 +124,17 @@ function navFor(role: Role, shopPath: (path: string) => string): NavItem[] {
     ]
   }
 
+  /**
+   * The customer menu, minus the wallet.
+   *
+   * Customer accounts are no longer created — a buyer pays per order with Mobile
+   * Money and needs none — so this is only ever seen by an account that predates
+   * that. The wallet entry is gone because there is nothing to top it up with;
+   * leaving it would be a link to a page that can only refuse.
+   */
   return [
     { to: '/app', label: 'Dashboard', icon: HomeIcon, end: true },
     { to: shopPath('/shop'), label: 'Buy', icon: StoreIcon },
-    { to: '/app/wallet', label: 'Wallet', icon: WalletIcon },
     { to: '/app/orders', label: 'Orders', icon: ReceiptIcon },
     { to: '/app/reports', label: 'My spending', icon: ChartIcon },
   ]
@@ -143,7 +155,28 @@ export function RequireAuth({ role }: { role?: Role }) {
   const location = useLocation()
 
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname }} />
-  if (role && session.role !== role) return <Navigate to="/app" replace />
+
+  // A superadmin satisfies an `admin` gate, mirroring the server's guard. Without
+  // this the operator could reach the API but not the screens that call it.
+  const allowed = !role || session.role === role || (session.role === 'superadmin' && role === 'admin')
+  if (!allowed) return <Navigate to="/app" replace />
+
+  /**
+   * An agent who has not been approved sees one screen, whatever they navigate to.
+   *
+   * Not a redirect loop risk: `/app/status` is reached through this same guard and
+   * is excluded below. Enforcing it here rather than page by page means a new agent
+   * screen cannot forget to check — and every one of them would be broken for a
+   * pending agent anyway, since their code does not resolve as a seller.
+   */
+  if (
+    session.role === 'agent' &&
+    session.status !== 'active' &&
+    location.pathname !== '/app/status'
+  ) {
+    return <Navigate to="/app/status" replace />
+  }
+
   return <Outlet />
 }
 

@@ -142,7 +142,14 @@ export default function Buy() {
   const receiptCheck = ownNumber ? check : buyerPhone.trim() ? checkPhone(buyerPhone) : null
 
   const isCustomer = session?.role === 'customer'
-  const canUseWallet = isCustomer && customerBalance >= price
+  /**
+   * Wallets are not in use, so there is nothing to pay from but Mobile Money.
+   *
+   * Kept as a constant rather than deleting the branch below: the payment step is
+   * the highest-stakes screen in the product, and a one-line switch is far easier
+   * to review — and to reverse — than surgery on it.
+   */
+  const canUseWallet = false
   const meta = CATEGORY_META[product.category]
   const isChecker = product.category === 'checker'
 
@@ -685,13 +692,12 @@ export default function Buy() {
                 ) : (
                   <Callout
                     tone="success"
-                    title="Your money is ready to claim"
+                    title="Your money has been sent back"
                     icon={<CheckIcon className="size-4" />}
                   >
-                    {cedis(placed.salePrice)} is held as credit against{' '}
-                    <strong className="tabular font-bold">{placed.buyerPhone}</strong>. We have sent
-                    an SMS with a link to claim it as a wallet balance or have it sent back to your
-                    Mobile Money.
+                    {cedis(placed.salePrice)} has been sent to{' '}
+                    <strong className="tabular font-bold">{placed.buyerPhone}</strong> — the same
+                    number you paid from. Mobile Money usually lands within a few minutes.
                   </Callout>
                 )}
                 <dl className="space-y-2.5 text-sm">

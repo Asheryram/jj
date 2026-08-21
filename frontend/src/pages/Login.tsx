@@ -107,10 +107,11 @@ export default function Login() {
         </form>
 
         <div className="mt-4 flex items-center justify-between text-sm">
-          {/* FR-1.4 */}
-          <button type="button" className="font-medium text-brand-700 hover:underline">
+          {/* FR-1.4. This was a button wired to nothing — it looked like a working
+              reset and was the reason nobody noticed there was not one. */}
+          <Link to="/forgot-password" className="font-medium text-brand-700 hover:underline">
             Forgot password?
-          </button>
+          </Link>
           <Link to="/register" className="font-medium text-brand-700 hover:underline">
             Create an account
           </Link>

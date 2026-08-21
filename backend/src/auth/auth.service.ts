@@ -36,6 +36,20 @@ export class AuthService {
       )
     }
 
+    if (user.status === 'rejected') {
+      // The reason, if there is one. Being turned down and told nothing is worse
+      // than being turned down.
+      throw new ForbiddenError(
+        user.statusNote
+          ? `This application was not approved: ${user.statusNote}`
+          : 'This application was not approved. Contact James on 020 987 6543.',
+      )
+    }
+
+    // `pending` is deliberately allowed through. A waiting agent signing in and
+    // being told their password is wrong would send them round in circles; they
+    // are let in, and the app shows them what they are waiting for.
+
     return this.issue(user)
   }
 
@@ -84,6 +98,20 @@ export class AuthService {
         // A new agent's default markup. They can price per product afterwards.
         markupPercent: 8,
         balance: 0,
+        /**
+         * An agent applies; a customer simply signs up.
+         *
+         * The difference is what the account can do. A customer spends their own
+         * money and represents nobody, so approving them would be a queue for
+         * its own sake. An agent sells under the platform's name, sets prices
+         * customers pay, and accrues money the platform owes them — that is a
+         * relationship somebody should agree to before it starts.
+         *
+         * Both places that resolve a seller already require `active`, so a
+         * pending agent's shop link does not sell and no order can be attributed
+         * to them. Nothing else had to change to make this safe.
+         */
+        status: dto.accountType === 'agent' ? 'pending' : 'active',
       },
     })
 

@@ -3,6 +3,7 @@ import { api, ApiError, type RefundRequest } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import { prettyPhone } from '../../lib/networks'
+import type { Network } from '../../data/types'
 import {
   Badge,
   Button,
@@ -44,6 +45,7 @@ export default function Refunds() {
   const [filter, setFilter] = useState<Filter>('pending')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [rejecting, setRejecting] = useState<RefundRequest | null>(null)
+  const [sending, setSending] = useState<RefundRequest | null>(null)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -61,18 +63,18 @@ export default function Refunds() {
 
   const owed = (rows ?? []).reduce((sum, row) => sum + row.amount, 0)
 
-  const approve = async (row: RefundRequest) => {
+  const approve = async (row: RefundRequest, momoNetwork?: Network) => {
     setBusyId(row.id)
     try {
-      await api.approveRefund(row.id)
+      await api.approveRefund(row.id, momoNetwork)
       await load()
       pushToast({
         tone: 'success',
-        title: `${cedis(row.amount)} refunded`,
+        title: `${cedis(row.amount)} on its way back`,
         detail:
           row.method === 'wallet'
             ? `Back in ${row.buyerName}'s wallet.`
-            : `Held for ${prettyPhone(row.buyerPhone)} to claim. Send them the link.`,
+            : `Sent to ${prettyPhone(row.buyerPhone)} on ${momoNetwork}. We will confirm when it lands.`,
       })
     } catch (caught) {
       pushToast({
@@ -174,12 +176,26 @@ export default function Refunds() {
                       <p className="max-w-xs text-sm text-slate-700">{row.reason}</p>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <Badge tone="neutral">
-                          {row.method === 'wallet' ? 'to wallet' : 'claim link'}
+                          {row.method === 'wallet'
+                            ? 'to wallet'
+                            : row.method === 'transfer'
+                              ? `to ${row.momoNetwork ?? 'Mobile Money'}`
+                              : 'claim link'}
                         </Badge>
                         <span className="text-xs text-slate-500">{dateTime(row.createdAt)}</span>
                       </div>
                       {row.note && (
                         <p className="mt-1 text-xs text-red-700">Refused: {row.note}</p>
+                      )}
+                      {/* A transfer that did not go says so here, rather than
+                          looking like an approval that quietly achieved nothing. */}
+                      {row.transferNote && (
+                        <p className="mt-1 text-xs text-amber-700">{row.transferNote}</p>
+                      )}
+                      {row.transferStatus === 'success' && (
+                        <p className="mt-1 text-xs text-emerald-700">
+                          Confirmed delivered{row.paidAt ? ` · ${dateTime(row.paidAt)}` : ''}
+                        </p>
                       )}
                     </Td>
                     <Td align="right" className="tabular font-bold text-slate-900">
@@ -191,7 +207,11 @@ export default function Refunds() {
                           <Button
                             size="sm"
                             loading={busyId === row.id}
-                            onClick={() => void approve(row)}
+                            onClick={() =>
+                              row.method === 'transfer'
+                                ? setSending(row)
+                                : void approve(row)
+                            }
                           >
                             Refund
                           </Button>
@@ -212,6 +232,15 @@ export default function Refunds() {
           )}
         </div>
       </Card>
+
+      <SendRefundModal
+        request={sending}
+        onClose={() => setSending(null)}
+        onSend={async (row, network) => {
+          setSending(null)
+          await approve(row, network)
+        }}
+      />
 
       <RefuseModal
         request={rejecting}
@@ -307,6 +336,80 @@ function RefuseModal({
             Refuse refund
           </Button>
           <Button block disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * Which network to send a Mobile Money refund on.
+ *
+ * Asked rather than guessed. Ghana's number portability means a prefix cannot
+ * tell you which network carries a line — the platform used to guess and turned
+ * real customers away for it — so the person looking at the order picks the rail.
+ * They can usually just ask the customer.
+ *
+ * The number is shown large and unmissable, because it is the whole identity of
+ * the person being paid: a guest has no account, and this is where the money
+ * goes.
+ */
+function SendRefundModal({
+  request,
+  onClose,
+  onSend,
+}: {
+  request: RefundRequest | null
+  onClose: () => void
+  onSend: (row: RefundRequest, network: Network) => Promise<void>
+}) {
+  const [network, setNetwork] = useState<Network>('MTN')
+
+  const key = request?.id ?? 'none'
+  const [lastKey, setLastKey] = useState(key)
+  if (key !== lastKey) {
+    setLastKey(key)
+    setNetwork('MTN')
+  }
+
+  if (!request) return null
+
+  return (
+    <Modal open onClose={onClose} title={`Send ${cedis(request.amount)} back`}>
+      <div className="space-y-4">
+        <div className="rounded-xl border-2 border-brand-200 bg-brand-50 p-4 text-center">
+          <p className="text-sm text-brand-900">Sending to</p>
+          <p className="tabular mt-1 text-2xl font-bold tracking-wide text-brand-900">
+            {prettyPhone(request.buyerPhone)}
+          </p>
+          <p className="mt-1 text-sm text-brand-900">{request.buyerName}</p>
+        </div>
+
+        <Field label="Which Mobile Money network?" htmlFor="refund-network">
+          <Segmented<Network>
+            className="w-full"
+            options={[
+              { value: 'MTN', label: 'MTN' },
+              { value: 'Telecel', label: 'Telecel' },
+              { value: 'AirtelTigo', label: 'AirtelTigo' },
+            ]}
+            value={network}
+            onChange={setNetwork}
+          />
+        </Field>
+
+        <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
+          We cannot tell the network from the number — a Ghanaian line keeps its number when it
+          moves. If you are not sure, ask them before sending.
+        </Callout>
+
+        <div className="flex gap-2">
+          <Button block onClick={() => void onSend(request, network)}>
+            Send {cedis(request.amount)}
+          </Button>
+          <Button block variant="outline" onClick={onClose}>
             Cancel
           </Button>
         </div>

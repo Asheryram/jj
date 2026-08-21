@@ -1,0 +1,76 @@
+# Render blueprint for the API and its database.
+#
+# Committed so the deploy is reproducible rather than a set of settings somebody
+# typed into a dashboard once. Render is one option among several — Railway or
+# Fly.io would work the same way — but the API needs a host that keeps a process
+# running, and this file records what that host has to provide.
+#
+# The front end is not here. It goes to Vercel as a static build; see
+# frontend/DEPLOY.md.
+
+databases:
+  - name: jdc-postgres
+    databaseName: jdc
+    user: jdc
+    # 17 to match docker-compose.yml. The schema leans on enums heavily and this
+    # has had values added to live enums repeatedly, so matching the development
+    # major version keeps `migrate deploy` predictable.
+    postgresMajorVersion: '17'
+    # Not the free tier. This holds the ledger, agent balances and every payment
+    # reference; the free plan has no backups and is deleted after 30 days.
+    plan: basic-256mb
+
+services:
+  - type: web
+    name: jdc-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    # Never the free plan for this service. A free instance sleeps when idle, and
+    # this API is not idle when nobody is clicking: the reconciler sweeps every
+    # 60 seconds for payments whose webhook never arrived, and orders are
+    # dispatched on a timer after the payment confirms. Asleep, a customer is
+    # charged and the bundle is never ordered.
+    plan: starter
+    healthCheckPath: /api/health
+    region: frankfurt # nearest to Ghana of the available regions
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: jdc-postgres
+          property: connectionString
+
+      # ── Set these in the dashboard; they are secrets or they are per-deploy ──
+      # sync: false means Render prompts rather than storing a value in git.
+      - key: JWT_SECRET
+        sync: false # 32+ characters, or the app refuses to boot
+      - key: SUPERADMIN_EMAIL
+        sync: false # who gets the first setup link
+      - key: PUBLIC_APP_URL
+        sync: false # the Vercel domain — where Paystack returns customers
+      - key: CORS_ORIGINS
+        sync: false # the Vercel domain, exactly
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: DATAHUB_API_KEY
+        sync: false
+      - key: DATAHUB_BASE_URL
+        sync: false # must end in /api — see supplier/datahub.client.ts
+      - key: DATAHUB_LIVE
+        sync: false
+      - key: DATAHUB_WEBHOOK_SECRET
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM
+        sync: false

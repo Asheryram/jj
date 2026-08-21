@@ -36,7 +36,10 @@ export class CatalogueService {
         orderBy: [{ category: 'asc' }, { supplierCost: 'asc' }],
       }),
       this.pricing.agents(),
-      this.pricing.admin(),
+      // Tolerant on purpose: a fresh deployment has no admin until the
+      // superadmin creates one, and the shop still has to render for them to be
+      // able to do it. Placing an order still refuses — see pricing.admin().
+      this.pricing.adminOrNull(),
       this.settings.all(),
     ])
 

@@ -1,7 +1,9 @@
 import 'reflect-metadata'
 import { ValidationPipe, Logger } from '@nestjs/common'
 import { NestFactory } from '@nestjs/core'
+import type { NestExpressApplication } from '@nestjs/platform-express'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
+import helmet from 'helmet'
 import { AppModule } from './app.module'
 import { DomainExceptionFilter } from './common/domain-exception.filter'
 
@@ -9,26 +11,60 @@ async function bootstrap() {
   // rawBody is required, not optional: Paystack's webhook signature is an HMAC
   // over the unparsed body, and a re-serialised object does not match. It has to
   // be set at creation time, so this line is load-bearing for every payment.
-  const app = await NestFactory.create(AppModule, { rawBody: true })
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true })
 
   const isProduction = process.env.NODE_ENV === 'production'
+
+  /**
+   * Behind a managed host's load balancer, every request arrives from the proxy.
+   *
+   * Without this, `req.ip` is the proxy for all of them, so per-IP rate limiting
+   * would treat the whole internet as one client — either locking everyone out
+   * together or nobody at all. One hop, because that is what Render, Railway and
+   * Fly put in front of a service; trusting the whole chain would let a caller
+   * forge `X-Forwarded-For` and dodge the limit.
+   */
+  app.set('trust proxy', 1)
+
+  /**
+   * Standard security headers.
+   *
+   * This serves JSON, not HTML, so most of helmet is belt-and-braces — but
+   * `nosniff` and a denied frame ancestor are what stop a browser being talked
+   * into treating an API response as a document. CSP is left off outside
+   * production because it blocks the Swagger UI, which only runs in development.
+   */
+  app.use(
+    helmet({
+      contentSecurityPolicy: isProduction,
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  )
 
   const origins = (process.env.CORS_ORIGINS ?? 'http://localhost:5173')
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean)
 
+  /**
+   * Allow throwaway tunnel origins — but never by default in production.
+   *
+   * A rotating ngrok URL is the whole reason this is a function rather than the
+   * array: during development the origin changes on every restart. Live, that
+   * same rule is a hole, because anybody can stand a site up on
+   * trycloudflare.com and would then be talking to this API from a browser with
+   * the platform's own permissions. So production has to opt in by name, and
+   * ALLOW_TUNNEL_ORIGINS exists for the case where the real domain is not
+   * pointed yet.
+   */
+  const allowTunnels = !isProduction || process.env.ALLOW_TUNNEL_ORIGINS === 'true'
+  const tunnelHost =
+    /^https:\/\/[a-z0-9-]+\.(ngrok-free\.(app|dev)|ngrok\.(app|io)|trycloudflare\.com|loca\.lt)$/
+
   app.enableCors({
-    // A function rather than the array, so an ngrok tunnel origin is allowed
-    // without restarting the API every time the URL rotates.
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       if (!origin) return callback(null, true) // curl, same-origin, server-side
-      const ok =
-        origins.includes(origin) ||
-        /^https:\/\/[a-z0-9-]+\.(ngrok-free\.(app|dev)|ngrok\.(app|io)|trycloudflare\.com|loca\.lt)$/.test(
-          origin,
-        )
-      callback(null, ok)
+      callback(null, origins.includes(origin) || (allowTunnels && tunnelHost.test(origin)))
     },
     credentials: true,
   })
@@ -72,6 +108,12 @@ async function bootstrap() {
   await app.listen(port, '0.0.0.0')
 
   const log = new Logger('bootstrap')
+  if (isProduction && allowTunnels) {
+    log.warn(
+      'ALLOW_TUNNEL_ORIGINS is on in production — any ngrok or trycloudflare ' +
+        'site can call this API from a browser. Turn it off once your domain is live.',
+    )
+  }
   log.log(`API      http://localhost:${port}/api`)
   if (!isProduction) log.log(`Swagger  http://localhost:${port}/api/docs`)
   log.log(`Health   http://localhost:${port}/api/health`)

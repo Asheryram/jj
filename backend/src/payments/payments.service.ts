@@ -43,7 +43,7 @@ export class PaymentsService {
 
   /** Where Paystack sends the customer back to. */
   private callbackUrl(reference: string): string {
-    const base = (this.config.get<string>('PUBLIC_APP_URL') ?? 'http://localhost:5173').replace(
+    const base = (this.config.get<string>('PUBLIC_APP_URL')?.trim() || 'http://localhost:5173').replace(
       /\/$/,
       '',
     )
@@ -423,7 +423,168 @@ export class PaymentsService {
       return { applied: result.status === 'paid' }
     }
 
+    /**
+     * A payout landing, or not.
+     *
+     * Approving a withdrawal hands the transfer to Paystack; it is not delivered
+     * until they say so. Without this an approved payout would sit as "in flight"
+     * for ever, and a reversal three days later would go unnoticed while the
+     * agent's balance stayed debited for money they never received.
+     */
+    if (event === 'transfer.success' || event === 'transfer.failed' || event === 'transfer.reversed') {
+      return this.applyTransfer(event, reference)
+    }
+
     return { applied: false }
+  }
+
+  /**
+   * Settle a payout from Paystack's own report.
+   *
+   * `reference` is the one we sent — `WDR-<withdrawal id>` — so the withdrawal is
+   * found without trusting anything else in the payload.
+   *
+   * A failure or reversal returns the money to the agent, because it never
+   * reached them and their balance was debited when they asked. That path is
+   * shared with a synchronous refusal, so both leave the books in the same state.
+   */
+  /**
+   * Settle a customer refund that was sent by transfer.
+   *
+   * Success is the only thing that marks the order refunded: until Paystack
+   * confirms, the customer is told their refund is on its way, which is true,
+   * rather than that it arrived, which would not be.
+   *
+   * A failure puts the refund back in the queue rather than losing it. The
+   * customer is still owed, so it belongs with the other people waiting — and the
+   * ledger entry comes off, because nothing left the business.
+   */
+  private async applyRefundTransfer(
+    event: string,
+    refundId: string,
+  ): Promise<{ applied: boolean }> {
+    const row = await this.prisma.refundRequest.findUnique({ where: { id: refundId } })
+    if (!row) {
+      this.log.warn(`refund transfer webhook for unknown refund ${refundId}`)
+      return { applied: false }
+    }
+
+    // Paystack retries. Already settled means no-op, not a second anything.
+    if (row.transferStatus === 'success') return { applied: false }
+
+    if (event === 'transfer.success') {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.refundRequest.update({
+          where: { id: refundId },
+          data: { transferStatus: 'success', paidAt: new Date(), transferNote: null },
+        })
+        // Now, and only now, the receipt may say the money has gone back.
+        await tx.order.update({ where: { id: row.orderId }, data: { refunded: true } })
+      })
+      this.log.log(`refund ${row.orderRef} confirmed paid to ${row.buyerPhone}`)
+      return { applied: true }
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.refundRequest.update({
+        where: { id: refundId },
+        data: {
+          status: 'pending',
+          transferStatus: event === 'transfer.reversed' ? 'reversed' : 'failed',
+          transferNote:
+            event === 'transfer.reversed'
+              ? 'The refund was sent and then reversed. It is back in the queue to try again.'
+              : 'The refund transfer did not go through. It is back in the queue to try again.',
+        },
+      })
+      // Nothing left the business, so it must not sit on the books as a cost.
+      await tx.ledgerEntry.deleteMany({
+        where: { idempotencyKey: LedgerService.key('order', row.orderRef, 'refund') },
+      })
+    })
+
+    this.log.warn(`refund ${row.orderRef} ${event} — back in the queue`)
+    return { applied: true }
+  }
+
+  private async applyTransfer(
+    event: string,
+    reference: string,
+  ): Promise<{ applied: boolean }> {
+    // Two kinds of money leave this platform, and both are transfers: an agent
+    // payout (WDR-) and a customer refund (RFD-). The prefix says which, so one
+    // webhook settles both without guessing.
+    if (reference.startsWith('RFD-')) {
+      return this.applyRefundTransfer(event, reference.slice(4))
+    }
+
+    const id = reference.startsWith('WDR-') ? reference.slice(4) : null
+    if (!id) {
+      this.log.warn(`transfer webhook for a reference we did not issue: ${reference}`)
+      return { applied: false }
+    }
+
+    const row = await this.prisma.withdrawal.findUnique({ where: { id } })
+    if (!row) {
+      this.log.warn(`transfer webhook for unknown withdrawal ${id}`)
+      return { applied: false }
+    }
+
+    // Already settled. Paystack retries, so this must be a no-op rather than a
+    // second credit or a second reversal.
+    if (row.status === 'paid' || row.status === 'failed') {
+      return { applied: false }
+    }
+
+    if (event === 'transfer.success') {
+      await this.prisma.withdrawal.update({
+        where: { id },
+        data: { status: 'paid', transferStatus: 'success', paidAt: new Date() },
+      })
+      this.log.log(`payout ${id} confirmed paid to ${row.agentPhone}`)
+      return { applied: true }
+    }
+
+    // failed or reversed — the money is back with us, so it goes back to them.
+    await this.prisma.$transaction(async (tx) => {
+      const after = await tx.user.update({
+        where: { id: row.userId },
+        data: { balance: { increment: row.amount } },
+        select: { balance: true },
+      })
+
+      await tx.withdrawal.update({
+        where: { id },
+        data: {
+          status: 'failed',
+          transferStatus: event === 'transfer.reversed' ? 'reversed' : 'failed',
+          transferNote:
+            event === 'transfer.reversed'
+              ? 'The transfer was reversed after being sent. The amount is back in your balance.'
+              : 'The transfer did not go through. The amount is back in your balance.',
+        },
+      })
+
+      await tx.earning.create({
+        data: {
+          userId: row.userId,
+          type: 'withdrawal',
+          amount: row.amount,
+          balanceAfter: after.balance,
+          description: 'Payout did not reach you — amount returned to your balance',
+          reference: `WDR-${id.slice(0, 8).toUpperCase()}-R`,
+          depth: 0,
+        },
+      })
+
+      // No money left the platform, so the payout line comes off the books.
+      await tx.ledgerEntry.deleteMany({
+        where: { idempotencyKey: LedgerService.key('withdrawal', id, 'payout') },
+      })
+    })
+
+    this.log.warn(`payout ${id} ${event} — GHS ${(row.amount / 100).toFixed(2)} returned to the agent`)
+    return { applied: true }
   }
 }
 

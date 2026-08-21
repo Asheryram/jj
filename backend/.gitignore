@@ -2,3 +2,6 @@ node_modules/
 dist/
 .env
 *.log
+
+# Database dumps. These contain password hashes and customer records.
+backups/

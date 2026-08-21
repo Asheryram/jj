@@ -368,6 +368,8 @@ export function markupFromPrice(cost: Pesewas, price: Pesewas): BasisPoints {
 
 /** For display: 1517 → "15.17%", 1500 → "15%". */
 export function formatMarkup(markupBp: BasisPoints): string {
+  // A non-finite markup would render as the literal text "NaN%" on a price row.
+  if (!Number.isFinite(markupBp)) return '—'
   const percent = markupBp / 100
   return `${Number.isInteger(percent) ? percent : percent.toFixed(2)}%`
 }

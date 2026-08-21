@@ -135,6 +135,16 @@ export function toSession(row: User) {
     role: row.role,
     referralCode: row.referralCode,
     uplineCode: row.uplineCode,
+    /**
+     * Carried so the app can show an agent what they are waiting for.
+     *
+     * A pending agent is allowed to sign in — being told their password is wrong
+     * would send them round in circles — so the client needs to know that they
+     * are approved before it offers them selling tools they cannot use.
+     */
+    status: row.status,
+    /** Why an application was refused. Shown to them, so it travels with them. */
+    statusNote: row.statusNote,
   }
 }
 

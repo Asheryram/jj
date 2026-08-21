@@ -268,7 +268,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const snapshot = await api.catalogue()
     setProducts(snapshot.products)
     setRemoteAgents(snapshot.pricingAgents)
-    setAdmin(snapshot.admin)
+    // A fresh deployment has no admin until the superadmin creates one. Keep the
+    // placeholder rather than blanking the name, so the shop renders and they can
+    // get to the screen that fixes it.
+    if (snapshot.admin) setAdmin(snapshot.admin)
     setReferralEnabledState(snapshot.settings.referralEnabled)
     setReferralRateState(snapshot.settings.referralRatePercent)
   }, [])

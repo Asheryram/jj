@@ -22,10 +22,32 @@ enum Role {
   customer
   agent
   admin
+  /// The person who runs the platform itself, as opposed to the business on it.
+  ///
+  /// Exists so nobody has to be handed a password. A superadmin creates the admin
+  /// account and passes on a one-time setup link; the admin chooses their own
+  /// password and the superadmin never learns it. Before this, the only way an
+  /// admin existed was the seed creating one with a password published in
+  /// .env.example — fine on a laptop, and not something to put in production.
+  ///
+  /// A superadmin passes every `admin` check too. Splitting the powers would mean
+  /// the operator could create the business owner's account but not help them
+  /// when something broke.
+  superadmin
 }
 
 enum UserStatus {
+  /// Signed up and waiting to be approved. Agents start here.
+  ///
+  /// A pending agent can sign in and see that they are waiting, and can do
+  /// nothing else: both places that resolve a seller already require `active`,
+  /// so their shop link does not sell and no order can be attributed to them.
+  /// That gate existed before this state did, which is why adding it is safe.
+  pending
   active
+  /// Turned down, with a reason they are shown. Distinct from `suspended`: one
+  /// never traded, the other did and was stopped.
+  rejected
   suspended
 }
 
@@ -90,7 +112,17 @@ enum EarningType {
 
 enum WithdrawalStatus {
   pending
+  /// Authorised, and the transfer has been handed to Paystack.
+  ///
+  /// Not the end of the story: Paystack settles asynchronously, so an approved
+  /// withdrawal is money promised and in flight, not money delivered. It becomes
+  /// `paid` or `failed` when they say so.
   approved
+  /// Paystack confirmed the money reached the agent.
+  paid
+  /// The transfer was refused or reversed. The amount is returned to the agent's
+  /// balance, because it never left the platform.
+  failed
   rejected
 }
 
@@ -102,6 +134,13 @@ model User {
   passwordHash String?    @map("password_hash")
   role         Role
   status       UserStatus @default(active)
+
+  /// Why an application was turned down, in the words the applicant is shown.
+  /// Also carries a suspension note.
+  statusNote String?   @map("status_note")
+  /// When somebody decided, and who. Null while an application is waiting.
+  decidedAt  DateTime? @map("decided_at")
+  decidedBy  String?   @map("decided_by")
 
   /// FR-1.7 — unique per user, and the handle a sell link is built from.
   referralCode String  @unique @map("referral_code")
@@ -126,6 +165,7 @@ model User {
   payments         Payment[]
   branding         Branding?
   brandingRequests BrandingRequest[]
+  setupTokens      SetupToken[]
 
   @@index([uplineCode])
   @@index([role])
@@ -426,6 +466,18 @@ model Withdrawal {
   momoNetwork Network          @map("momo_network")
   status      WithdrawalStatus @default(pending)
 
+  /// Paystack's recipient handle for this agent's Mobile Money number. Reused
+  /// across payouts — creating one per withdrawal would litter their dashboard.
+  recipientCode  String?   @map("recipient_code")
+  /// Paystack's handle for the transfer itself, for looking a dispute up.
+  transferCode   String?   @map("transfer_code")
+  /// Their status verbatim: pending, success, failed, reversed, otp.
+  transferStatus String?   @map("transfer_status")
+  /// Why a transfer failed, in words that can be shown to the agent.
+  transferNote   String?   @map("transfer_note")
+  /// When Paystack confirmed the money left.
+  paidAt         DateTime? @map("paid_at")
+
   requestedAt DateTime  @default(now()) @map("requested_at")
   decidedAt   DateTime? @map("decided_at")
 
@@ -680,11 +732,20 @@ enum RefundStatus {
 }
 
 enum RefundMethod {
-  /// Straight back into the customer's wallet.
+  /// Sent back to the number that paid, as a Mobile Money transfer.
+  ///
+  /// The normal case, and the only one now that wallets are closed. The payer's
+  /// number is the identity — they have no account, and it is where the money
+  /// came from.
+  transfer
+  /// Straight back into a customer wallet. Kept for accounts that predate
+  /// wallets being closed.
   wallet
-  /// Held against their phone number for them to claim — a Mobile Money payer
-  /// has no wallet, and reversing a MoMo collection is neither instant nor
-  /// guaranteed.
+  /// Held against their number for them to claim.
+  ///
+  /// Retained only so historical rows still read. Never chosen now: nothing in
+  /// the platform ever implemented claiming, so money parked here could be
+  /// listed and never collected — a promise on a receipt with nothing behind it.
   claimable
 }
 
@@ -724,6 +785,24 @@ model RefundRequest {
   decidedAt DateTime? @map("decided_at")
   decidedBy String?   @map("decided_by")
   note      String?
+
+  /// Which Mobile Money network to pay back on.
+  ///
+  /// Chosen by whoever approves, not derived from the number. Ghana's number
+  /// portability means a prefix cannot tell you which network carries a line —
+  /// the platform used to guess and turned real customers away for it — so the
+  /// person with the order in front of them picks the rail.
+  momoNetwork Network? @map("momo_network")
+
+  /// Paystack's handles for the payout, mirroring Withdrawal.
+  recipientCode  String?   @map("recipient_code")
+  transferCode   String?   @map("transfer_code")
+  /// Their status verbatim: pending, success, failed, reversed, otp, manual.
+  transferStatus String?   @map("transfer_status")
+  /// Why a transfer did not go, in words that can be shown.
+  transferNote   String?   @map("transfer_note")
+  /// When Paystack confirmed the money reached them.
+  paidAt         DateTime? @map("paid_at")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -815,4 +894,43 @@ model BrandingRequest {
   @@index([status])
   @@index([userId])
   @@map("branding_requests")
+}
+
+enum SetupTokenPurpose {
+  /// A new account choosing its first password.
+  setup
+  /// An existing account that has forgotten it.
+  reset
+}
+
+/// A one-time link for setting a password.
+///
+/// The whole point is that a password is never transmitted, seeded, or known by
+/// anybody but its owner. A superadmin creating an admin mints one of these and
+/// hands over the link; the admin sets their own password; the token dies.
+///
+/// Three properties make it safe to send in a message:
+///
+///  · **Only the hash is stored.** A leaked database does not yield working
+///    links, the same reason `passwordHash` is not a password.
+///  · **Single use.** `usedAt` is set inside the same transaction that changes
+///    the password, so a link that is replayed does nothing.
+///  · **Short-lived.** A setup link outlives a working day; a reset link does
+///    not outlive an hour.
+model SetupToken {
+  id String @id @default(uuid())
+
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// SHA-256 of the token. Never the token itself.
+  tokenHash String            @unique @map("token_hash")
+  purpose   SetupTokenPurpose
+
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("setup_tokens")
 }

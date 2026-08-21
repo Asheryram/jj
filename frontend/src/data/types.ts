@@ -23,7 +23,18 @@ export type OrderStatus =
   | 'failed'
 
 /** FR-1.5 — Customer and Agent, with Admin as a separate elevated role. */
-export type Role = 'customer' | 'agent' | 'admin'
+export type Role =
+  | 'customer'
+  | 'agent'
+  | 'admin'
+  /**
+   * Runs the platform, as opposed to the business on it.
+   *
+   * Passes every admin check — see `satisfies` in the server's auth guard — so a
+   * superadmin sees the admin screens plus the platform team page. The reverse is
+   * never true: an admin cannot create accounts or change roles.
+   */
+  | 'superadmin'
 
 /** Movements against a customer wallet (FR-2.4). */
 export type TxType = 'topup' | 'purchase' | 'refund'
@@ -200,4 +211,15 @@ export interface Session {
   referralCode: string
   /** Referral code of this agent's upline. null means directly under James. */
   uplineCode: string | null
+  /**
+   * Whether this account may trade yet.
+   *
+   * An agent applies rather than simply signing up, so a new one is `pending`
+   * until approved. They are allowed to sign in — telling them their password is
+   * wrong would send them round in circles — so the app has to know not to offer
+   * selling tools that cannot work.
+   */
+  status: 'pending' | 'active' | 'rejected' | 'suspended'
+  /** Why an application was refused. Shown to them. */
+  statusNote: string | null
 }

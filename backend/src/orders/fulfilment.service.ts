@@ -333,7 +333,10 @@ export class FulfilmentService implements OnApplicationBootstrap {
             buyerName: order.buyer,
             buyerPhone: order.buyerPhone,
             amount: order.salePrice,
-            method: order.paidWith === 'wallet' && order.buyerUserId ? 'wallet' : 'claimable',
+            // A guest is paid back on the rail they paid from. `claimable`
+             // is never chosen any more: nothing ever implemented claiming, so
+             // money parked there could be listed and never collected.
+            method: order.paidWith === 'wallet' && order.buyerUserId ? 'wallet' : 'transfer',
             reason: reason ?? 'The delivery partner could not complete this order.',
           },
           // A second failure on the same order does not owe twice.

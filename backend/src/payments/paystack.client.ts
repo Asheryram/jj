@@ -187,6 +187,146 @@ export class PaystackClient {
   }
 
   /**
+   * A Mobile Money recipient, created once per agent number and reused.
+   *
+   * Ghana pays out to Mobile Money rather than a bank account, so `type` is
+   * `mobile_money` and `bank_code` is the network — MTN, VOD or ATL, exactly as
+   * `GET /bank?currency=GHS&type=mobile_money` returns them. `account_number` is
+   * the phone number.
+   *
+   * Reused because a recipient per payout would fill their dashboard with
+   * duplicates of the same person, and because the code is what a transfer is
+   * addressed to: one stable handle per agent is easier to reason about when
+   * something goes wrong.
+   */
+  async createRecipient(input: {
+    name: string
+    phone: string
+    /** MTN | VOD | ATL */
+    networkCode: string
+  }): Promise<{ ok: true; recipientCode: string } | { ok: false; reason: string }> {
+    const key = this.secretKey
+    if (!key) return { ok: false, reason: 'No Paystack secret key configured.' }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/transferrecipient`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          type: 'mobile_money',
+          name: input.name,
+          account_number: input.phone,
+          bank_code: input.networkCode,
+          currency: 'GHS',
+        }),
+        signal: AbortSignal.timeout(20_000),
+      })
+
+      const body = (await response.json().catch(() => ({}))) as PaystackEnvelope<{
+        recipient_code?: string
+      }>
+
+      if (!response.ok || body.status !== true || !body.data?.recipient_code) {
+        return { ok: false, reason: body.message ?? `Paystack returned ${response.status}.` }
+      }
+      return { ok: true, recipientCode: body.data.recipient_code }
+    } catch (error) {
+      return { ok: false, reason: `Could not reach Paystack: ${String(error)}` }
+    }
+  }
+
+  /**
+   * Send money to a recipient.
+   *
+   * ── The three answers that matter ──────────────────────────────────────────
+   *
+   * `sent` — accepted, and Paystack will confirm the outcome by webhook. Not yet
+   * delivered; a transfer can still fail or be reversed afterwards.
+   *
+   * `otp` — the account requires an OTP per transfer, so this cannot complete
+   * without a human typing a code. Automated payouts are impossible until it is
+   * switched off in Paystack's dashboard, and saying so plainly beats leaving
+   * every payout mysteriously stuck.
+   *
+   * `failed` — refused outright, most often for want of balance. Nothing left the
+   * account, so the caller must give the agent their money back.
+   *
+   * `reference` is ours and Paystack rejects a duplicate, which is what makes
+   * this safe to retry: unlike the DataHub purchase, a repeated call cannot pay
+   * twice.
+   */
+  async transfer(input: {
+    recipientCode: string
+    /** Pesewas. */
+    amount: number
+    reference: string
+    reason: string
+  }): Promise<TransferOutcome> {
+    const key = this.secretKey
+    if (!key) return { kind: 'failed', reason: 'No Paystack secret key configured.' }
+
+    let response: Response
+    try {
+      response = await fetch(`${this.baseUrl}/transfer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          source: 'balance',
+          amount: input.amount,
+          recipient: input.recipientCode,
+          reference: input.reference,
+          reason: input.reason,
+          currency: 'GHS',
+        }),
+        signal: AbortSignal.timeout(30_000),
+      })
+    } catch (error) {
+      // Ambiguous: the transfer may or may not have been created. Never retried
+      // blindly — the reference makes a deliberate retry safe, but a caller has
+      // to decide that, and the reconciler can ask what happened.
+      return {
+        kind: 'unknown',
+        reason: `Paystack did not answer in time: ${String(error)}`,
+      }
+    }
+
+    const raw = await response.text().catch(() => '')
+    let body: PaystackEnvelope<{ status?: string; transfer_code?: string }> = {}
+    try {
+      body = JSON.parse(raw) as PaystackEnvelope<{ status?: string; transfer_code?: string }>
+    } catch {
+      body = {}
+    }
+
+    if (!response.ok || body.status !== true) {
+      const reason = body.message ?? `Paystack returned ${response.status}.`
+      // A 5xx may have created the transfer before failing to answer.
+      if (response.status >= 500) return { kind: 'unknown', reason }
+      this.log.error(`transfer ${input.reference} refused: ${raw.slice(0, 300)}`)
+      return {
+        kind: 'failed',
+        reason,
+        insufficientBalance: /insufficient|balance/i.test(reason),
+      }
+    }
+
+    const status = body.data?.status ?? 'pending'
+    if (status === 'otp') {
+      this.log.error(
+        `transfer ${input.reference} is waiting for an OTP — automated payouts need ` +
+          'transfer OTP disabled in the Paystack dashboard.',
+      )
+      return { kind: 'otp', transferCode: body.data?.transfer_code ?? null }
+    }
+
+    return {
+      kind: 'sent',
+      transferCode: body.data?.transfer_code ?? null,
+      status,
+    }
+  }
+
+  /**
    * Whether this request really came from Paystack.
    *
    * HMAC-SHA512 of the **raw** body — a re-serialised object will not match,
@@ -220,6 +360,16 @@ interface PaystackTransaction {
   /** What Paystack keeps, in pesewas. Their figure, not our arithmetic. */
   fees?: number | null
 }
+
+export type TransferOutcome =
+  /** Accepted. Paystack confirms the real outcome by webhook. */
+  | { kind: 'sent'; transferCode: string | null; status: string }
+  /** The account demands an OTP per transfer, so this cannot be automated. */
+  | { kind: 'otp'; transferCode: string | null }
+  /** Refused. Nothing left the account. */
+  | { kind: 'failed'; reason: string; insufficientBalance?: boolean }
+  /** No usable answer. May or may not exist at Paystack; ask before retrying. */
+  | { kind: 'unknown'; reason: string }
 
 export type VerifyOutcome =
   | {

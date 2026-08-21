@@ -16,6 +16,7 @@ import { SettingsModule } from './settings/settings.module'
 import { PaymentsModule } from './payments/payments.module'
 import { FinanceModule } from './finance/finance.module'
 import { BrandingModule } from './branding/branding.module'
+import { MailModule } from './mail/mail.module'
 import { AuthGuard } from './common/auth'
 
 @Module({
@@ -51,9 +52,10 @@ import { AuthGuard } from './common/auth'
         if (env.NODE_ENV === 'production') {
           const unsafe: string[] = []
 
-          if (!env.SEED_PASSWORD || env.SEED_PASSWORD === 'demo1234') {
-            unsafe.push('SEED_PASSWORD is the published example value')
-          }
+          // SEED_PASSWORD is deliberately not checked any more. The seed refuses
+          // to create demo users in production at all, so the variable has no
+          // effect there — and requiring it blocked a legitimate deploy over a
+          // value nothing would read.
           if (String(env.JWT_SECRET).length < 32) {
             unsafe.push('JWT_SECRET should be at least 32 characters in production')
           }
@@ -62,6 +64,11 @@ import { AuthGuard } from './common/auth'
           }
           if (!env.PUBLIC_APP_URL) {
             unsafe.push('PUBLIC_APP_URL must be the address customers return to after paying')
+          }
+          // Without this nobody can sign in to a fresh database, and there is no
+          // seeded account in production to fall back on.
+          if (!env.SUPERADMIN_EMAIL) {
+            unsafe.push('SUPERADMIN_EMAIL must name the person who runs the platform')
           }
           if (env.PAYSTACK_SECRET_KEY && String(env.PAYSTACK_SECRET_KEY).startsWith('sk_test')) {
             unsafe.push('PAYSTACK_SECRET_KEY is a test key — no real money would be collected')
@@ -78,6 +85,7 @@ import { AuthGuard } from './common/auth'
       },
     }),
     PrismaModule,
+    MailModule,
     FinanceModule,
     SettingsModule,
     SupplierModule,

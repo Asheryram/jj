@@ -1,11 +1,31 @@
 import { Module } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { JwtModule } from '@nestjs/jwt'
-import { AuthController } from './auth.controller'
+import { ThrottlerModule } from '@nestjs/throttler'
+import { AuthController, TeamController } from './auth.controller'
 import { AuthService } from './auth.service'
+import { SetupTokensService } from './setup-tokens.service'
+import { TeamService } from './team.service'
+import { BootstrapService } from './bootstrap.service'
 
 @Module({
   imports: [
+    /**
+     * Two windows, because the two attacks look different.
+     *
+     * `burst` stops someone firing a password list at one account as fast as the
+     * network allows. `grind` stops the patient version — a few tries a minute,
+     * all day, which slips under any per-minute limit. Registered here rather
+     * than globally so only these routes are guarded.
+     *
+     * In-memory, so each instance counts separately. That is honest for one
+     * container and worth revisiting behind more than one; it still cuts an
+     * unlimited attack down to a rate a person would notice.
+     */
+    ThrottlerModule.forRoot([
+      { name: 'burst', ttl: 60_000, limit: 10 },
+      { name: 'grind', ttl: 900_000, limit: 40 },
+    ]),
     JwtModule.registerAsync({
       inject: [ConfigService],
       // Registered async so the secret comes from validated config rather than
@@ -21,7 +41,8 @@ import { AuthService } from './auth.service'
       global: true,
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService],
+  controllers: [AuthController, TeamController],
+  providers: [AuthService, SetupTokensService, TeamService, BootstrapService],
+  exports: [SetupTokensService],
 })
 export class AuthModule {}

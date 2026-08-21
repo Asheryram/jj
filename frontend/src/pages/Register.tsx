@@ -2,10 +2,19 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useStore } from '../state/store'
 import { checkPhone } from '../lib/networks'
-import { Button, Callout, Card, Field, Segmented, TextInput, cn } from '../components/ui'
-import { AlertIcon, CheckIcon, UsersIcon } from '../components/icons'
+import { Button, Callout, Card, Field, TextInput, cn } from '../components/ui'
+import { AlertIcon, CheckIcon, StoreIcon, UsersIcon } from '../components/icons'
 
-type AccountType = 'customer' | 'agent'
+/**
+ * Only agents register.
+ *
+ * A buyer needs no account: they enter a number, pay with Mobile Money, and the
+ * bundle goes where they said. The buyer option existed to hold a wallet, and a
+ * wallet is somebody else's money parked on the platform — a balance to top up,
+ * reconcile and refund, in exchange for skipping one Mobile Money prompt.
+ * Deferred, not deleted: the role and its ledger are still in the schema.
+ */
+type AccountType = 'agent'
 
 /** FR-1.1, FR-1.2, FR-1.6, FR-1.7, NFR-7.3 */
 export default function Register() {
@@ -13,7 +22,8 @@ export default function Register() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
 
-  const [accountType, setAccountType] = useState<AccountType>('agent')
+  // Fixed: this page only creates agents.
+  const accountType: AccountType = 'agent'
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
@@ -53,11 +63,10 @@ export default function Register() {
 
       pushToast({
         tone: 'success',
-        title: 'Account created',
-        detail:
-          accountType === 'agent'
-            ? 'Your referral code is ready on the Referrals page.'
-            : 'Top up your wallet to place your first order.',
+        title: 'Application sent',
+        // An agent is not live until approved, and saying "account created" would
+        // send them looking for a shop link that does not work yet.
+        detail: 'We will email you as soon as it is approved.',
       })
       navigate('/app', { replace: true })
     } catch (caught) {
@@ -108,24 +117,21 @@ export default function Register() {
             void submit()
           }}
         >
-          {/* FR-1.6 */}
-          <div>
-            <p className="mb-2 text-sm font-medium text-slate-700">I am registering as</p>
-            <Segmented<AccountType>
-              className="w-full"
-              options={[
-                { value: 'agent', label: 'An agent — I want to sell' },
-                { value: 'customer', label: 'A buyer — wallet only' },
-              ]}
-              value={accountType}
-              onChange={setAccountType}
-            />
-            <p className="mt-2 text-sm text-slate-500">
-              {accountType === 'agent'
-                ? 'You get your own shop link, set your own prices, and keep the margin on every sale.'
-                : 'Optional. Keeps a topped-up balance so you skip the Mobile Money prompt, and saves your order history. You can become an agent later.'}
+          {/* FR-1.6. No account-type choice any more: this page exists to sign up
+              agents, and buying needs no account at all. */}
+          <Callout tone="info" icon={<StoreIcon className="size-4" />}>
+            <p>
+              <strong className="font-semibold">This is for agents.</strong> You get your own shop
+              link, set your own prices, and keep the margin on every sale.
             </p>
-          </div>
+            <p className="mt-1.5">
+              Just buying a bundle? You do not need an account —{' '}
+              <Link to="/shop" className="font-semibold underline">
+                go straight to the shop
+              </Link>{' '}
+              and pay with Mobile Money.
+            </p>
+          </Callout>
 
           <Field label="Full name" htmlFor="reg-name" error={errors.name}>
             <TextInput

@@ -72,6 +72,21 @@ export default function CostPrices() {
   const visible = products.filter((p) => p.category === category)
   const agentMargin = products.reduce((sum, p) => sum + (p.adminPrice - p.supplierCost), 0)
   const directMargin = products.reduce((sum, p) => sum + (p.standardPrice - p.supplierCost), 0)
+
+  /**
+   * An average needs something to average.
+   *
+   * The catalogue is empty until it has been synced from the provider, and until
+   * then dividing by `products.length` is 0/0 — which reached the stat tiles as
+   * the literal text `GHS NaN`. `null` rather than 0 because the average margin
+   * on no products is not zero, it is nothing, and a tile reading GHS 0.00 would
+   * be telling James he makes no margin.
+   */
+  const averageOf = (totalMargin: number): number | null =>
+    products.length > 0 ? Math.round(totalMargin / products.length) : null
+
+  const agentAverage = averageOf(agentMargin)
+  const directAverage = averageOf(directMargin)
   // Both selling prices must clear cost. Walk-up vs agent price is deliberately
   // not checked, and there is no ceiling to check — see EDITABLE_TIERS.
   const broken = products.filter(
@@ -93,15 +108,23 @@ export default function CostPrices() {
         />
         <StatTile
           label="Average margin on agent sales"
-          value={cedis(Math.round(agentMargin / products.length))}
-          hint="Your price to agents, less supplier cost"
+          value={agentAverage === null ? '—' : cedis(agentAverage)}
+          hint={
+            products.length > 0
+              ? 'Your price to agents, less supplier cost'
+              : 'Sync the provider catalogue to see this'
+          }
           tone="brand"
           icon={<TrendUpIcon className="size-5" />}
         />
         <StatTile
           label="Average margin on direct sales"
-          value={cedis(Math.round(directMargin / products.length))}
-          hint="Standard price, less supplier cost"
+          value={directAverage === null ? '—' : cedis(directAverage)}
+          hint={
+            products.length > 0
+              ? 'Standard price, less supplier cost'
+              : 'Sync the provider catalogue to see this'
+          }
           tone="success"
         />
       </div>

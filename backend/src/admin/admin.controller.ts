@@ -18,6 +18,7 @@ import { AdminService, type Tier } from './admin.service'
 import { ApprovalsService } from '../orders/approvals.service'
 import { LedgerService } from '../finance/ledger.service'
 import { RefundsService } from '../orders/refunds.service'
+import { ApplicationsService } from './applications.service'
 import { SolvencyService } from '../finance/solvency.service'
 
 const TIERS = ['supplierCost', 'adminPrice', 'standardPrice'] as const
@@ -70,6 +71,18 @@ export class ApplyMarkupDto {
   category?: 'data' | 'airtime' | 'voice' | 'sms' | 'afa' | 'checker'
 }
 
+export class ApproveRefundDto {
+  /**
+   * Which Mobile Money network to send it back on.
+   *
+   * Required for a Mobile Money refund and asked for rather than derived: number
+   * portability means a prefix cannot tell you which network carries a line.
+   */
+  @IsOptional()
+  @IsIn(['MTN', 'Telecel', 'AirtelTigo'])
+  momoNetwork?: 'MTN' | 'Telecel' | 'AirtelTigo'
+}
+
 export class RejectRefundDto {
   /**
    * Why the refund is being refused. Required, and kept: this is a decision not
@@ -113,6 +126,7 @@ export class AdminController {
     private readonly ledger: LedgerService,
     private readonly solvency: SolvencyService,
     private readonly refunds: RefundsService,
+    private readonly applications: ApplicationsService,
   ) {}
 
   @Get('overview')
@@ -227,14 +241,44 @@ export class AdminController {
    * Refunds are not automatic — a failed delivery records the debt and stops, so
    * this queue is the only way the money moves.
    */
+  /**
+   * Agents waiting to be let in.
+   *
+   * Registration creates the account and stops. An agent sells under your name
+   * and sets the prices customers pay, so somebody agrees to that before it
+   * starts.
+   */
+  @Get('applications')
+  applicationQueue() {
+    return this.applications.pending()
+  }
+
+  @Post('applications/:id/approve')
+  approveApplication(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.applications.approve(id, user.id)
+  }
+
+  @Post('applications/:id/reject')
+  rejectApplication(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: RejectRefundDto,
+  ) {
+    return this.applications.reject(id, user.id, dto.note)
+  }
+
   @Get('refunds')
   refundQueue(@Query('status') status?: 'pending' | 'approved' | 'rejected') {
     return this.refunds.list(status)
   }
 
   @Post('refunds/:id/approve')
-  approveRefund(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.refunds.approve(id, user.id)
+  approveRefund(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ApproveRefundDto,
+  ) {
+    return this.refunds.approve(id, user.id, dto.momoNetwork)
   }
 
   @Post('refunds/:id/reject')

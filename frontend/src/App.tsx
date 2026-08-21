@@ -17,12 +17,12 @@ import Buy from './pages/Buy'
 import Track from './pages/Track'
 
 import Dashboard from './pages/app/Dashboard'
-import Wallet from './pages/app/Wallet'
 import Earnings from './pages/app/Earnings'
 import Orders from './pages/app/Orders'
 import Pricing from './pages/app/Pricing'
 import Referrals from './pages/app/Referrals'
 import ShopBranding from './pages/app/ShopBranding'
+import AwaitingApproval from './pages/app/AwaitingApproval'
 import Reports from './pages/app/Reports'
 import Withdrawals from './pages/app/Withdrawals'
 
@@ -33,8 +33,11 @@ import CostPrices from './pages/admin/CostPrices'
 import AdminWithdrawals from './pages/admin/AdminWithdrawals'
 import NumberApprovals from './pages/admin/NumberApprovals'
 import PaymentReturn from './pages/PaymentReturn'
+import SetPassword from './pages/SetPassword'
+import ForgotPassword from './pages/ForgotPassword'
 import Refunds from './pages/admin/Refunds'
 import BrandingReview from './pages/admin/BrandingReview'
+import Team from './pages/admin/Team'
 import Settings from './pages/admin/Settings'
 
 /**
@@ -83,6 +86,10 @@ export default function App() {
                 with Mobile Money has no account, and the reference in the URL is
                 checked with Paystack rather than believed. */}
             <Route path="/pay/return" element={<PaymentReturn />} />
+            {/* Public: the holder of a one-time link is not signed in yet, and
+                the token is what authorises them. */}
+            <Route path="/set-password" element={<SetPassword />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
             {/* A guest must be able to complete a purchase (FR-4.8) */}
             <Route path="/buy/:productId" element={<Buy />} />
 
@@ -113,16 +120,17 @@ export default function App() {
               <Route path="/app/orders" element={<Orders />} />
               <Route path="/app/reports" element={<Reports />} />
 
-              {/* Customers hold a spendable wallet; agents do not. */}
-              <Route element={<RequireAuth role="customer" />}>
-                <Route path="/app/wallet" element={<Wallet />} />
-              </Route>
+              {/* No wallet route. Customer accounts are not created any more, and
+                  top-ups are closed, so the page could only ever refuse. The
+                  Wallet screen and its ledger stay in the codebase for the day
+                  holding customer balances is worth the reconciliation. */}
 
               {/* Agent-only surfaces */}
               <Route element={<RequireAuth role="agent" />}>
                 <Route path="/app/earnings" element={<Earnings />} />
                 <Route path="/app/pricing" element={<Pricing />} />
                 <Route path="/app/shop-look" element={<ShopBranding />} />
+              <Route path="/app/status" element={<AwaitingApproval />} />
                 <Route path="/app/referrals" element={<Referrals />} />
                 <Route path="/app/withdrawals" element={<Withdrawals />} />
               </Route>
@@ -140,6 +148,7 @@ export default function App() {
               <Route path="/admin/approvals" element={<NumberApprovals />} />
               <Route path="/admin/refunds" element={<Refunds />} />
               <Route path="/admin/branding" element={<BrandingReview />} />
+              <Route path="/admin/team" element={<Team />} />
               <Route path="/admin/settings" element={<Settings />} />
             </Route>
           </Route>

@@ -60,9 +60,23 @@ export class RegisterDto {
   @MinLength(8, { message: 'Use at least 8 characters.' })
   password!: string
 
-  /** FR-1.6 — customers hold a wallet, agents hold an earnings account. */
-  @IsIn(['customer', 'agent'], { message: 'Choose whether you are buying or selling.' })
-  accountType!: 'customer' | 'agent'
+  /**
+   * Only agents register.
+   *
+   * A buyer needs no account: they enter a number, pay with Mobile Money, and the
+   * bundle goes to the number they gave. A customer account only ever existed to
+   * hold a wallet, and a wallet is somebody else's money sitting on the platform
+   * — a liability to reconcile, top up, refund and audit, for a convenience
+   * nobody asked for. Deferred rather than removed: the `customer` role and the
+   * wallet ledger stay in the schema for when it earns its keep.
+   *
+   * Enforced here rather than only in the UI, so a crafted request cannot create
+   * a wallet the platform is not ready to manage.
+   */
+  @IsIn(['agent'], {
+    message: 'Only agent accounts can be created. Buying needs no account at all.',
+  })
+  accountType!: 'agent'
 
   /** FR-1.2 — the referral code they signed up through, if any. */
   @IsOptional()

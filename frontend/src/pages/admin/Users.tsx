@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import AgentApplications from './AgentApplications'
 import { useStore } from '../../state/store'
 import { cedis, initials } from '../../lib/format'
 import type { PlatformUser, Role } from '../../data/types'
@@ -49,6 +50,10 @@ export default function Users() {
   return (
     <div>
       <PageHead title="Users" subtitle="Every customer, agent and admin on the platform." />
+
+      {/* Only renders when somebody is waiting. Whoever is looking at people is
+          the person who should notice that three of them cannot trade yet. */}
+      <AgentApplications />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="Total users" value={String(users.length)} icon={<UsersIcon className="size-5" />} />

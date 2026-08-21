@@ -3,6 +3,9 @@ import type { Network, WithdrawalStatus } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { LedgerService } from '../finance/ledger.service'
 import { SolvencyService } from '../finance/solvency.service'
+import { PaystackClient } from '../payments/paystack.client'
+import { momoCodeFor } from '../payments/momo'
+
 import { toWithdrawal } from '../common/mappers'
 import {
   ConflictError,
@@ -24,6 +27,7 @@ export class WithdrawalsService {
     private readonly prisma: PrismaService,
     private readonly ledger: LedgerService,
     private readonly solvency: SolvencyService,
+    private readonly paystack: PaystackClient,
   ) {}
 
   async list(user: AuthUser) {
@@ -139,7 +143,7 @@ export class WithdrawalsService {
       }
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const decided = await this.prisma.$transaction(async (tx) => {
       const row = await tx.withdrawal.findUnique({ where: { id } })
       if (!row) throw new NotFoundError('We could not find that withdrawal request.')
 
@@ -203,5 +207,206 @@ export class WithdrawalsService {
       this.log.log(`withdrawal ${id} ${status}`)
       return toWithdrawal(updated)
     })
+
+    // Committed. Now actually send the money.
+    //
+    // Outside the transaction on purpose: this is an outbound HTTP call, and
+    // holding a transaction open across one blocks every other write on these
+    // rows for as long as Paystack takes to answer.
+    if (status === 'approved') {
+      await this.sendPayout(id).catch((error) => {
+        // A failure here does not undo the approval — the decision was made and
+        // the agent's balance is already debited. `sendPayout` handles a refusal
+        // by giving the money back; this only catches the unexpected.
+        this.log.error(`payout for ${id} threw: ${String(error)}`)
+      })
+    }
+
+    return decided
+  }
+
+  /**
+   * Pay an approved withdrawal out to the agent's Mobile Money.
+   *
+   * The agent's balance was debited when they asked, so nothing is deducted here
+   * — this moves money that is already accounted for. Three outcomes, and each
+   * has to leave the books honest:
+   *
+   *  · **Accepted.** The withdrawal stays `approved` and waits for Paystack's
+   *    webhook to say `paid` or `failed`. Approved is not delivered.
+   *  · **Refused.** Nothing left the account, so the agent gets their balance
+   *    back immediately and the request is marked failed with the reason.
+   *  · **Unknown.** No usable answer. Nothing is returned and nothing is retried,
+   *    because the money may be on its way — the same rule as a supplier dispatch,
+   *    and for the same reason: paying twice is worse than paying late.
+   */
+  private async sendPayout(withdrawalId: string): Promise<void> {
+    const row = await this.prisma.withdrawal.findUnique({ where: { id: withdrawalId } })
+    if (!row || row.status !== 'approved') return
+
+    // Already handed over. Guards a double approval or a retried request from
+    // creating a second transfer.
+    if (row.transferCode) {
+      this.log.warn(`payout ${withdrawalId} already has a transfer — not sending again`)
+      return
+    }
+
+    if (!this.paystack.configured) {
+      await this.prisma.withdrawal.update({
+        where: { id: withdrawalId },
+        data: {
+          transferStatus: 'manual',
+          transferNote:
+            'No Paystack key on this server, so this one has to be sent by hand.',
+        },
+      })
+      this.log.warn(`payout ${withdrawalId} left for manual sending — Paystack is not configured`)
+      return
+    }
+
+    const networkCode = momoCodeFor(row.momoNetwork)
+    if (!networkCode) {
+      await this.failPayout(row.id, `We do not know how to pay out to ${row.momoNetwork}.`)
+      return
+    }
+
+    // One recipient per agent number, reused across payouts.
+    let recipientCode = row.recipientCode
+    if (!recipientCode) {
+      const existing = await this.prisma.withdrawal.findFirst({
+        where: { agentPhone: row.agentPhone, recipientCode: { not: null } },
+        select: { recipientCode: true },
+      })
+      recipientCode = existing?.recipientCode ?? null
+    }
+
+    if (!recipientCode) {
+      const created = await this.paystack.createRecipient({
+        name: row.agentName,
+        phone: row.agentPhone,
+        networkCode,
+      })
+      if (!created.ok) {
+        await this.failPayout(row.id, `Paystack would not accept the number: ${created.reason}`)
+        return
+      }
+      recipientCode = created.recipientCode
+    }
+
+    await this.prisma.withdrawal.update({
+      where: { id: row.id },
+      data: { recipientCode },
+    })
+
+    /**
+     * The reference is derived from the withdrawal, never from the clock.
+     *
+     * Paystack rejects a duplicate reference, so this is what makes a retry safe:
+     * the same withdrawal can only ever produce one transfer, however many times
+     * this runs.
+     */
+    const result = await this.paystack.transfer({
+      recipientCode,
+      amount: row.amount,
+      reference: `WDR-${row.id}`,
+      reason: `${row.agentName} — agent earnings`,
+    })
+
+    if (result.kind === 'sent') {
+      await this.prisma.withdrawal.update({
+        where: { id: row.id },
+        data: { transferCode: result.transferCode, transferStatus: result.status },
+      })
+      this.log.log(
+        `payout ${row.id}: GHS ${(row.amount / 100).toFixed(2)} sent to ${row.agentPhone} (${result.status})`,
+      )
+      return
+    }
+
+    if (result.kind === 'otp') {
+      // Not a failure and not a success. The money has not moved and cannot
+      // without somebody typing a code, so it is left visible rather than
+      // silently stuck or wrongly reversed.
+      await this.prisma.withdrawal.update({
+        where: { id: row.id },
+        data: {
+          transferCode: result.transferCode,
+          transferStatus: 'otp',
+          transferNote:
+            'Paystack is asking for an OTP for every transfer. Turn transfer OTP off in ' +
+            'your Paystack dashboard (Settings → Preferences) for payouts to send themselves, ' +
+            'or approve this one in their dashboard.',
+        },
+      })
+      this.log.error(`payout ${row.id} is waiting for an OTP in the Paystack dashboard`)
+      return
+    }
+
+    if (result.kind === 'failed') {
+      await this.failPayout(
+        row.id,
+        result.insufficientBalance
+          ? 'Your Paystack balance could not cover this payout. Top up and approve it again.'
+          : result.reason,
+      )
+      return
+    }
+
+    // unknown — may or may not have been created.
+    await this.prisma.withdrawal.update({
+      where: { id: row.id },
+      data: {
+        transferStatus: 'unknown',
+        transferNote:
+          `We did not get an answer from Paystack: ${result.reason} The money may be on its ` +
+          'way. Check the transfer in their dashboard before doing anything else — do not ' +
+          'approve it again.',
+      },
+    })
+    this.log.error(`payout ${row.id} unresolved and NOT retried: ${result.reason}`)
+  }
+
+  /**
+   * Give the money back, because it never left.
+   *
+   * The agent's balance was debited when they asked, so a refused transfer means
+   * they are down the amount and nobody has it. Returning it is the whole point
+   * of distinguishing a refusal from an unknown outcome.
+   */
+  private async failPayout(withdrawalId: string, reason: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      const row = await tx.withdrawal.findUnique({ where: { id: withdrawalId } })
+      if (!row || row.status === 'failed' || row.status === 'paid') return
+
+      await tx.withdrawal.update({
+        where: { id: withdrawalId },
+        data: { status: 'failed', transferStatus: 'failed', transferNote: reason },
+      })
+
+      const after = await tx.user.update({
+        where: { id: row.userId },
+        data: { balance: { increment: row.amount } },
+        select: { balance: true },
+      })
+
+      await tx.earning.create({
+        data: {
+          userId: row.userId,
+          type: 'withdrawal',
+          amount: row.amount,
+          balanceAfter: after.balance,
+          description: 'Payout could not be sent — amount returned to your balance',
+          reference: `WDR-${row.id.slice(0, 8).toUpperCase()}-F`,
+          depth: 0,
+        },
+      })
+
+      // The payout line comes back off the books too: no money left the platform.
+      await tx.ledgerEntry.deleteMany({
+        where: { idempotencyKey: LedgerService.key('withdrawal', row.id, 'payout') },
+      })
+    })
+
+    this.log.warn(`payout ${withdrawalId} failed and was returned: ${reason}`)
   }
 }

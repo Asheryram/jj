@@ -40,6 +40,37 @@ const PASSWORD = process.env.SEED_PASSWORD ?? 'demo1234'
  */
 const WITH_HISTORY = process.argv.includes('--with-history')
 
+/**
+ * Whether to create the demo people at all.
+ *
+ * Off by default, and that is the important part. This used to create an admin
+ * and an agent sharing a password that is published in `.env.example` — fine on a
+ * laptop, and in production a live credential for two accounts that can set the
+ * prices customers pay and accrue money the platform owes.
+ *
+ * Production has no need for it: `SUPERADMIN_EMAIL` is bootstrapped on boot with
+ * a one-time link, and that superadmin creates the real admin the same way. No
+ * password is ever seeded, and none exists to leak.
+ *
+ * `--with-demo-users` brings them back for local work, and is refused outright
+ * when NODE_ENV is production.
+ */
+const WITH_DEMO_USERS = process.argv.includes('--with-demo-users')
+const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+
+if (WITH_DEMO_USERS && IS_PRODUCTION) {
+  throw new Error(
+    'Refusing to seed demo users in production. They share a published password. ' +
+      'Set SUPERADMIN_EMAIL and let the bootstrap issue a one-time setup link instead.',
+  )
+}
+
+if (WITH_HISTORY && !WITH_DEMO_USERS) {
+  throw new Error(
+    '--with-history needs --with-demo-users: the sample orders are attributed to the demo people.',
+  )
+}
+
 // ─── Supplier catalogue ──────────────────────────────────────────────────────
 //
 // There isn't one here any more, and that is the point.
@@ -311,11 +342,17 @@ async function main(): Promise<void> {
   // shop has nothing to sell until a supplier has been asked what is for sale.
   console.log('  0 products — sync from the provider catalogue to populate')
 
-  // 3 — people. Everyone shares one password so testers are not blocked on it.
-  const passwordHash = await bcrypt.hash(PASSWORD, 10)
+  // 3 — people. Only on request, and never in production. See WITH_DEMO_USERS.
   const ids = new Map<string, string>()
 
-  for (const seed of USERS) {
+  if (!WITH_DEMO_USERS) {
+    console.log('  0 users — the superadmin is created on boot from SUPERADMIN_EMAIL')
+    console.log('           (pass --with-demo-users for local sample accounts)')
+  }
+
+  const passwordHash = WITH_DEMO_USERS ? await bcrypt.hash(PASSWORD, 10) : ''
+
+  for (const seed of WITH_DEMO_USERS ? USERS : []) {
     const user = await prisma.user.create({
       data: {
         name: seed.name,
@@ -336,18 +373,21 @@ async function main(): Promise<void> {
     ids.set(seed.key, user.id)
     balances.set(user.id, 0)
   }
-  console.log(`  ${USERS.length} users (password: ${PASSWORD})`)
+  if (WITH_DEMO_USERS) {
+    console.log(`  ${USERS.length} demo users (password: ${PASSWORD}) — LOCAL ONLY`)
+  }
 
-  // 4 — Kwame's explicit prices.
-  const kwameId = ids.get('kwame')!
-  for (const [productId, resalePrice] of Object.entries(KWAME_PRICES)) {
+  // 4 — Kwame's explicit prices. Nothing to price against without the demo
+  // people, so the loop simply does not run.
+  const kwameId = ids.get('kwame') ?? null
+  for (const [productId, resalePrice] of kwameId === null ? [] : Object.entries(KWAME_PRICES)) {
     // The catalogue comes from DataHub now, so a hard-coded id here may simply
     // not exist — they do not sell a 1GB Telecel bundle, for one. Skip rather
     // than fail: these are illustrative agent prices, not part of the contract.
     if (!(await prisma.product.findUnique({ where: { id: productId }, select: { id: true } }))) {
       continue
     }
-    await prisma.agentPrice.create({ data: { userId: kwameId, productId, resalePrice } })
+    await prisma.agentPrice.create({ data: { userId: kwameId as string, productId, resalePrice } })
   }
 
   // 5 — platform switches.
@@ -361,10 +401,15 @@ async function main(): Promise<void> {
   })
 
   // 6 — the pricing chain, read back exactly as the API will read it.
-  const agents = await loadAgents()
-  const admin = await loadAdmin()
-
+  //
+  // Only meaningful with the demo people: `loadAdmin` reads the admin the sample
+  // orders are priced against, and on a fresh production database there is no
+  // admin yet — the superadmin creates one through a one-time link after boot.
+  // Asking for one here threw P2025 and failed the whole seed.
   if (WITH_HISTORY) {
+    const agents = await loadAgents()
+    const admin = await loadAdmin()
+
     // 7 — top the customers up before they spend, so no purchase ever lands the
     // running balance below zero.
     await seedTopUps(ids)
@@ -764,11 +809,21 @@ async function report(): Promise<void> {
   ])
 
   console.log('')
-  console.log('  ── sign in with any of these · password: ' + PASSWORD + ' ──')
-  for (const user of users) {
-    console.log(
-      `  ${user.email.padEnd(30)} ${user.role.padEnd(8)} ${user.name.padEnd(16)} GHS ${(user.balance / 100).toFixed(2)}`,
-    )
+  // Only claim there are sign-in details when there are. This printed
+  // "sign in with any of these · password: demo1234" above an empty list, which
+  // is the sort of output that sends somebody hunting for an account that was
+  // never created.
+  if (users.length > 0) {
+    console.log('  ── sign in with any of these · password: ' + PASSWORD + ' ──')
+    for (const user of users) {
+      console.log(
+        `  ${user.email.padEnd(30)} ${user.role.padEnd(8)} ${user.name.padEnd(16)} GHS ${(user.balance / 100).toFixed(2)}`,
+      )
+    }
+  } else {
+    console.log('  ── nobody can sign in yet, by design ──')
+    console.log('  Start the API. It creates the SUPERADMIN_EMAIL account and prints a')
+    console.log('  one-time link to set your password. Create the admin from Platform team.')
   }
 
   console.log('')
@@ -784,7 +839,13 @@ async function report(): Promise<void> {
 
   if (!WITH_HISTORY) {
     console.log('')
-    console.log('  Clean slate. Buy something through /s/KWAME77 and watch Kwame earn.')
+    // Pointing at /s/KWAME77 when Kwame was never created is a dead end dressed
+    // up as a next step.
+    console.log(
+      users.length > 0
+        ? '  Clean slate. Buy something through /s/KWAME77 and watch Kwame earn.'
+        : '  Clean slate. Sync the provider catalogue, then price it, and you can sell.',
+    )
     console.log('  Want a month of history instead?  npm run seed:history')
   }
 

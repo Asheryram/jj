@@ -31,6 +31,25 @@ export interface TokenPayload {
 export const ROLES_KEY = 'jdc:roles'
 
 /**
+ * Whether a role satisfies what a route asked for.
+ *
+ * A superadmin passes every `admin` check. They run the platform the business
+ * sits on, and an operator who can create the owner's account but not help them
+ * when something breaks is not much use — the alternative is handing over the
+ * owner's password, which is exactly what the setup-link mechanism exists to
+ * avoid.
+ *
+ * It does NOT work the other way. An admin is never treated as a superadmin, so
+ * they cannot create another admin, lift their own role, or suspend the operator.
+ * Route decorators are still written as the narrowest role that should reach
+ * them; this only widens upwards.
+ */
+function satisfies(role: Role, required: Role[]): boolean {
+  if (required.includes(role)) return true
+  return role === 'superadmin' && required.includes('admin')
+}
+
+/**
  * Require a signed-in user, optionally in one of the listed roles.
  *
  * `@Roles()` with no arguments means "any authenticated user". A route with no
@@ -92,7 +111,7 @@ export class AuthGuard implements CanActivate {
 
     if (!req.user) throw new UnauthorisedError('Please log in to continue.')
 
-    if (required.length > 0 && !required.includes(req.user.role)) {
+    if (required.length > 0 && !satisfies(req.user.role, required)) {
       throw new ForbiddenError('Your account does not have access to that.')
     }
 

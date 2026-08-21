@@ -66,10 +66,11 @@ export default function AdminWithdrawals() {
       </div>
 
       <div className="mt-3">
-        <Callout tone="warning" title="You send the money yourself" icon={<AlertIcon className="size-4" />}>
-          Approving a request here records the decision and debits the agent&apos;s wallet. Sending the
-          Mobile Money is still a manual step you do outside the platform — automatic payouts come in
-          a later version.
+        <Callout tone="info" title="Approving sends the money" icon={<AlertIcon className="size-4" />}>
+          Approving hands the transfer to Paystack, which pays the agent&apos;s Mobile Money
+          directly. It is checked against your Paystack balance first, so nobody is marked paid
+          against money that is not there — and if a transfer is refused or reversed, the amount
+          goes straight back to their balance.
         </Callout>
       </div>
 

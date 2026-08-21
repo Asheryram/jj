@@ -130,7 +130,11 @@ export interface AuthResult {
 export interface CatalogueSnapshot {
   products: Product[]
   pricingAgents: PricingAgent[]
-  admin: { userId: string; name: string }
+  /**
+   * Who holds the supplier margin. Null on a fresh deployment, before the
+   * superadmin has created an admin — the shop still has to render so they can.
+   */
+  admin: { userId: string; name: string } | null
   settings: {
     referralEnabled: boolean
     /** The referrer's share of James's margin, as a whole percentage. */
@@ -218,6 +222,28 @@ export interface DispatchAttempt {
 
 import type { BrandRamp } from './branding'
 
+export interface AgentApplication {
+  id: string
+  name: string
+  email: string
+  phone: string
+  referralCode: string
+  /** The agent who referred them, if any — a different proposition. */
+  referredBy: string | null
+  appliedAt: string
+}
+
+export interface TeamMember {
+  id: string
+  name: string
+  email: string
+  role: 'admin' | 'superadmin'
+  status: string
+  /** No password chosen yet — their setup link is still outstanding. */
+  pendingSetup: boolean
+  joinedAt: string
+}
+
 export interface PublicBranding {
   shopName: string
   /** The colour as chosen. The ramp below may darken its 700 step for contrast. */
@@ -261,15 +287,29 @@ export interface RefundRequest {
   buyerName: string
   buyerPhone: string
   amount: number
-  /** `wallet` credits directly; `claimable` issues a link to claim. */
-  method: 'wallet' | 'claimable'
+  /**
+   * How the money goes back.
+   *
+   * `transfer` sends it to the number that paid — the normal case now that
+   * wallets are closed. `wallet` credits an account that predates that.
+   * `claimable` is historical only: nothing ever implemented claiming.
+   */
+  method: 'transfer' | 'wallet' | 'claimable'
   /** Why the order failed, in the words shown to whoever decides. */
   reason: string
   status: 'pending' | 'approved' | 'rejected'
   /** Set only on a refusal: why it was refused. */
   note: string | null
+  /** Chosen at approval, for a Mobile Money refund. */
+  momoNetwork: 'MTN' | 'Telecel' | 'AirtelTigo' | null
+  /** Paystack's word: pending, success, failed, reversed, otp, manual. */
+  transferStatus: string | null
+  /** Why the transfer has not gone, when it has not. */
+  transferNote: string | null
   createdAt: string
   decidedAt: string | null
+  /** When the money was confirmed delivered. */
+  paidAt: string | null
 }
 
 export interface ReservePosition {
@@ -534,6 +574,78 @@ export const api = {
       body: { note },
     }),
 
+  // ── Platform access ──────────────────────────────────────────────────────
+
+  /** Is this one-time setup link still good? Public — the holder is not signed in. */
+  checkSetupLink: (token: string) =>
+    request<{ valid: boolean; name?: string; purpose?: string }>(
+      `/auth/set-password?token=${encodeURIComponent(token)}`,
+      { auth: false },
+    ),
+
+  /** Spend the link and set a password. Public for the same reason. */
+  setPassword: (token: string, password: string) =>
+    request<{ ok: true }>('/auth/set-password', {
+      method: 'POST',
+      body: { token, password },
+      auth: false,
+    }),
+
+  /**
+   * Ask for a reset link.
+   *
+   * Always resolves the same way whether or not the address has an account — the
+   * server will not say, and neither should the UI.
+   */
+  forgotPassword: (email: string) =>
+    request<{ ok: true; message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: { email },
+      auth: false,
+    }),
+
+  /** Agents waiting to be approved. Admin only. */
+  applicationQueue: () => request<AgentApplication[]>('/admin/applications'),
+
+  approveApplication: (id: string) =>
+    request<{ id: string; status: string }>(`/admin/applications/${id}/approve`, {
+      method: 'POST',
+    }),
+
+  rejectApplication: (id: string, note: string) =>
+    request<{ id: string; status: string }>(`/admin/applications/${id}/reject`, {
+      method: 'POST',
+      body: { note },
+    }),
+
+  /** Superadmin only. */
+  team: () => request<TeamMember[]>('/platform/team'),
+
+  createAdmin: (body: { name: string; email: string; phone: string }) =>
+    request<{
+      id: string
+      email: string
+      setupLink: string
+      /** False when mail is not configured or the send failed. */
+      emailed: boolean
+      emailProblem: string | null
+    }>('/platform/team', { method: 'POST', body }),
+
+  resendTeamLink: (id: string) =>
+    request<{
+      email: string
+      purpose: string
+      setupLink: string
+      emailed: boolean
+      emailProblem: string | null
+    }>(`/platform/team/${id}/link`, { method: 'POST' }),
+
+  suspendTeamMember: (id: string) =>
+    request<{ id: string; status: string }>(`/platform/team/${id}/suspend`, { method: 'POST' }),
+
+  restoreTeamMember: (id: string) =>
+    request<{ id: string; status: string }>(`/platform/team/${id}/restore`, { method: 'POST' }),
+
   reservePosition: () => request<ReservePosition>('/admin/finance/position'),
 
   /**
@@ -545,8 +657,18 @@ export const api = {
   refundQueue: (status: 'pending' | 'approved' | 'rejected' = 'pending') =>
     request<RefundRequest[]>(`/admin/refunds?status=${status}`),
 
-  approveRefund: (id: string) =>
-    request<{ id: string; status: 'approved' }>(`/admin/refunds/${id}/approve`, { method: 'POST' }),
+  /**
+   * Approve a refund and send it.
+   *
+   * `momoNetwork` is required for a Mobile Money refund: the payer has no
+   * account, so the money goes back to their number, and which network carries
+   * that number cannot be told from its prefix.
+   */
+  approveRefund: (id: string, momoNetwork?: 'MTN' | 'Telecel' | 'AirtelTigo') =>
+    request<{ id: string; status: 'approved' }>(`/admin/refunds/${id}/approve`, {
+      method: 'POST',
+      body: { momoNetwork },
+    }),
 
   /** Refusing needs a reason, and it is kept on the record. */
   rejectRefund: (id: string, note: string) =>

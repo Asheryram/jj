@@ -63,6 +63,26 @@ export class PricingService {
     }))
   }
 
+/**
+   * The admin, or null when the platform has no admin yet.
+   *
+   * Separate from `admin()` because the two callers need opposite answers on a
+   * fresh deployment. Reading the shop is fine with nobody to hold the margin —
+   * there is nothing priced to sell. Placing an order is not.
+   *
+   * This exists because the strict version made a new deployment unusable: the
+   * catalogue call failed, the client treats that as fatal, and the superadmin
+   * could not get past the boot screen to create the very admin that was missing.
+   */
+  async adminOrNull(db: Db = this.prisma): Promise<Admin | null> {
+    const row = await db.user.findFirst({
+      where: { role: 'admin' },
+      select: { id: true, name: true },
+      orderBy: { joinedAt: 'asc' },
+    })
+    return row ? { userId: row.id, name: row.name } : null
+  }
+
   /** James. The root of every chain and the only holder of the supplier margin. */
   async admin(db: Db = this.prisma): Promise<Admin> {
     const row = await db.user.findFirst({
