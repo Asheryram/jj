@@ -123,6 +123,27 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   if (response.status === 204) return undefined as T
 
+  /**
+   * A 200 that is not JSON means we are not talking to the API.
+   *
+   * The specific way this happens: with `VITE_API_URL` unset the base falls back
+   * to a relative `/api`, and on a static host the single-page-app catch-all
+   * rewrite answers `/api/anything` with `index.html` — a perfectly successful
+   * 200 full of HTML. Parsing it yields null, and the app used to report "check
+   * your connection", which blames the reader's network for a deployment
+   * setting. Worth its own message because the fix is precise and nothing else
+   * on the page will work until it is done.
+   */
+  const contentType = response.headers.get('content-type') ?? ''
+  if (response.ok && contentType.includes('html')) {
+    throw new ApiError(
+      'API_NOT_CONFIGURED',
+      'This app is not pointed at its API — it is reaching the website instead. ' +
+        'Set VITE_API_URL to the API address ending in /api, then redeploy.',
+      response.status,
+    )
+  }
+
   const payload: unknown = await response.json().catch(() => null)
 
   if (!response.ok) {
