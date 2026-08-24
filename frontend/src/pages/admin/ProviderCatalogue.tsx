@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError, type SupplierSku } from '../../lib/api'
 import { useStore } from '../../state/store'
@@ -167,12 +168,21 @@ export default function ProviderCatalogue() {
               >
                 <p>
                   They arrived with the supplier's real cost and no price, because what they sell
-                  for is your decision, not ours. Set a markup to put them all on sale — you can
-                  adjust any individual price afterwards on the Prices page.
+                  for is your decision, not ours. Two ways to put them on sale, and neither is a
+                  prerequisite for the other: one markup across all of them, or type the actual
+                  prices product by product.
                 </p>
-                <Button size="sm" className="mt-2.5" onClick={() => setPublishing(true)}>
-                  Set a markup and publish
-                </Button>
+                <div className="mt-2.5 flex flex-wrap items-center gap-3">
+                  <Button size="sm" onClick={() => setPublishing(true)}>
+                    Set a markup and publish
+                  </Button>
+                  <Link
+                    to="/admin/prices"
+                    className="text-sm font-semibold text-brand-700 hover:underline"
+                  >
+                    Or price them individually
+                  </Link>
+                </div>
               </Callout>
             )}
 

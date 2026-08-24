@@ -1,9 +1,10 @@
 import { useState, type ReactNode } from 'react'
-import { Link, NavLink, Navigate, Outlet, useLocation } from 'react-router-dom'
+import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useStore, type Toast } from '../state/store'
 import { useBranding } from '../state/branding'
 import { useRegisterPath, useShopPath } from '../lib/shopPath'
 import { cedis, initials } from '../lib/format'
+import { isAdmin } from '../lib/roles'
 import type { Role } from '../data/types'
 import { Badge, Button, Modal, cn } from './ui'
 import {
@@ -88,8 +89,16 @@ interface NavItem {
  * `Catalogue` only appears when no sell link is active, so scoping it would hide
  * from them the very numbers they went there to see.
  */
+/** What each profile is called in the switcher. */
+const PROFILE_LABEL: Partial<Record<Role, string>> = {
+  superadmin: 'Platform',
+  admin: 'Admin',
+  agent: 'Agent',
+  customer: 'Customer',
+}
+
 function navFor(role: Role, shopPath: (path: string) => string): NavItem[] {
-  if (role === 'admin' || role === 'superadmin') {
+  if (isAdmin(role)) {
     return [
       { to: '/admin', label: 'Overview', icon: HomeIcon, end: true },
       { to: '/admin/orders', label: 'All orders', icon: ReceiptIcon },
@@ -158,7 +167,7 @@ export function RequireAuth({ role }: { role?: Role }) {
 
   // A superadmin satisfies an `admin` gate, mirroring the server's guard. Without
   // this the operator could reach the API but not the screens that call it.
-  const allowed = !role || session.role === role || (session.role === 'superadmin' && role === 'admin')
+  const allowed = !role || session.role === role || (role === 'admin' && isAdmin(session.role))
   if (!allowed) return <Navigate to="/app" replace />
 
   /**
@@ -182,7 +191,27 @@ export function RequireAuth({ role }: { role?: Role }) {
 
 export function AppShell() {
   const branding = useBranding()
-  const { session, balance, logout } = useStore()
+  const { session, balance, logout, profiles, switchProfile } = useStore()
+  const [switching, setSwitching] = useState(false)
+  const navigate = useNavigate()
+
+  /**
+   * Move to another of this person's profiles, and land somewhere it makes sense.
+   *
+   * The destination matters: switching to an agent while standing on an admin
+   * page would leave you on a route your new role cannot open, and the guard
+   * would bounce you somewhere arbitrary. So the switch decides where you go.
+   */
+  const swap = async (userId: string) => {
+    if (!session || userId === session.id || switching) return
+    setSwitching(true)
+    try {
+      const next = await switchProfile(userId)
+      navigate(isAdmin(next.role) ? '/admin' : '/app', { replace: true })
+    } finally {
+      setSwitching(false)
+    }
+  }
   const shopPath = useShopPath()
   const [moreOpen, setMoreOpen] = useState(false)
   if (!session) return null
@@ -203,20 +232,44 @@ export function AppShell() {
           </span>
 
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
-            {session.role !== 'admin' && (
+            {!isAdmin(session.role) && (
               <Link
-                to={session.role === 'agent' ? '/app/earnings' : '/app/wallet'}
-                title={session.role === 'agent' ? 'Earnings available' : 'Wallet balance'}
+                /* Always earnings. The wallet route was withdrawn with customer
+                   accounts, so the other branch pointed at nothing. */
+                to="/app/earnings"
+                title={session.role === 'agent' ? 'Earnings available' : 'Balance'}
                 className="tabular flex items-center gap-2 rounded-xl border border-brand-100 bg-brand-50 px-3 py-1.5 text-sm font-bold text-brand-800 hover:bg-brand-100"
               >
                 <WalletIcon className="size-4" />
                 {cedis(balance)}
               </Link>
             )}
-            {session.role === 'admin' && (
-              <Badge tone="brand">
-                <ShieldIcon className="size-3.5" /> Admin
-              </Badge>
+            {/* Only when there is something to switch to. One profile needs no
+                control, and an empty picker reads as a broken feature. */}
+            {profiles.length > 1 ? (
+              <label className="flex items-center gap-1.5">
+                <span className="sr-only">Switch profile</span>
+                <ShieldIcon className="size-3.5 text-brand-700" />
+                <select
+                  value={session.id}
+                  disabled={switching}
+                  onChange={(event) => void swap(event.target.value)}
+                  className="rounded-xl border border-brand-100 bg-brand-50 px-2 py-1.5 text-sm font-bold text-brand-800 disabled:opacity-60"
+                >
+                  {profiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {PROFILE_LABEL[profile.role] ?? profile.role}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              isAdmin(session.role) && (
+                <Badge tone="brand">
+                  <ShieldIcon className="size-3.5" />{' '}
+                  {session.role === 'superadmin' ? 'Platform' : 'Admin'}
+                </Badge>
+              )
             )}
             <span className="flex size-9 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-white">
               {initials(session.name)}
@@ -352,7 +405,7 @@ export function PublicShell() {
               Track order
             </Link>
             {session ? (
-              <Link to={session.role === 'admin' ? '/admin' : '/app'}>
+              <Link to={isAdmin(session.role) ? '/admin' : '/app'}>
                 <Button size="sm">My dashboard</Button>
               </Link>
             ) : (

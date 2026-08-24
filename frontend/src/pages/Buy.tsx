@@ -490,11 +490,7 @@ export default function Buy() {
               icon={<AlertIcon className="size-4" />}
             >
               You have {cedis(customerBalance)} and need {cedis(price - customerBalance)} more. Pay
-              with Mobile Money below, or{' '}
-              <Link to="/app/wallet" className="font-semibold underline">
-                top up your wallet
-              </Link>{' '}
-              first.
+              the difference with Mobile Money below.
             </Callout>
           )}
 

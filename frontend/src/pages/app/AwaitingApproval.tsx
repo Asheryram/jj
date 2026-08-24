@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { useBranding } from '../../state/branding'
 import { Button, Callout, Card } from '../../components/ui'
@@ -21,6 +21,16 @@ export default function AwaitingApproval() {
   const branding = useBranding()
 
   if (!session) return null
+
+  /**
+   * An approved agent has no application to wait for.
+   *
+   * Reachable directly, and it told anybody who arrived that their application was
+   * under review — including agents already selling. A page that states something
+   * untrue about the reader's own account is worse than one that is missing, so an
+   * active account is sent to the dashboard instead.
+   */
+  if (session.status === 'active') return <Navigate to="/app" replace />
 
   const refused = session.status === 'rejected'
 

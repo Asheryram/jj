@@ -129,8 +129,11 @@ enum WithdrawalStatus {
 model User {
   id           String     @id @default(uuid())
   name         String
-  phone        String     @unique
-  email        String     @unique
+  /// Unique per role, not globally — see the @@unique blocks at the end of this
+  /// model. One person may hold more than one profile, and they share a phone
+  /// and an email because they are the same person.
+  phone        String
+  email        String
   passwordHash String?    @map("password_hash")
   role         Role
   status       UserStatus @default(active)
@@ -167,6 +170,25 @@ model User {
   brandingRequests BrandingRequest[]
   setupTokens      SetupToken[]
 
+  /**
+   * One profile per role per person.
+   *
+   * James runs the business and also wants to sell as an agent, to see what his
+   * agents see. Those cannot be the same row: an agent owns a balance, a referral
+   * code, a downline and earnings that the platform's own margin must never be
+   * mixed with. So they are separate users who happen to be the same human.
+   *
+   * Uniqueness moved from the column to the pair. What stops a stranger claiming
+   * somebody's address is now application code — registration rejects an email
+   * already present under any role, and only the account's owner can add a
+   * profile to it. See the invariant in AuthService.createProfile: at most one
+   * row per email carries a password, and every other row with that email was
+   * created deliberately by its owner.
+   */
+  @@unique([email, role])
+  @@unique([phone, role])
+  @@index([email])
+  @@index([phone])
   @@index([uplineCode])
   @@index([role])
   @@map("users")

@@ -15,6 +15,7 @@ import {
 } from '../common/domain-errors'
 import type { AuthUser } from '../common/auth'
 import { momoLabel } from '../wallet/wallet.service'
+import { isAdminRole } from '../common/auth'
 
 /** FR-2.6 — the smallest amount worth a manual MoMo transfer. */
 const MIN_WITHDRAWAL = 1000 // GHS 10.00
@@ -33,7 +34,7 @@ export class WithdrawalsService {
   async list(user: AuthUser) {
     // An agent sees only their own requests; James sees the whole queue.
     const rows = await this.prisma.withdrawal.findMany({
-      where: user.role === 'admin' ? {} : { userId: user.id },
+      where: isAdminRole(user.role) ? {} : { userId: user.id },
       orderBy: { requestedAt: 'desc' },
       take: 200,
     })
@@ -47,7 +48,7 @@ export class WithdrawalsService {
    * it. Otherwise an agent could request their whole balance twice and, if both
    * were approved, be paid twice for money they only earned once.
    */
-  async request(user: AuthUser, amount: number, momoNetwork: Network) {
+  async request(user: AuthUser, amount: number, momoNetwork: Network, momoNumber: string) {
     if (!Number.isInteger(amount) || amount < MIN_WITHDRAWAL) {
       throw new ValidationError(
         `The smallest withdrawal is GHS ${(MIN_WITHDRAWAL / 100).toFixed(2)}.`,
@@ -79,7 +80,7 @@ export class WithdrawalsService {
           where: { id: user.id },
           select: { balance: true },
         })
-        throw new InsufficientBalanceError(current?.balance ?? 0, amount)
+        throw new InsufficientBalanceError(current?.balance ?? 0, amount, 'withdrawal')
       }
 
       const after = await tx.user.findUniqueOrThrow({
@@ -91,7 +92,9 @@ export class WithdrawalsService {
         data: {
           userId: user.id,
           agentName: after.name,
-          agentPhone: after.phone,
+          // The number the agent asked to be paid on, not whatever their profile
+          // says — see RequestWithdrawalDto.momoNumber.
+          agentPhone: momoNumber,
           amount,
           momoNetwork,
           status: 'pending',

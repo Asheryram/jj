@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common'
+import { SettingsModule } from '../settings/settings.module'
+import { MailModule } from '../mail/mail.module'
 import { SupplierService } from './supplier.service'
+import { FloatMonitorService } from './float-monitor.service'
 import { DatahubClient } from './datahub.client'
 import { DatahubSource } from './datahub.source'
 import { CatalogueImportService } from './catalogue-import.service'
@@ -23,8 +26,11 @@ import { CATALOGUE_SOURCES } from './catalogue-source'
  * orders, and settlement belongs to FulfilmentService.
  */
 @Module({
+  // The float monitor reads the thresholds and sends the warning.
+  imports: [SettingsModule, MailModule],
   providers: [
     SupplierService,
+    FloatMonitorService,
     DatahubClient,
     DatahubSource,
     CatalogueImportService,
@@ -34,6 +40,6 @@ import { CATALOGUE_SOURCES } from './catalogue-source'
       inject: [DatahubSource],
     },
   ],
-  exports: [SupplierService, DatahubClient, CatalogueImportService],
+  exports: [SupplierService, DatahubClient, CatalogueImportService, FloatMonitorService],
 })
 export class SupplierModule {}

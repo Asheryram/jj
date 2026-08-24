@@ -4,6 +4,7 @@ import { PricingService } from '../pricing/pricing.service'
 import { SettingsService } from '../settings/settings.service'
 import { toProduct, toPublicProduct } from '../common/mappers'
 import type { Role } from '@prisma/client'
+import { isAdminRole } from '../common/auth'
 
 /**
  * One call that gives the browser everything it needs to price the shop without
@@ -32,8 +33,11 @@ export class CatalogueService {
   async snapshot(role: Role | undefined) {
     const [products, agents, admin, settings] = await Promise.all([
       this.prisma.product.findMany({
-        where: role === 'admin' ? {} : { active: true },
+        where: isAdminRole(role) ? {} : { active: true },
         orderBy: [{ category: 'asc' }, { supplierCost: 'asc' }],
+        // Only the admin payload keeps `provider`, but loading it costs one join
+        // either way and `toPublicProduct` strips it.
+        include: { supplier: { select: { provider: true } } },
       }),
       this.pricing.agents(),
       // Tolerant on purpose: a fresh deployment has no admin until the
@@ -44,7 +48,7 @@ export class CatalogueService {
     ])
 
     return {
-      products: products.map(role === 'admin' ? toProduct : toPublicProduct),
+      products: products.map(isAdminRole(role) ? toProduct : toPublicProduct),
       pricingAgents: agents,
       admin,
       settings: {
@@ -52,7 +56,7 @@ export class CatalogueService {
         referralRatePercent: settings.referralRatePercent,
         // The failure switch is an admin testing aid; a customer's browser has no
         // business branching on it, and telling everyone would be odd.
-        ...(role === 'admin' ? { simulateFailure: settings.simulateFailure } : {}),
+        ...(isAdminRole(role) ? { simulateFailure: settings.simulateFailure } : {}),
       },
     }
   }

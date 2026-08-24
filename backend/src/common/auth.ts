@@ -44,6 +44,20 @@ export const ROLES_KEY = 'jdc:roles'
  * Route decorators are still written as the narrowest role that should reach
  * them; this only widens upwards.
  */
+/**
+ * Does this role count as an admin?
+ *
+ * Exported because the guard is not the only place that asks. Every raw
+ * `role === 'admin'` in a service silently excluded the superadmin, and the
+ * symptom was never an error: the catalogue handed the platform owner the
+ * *public* payload, so the Prices page saw only products already on sale and no
+ * supplier costs at all. Orders and withdrawals did the same, scoping the
+ * operator to their own rows as though they were a customer.
+ */
+export function isAdminRole(role: Role | undefined): boolean {
+  return role === 'admin' || role === 'superadmin'
+}
+
 function satisfies(role: Role, required: Role[]): boolean {
   if (required.includes(role)) return true
   return role === 'superadmin' && required.includes('admin')

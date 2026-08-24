@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
+import type { PlatformSettings } from '../settings/settings.service'
 import { SettingsService } from '../settings/settings.service'
 import { toProduct } from '../common/mappers'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
@@ -61,10 +62,40 @@ export class AdminService {
     const row = await this.prisma.user.findUnique({ where: { id } })
     if (!row) throw new NotFoundError('We could not find that user.')
 
-    if (row.role === 'admin') {
-      // Locking the only admin out of the platform is not an undoable mistake
-      // from inside the platform.
-      throw new ConflictError('CANNOT_SUSPEND_ADMIN', 'An admin account cannot be suspended here.')
+    /**
+     * Neither an admin nor the superadmin can be suspended from this screen.
+     *
+     * Locking the only admin out of the platform is not an undoable mistake from
+     * inside the platform. The superadmin matters more: this endpoint is open to
+     * any admin, so checking only for `admin` let an admin suspend the person who
+     * runs the platform — and the account that can restore roles is the one being
+     * disabled. Hiding the button was never enough, because the request does not
+     * need the button.
+     */
+    if (row.role === 'admin' || row.role === 'superadmin') {
+      throw new ConflictError(
+        'CANNOT_SUSPEND_ADMIN',
+        row.role === 'superadmin'
+          ? 'The platform owner cannot be suspended.'
+          : 'An admin account cannot be suspended here.',
+      )
+    }
+
+    /**
+     * An undecided application cannot be activated from here.
+     *
+     * This endpoint only flips between active and suspended. Applied to a
+     * `pending` agent it would set them active while skipping everything
+     * `ApplicationsService.approve` does — `decidedBy`, `decidedAt`, and the
+     * email telling them they may start selling. An agent who is not told they
+     * are approved does not start selling, so the approval would achieve nothing
+     * and nobody would know who granted it.
+     */
+    if (row.status === 'pending' || row.status === 'rejected') {
+      throw new ConflictError(
+        'NOT_DECIDED',
+        'That application has not been decided. Approve or reject it under Agent applications.',
+      )
     }
 
     const updated = await this.prisma.user.update({
@@ -136,24 +167,66 @@ export class AdminService {
     // up to meet the new cost.
     const markupField = tier === 'adminPrice' ? 'agentMarkupBp' : 'walkupMarkupBp'
 
+    /**
+     * Pricing something by hand puts it on sale, exactly as the bulk markup does.
+     *
+     * `applyMarkup` already holds that anything being priced is by definition
+     * ready to sell. This did not, so a freshly imported bundle priced one
+     * product at a time stayed invisible to customers, and the only way to
+     * publish it was to run the bulk tool — which is not obvious from anywhere on
+     * the screen.
+     *
+     * Both selling prices have to clear cost first. Activating while one of them
+     * still sits at cost would quietly list a bundle that earns nothing on that
+     * channel, which is the thing the import is careful not to do.
+     */
+    const bothPricesClearCost =
+      next.adminPrice > next.supplierCost && next.standardPrice > next.supplierCost
+
     const updated = await this.prisma.product.update({
       where: { id: productId },
       data: {
         [tier]: value,
         [markupField]: markupFromPrice(row.supplierCost, value),
+        ...(!row.active && bothPricesClearCost ? { active: true } : {}),
       },
     })
+
+    if (!row.active && bothPricesClearCost) {
+      this.log.log(`${productId} is now on sale — both prices clear cost`)
+    }
 
     this.log.log(`tier ${tier} on ${productId} → ${value}p (markup ${updated[markupField]}bp)`)
     return toProduct(updated)
   }
 
   async setProductActive(productId: string, active: boolean) {
-    const updated = await this.prisma.product
-      .update({ where: { id: productId }, data: { active } })
-      .catch(() => {
-        throw new NotFoundError('We could not find that product.')
-      })
+    const row = await this.prisma.product.findUnique({ where: { id: productId } })
+    if (!row) throw new NotFoundError('We could not find that product.')
+
+    /**
+     * A product still priced at cost cannot be put on sale.
+     *
+     * Every other route to publishing refuses this — the import leaves new SKUs
+     * inactive rather than sell them at cost, and `setTier` only activates once
+     * both prices clear it. Without the same check here, this toggle would be the
+     * one way to list a bundle that earns nothing, and nobody would notice until
+     * the margin report came out flat.
+     */
+    if (active) {
+      const flat: string[] = []
+      if (row.adminPrice <= row.supplierCost) flat.push('the agent price')
+      if (row.standardPrice <= row.supplierCost) flat.push('the walk-up price')
+      if (flat.length > 0) {
+        throw new ValidationError(
+          `${flat.join(' and ')} ${flat.length === 1 ? 'is' : 'are'} still at what you pay for ` +
+            'this, so selling it would earn nothing. Set a price above cost first.',
+        )
+      }
+    }
+
+    const updated = await this.prisma.product.update({ where: { id: productId }, data: { active } })
+    this.log.log(`${productId} is ${active ? 'on sale' : 'off sale'}`)
     return toProduct(updated)
   }
 
@@ -303,10 +376,8 @@ export class AdminService {
     return this.settings.all()
   }
 
-  setSetting(
-    key: 'referralEnabled' | 'referralRatePercent' | 'simulateFailure' | 'registrationOpen',
-    value: boolean | number,
-  ) {
+  /** Keyed off PlatformSettings, so a new setting needs no change here. */
+  setSetting(key: keyof PlatformSettings, value: boolean | number) {
     return this.settings.set(key, value)
   }
 

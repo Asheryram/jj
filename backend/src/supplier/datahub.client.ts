@@ -37,6 +37,8 @@ export type PurchaseOutcome =
       providerReference: string
       providerStatus: string
       deducted: number | null
+      /** Cedis left in the float, as the provider reported them. Null if absent. */
+      balanceAfter: number | null
       raw: string
     }
   | { kind: 'rejected'; reason: string; insufficientBalance: boolean; raw: string }
@@ -81,6 +83,23 @@ function deductedFrom(body: DatahubEnvelope): number | null {
     if (difference > 0) return Number(difference.toFixed(2))
   }
   return typeof body.data?.price === 'number' ? body.data.price : null
+}
+
+/**
+ * What is left in the float afterwards, in cedis.
+ *
+ * The only place this number is ever available: DataHub publishes no balance
+ * endpoint, so the float is knowable exactly once per purchase, in the reply.
+ * It used to be parsed and discarded — `deductedFrom` reads `current` only to
+ * work out what was charged — which is why nobody could see the float until an
+ * order failed for want of it.
+ *
+ * Null when they did not send it, never zero: zero is a real and alarming
+ * balance, and inventing it would raise an alert nobody needed.
+ */
+function balanceAfterFrom(body: DatahubEnvelope): number | null {
+  const current = body.balance?.current
+  return typeof current === 'number' ? current : null
 }
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -276,6 +295,7 @@ export class DatahubClient {
       // cost of GHS 4.70 and actually charged GHS 4.20, and reading only
       // `deducted` missed it entirely.
       deducted: deductedFrom(body),
+      balanceAfter: balanceAfterFrom(body),
       raw,
     }
   }

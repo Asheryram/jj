@@ -19,6 +19,8 @@ import { ApprovalsService } from '../orders/approvals.service'
 import { LedgerService } from '../finance/ledger.service'
 import { RefundsService } from '../orders/refunds.service'
 import { ApplicationsService } from './applications.service'
+import { FloatMonitorService } from '../supplier/float-monitor.service'
+import { SettingsService } from '../settings/settings.service'
 import { SolvencyService } from '../finance/solvency.service'
 
 const TIERS = ['supplierCost', 'adminPrice', 'standardPrice'] as const
@@ -94,16 +96,44 @@ export class RejectRefundDto {
   note!: string
 }
 
-export class SetSettingDto {
-  @IsIn(['referralEnabled', 'referralRatePercent', 'simulateFailure', 'registrationOpen'])
-  key!: 'referralEnabled' | 'referralRatePercent' | 'simulateFailure' | 'registrationOpen'
+/** Keys whose value is a number rather than a switch. */
+const NUMERIC_SETTING_KEYS = ['referralRatePercent', 'floatWatchAt', 'floatRiskAt'] as const
 
-  /** Boolean for the switches, a whole percentage for `referralRatePercent`. */
-  @ValidateIf((dto: SetSettingDto) => dto.key === 'referralRatePercent')
-  @IsInt({ message: 'A referral rate is a whole number of percent.' })
+export class SetSettingDto {
+  @IsIn([
+    'referralEnabled',
+    'referralRatePercent',
+    'simulateFailure',
+    'registrationOpen',
+    'agentsAutoApprove',
+    'floatWatchAt',
+    'floatRiskAt',
+  ])
+  key!:
+    | 'referralEnabled'
+    | 'referralRatePercent'
+    | 'simulateFailure'
+    | 'registrationOpen'
+    | 'agentsAutoApprove'
+    | 'floatWatchAt'
+    | 'floatRiskAt'
+
+  /**
+   * A whole number for the numeric keys, a boolean for the switches.
+   *
+   * Only the shape is checked here. The ranges belong to SettingsService, which
+   * knows that a referral rate caps at 100 while a float threshold is pesewas
+   * with no ceiling, and that at-risk has to sit below watch — a rule that needs
+   * the other value and so cannot live on a DTO at all.
+   */
+  @ValidateIf((dto: SetSettingDto) =>
+    (NUMERIC_SETTING_KEYS as readonly string[]).includes(dto.key),
+  )
+  @IsInt({ message: 'That setting takes a whole number.' })
   @Min(0)
-  @Max(100)
-  @ValidateIf((dto: SetSettingDto) => dto.key !== 'referralRatePercent')
+  @ValidateIf(
+    (dto: SetSettingDto) => !(NUMERIC_SETTING_KEYS as readonly string[]).includes(dto.key),
+  )
   @IsBoolean()
   value!: boolean | number
 }
@@ -127,6 +157,8 @@ export class AdminController {
     private readonly solvency: SolvencyService,
     private readonly refunds: RefundsService,
     private readonly applications: ApplicationsService,
+    private readonly float: FloatMonitorService,
+    private readonly platformSettings: SettingsService,
   ) {}
 
   @Get('overview')
@@ -166,6 +198,26 @@ export class AdminController {
   @Get('supplier')
   supplier() {
     return this.admin.supplierCatalogue()
+  }
+
+  /**
+   * What is left in the provider float, and the thresholds that watch it.
+   *
+   * Null until the first purchase: the provider has no balance endpoint, so the
+   * figure only exists in the reply to an order. The screen has to say when it
+   * was read, or it implies a live number it cannot have.
+   */
+  @Get('supplier/float')
+  async float_() {
+    const [observation, settings] = await Promise.all([
+      this.float.latest(),
+      this.platformSettings.all(),
+    ])
+    return {
+      observation,
+      watchAt: settings.floatWatchAt,
+      riskAt: settings.floatRiskAt,
+    }
   }
 
   /** Re-read every configured supplier's catalogue. */

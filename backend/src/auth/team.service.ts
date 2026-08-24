@@ -59,28 +59,52 @@ export class TeamService {
   async createAdmin(input: { name: string; email: string; phone: string }, invitedBy?: string) {
     const email = input.email.trim().toLowerCase()
 
-    const clash = await this.prisma.user.findUnique({ where: { email } })
-    if (clash) {
+    /**
+     * Does this address already belong to somebody here?
+     *
+     * If it does, this is not a new person — it is an existing account gaining an
+     * admin profile, which is the whole point of the profile model. That profile
+     * gets no password and no setup link: they already have both, on the row that
+     * holds them, and issuing a second would create two ways into one identity.
+     */
+    const owner = await this.prisma.user.findFirst({
+      where: { email },
+      select: { id: true, name: true },
+    })
+
+    const alreadyAdmin = await this.prisma.user.findFirst({
+      where: { email, role: 'admin' },
+      select: { id: true },
+    })
+    if (alreadyAdmin) {
       throw new ConflictError(
         'EMAIL_IN_USE',
-        `${email} already has an account here. Send them a new sign-in link instead of creating a second one.`,
+        `${email} already has an admin profile. Send them a new sign-in link instead of creating a second one.`,
       )
     }
 
-    // Checked here rather than left to the unique index, so the message names
-    // which field clashed. A superadmin typing in somebody's details needs to
-    // know whether to change the email or the phone.
-    const phoneClash = await this.prisma.user.findFirst({ where: { phone: input.phone } })
+    /**
+     * A phone may repeat across one person's own profiles and nobody else's.
+     *
+     * Uniqueness is per role now, so the index alone would let two different
+     * people share a number as long as their roles differed. Checked here so the
+     * message names the field, and scoped to a different email so somebody's own
+     * second profile is not refused for using their own number.
+     */
+    const phoneClash = await this.prisma.user.findFirst({
+      where: { phone: input.phone, email: { not: email } },
+      select: { id: true },
+    })
     if (phoneClash) {
       throw new ConflictError(
         'PHONE_IN_USE',
-        `${input.phone} is already on another account. Use a different number for this one.`,
+        `${input.phone} is already on somebody else's account. Use a different number for this one.`,
       )
     }
 
     const created = await this.prisma.user.create({
       data: {
-        name: input.name.trim(),
+        name: owner?.name ?? input.name.trim(),
         email,
         phone: input.phone,
         // No password until they set one, which is what the nullable column is
@@ -95,6 +119,18 @@ export class TeamService {
       },
     })
 
+    if (owner) {
+      this.log.log(`admin profile added to the existing account ${email} — no link needed`)
+      return {
+        id: created.id,
+        email,
+        setupLink: null,
+        emailed: false,
+        emailProblem: null,
+        addedToExistingAccount: true,
+      }
+    }
+
     const { link, sent, reason } = await this.tokens.issueAndSend(
       created.id,
       'setup',
@@ -105,7 +141,14 @@ export class TeamService {
     // The link is returned whether or not it was emailed. When mail is not
     // working the superadmin is the delivery channel, and needs to be told that
     // rather than assuming an email went out.
-    return { id: created.id, email, setupLink: link, emailed: sent, emailProblem: reason ?? null }
+    return {
+      id: created.id,
+      email,
+      setupLink: link,
+      emailed: sent,
+      emailProblem: reason ?? null,
+      addedToExistingAccount: false,
+    }
   }
 
   /**

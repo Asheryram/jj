@@ -1,6 +1,7 @@
 import { useStore } from '../../state/store'
 import { referralLinkFor, sellLinkFor } from '../../lib/origin'
 import { cedis, longDate } from '../../lib/format'
+import { STATUS_LABEL, STATUS_TONE } from '../../lib/userStatus'
 import {
   Badge,
   Button,
@@ -177,8 +178,8 @@ export default function Referrals() {
                       {cedis(agent.earnedForUpline)}
                     </Td>
                     <Td>
-                      <Badge tone={agent.status === 'active' ? 'success' : 'danger'}>
-                        {agent.status === 'active' ? 'Active' : 'Suspended'}
+                      <Badge tone={STATUS_TONE[agent.status]}>
+                        {STATUS_LABEL[agent.status]}
                       </Badge>
                     </Td>
                   </tr>
@@ -187,10 +188,17 @@ export default function Referrals() {
             </tbody>
           </TableWrap>
         )}
-        <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
-          Joined dates run from {longDate(subAgents[subAgents.length - 1].joinedAt)} to{' '}
-          {longDate(subAgents[0].joinedAt)}.
-        </p>
+        {/* Only with somebody in the list. This sat outside the guard above and
+            read `subAgents[-1].joinedAt` when the list was empty, which throws
+            during render — React then unmounted the whole tree, so a new agent
+            with no downline saw a completely blank page with every link gone and
+            nothing in the console to explain it. */}
+        {subAgents.length > 0 && (
+          <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
+            Joined dates run from {longDate(subAgents[subAgents.length - 1].joinedAt)} to{' '}
+            {longDate(subAgents[0].joinedAt)}.
+          </p>
+        )}
       </Card>
 
       {/* FR-5.3 — say clearly that there is no commission to wait for. */}

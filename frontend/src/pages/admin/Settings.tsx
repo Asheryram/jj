@@ -353,7 +353,348 @@ export default function Settings() {
         </div>
       </Card>
 
+      <YourDetails />
+
+      <AgentApproval />
+
+      <YourProfiles />
+
+      <FloatThresholds />
+
       <ProviderCatalogue />
     </div>
+  )
+}
+
+/**
+ * When to be told the provider float is running down.
+ *
+ * Kept local to this screen rather than added to the store: nothing else in the
+ * app reads these, and the panel on the Overview gets them from the same endpoint
+ * that reports the balance.
+ *
+ * Entered in cedis because that is how James thinks about his float, stored in
+ * pesewas because that is how every amount in this system is stored. Zero means
+ * off, and says so — a threshold of nothing would otherwise look like a threshold
+ * that never triggers, which is the same behaviour with none of the honesty.
+ */
+function FloatThresholds() {
+  const { pushToast } = useStore()
+  const [watch, setWatch] = useState('')
+  const [risk, setRisk] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api
+      .adminSettings()
+      .then((settings) => {
+        if (!live) return
+        setWatch(settings.floatWatchAt ? String(settings.floatWatchAt / 100) : '')
+        setRisk(settings.floatRiskAt ? String(settings.floatRiskAt / 100) : '')
+        setLoaded(true)
+      })
+      .catch(() => live && setLoaded(true))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const save = async (key: 'floatWatchAt' | 'floatRiskAt', draft: string, label: string) => {
+    const cedisValue = draft.trim() === '' ? 0 : Number(draft)
+    if (!Number.isFinite(cedisValue) || cedisValue < 0) {
+      pushToast({ tone: 'error', title: `${label} needs to be an amount like 500.` })
+      return
+    }
+    try {
+      await api.setSetting(key, Math.round(cedisValue * 100))
+      pushToast({
+        tone: 'success',
+        title: cedisValue === 0 ? `${label} switched off` : `${label} set to ${cedis(Math.round(cedisValue * 100))}`,
+      })
+    } catch (error) {
+      // The server also refuses at-risk above watch, which is the rule a single
+      // field cannot check on its own.
+      pushToast({
+        tone: 'error',
+        title: error instanceof Error ? error.message : 'We could not save that.',
+      })
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Float warnings"
+        subtitle="When to email you that DataHub GH is running low"
+      />
+      <div className="space-y-3 px-4 pb-4">
+        <p className="text-sm text-slate-600">
+          The float is prepaid, and when it empties every order fails after the customer has already
+          paid. DataHub publishes no balance, so it is read from the reply to each order — which
+          means a warning is the only advance notice possible.
+        </p>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Warn me at (GHS)" htmlFor="float-watch" hint="Blank or 0 switches it off.">
+            <TextInput
+              id="float-watch"
+              inputMode="decimal"
+              disabled={!loaded}
+              value={watch}
+              onChange={(event) => setWatch(event.target.value.replace(/[^0-9.]/g, ''))}
+              onBlur={() => void save('floatWatchAt', watch, 'Warning level')}
+            />
+          </Field>
+
+          <Field
+            label="Urgent at (GHS)"
+            htmlFor="float-risk"
+            hint="Has to be lower than the warning level."
+          >
+            <TextInput
+              id="float-risk"
+              inputMode="decimal"
+              disabled={!loaded}
+              value={risk}
+              onChange={(event) => setRisk(event.target.value.replace(/[^0-9.]/g, ''))}
+              onBlur={() => void save('floatRiskAt', risk, 'Urgent level')}
+            />
+          </Field>
+        </div>
+
+        <p className="text-xs text-slate-500">
+          You get one email each time the balance falls past a level, not one per order. If it
+          climbs back above and falls again, you are told again.
+        </p>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * The hats you wear, and a way to add one.
+ *
+ * An agent profile is a real account, not a preview: it has its own balance,
+ * referral code and shop link, and the API strips supplier costs from it exactly
+ * as it does for any other agent. That is the point — a preview built on your own
+ * admin session would still show you your buying price, which is the one number
+ * an agent can never see.
+ *
+ * It gets no password and no setup link. There is one password per person, on the
+ * profile that holds it, and a second would be a second way into one identity.
+ */
+function YourProfiles() {
+  const { session, profiles, addProfile } = useStore()
+  const [busy, setBusy] = useState<'admin' | 'agent' | null>(null)
+
+  if (!session) return null
+
+  const has = (role: string) => profiles.some((p) => p.role === role)
+
+  const add = async (role: 'admin' | 'agent') => {
+    setBusy(role)
+    try {
+      await addProfile(role)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead title="Your profiles" subtitle="One sign-in, more than one role" />
+      <div className="space-y-3 px-4 pb-4">
+        <ul className="space-y-2">
+          {profiles.map((profile) => (
+            <li
+              key={profile.id}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2"
+            >
+              <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                {profile.role === 'superadmin'
+                  ? 'Platform'
+                  : profile.role === 'admin'
+                    ? 'Admin'
+                    : profile.role === 'agent'
+                      ? 'Agent'
+                      : 'Customer'}
+                {profile.id === session.id && <Badge tone="brand">Signed in</Badge>}
+              </span>
+              <span className="tabular text-xs text-slate-500">{profile.referralCode}</span>
+            </li>
+          ))}
+        </ul>
+
+        <div className="flex flex-wrap gap-2">
+          {!has('agent') && (
+            <Button size="sm" loading={busy === 'agent'} onClick={() => void add('agent')}>
+              Add an agent profile
+            </Button>
+          )}
+          {!has('admin') && session.role === 'superadmin' && (
+            <Button
+              size="sm"
+              variant="outline"
+              loading={busy === 'admin'}
+              onClick={() => void add('admin')}
+            >
+              Add an admin profile
+            </Button>
+          )}
+        </div>
+
+        <p className="text-xs text-slate-500">
+          Switch between them from the picker at the top of the page. Each keeps its own earnings and
+          shop link; you sign in once, with the password you already have.
+        </p>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * Your own number, which is where your earnings are sent.
+ *
+ * The bootstrap seeds `0000000000` because it creates the operator account before
+ * anybody has typed a real number, and no Mobile Money transfer can reach that.
+ * Editable here rather than by an admin: it is the account your own money goes to,
+ * so nobody else should be setting it.
+ *
+ * Applies to every profile you hold — they share a number because they are the
+ * same person, and leaving one behind would mean a payout to a stale value.
+ */
+function YourDetails() {
+  const { session, updatePhone } = useStore()
+  const [draft, setDraft] = useState(session?.phone ?? '')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  if (!session) return null
+
+  const placeholder = session.phone === '0000000000'
+
+  const save = async () => {
+    if (!/^0\d{9}$/.test(draft.trim())) {
+      setError('A Ghana number needs 10 digits, like 0209876543.')
+      return
+    }
+    if (draft.trim() === session.phone) return
+    setBusy(true)
+    setError('')
+    try {
+      await updatePhone(draft.trim())
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead title="Your details" subtitle="The number your earnings are paid to" />
+      <div className="space-y-3 px-4 pb-4">
+        {placeholder && (
+          <Callout tone="warning" title="No real number on your account" icon={<AlertIcon className="size-4" />}>
+            Your account still holds the placeholder it was created with. Nothing can be paid to it —
+            set your Mobile Money number before requesting a withdrawal.
+          </Callout>
+        )}
+
+        <Field label="Mobile Money number" htmlFor="my-phone" error={error}>
+          <div className="flex flex-wrap gap-2">
+            <TextInput
+              id="my-phone"
+              inputMode="numeric"
+              placeholder="0209876543"
+              className="tabular max-w-48"
+              invalid={Boolean(error)}
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value.replace(/[^0-9]/g, '').slice(0, 10))
+                setError('')
+              }}
+            />
+            <Button
+              size="sm"
+              loading={busy}
+              disabled={draft.trim() === session.phone}
+              onClick={() => void save()}
+            >
+              Save
+            </Button>
+          </div>
+        </Field>
+
+        <p className="text-xs text-slate-500">
+          Changing this updates every profile you hold. A withdrawal can still be sent to a different
+          number — you choose it when you request one.
+        </p>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * Whether a new agent waits for a decision.
+ *
+ * On by default: the common case is signing up somebody already known, and a queue
+ * between them and their first sale is friction for its own sake. Off once
+ * strangers start finding the form, and then every application waits in Agent
+ * applications where it is approved by a person and the decision is recorded.
+ */
+function AgentApproval() {
+  const { pushToast } = useStore()
+  const [auto, setAuto] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let live = true
+    api
+      .adminSettings()
+      .then((s) => live && setAuto(s.agentsAutoApprove))
+      .catch(() => live && setAuto(null))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const change = async (next: boolean) => {
+    setAuto(next)
+    try {
+      await api.setSetting('agentsAutoApprove', next)
+      pushToast({
+        tone: next ? 'success' : 'info',
+        title: next ? 'New agents start selling straight away' : 'New agents wait for approval',
+        detail: next
+          ? 'Anyone who signs up is active immediately.'
+          : 'Sign-ups land in Agent applications for you to approve or turn down.',
+      })
+    } catch {
+      setAuto(!next)
+      pushToast({ tone: 'error', title: 'We could not change that.' })
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead title="New agents" subtitle="Who may start selling, and when" />
+      <div className="flex items-start justify-between gap-4 px-4 pb-4">
+        <div>
+          <label htmlFor="auto-approve" className="block font-semibold text-slate-900">
+            Approve new agents automatically
+          </label>
+          <p className="mt-1 text-sm leading-relaxed text-slate-500">
+            On, and anyone who signs up can sell immediately. Off, and every sign-up waits in Agent
+            applications until you decide — which is what you want once people you do not recognise
+            are finding the form. Either way the account is real and your decision is recorded.
+          </p>
+        </div>
+        <Toggle
+          id="auto-approve"
+          label="Approve new agents automatically"
+          checked={auto ?? true}
+          onChange={(next) => void change(next)}
+        />
+      </div>
+    </Card>
   )
 }

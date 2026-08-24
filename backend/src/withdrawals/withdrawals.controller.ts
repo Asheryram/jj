@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
-import { IsIn, IsInt, Min } from 'class-validator'
+import { IsIn, IsInt, Matches, Min } from 'class-validator'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { WithdrawalsService } from './withdrawals.service'
 
@@ -11,6 +11,19 @@ export class RequestWithdrawalDto {
 
   @IsIn(['MTN', 'Telecel', 'AirtelTigo'], { message: 'Choose the network to be paid on.' })
   momoNetwork!: 'MTN' | 'Telecel' | 'AirtelTigo'
+
+  /**
+   * The Mobile Money number to pay.
+   *
+   * Asked for rather than taken from the account, because the two are not always
+   * the same: the number somebody signs in with is not necessarily the wallet they
+   * want their earnings in, and a placeholder on the account — the bootstrap seeds
+   * `0000000000` — would send a real transfer nowhere. Stored on the withdrawal, so
+   * the record shows where the money was sent rather than where the account
+   * happened to point later.
+   */
+  @Matches(/^0\d{9}$/, { message: 'A Ghana number needs 10 digits, like 0209876543.' })
+  momoNumber!: string
 }
 
 export class DecideWithdrawalDto {
@@ -34,7 +47,7 @@ export class WithdrawalsController {
   @Post()
   @Roles('agent')
   request(@CurrentUser() user: AuthUser, @Body() dto: RequestWithdrawalDto) {
-    return this.withdrawals.request(user, dto.amount, dto.momoNetwork)
+    return this.withdrawals.request(user, dto.amount, dto.momoNetwork, dto.momoNumber)
   }
 
   @Patch(':id')

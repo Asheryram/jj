@@ -29,6 +29,9 @@ import { AlertIcon, CashIcon, ClockIcon } from '../../components/icons'
  * spent twice while it waits. James approves it and sends the MoMo; a rejection
  * puts it straight back.
  */
+/** What the bootstrap seeds when nobody has given a real number yet. */
+const PLACEHOLDER_PHONE = '0000000000'
+
 export default function Withdrawals() {
   const { agentBalance: balance, withdrawals, requestWithdrawal, session } = useStore()
   const [open, setOpen] = useState(false)
@@ -128,8 +131,8 @@ export default function Withdrawals() {
         onClose={() => setOpen(false)}
         balance={balance}
         defaultPhone={session?.phone ?? ''}
-        onSubmit={(amount, network) => {
-          requestWithdrawal(amount, network)
+        onSubmit={(amount, network, number) => {
+          requestWithdrawal(amount, network, number)
           setOpen(false)
         }}
       />
@@ -148,11 +151,18 @@ function RequestModal({
   onClose: () => void
   balance: number
   defaultPhone: string
-  onSubmit: (amount: number, network: Network) => void
+  onSubmit: (amount: number, network: Network, number: string) => void
 }) {
   const [value, setValue] = useState('')
   const [network, setNetwork] = useState<Network>('MTN')
+  /**
+   * Prefilled from the account, but blank when the account still holds the
+   * bootstrap placeholder — `0000000000` is not a number any transfer can reach,
+   * and offering it as a default would invite sending real money nowhere.
+   */
+  const [phone, setPhone] = useState(defaultPhone === PLACEHOLDER_PHONE ? '' : defaultPhone)
   const [error, setError] = useState('')
+  const [phoneError, setPhoneError] = useState('')
 
   const parsed = value.trim() ? parseCedis(value) : null
 
@@ -169,9 +179,14 @@ function RequestModal({
       setError(`You only have ${cedis(balance)} available.`)
       return
     }
+    if (!/^0\d{9}$/.test(phone.trim())) {
+      setPhoneError('A Ghana number needs 10 digits, like 0209876543.')
+      return
+    }
     setError('')
+    setPhoneError('')
     setValue('')
-    onSubmit(parsed, network)
+    onSubmit(parsed, network, phone.trim())
   }
 
   return (
@@ -228,8 +243,24 @@ function RequestModal({
           </Select>
         </Field>
 
-        <Field label="Paid to" htmlFor="wd-phone" hint="Your registered number. Contact James to change it.">
-          <TextInput id="wd-phone" value={defaultPhone} readOnly className="bg-slate-50 tabular" />
+        <Field
+          label="Paid to"
+          htmlFor="wd-phone"
+          error={phoneError}
+          hint="The Mobile Money number to send it to. It does not have to be the number you sign in with."
+        >
+          <TextInput
+            id="wd-phone"
+            inputMode="numeric"
+            placeholder="0209876543"
+            className="tabular"
+            invalid={Boolean(phoneError)}
+            value={phone}
+            onChange={(event) => {
+              setPhone(event.target.value.replace(/[^0-9]/g, '').slice(0, 10))
+              setPhoneError('')
+            }}
+          />
         </Field>
 
         <Button block size="lg" onClick={submit}>

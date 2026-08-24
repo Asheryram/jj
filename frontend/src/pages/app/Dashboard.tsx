@@ -105,18 +105,14 @@ export default function Dashboard() {
                 </Link>
               </>
             ) : (
-              <>
-                <Link to="/app/wallet">
-                  <Button variant="onBrand">
-                    <WalletIcon className="size-4" /> Top up
-                  </Button>
-                </Link>
-                <Link to={shopPath('/shop')}>
-                  <Button variant="onBrandOutline">
-                    <StoreIcon className="size-4" /> Buy
-                  </Button>
-                </Link>
-              </>
+              /* No top-up: customer wallets were withdrawn, and `/app/wallet` has
+                 no route, so the button led nowhere. Buying is the only thing this
+                 account can still do, and it pays per order with Mobile Money. */
+              <Link to={shopPath('/shop')}>
+                <Button variant="onBrand">
+                  <StoreIcon className="size-4" /> Buy a bundle
+                </Button>
+              </Link>
             )}
           </div>
         </div>
@@ -382,10 +378,11 @@ function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
       accent: 'bg-brand-50 text-brand-700',
     },
     {
-      to: '/app/wallet',
-      label: 'Top up wallet',
-      hint: 'Mobile Money or card',
-      icon: WalletIcon,
+      // Was "Top up wallet", pointing at a route that no longer exists.
+      to: '/app/orders',
+      label: 'Your orders',
+      hint: 'Track a delivery',
+      icon: ReceiptIcon,
       accent: 'bg-sky-50 text-sky-700',
     },
     {

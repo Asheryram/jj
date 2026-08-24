@@ -17,8 +17,22 @@ import type { OrderSplit } from '../domain/pricing'
  * because that is what the frontend's `format.ts` parses.
  */
 
-export function toProduct(row: Product) {
+/**
+ * `provider` is carried when the caller loaded the supplier relation.
+ *
+ * Which supplier fulfils a product only matters once there is more than one, and
+ * there will be: DataHub sells data and nothing else, so airtime, voice, SMS and
+ * AFA have to come from somewhere else. An admin pricing a mixed catalogue needs
+ * to see which row comes from where; a customer does not.
+ *
+ * Null rather than a guess when nothing is linked yet — an unfulfillable product
+ * saying "datahub-gh" would be a claim nobody checked.
+ */
+type ProductRow = Product & { supplier?: { provider: string } | null }
+
+export function toProduct(row: ProductRow) {
   return {
+    provider: row.supplier?.provider ?? null,
     id: row.id,
     category: row.category,
     network: row.network,
@@ -43,11 +57,13 @@ export function toProduct(row: Product) {
  * behind it give up the cost by division. Stripping one and keeping the other
  * would publish the same secret in two steps.
  */
-export function toPublicProduct(row: Product) {
+export function toPublicProduct(row: ProductRow) {
   const {
     supplierCost: _cost,
     agentMarkupBp: _agentBp,
     walkupMarkupBp: _walkupBp,
+    // Who supplies it is nobody's business but the platform's.
+    provider: _provider,
     ...rest
   } = toProduct(row)
   return rest

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useStore } from '../state/store'
 import { Button, Callout, Card, Field, TextInput } from '../components/ui'
 import { AlertIcon } from '../components/icons'
+import { isAdmin } from '../lib/roles'
 
 /**
  * FR-1.3.
@@ -36,7 +37,7 @@ export default function Login() {
       // Trimmed and lowercased here as well as server-side: a phone keyboard
       // will happily capitalise the first letter of an address.
       const session = await login(email.trim().toLowerCase(), password)
-      navigate(session.role === 'admin' ? '/admin' : '/app', { replace: true })
+      navigate(isAdmin(session.role) ? '/admin' : '/app', { replace: true })
     } catch (caught) {
       // The API's message is already written for this reader (NFR-4.3).
       setError(

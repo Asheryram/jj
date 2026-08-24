@@ -13,6 +13,7 @@ import type {
   WithdrawalStatus,
 } from '../data/types'
 import type { PricingAgent } from './pricing'
+import type { UserStatus } from '../data/types'
 
 /**
  * HTTP client for the NestJS API. The only source of data in the app.
@@ -166,10 +167,27 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
 // ─── Shapes the API returns ─────────────────────────────────────────────────
 
+/**
+ * One hat this person can wear.
+ *
+ * A profile is a separate account that happens to belong to the same human — the
+ * platform owner selling as an agent needs a real agent account, because an agent
+ * owns a balance and a referral code that must never mix with the platform's own
+ * margin. They share an email; only one of them has a password.
+ */
+export interface Profile {
+  id: string
+  role: Role
+  status: UserStatus
+  referralCode: string
+}
+
 export interface AuthResult {
   accessToken: string
   user: Session
   balance: number
+  /** Every hat this person has. One entry means no switcher is shown. */
+  profiles: Profile[]
 }
 
 export interface CatalogueSnapshot {
@@ -237,11 +255,40 @@ export interface MySummary {
   activeSubAgents: number
 }
 
+/** Where the provider float sits against the thresholds. */
+export type FloatLevel = 'ok' | 'watch' | 'risk'
+
+/**
+ * What is left in the DataHub float, as of the last order.
+ *
+ * `observation` is null until a purchase has reported it: DataHub publishes no
+ * balance endpoint, so the figure only ever arrives in the reply to an order.
+ * Any screen showing it has to show `observedAt` too, or it implies a live
+ * number nobody can actually have.
+ */
+export interface SupplierFloat {
+  observation: {
+    /** Pesewas. */
+    balance: number
+    observedAt: string
+    orderRef: string | null
+    level: FloatLevel
+  } | null
+  /** Pesewas. Zero means the alert is switched off. */
+  watchAt: number
+  riskAt: number
+}
+
 export interface PlatformSettings {
   referralEnabled: boolean
   referralRatePercent: number
   simulateFailure: boolean
   registrationOpen: boolean
+  /** Whether a new agent can start selling without being approved first. */
+  agentsAutoApprove: boolean
+  /** Provider float thresholds, in pesewas. Zero switches the alert off. */
+  floatWatchAt: number
+  floatRiskAt: number
 }
 
 /** One SKU in the provider's catalogue. */
@@ -464,7 +511,7 @@ export const api = {
     referralCode?: string
   }) => request<AuthResult>('/auth/register', { method: 'POST', body, auth: false }),
 
-  me: () => request<{ user: Session; balance: number }>('/auth/me'),
+  me: () => request<{ user: Session; balance: number; profiles: Profile[] }>('/auth/me'),
 
   // Catalogue — one call for products, the referral chain and platform switches.
   catalogue: () => request<CatalogueSnapshot>('/catalogue', { auth: true }),
@@ -567,10 +614,10 @@ export const api = {
   // Withdrawals
   withdrawals: () => request<WithdrawalRequest[]>('/withdrawals'),
 
-  requestWithdrawal: (amount: number, momoNetwork: Network) =>
+  requestWithdrawal: (amount: number, momoNetwork: Network, momoNumber: string) =>
     request<WithdrawalRequest>('/withdrawals', {
       method: 'POST',
-      body: { amount, momoNetwork },
+      body: { amount, momoNetwork, momoNumber },
     }),
 
   decideWithdrawal: (id: string, status: WithdrawalStatus) =>
@@ -743,12 +790,42 @@ export const api = {
       body: { tier, value },
     }),
 
+  /**
+   * Put a product on sale, or take it off.
+   *
+   * The endpoint existed from the start and nothing ever called it, so there was
+   * no way to withdraw a bundle from the shop without editing its price. The
+   * server refuses to publish one still priced at cost.
+   */
+  /** Change your own number, on every profile you hold. */
+  updatePhone: (phone: string) =>
+    request<{ user: Session; profiles: Profile[] }>('/auth/me/phone', {
+      method: 'PATCH',
+      body: { phone },
+    }),
+
+  /** Swap the session for another of this person's profiles. */
+  switchProfile: (userId: string) =>
+    request<AuthResult>('/auth/switch', { method: 'POST', body: { userId } }),
+
+  /** Give yourself another profile. Creates no password and sends no link. */
+  addProfile: (role: 'admin' | 'agent') =>
+    request<{ id: string; role: Role; referralCode: string }>('/auth/profiles', {
+      method: 'POST',
+      body: { role },
+    }),
+
+  supplierFloat: () => request<SupplierFloat>('/admin/supplier/float'),
+
+  setProductActive: (productId: string, active: boolean) =>
+    request<Product>(`/admin/products/${encodeURIComponent(productId)}/active`, {
+      method: 'PATCH',
+      body: { active },
+    }),
+
   revenueByDay: (days = 7) => request<RevenueDay[]>(`/admin/reports/revenue?days=${days}`),
 
-  setSetting: (
-    key: 'referralEnabled' | 'referralRatePercent' | 'simulateFailure' | 'registrationOpen',
-    value: boolean | number,
-  ) =>
+  setSetting: (key: keyof PlatformSettings, value: boolean | number) =>
     request<PlatformSettings>(
       '/admin/settings',
       { method: 'PATCH', body: { key, value } },

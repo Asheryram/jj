@@ -1,8 +1,19 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common'
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
+/**
+ * `@SkipThrottle()` takes the throttler names, and must.
+ *
+ * With no argument it defaults to `{ default: true }`, which matches nothing here
+ * because the throttlers are named `burst` and `grind` — so the decorator was
+ * silently doing nothing. The route it was protecting is `/auth/me`, which the app
+ * calls on every page load, and the store clears the token whenever that call
+ * fails: about ten page views in a minute quietly signed the user out and dropped
+ * them onto the public shell. The decorator looked right and the failure looked
+ * like broken links.
+ */
 import { SkipThrottle, Throttle } from '@nestjs/throttler'
 import { LoginThrottleGuard } from './login-throttle.guard'
-import { IsEmail, IsString, MaxLength, Matches, MinLength } from 'class-validator'
+import { IsEmail, IsIn, IsString, MaxLength, Matches, MinLength } from 'class-validator'
 import { Transform } from 'class-transformer'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { AuthService } from './auth.service'
@@ -21,6 +32,22 @@ export class SetPasswordDto {
   })
   @MaxLength(200)
   password!: string
+}
+
+export class UpdatePhoneDto {
+  @Matches(/^0\d{9}$/, { message: 'A Ghana number needs 10 digits, like 0209876543.' })
+  phone!: string
+}
+
+export class SwitchProfileDto {
+  @IsString()
+  @MinLength(10)
+  userId!: string
+}
+
+export class CreateProfileDto {
+  @IsIn(['admin', 'agent'], { message: 'A profile is either admin or agent.' })
+  role!: 'admin' | 'agent'
 }
 
 export class ForgotPasswordDto {
@@ -120,6 +147,53 @@ export class AuthController {
   }
 
   /**
+   * Swap the session for another of this person's profiles.
+   *
+   * No password: the caller already proved who they are, and every profile under
+   * one email belongs to one person by construction — registration refuses an
+   * address that already exists, and only the owner can add a profile.
+   *
+   * Not throttled with the sign-in routes. It cannot be used to guess anything,
+   * and being rate-limited out of your own admin screens mid-shift would be a
+   * worse outcome than the attack it prevents.
+   */
+  /**
+   * Change your own phone number.
+   *
+   * Not an admin action: it is the number your own earnings are paid to, so
+   * nobody else should be setting it. Applies to every profile you hold.
+   */
+  @SkipThrottle({ burst: true, grind: true })
+  @Roles()
+  @ApiBearerAuth()
+  @Patch('me/phone')
+  updatePhone(@CurrentUser() user: AuthUser, @Body() dto: UpdatePhoneDto) {
+    return this.auth.updatePhone(user.id, dto.phone)
+  }
+
+  @SkipThrottle({ burst: true, grind: true })
+  @Roles()
+  @ApiBearerAuth()
+  @Post('switch')
+  switchProfile(@CurrentUser() user: AuthUser, @Body() dto: SwitchProfileDto) {
+    return this.auth.switchProfile(user.id, dto.userId)
+  }
+
+  /**
+   * Give yourself another profile — an agent one to see what agents see, or a
+   * second admin one if you run the platform.
+   *
+   * Creates no password and sends no link: this account already has both.
+   */
+  @SkipThrottle({ burst: true, grind: true })
+  @Roles('admin', 'superadmin')
+  @ApiBearerAuth()
+  @Post('profiles')
+  createProfile(@CurrentUser() user: AuthUser, @Body() dto: CreateProfileDto) {
+    return this.auth.createProfile(user.id, dto.role)
+  }
+
+  /**
    * Called on page load to turn a stored token back into a session.
    *
    * Not counted. This runs on every page load and every tab, so a shared office
@@ -127,7 +201,7 @@ export class AuthController {
    * and the failure mode is the platform locking out the people running it. There
    * is nothing to guess here anyway: it validates a token it was handed.
    */
-  @SkipThrottle()
+  @SkipThrottle({ burst: true, grind: true })
   @Get('me')
   @Roles()
   @ApiBearerAuth()

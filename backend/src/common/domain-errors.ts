@@ -17,11 +17,21 @@ export class DomainError extends Error {
 }
 
 export class InsufficientBalanceError extends DomainError {
-  constructor(balance: number, required: number) {
-    const short = (required - balance) / 100
+  /**
+   * Two situations, and the same sentence does not fit both.
+   *
+   * Spending is "this costs more than you have". Withdrawing is "you asked for
+   * more than you have earned" — and an agent has earnings, not a wallet, so the
+   * shared wording told them about an account they do not hold and a purchase
+   * they were not making.
+   */
+  constructor(balance: number, required: number, kind: 'purchase' | 'withdrawal' = 'purchase') {
+    const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
     super(
       'INSUFFICIENT_BALANCE',
-      `Your wallet has GHS ${(balance / 100).toFixed(2)} and this costs GHS ${(required / 100).toFixed(2)} — you need GHS ${short.toFixed(2)} more.`,
+      kind === 'withdrawal'
+        ? `You have ${ghs(balance)} available and asked to withdraw ${ghs(required)}.`
+        : `Your wallet has ${ghs(balance)} and this costs ${ghs(required)} — you need ${ghs(required - balance)} more.`,
       409,
       { balance, required },
     )

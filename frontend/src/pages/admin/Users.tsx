@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import AgentApplications from './AgentApplications'
 import { useStore } from '../../state/store'
 import { cedis, initials } from '../../lib/format'
 import type { PlatformUser, Role } from '../../data/types'
+import { STATUS_LABEL, STATUS_TONE } from '../../lib/userStatus'
 import {
   Badge,
   Button,
@@ -19,12 +21,14 @@ import {
   Th,
 } from '../../components/ui'
 import { BanIcon, CheckIcon, SearchIcon, ShieldIcon, UsersIcon } from '../../components/icons'
+import { isAdmin } from '../../lib/roles'
+
 
 type Filter = 'all' | Role | 'suspended'
 
 /** FR-6.3 (all users) + FR-6.5 (suspend or deactivate any account). */
 export default function Users() {
-  const { users, toggleUserStatus } = useStore()
+  const { users, toggleUserStatus, session } = useStore()
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [confirming, setConfirming] = useState<PlatformUser | null>(null)
@@ -150,12 +154,37 @@ export default function Users() {
                     {cedis(user.balance)}
                   </Td>
                   <Td>
-                    <Badge tone={user.status === 'active' ? 'success' : 'danger'}>
-                      {user.status === 'active' ? 'Active' : 'Suspended'}
-                    </Badge>
+                    <Badge tone={STATUS_TONE[user.status]}>{STATUS_LABEL[user.status]}</Badge>
                   </Td>
                   <Td align="right">
-                    {user.role !== 'admin' && (
+                    {/* Neither an admin nor the platform owner is suspendable here;
+                        the server refuses both, so offering the button would only
+                        produce an error. Platform team is where that lives, with the
+                        guards this screen does not have — no suspending yourself, and
+                        never the last active superadmin. Saying so beats an empty
+                        cell that reads as a missing feature. */}
+                    {isAdmin(user.role) ? (
+                      session?.role === 'superadmin' && (
+                        <Link
+                          to="/admin/team"
+                          className="text-xs font-semibold text-brand-700 hover:underline"
+                        >
+                          Manage in Platform team
+                        </Link>
+                      )
+                    ) : user.status === 'pending' || user.status === 'rejected' ? (
+                      /* An undecided application is not a suspended account, so it gets
+                         no Suspend button — deciding it belongs in the applications
+                         queue above, which records who decided and emails the agent.
+                         Neither of which this button does, and the server refuses it.
+
+                         Text rather than a link: the queue is already on this page, and
+                         it renders nothing when empty, so a link would sometimes point
+                         at an element that is not there. */
+                      <span className="text-xs text-slate-500">
+                        {user.status === 'pending' ? 'Decide above' : 'Turned down'}
+                      </span>
+                    ) : (
                       <Button
                         size="sm"
                         variant={user.status === 'active' ? 'outline' : 'secondary'}

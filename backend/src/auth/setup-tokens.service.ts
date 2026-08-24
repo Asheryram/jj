@@ -141,8 +141,11 @@ export class SetupTokensService {
    * somebody a hundred emails.
    */
   async requestReset(email: string): Promise<void> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: email.trim().toLowerCase() },
+    // The profile that holds the password — see AuthService.login. Resetting a
+    // secondary profile would set a second password for one person, which is the
+    // one thing the profile model exists to avoid.
+    const user = await this.prisma.user.findFirst({
+      where: { email: email.trim().toLowerCase(), passwordHash: { not: null } },
       select: { id: true, role: true, status: true, passwordHash: true },
     })
 

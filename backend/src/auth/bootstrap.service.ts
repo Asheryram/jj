@@ -44,7 +44,11 @@ export class BootstrapService implements OnApplicationBootstrap {
       return
     }
 
-    const existing = await this.prisma.user.findUnique({ where: { email } })
+    // Their password-holding profile, whatever role it currently has — this is
+    // the row that gets promoted, not a secondary profile they added later.
+    const existing = await this.prisma.user.findFirst({
+      where: { email, passwordHash: { not: null } },
+    })
 
     if (existing) {
       // Promote rather than complain: the address in the environment is the

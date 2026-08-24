@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useStore } from '../../state/store'
 import { cedis, parseCedis } from '../../lib/format'
-import type { Category, Product } from '../../data/types'
+import type { Category, Network, Product } from '../../data/types'
+import { NETWORKS, NETWORK_STYLES } from '../../lib/networks'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
 import {
   Button,
@@ -20,7 +21,7 @@ import {
   Th,
   cn,
 } from '../../components/ui'
-import { AlertIcon, TagIcon, TrendUpIcon } from '../../components/icons'
+import { AlertIcon, ChevronDownIcon, TagIcon, TrendUpIcon } from '../../components/icons'
 import { api, ApiError } from '../../lib/api'
 import { formatMarkup, priceFromMarkup } from '../../lib/pricing'
 
@@ -64,12 +65,50 @@ const TIER_LABELS: Record<Tier, { label: string; help: string }> = {
  * not capped. See EDITABLE_TIERS above.
  */
 export default function CostPrices() {
-  const { products, updateProductTier, refresh, pushToast } = useStore()
+  const { products, updateProductTier, setProductOnSale, refresh, pushToast } = useStore()
   const [category, setCategory] = useState<Category>('data')
   const [editing, setEditing] = useState<Product | null>(null)
   const [marking, setMarking] = useState(false)
 
   const visible = products.filter((p) => p.category === category)
+
+  /**
+   * Grouped by network, because that is how the person pricing them thinks.
+   *
+   * A flat list interleaves MTN, Telecel and AirtelTigo bundles of similar size,
+   * so comparing "what do I charge for 10GB across the networks" meant reading
+   * the whole table. Cheapest first inside each group, which is the order a
+   * customer sees them in.
+   *
+   * Airtime and anything else without a carrier falls into a final group rather
+   * than being dropped — a product missing from this screen is a product nobody
+   * can price.
+   */
+  const groups = useMemo(() => {
+    const byNetwork = new Map<string, Product[]>()
+    for (const product of visible) {
+      const key = product.network ?? 'Other'
+      const bucket = byNetwork.get(key)
+      if (bucket) bucket.push(product)
+      else byNetwork.set(key, [product])
+    }
+
+    const order = [...NETWORKS.filter((n) => byNetwork.has(n)), ...(byNetwork.has('Other') ? ['Other'] : [])]
+
+    return order.map((key) => {
+      const items = (byNetwork.get(key) ?? []).sort((a, b) => a.supplierCost - b.supplierCost)
+      // Named in the header rather than repeated on every row. Usually one, and
+      // worth seeing the moment it is not.
+      const providers = [...new Set(items.map((p) => p.provider ?? 'unassigned'))].sort()
+      return {
+        key,
+        label: key === 'Other' ? 'No network' : NETWORK_STYLES[key as Network].label,
+        dot: key === 'Other' ? 'bg-slate-300' : NETWORK_STYLES[key as Network].dot,
+        items,
+        providers,
+      }
+    })
+  }, [visible])
   const agentMargin = products.reduce((sum, p) => sum + (p.adminPrice - p.supplierCost), 0)
   const directMargin = products.reduce((sum, p) => sum + (p.standardPrice - p.supplierCost), 0)
 
@@ -84,6 +123,18 @@ export default function CostPrices() {
    */
   const averageOf = (totalMargin: number): number | null =>
     products.length > 0 ? Math.round(totalMargin / products.length) : null
+
+  // Collapsed groups, by key. Open by default: hiding rows on arrival would make
+  // a freshly synced catalogue look empty, which is the confusion this screen has
+  // already caused once.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const toggle = (key: string) =>
+    setCollapsed((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
 
   const agentAverage = averageOf(agentMargin)
   const directAverage = averageOf(directMargin)
@@ -205,15 +256,66 @@ export default function CostPrices() {
               <Th align="right">Your margin</Th>
               <Th align="right">Walk-up price</Th>
               <Th align="right">Markup</Th>
+              <Th align="center">On sale</Th>
               <Th align="right" />
             </tr>
           </thead>
           <tbody>
-            {visible.map((product) => {
+            {groups.map((group) => (
+              <Fragment key={group.key}>
+                <tr className="bg-slate-50/80">
+                  <td colSpan={8} className="p-0">
+                    <button
+                      type="button"
+                      onClick={() => toggle(group.key)}
+                      aria-expanded={!collapsed.has(group.key)}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-100"
+                    >
+                      <ChevronDownIcon
+                        className={cn(
+                          'size-4 shrink-0 text-slate-400 transition-transform',
+                          collapsed.has(group.key) && '-rotate-90',
+                        )}
+                      />
+                      <span className={cn('size-2 shrink-0 rounded-full', group.dot)} />
+                      <span className="text-xs font-bold tracking-wide text-slate-600 uppercase">
+                        {group.label}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-400">
+                        {group.items.length} bundle{group.items.length === 1 ? '' : 's'} ·{' '}
+                        {group.items.filter((p) => p.active).length} on sale
+                      </span>
+                      {/* Who supplies them. One name normally; more once the
+                          catalogue spans providers, which it will as soon as
+                          airtime arrives from somewhere other than DataHub. */}
+                      <span className="ml-auto flex flex-wrap gap-1">
+                        {group.providers.map((provider) => (
+                          <span
+                            key={provider}
+                            className={cn(
+                              'rounded-lg px-2 py-0.5 text-[11px] font-semibold',
+                              provider === 'unassigned'
+                                ? 'bg-amber-50 text-amber-700'
+                                : 'bg-slate-100 text-slate-600',
+                            )}
+                          >
+                            {provider === 'unassigned' ? 'no supplier' : provider}
+                          </span>
+                        ))}
+                      </span>
+                    </button>
+                  </td>
+                </tr>
+                {!collapsed.has(group.key) &&
+                  group.items.map((product) => {
               const margin = product.adminPrice - product.supplierCost
               const invalid =
                 product.adminPrice < product.supplierCost ||
                 product.standardPrice < product.supplierCost
+              // Publishing needs a margin on both channels, not merely a legal price.
+              const invalidToPublish =
+                product.adminPrice <= product.supplierCost ||
+                product.standardPrice <= product.supplierCost
               return (
                 <tr key={product.id} className={cn('hover:bg-slate-50', invalid && 'bg-red-50/50')}>
                   <Td>
@@ -251,14 +353,37 @@ export default function CostPrices() {
                         : `${formatMarkup(product.agentMarkupBp)} / ${formatMarkup(product.walkupMarkupBp ?? 0)}`}
                     </span>
                   </Td>
+                  <Td align="center">
+                    {/* The one place a bundle can be withdrawn from the shop without
+                        touching its price. Publishing is refused server-side while a
+                        price still sits at cost, so the control is disabled rather
+                        than left to fail — with the reason on hover. */}
+                    <Button
+                      size="sm"
+                      variant={product.active ? 'outline' : 'secondary'}
+                      disabled={!product.active && invalidToPublish}
+                      title={
+                        !product.active && invalidToPublish
+                          ? 'Set a price above what you pay before putting this on sale.'
+                          : product.active
+                            ? 'Take it off sale'
+                            : 'Put it on sale'
+                      }
+                      onClick={() => void setProductOnSale(product.id, !product.active)}
+                    >
+                      {product.active ? 'On sale' : 'Off sale'}
+                    </Button>
+                  </Td>
                   <Td align="right">
                     <Button size="sm" variant="outline" onClick={() => setEditing(product)}>
                       Edit
                     </Button>
                   </Td>
                 </tr>
-              )
-            })}
+                  )
+                })}
+              </Fragment>
+            ))}
           </tbody>
         </TableWrap>
       </Card>

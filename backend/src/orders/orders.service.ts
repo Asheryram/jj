@@ -18,6 +18,7 @@ import {
 } from '../common/domain-errors'
 import type { AuthUser } from '../common/auth'
 import type { PlaceOrderDto, TrackOrderDto } from './orders.dto'
+import { isAdminRole } from '../common/auth'
 
 /**
  * The networks DataHub's /verify can answer for. Their docs list it as
@@ -383,7 +384,7 @@ export class OrdersService {
   }
 
   private async scopeFor(user: AuthUser): Promise<Prisma.OrderWhereInput> {
-    if (user.role === 'admin') return {}
+    if (isAdminRole(user.role)) return {}
 
     if (user.role === 'customer') {
       // Their own purchases, including ones made as a guest before they signed
@@ -426,7 +427,7 @@ export class OrdersService {
     // unguessable, which is the same bearer-token logic a payment link uses.
     if (!user) return toTrackedOrder(row)
 
-    if (user.role === 'admin') return toOrder(row)
+    if (isAdminRole(user.role)) return toOrder(row)
 
     const mine =
       row.buyerUserId === user.id ||

@@ -44,7 +44,15 @@ export type EarningType = 'sale' | 'downline' | 'reversal' | 'withdrawal'
 
 export type WithdrawalStatus = 'pending' | 'approved' | 'rejected'
 
-export type UserStatus = 'active' | 'suspended'
+/**
+ * Mirrors `UserStatus` in the Prisma schema — all four states, not two.
+ *
+ * Declaring only `active | suspended` made every `status === 'active' ? a : b`
+ * in the admin screens render a *pending* agent as "Suspended", and offer a
+ * "Reactivate" button that skipped the approval flow entirely: no `decidedBy`,
+ * no `decidedAt`, and no email telling the agent they may start selling.
+ */
+export type UserStatus = 'pending' | 'active' | 'rejected' | 'suspended'
 
 /**
  * Three prices per product: what James pays, what he charges agents, and what he
@@ -77,6 +85,15 @@ export interface Product {
    */
   agentMarkupBp?: number
   walkupMarkupBp?: number
+  /**
+   * Which supplier fulfils this, when one is linked. Admin-only.
+   *
+   * Null while nothing is linked, rather than defaulting to the one supplier we
+   * happen to have — an unfulfillable product naming a provider would be a claim
+   * nobody checked. Matters once the catalogue is mixed: DataHub sells data only,
+   * so airtime, voice, SMS and AFA must come from elsewhere.
+   */
+  provider?: string | null
   active: boolean
 }
 

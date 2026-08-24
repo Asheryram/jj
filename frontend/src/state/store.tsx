@@ -31,6 +31,7 @@ import {
   type AdminOverview,
   type AgentEarningsDay,
   type MySummary,
+  type Profile,
   type RevenueDay,
 } from '../lib/api'
 import {
@@ -40,6 +41,7 @@ import {
   type PriceBand,
   type PricingAgent,
 } from '../lib/pricing'
+import { isAdmin } from '../lib/roles'
 
 /**
  * The single source of application state, backed entirely by the API.
@@ -101,6 +103,10 @@ interface Store {
   reconnect: () => Promise<void>
 
   session: Session | null
+  /** Every profile this person holds. One entry means no switcher. */
+  profiles: Profile[]
+  switchProfile: (userId: string) => Promise<Session>
+  addProfile: (role: 'admin' | 'agent') => Promise<void>
   /** Email is the credential; the phone number stays on the account for delivery. */
   login: (email: string, password: string) => Promise<Session>
   register: (input: RegisterInput) => Promise<Session>
@@ -143,6 +149,7 @@ interface Store {
     tier: 'supplierCost' | 'adminPrice' | 'standardPrice',
     value: number,
   ) => Promise<void>
+  setProductOnSale: (productId: string, active: boolean) => Promise<void>
 
   /** Pricing helpers, all backed by lib/pricing. */
   pricingAgents: PricingAgent[]
@@ -155,7 +162,8 @@ interface Store {
   myShareOf: (order: Order) => SplitShare | undefined
 
   withdrawals: WithdrawalRequest[]
-  requestWithdrawal: (amount: number, momoNetwork: Network) => Promise<void>
+  requestWithdrawal: (amount: number, momoNetwork: Network, momoNumber: string) => Promise<void>
+  updatePhone: (phone: string) => Promise<void>
   decideWithdrawal: (id: string, status: WithdrawalStatus) => Promise<void>
 
   users: PlatformUser[]
@@ -210,6 +218,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
   const [offline, setOffline] = useState<string | null>(null)
   const [session, setSession] = useState<Session | null>(null)
+  const [profiles, setProfiles] = useState<Profile[]>([])
 
   const [sellerCode, setSellerCodeState] = useState<string | null>(() =>
     sessionStorage.getItem('jdc.seller'),
@@ -304,7 +313,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .catch(() => undefined),
     ]
 
-    if (current.role !== 'admin') {
+    if (!isAdmin(current.role)) {
       tasks.push(
         api
           .mySummary()
@@ -353,7 +362,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       )
     }
 
-    if (current.role === 'admin') {
+    if (isAdmin(current.role)) {
       tasks.push(
         api
           .adminUsers()
@@ -395,14 +404,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     if (token.get()) {
       try {
-        const { user } = await api.me()
+        const { user, profiles: mine } = await api.me()
         setSession(user)
+        setProfiles(mine)
         await loadForSession(user)
-      } catch {
-        // An expired or revoked token. Dropping it lands the visitor on the
-        // public shop rather than a half-loaded signed-in page.
-        token.clear()
-        setSession(null)
+      } catch (error) {
+        /**
+         * Only a 401 means the token is bad. Anything else must not sign anybody out.
+         *
+         * This used to drop the session on *any* failure, so a rate limit, a
+         * five-hundred or a moment of bad signal logged the user out and left them
+         * on the public shell — where every link is a signed-out link, which reads
+         * as the app being broken rather than as having been ejected from it.
+         *
+         * On anything else the token is kept and the app comes up offline-ish: the
+         * next navigation retries, and a real 401 will still clear it.
+         */
+        if (error instanceof ApiError && error.status === 401) {
+          token.clear()
+          setSession(null)
+        } else {
+          // Keep the token and say what happened, rather than pretending the
+          // visitor is a stranger.
+          setOffline(
+            error instanceof ApiError
+              ? error.message
+              : 'We could not reach the server. Check your connection and try again.',
+          )
+        }
       }
     }
 
@@ -424,6 +453,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const result = await api.login(email, password)
       token.set(result.accessToken)
       setSession(result.user)
+      setProfiles(result.profiles)
       if (result.user.role === 'customer') setCustomerBalance(result.balance)
       if (result.user.role === 'agent') setAgentBalance(result.balance)
 
@@ -438,11 +468,55 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [loadCatalogue, loadForSession],
   )
 
+  /**
+   * Wear another hat.
+   *
+   * The catalogue is refetched for the same reason login refetches it, and the
+   * reason matters more here: its shape depends on who is asking, because
+   * `supplierCost` and the markups are stripped for anyone who is not an admin.
+   * Switching without this would leave an agent holding admin data — or worse,
+   * an admin holding the agent payload, which is exactly how the Prices page
+   * came to render GHS NaN.
+   */
+  const switchProfile = useCallback(
+    async (userId: string): Promise<Session> => {
+      const result = await api.switchProfile(userId)
+      token.set(result.accessToken)
+      setSession(result.user)
+      setProfiles(result.profiles)
+      if (result.user.role === 'customer') setCustomerBalance(result.balance)
+      if (result.user.role === 'agent') setAgentBalance(result.balance)
+      await Promise.all([loadCatalogue(), loadForSession(result.user)])
+      return result.user
+    },
+    [loadCatalogue, loadForSession],
+  )
+
+  /** Give yourself another profile. No password and no link — you have both. */
+  const addProfile = useCallback(
+    async (role: 'admin' | 'agent') => {
+      try {
+        await api.addProfile(role)
+        const { profiles: mine } = await api.me()
+        setProfiles(mine)
+        pushToast({
+          tone: 'success',
+          title: `${role === 'agent' ? 'Agent' : 'Admin'} profile added`,
+          detail: 'Switch to it from the menu at the top.',
+        })
+      } catch (error) {
+        reportError(error, 'We could not add that profile.')
+      }
+    },
+    [pushToast, reportError],
+  )
+
   const register = useCallback(
     async (input: RegisterInput): Promise<Session> => {
       const result = await api.register(input)
       token.set(result.accessToken)
       setSession(result.user)
+      setProfiles(result.profiles)
       // Reload the catalogue too: a new agent joins the referral chain, which
       // changes what prices resolve to.
       await Promise.all([loadCatalogue(), loadForSession(result.user)])
@@ -454,6 +528,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     token.clear()
     setSession(null)
+    setProfiles([])
     // Re-fetch for the same reason as login: an admin's catalogue carries
     // supplier costs, and those should not linger in a signed-out browser.
     void loadCatalogue()
@@ -588,6 +663,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
       } catch (error) {
         reportError(error, 'We could not update that price.')
+      }
+    },
+    [pushToast, reportError],
+  )
+
+  const setProductOnSale = useCallback(
+    async (productId: string, active: boolean) => {
+      try {
+        const updated = await api.setProductActive(productId, active)
+        setProducts((current) => current.map((p) => (p.id === productId ? updated : p)))
+        pushToast({
+          tone: 'success',
+          title: active ? 'On sale' : 'Taken off sale',
+          detail: active
+            ? 'Customers and agents can buy it now.'
+            : 'Nobody can buy it. Orders already placed are unaffected.',
+        })
+      } catch (error) {
+        reportError(error, 'We could not change whether that is on sale.')
       }
     },
     [pushToast, reportError],
@@ -802,10 +896,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // ── Withdrawals ───────────────────────────────────────────────────────────
 
-  const requestWithdrawal = useCallback(
-    async (amount: number, momoNetwork: Network) => {
+  /** Change your number everywhere you hold a profile. */
+  const updatePhone = useCallback(
+    async (phone: string) => {
       try {
-        const created = await api.requestWithdrawal(amount, momoNetwork)
+        const result = await api.updatePhone(phone)
+        setSession(result.user)
+        setProfiles(result.profiles)
+        pushToast({ tone: 'success', title: 'Number updated', detail: `Earnings will be paid to ${phone}.` })
+      } catch (error) {
+        reportError(error, 'We could not update that number.')
+      }
+    },
+    [pushToast, reportError],
+  )
+
+  const requestWithdrawal = useCallback(
+    async (amount: number, momoNetwork: Network, momoNumber: string) => {
+      try {
+        const created = await api.requestWithdrawal(amount, momoNetwork, momoNumber)
         setWithdrawals((current) => [created, ...current])
         // The balance is held at request time, so re-read it rather than guess.
         await loadForSession(session)
@@ -884,6 +993,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       offline,
       reconnect: bootstrap,
       session,
+      profiles,
+      switchProfile,
+      addProfile,
       login,
       register,
       logout,
@@ -903,6 +1015,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refresh,
       products,
       updateProductTier,
+      setProductOnSale,
       pricingAgents,
       retailPrice,
       myBand,
@@ -913,6 +1026,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       myShareOf,
       withdrawals,
       requestWithdrawal,
+      updatePhone,
       decideWithdrawal,
       users,
       toggleUserStatus,
@@ -960,11 +1074,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refresh,
       register,
       requestWithdrawal,
+      updatePhone,
       retailPrice,
       revenueByDay,
       sellerCode,
       sellerName,
       session,
+      profiles,
+      switchProfile,
+      addProfile,
       referralEnabled,
       referralRatePercent,
       setAgentPrice,
@@ -977,6 +1095,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       topUpWallet,
       transactions,
       updateProductTier,
+      setProductOnSale,
       watchOrder,
       users,
       withdrawals,

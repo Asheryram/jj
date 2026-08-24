@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import ReservePanel from './ReservePanel'
+import FloatPanel from './FloatPanel'
 import { useStore } from '../../state/store'
 import { cedis, cedisCompact, dateTime } from '../../lib/format'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
@@ -63,8 +64,16 @@ export default function Overview() {
 
   const weekRevenue = revenueByDay.reduce((sum, day) => sum + day.revenue, 0)
   const weekOrders = revenueByDay.reduce((sum, day) => sum + day.orders, 0)
-  const activeUsers = users.filter((u) => u.status === 'active').length
-  const agents = users.filter((u) => u.role === 'agent')
+  /**
+    * Both numbers count the same population.
+    *
+    * The tile used to show active users with a breakdown of *every* user, so two
+    * active accounts were annotated "2 agents · 2 others" — a headline of 2 over
+    * a hint summing to 4. Pending agents were the difference.
+    */
+  const active = users.filter((u) => u.status === 'active')
+  const activeAgents = active.filter((u) => u.role === 'agent')
+  const awaitingApproval = users.filter((u) => u.status === 'pending').length
   const pendingWithdrawals = withdrawals.filter((w) => w.status === 'pending')
   const failedOrders = orders.filter((o) => o.status === 'failed')
   const inFlight = orders.filter((o) => o.status === 'processing' || o.status === 'pending')
@@ -150,8 +159,11 @@ export default function Overview() {
         />
         <StatTile
           label="Active users"
-          value={String(activeUsers)}
-          hint={`${agents.length} agents · ${users.length - agents.length} others`}
+          value={String(active.length)}
+          hint={
+            `${activeAgents.length} agents · ${active.length - activeAgents.length} others` +
+            (awaitingApproval > 0 ? ` · ${awaitingApproval} awaiting approval` : '')
+          }
           icon={<UsersIcon className="size-5" />}
         />
         <StatTile
@@ -164,6 +176,13 @@ export default function Overview() {
       </div>
 
       <ReservePanel />
+
+      {/* The other pot of money, and the one that stops the product working when
+          it empties. Next to the reserve panel because the two are read together:
+          what is free to spend, and what the float still needs. */}
+      <div className="mt-3">
+        <FloatPanel />
+      </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-5">
         <Card className="lg:col-span-3">

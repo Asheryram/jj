@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useStore } from '../state/store'
 import { useRegisterPath, useShopPath } from '../lib/shopPath'
 import { cedis, dateTime } from '../lib/format'
@@ -27,7 +27,16 @@ export default function Track() {
   const { findOrder } = useStore()
   const shopPath = useShopPath()
   const registerPath = useRegisterPath()
-  const [reference, setReference] = useState('')
+  /**
+   * The reference may arrive in the URL.
+   *
+   * PaymentReturn sends somebody here when it has a payment reference but no
+   * order to show a receipt for. Prefilling saves them retyping the one thing
+   * they are least likely to have written down — they still supply their phone
+   * number, which is what makes the lookup theirs to make.
+   */
+  const [params] = useSearchParams()
+  const [reference, setReference] = useState(params.get('ref') ?? '')
   const [phone, setPhone] = useState('')
   const [result, setResult] = useState<Order | null>(null)
   const [searched, setSearched] = useState(false)

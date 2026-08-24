@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { JwtModule } from '@nestjs/jwt'
 import { ThrottlerModule } from '@nestjs/throttler'
+import { SettingsModule } from '../settings/settings.module'
 import { AuthController, TeamController } from './auth.controller'
 import { AuthService } from './auth.service'
 import { SetupTokensService } from './setup-tokens.service'
@@ -22,6 +23,7 @@ import { BootstrapService } from './bootstrap.service'
      * container and worth revisiting behind more than one; it still cuts an
      * unlimited attack down to a rate a person would notice.
      */
+    SettingsModule,
     ThrottlerModule.forRoot([
       { name: 'burst', ttl: 60_000, limit: 10 },
       { name: 'grind', ttl: 900_000, limit: 40 },

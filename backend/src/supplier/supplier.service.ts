@@ -4,6 +4,7 @@ import type { Order } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
 import { DatahubClient } from './datahub.client'
+import { FloatMonitorService } from './float-monitor.service'
 
 export interface DispatchResult {
   /**
@@ -72,6 +73,7 @@ export class SupplierService implements OnModuleInit {
     private readonly settings: SettingsService,
     private readonly config: ConfigService,
     private readonly datahub: DatahubClient,
+    private readonly float: FloatMonitorService,
   ) {}
 
   /** Credentials are present. Necessary for live fulfilment, not sufficient. */
@@ -236,6 +238,17 @@ export class SupplierService implements OnModuleInit {
     })
 
     if (result.kind === 'accepted') {
+      /**
+       * The one moment the float is knowable.
+       *
+       * DataHub publishes no balance endpoint, so this reply is the only place
+       * the remaining balance ever appears. Awaited rather than fired and
+       * forgotten, because the process may be about to be replaced on a deploy —
+       * but `record` swallows its own failures, so it cannot turn a successful
+       * purchase into a failed one.
+       */
+      await this.float.record(result.balanceAfter, order.reference)
+
       // Their reply means "queued", never "delivered". The real outcome arrives
       // by webhook, or the reconciler goes and asks.
       return {

@@ -34,8 +34,12 @@ export default function PaymentReturn() {
   const attempts = useRef(0)
 
   const finish = useCallback(async () => {
-    // A wallet top-up has no order to show, so land on the wallet where the new
-    // balance is. An order goes to its receipt.
+    // An order goes to its receipt. Anything else has no receipt to show — this
+    // used to be a wallet top-up, and landed on a wallet page that no longer
+    // exists, on the one screen a paying customer must never see break.
+    //
+    // `/track` is the honest fallback: it looks an order up by the reference we
+    // still hold, which is exactly what somebody in that position needs.
     const stored = window.sessionStorage.getItem('jdc.pendingOrder')
     window.sessionStorage.removeItem('jdc.pendingOrder')
     await refresh().catch(() => undefined)
@@ -50,11 +54,12 @@ export default function PaymentReturn() {
         navigate(`/buy/${productId}?order=${orderId}`, { replace: true })
         return
       } catch {
-        // Unreadable, so fall through to the wallet rather than crashing on the
-        // one screen a paying customer must never see break.
+        // Unreadable, so fall through to tracking rather than crashing here.
       }
     }
-    navigate('/app/wallet', { replace: true })
+    navigate(reference ? `/track?ref=${encodeURIComponent(reference)}` : '/track', {
+      replace: true,
+    })
   }, [navigate, refresh, reference])
 
   useEffect(() => {
