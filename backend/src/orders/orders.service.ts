@@ -84,10 +84,9 @@ export class OrdersService {
      * hand. Every one of those was a sale that could never have completed and a
      * refund somebody had to approve.
      *
-     * So the sale is refused up front. The number is recorded either way — see
-     * `noteApprovalNeeded` — because a refused sale is exactly the information
-     * needed to get that number approved, and once it is, the same customer can
-     * come back and buy.
+     * So the sale is refused up front. `verifyRecipient` records the number as it
+     * refuses, so it reaches the approvals queue whether the customer was stopped
+     * at the checkout or got as far as submitting — one place, counted once.
      *
      * Only a definite refusal stops it. `verifyRecipient` returns verified for
      * both "they say it is fine" and "we could not ask them", because a provider
@@ -95,8 +94,6 @@ export class OrdersService {
      */
     const registration = await this.verifyRecipient(dto.productId, dto.recipient)
     if (registration.checked && !registration.verified) {
-      // Written before the throw and outside any transaction, so it survives.
-      await this.noteApprovalNeeded(dto.productId, dto.recipient).catch(() => undefined)
       throw new ConflictError('RECIPIENT_NOT_REGISTERED', registration.message)
     }
 
@@ -521,6 +518,18 @@ export class OrdersService {
      * that turns out to be undeliverable.
      */
     if (result.kind === 'not_registered') {
+      /**
+       * Record it here, because this is where the customer is turned away.
+       *
+       * The checkout disables its pay button on this answer, so the order is never
+       * submitted and `place` never runs — which means recording it there would
+       * capture nothing at all. This is the only point in the flow that sees a
+       * refused number, and getting it in front of an admin is the entire reason
+       * the refusal is worth anything: they copy it into DataHub's dashboard, and
+       * that customer can come back and buy.
+       */
+      await this.noteApprovalNeeded(productId, recipient).catch(() => undefined)
+
       return {
         checked: true,
         verified: false,

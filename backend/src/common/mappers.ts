@@ -30,6 +30,17 @@ import type { OrderSplit } from '../domain/pricing'
  */
 type ProductRow = Product & { supplier?: { provider: string } | null }
 
+/**
+ * What every product read must include for `toProduct` to be complete.
+ *
+ * Exported so no query can forget. When it was left to each call site, the update
+ * paths did not load the relation — so editing a price returned a product whose
+ * `provider` was null, and the row that had said `datahub-gh` a moment earlier
+ * redrew as "no supplier". The data was fine; the response was simply missing a
+ * join, which is the kind of bug that looks like data loss.
+ */
+export const PRODUCT_INCLUDE = { supplier: { select: { provider: true } } } as const
+
 export function toProduct(row: ProductRow) {
   return {
     provider: row.supplier?.provider ?? null,

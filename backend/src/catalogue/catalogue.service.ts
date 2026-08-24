@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { PricingService } from '../pricing/pricing.service'
 import { SettingsService } from '../settings/settings.service'
-import { toProduct, toPublicProduct } from '../common/mappers'
+import { toProduct, toPublicProduct , PRODUCT_INCLUDE} from '../common/mappers'
 import type { Role } from '@prisma/client'
 import { isAdminRole } from '../common/auth'
 
@@ -37,7 +37,7 @@ export class CatalogueService {
         orderBy: [{ category: 'asc' }, { supplierCost: 'asc' }],
         // Only the admin payload keeps `provider`, but loading it costs one join
         // either way and `toPublicProduct` strips it.
-        include: { supplier: { select: { provider: true } } },
+        include: PRODUCT_INCLUDE,
       }),
       this.pricing.agents(),
       // Tolerant on purpose: a fresh deployment has no admin until the

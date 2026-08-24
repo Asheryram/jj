@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import type { PlatformSettings } from '../settings/settings.service'
 import { SettingsService } from '../settings/settings.service'
-import { toProduct } from '../common/mappers'
+import { toProduct, PRODUCT_INCLUDE } from '../common/mappers'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import { markupFromPrice, priceFromMarkup, type OrderSplit } from '../domain/pricing'
 import { CatalogueImportService } from '../supplier/catalogue-import.service'
@@ -190,6 +190,7 @@ export class AdminService {
         [markupField]: markupFromPrice(row.supplierCost, value),
         ...(!row.active && bothPricesClearCost ? { active: true } : {}),
       },
+      include: PRODUCT_INCLUDE,
     })
 
     if (!row.active && bothPricesClearCost) {
@@ -225,7 +226,11 @@ export class AdminService {
       }
     }
 
-    const updated = await this.prisma.product.update({ where: { id: productId }, data: { active } })
+    const updated = await this.prisma.product.update({
+      where: { id: productId },
+      data: { active },
+      include: PRODUCT_INCLUDE,
+    })
     this.log.log(`${productId} is ${active ? 'on sale' : 'off sale'}`)
     return toProduct(updated)
   }
