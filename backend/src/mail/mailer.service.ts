@@ -93,8 +93,23 @@ export class MailerService {
   async send(mail: Mail): Promise<{ sent: boolean; reason?: string }> {
     if (this.useSmtp) {
       const result = await this.sendOverSmtp(mail)
-      if (!result.sent) this.logUnsent(mail, result.reason ?? 'SMTP refused it')
-      return result
+      if (result.sent) return result
+
+      /**
+       * SMTP failed. Try Resend rather than give up.
+       *
+       * Container platforms routinely block outbound SMTP, and the failure is
+       * not a configuration mistake anybody can fix from here: the port simply
+       * does not answer. Where a Resend key exists it reaches the same inbox
+       * over HTTPS, which no host blocks. Nothing was delivered on the failed
+       * attempt, so this cannot duplicate a message.
+       */
+      if (this.resendKey) {
+        this.log.warn(`SMTP failed (${result.reason ?? 'no reason given'}) — trying Resend`)
+      } else {
+        this.logUnsent(mail, result.reason ?? 'SMTP refused it')
+        return result
+      }
     }
 
     if (!this.resendKey) {
@@ -142,6 +157,20 @@ export class MailerService {
         // nodemailer handles when `secure` is false.
         secure: Number(this.config.get<string>('SMTP_PORT') ?? 465) === 465,
         auth: { user: this.smtpUser as string, pass: this.smtpPass as string },
+
+        /**
+         * Fail in seconds, not minutes.
+         *
+         * Without these, nodemailer inherits the OS timeout: a blocked SMTP port
+         * hangs for around two minutes. That is long enough to delay startup —
+         * the boot email is awaited — so a mail problem became a deploy that
+         * looked stalled and failed six health checks before answering. Mail is
+         * not important enough to hold the API's boot; better to give up quickly
+         * and log the link.
+         */
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 20_000,
       })
 
       await this.transporter.sendMail({

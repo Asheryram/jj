@@ -58,6 +58,35 @@ Pick Postgres **17** to match `docker-compose.yml`, and turn on backups. This
 database holds the ledger and every agent balance; a free database with no
 backups is only acceptable while nobody's real money is in it.
 
+### Email, and why it fails here first
+
+Gmail's SMTP host publishes both IPv4 and IPv6 addresses, and Node will pick the
+IPv6 one. Railway's containers have an IPv6 address with no route off the host, so
+the first deploy fails with:
+
+```
+ENETUNREACH 2a00:1450:4025:401::6d:465
+```
+
+which reads like Gmail is down when it is really that this network cannot get
+there. Set:
+
+```
+NODE_OPTIONS = --dns-result-order=ipv4first
+```
+
+Worse than the failure was the delay: it hung for two minutes before giving up,
+and because the superadmin email is awaited during boot, the deploy failed six
+health checks before the API answered at all. `sendOverSmtp` now sets a 10 second
+connect timeout and a 20 second socket timeout, so a mail problem can never hold
+up a deploy again.
+
+If SMTP stays blocked — some platforms refuse outbound 465/587 outright — a
+failure now falls through to Resend over HTTPS, which nothing blocks. Note the
+limit that makes this a fallback rather than the answer: until a sending domain is
+verified, Resend only delivers to the address that owns the account. Gmail SMTP
+can reach everyone; Resend without a domain can reach one person.
+
 ### One replica, and it matters
 
 `railway.json` pins `numReplicas` to **1**. Do not raise it yet.
