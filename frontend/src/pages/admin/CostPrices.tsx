@@ -87,6 +87,17 @@ export default function CostPrices() {
 
   const agentAverage = averageOf(agentMargin)
   const directAverage = averageOf(directMargin)
+
+  /**
+   * Freshly imported bundles are real, priced at cost, and not on sale.
+   *
+   * That is deliberate on the server's side — a made-up default markup would
+   * appear as James's own price — but until now nothing on this screen said so.
+   * A sync reported "46 new", the table listed all 46, and the shop stayed empty
+   * with no explanation anywhere. The rule is only honest if the person who has
+   * to act on it can see it.
+   */
+  const notOnSale = products.filter((p) => !p.active)
   // Both selling prices must clear cost. Walk-up vs agent price is deliberately
   // not checked, and there is no ceiling to check — see EDITABLE_TIERS.
   const broken = products.filter(
@@ -130,6 +141,18 @@ export default function CostPrices() {
       </div>
 
       <div className="mt-3 space-y-3">
+        {notOnSale.length > 0 && (
+          <Callout
+            tone="warning"
+            title={`${notOnSale.length} product${notOnSale.length === 1 ? '' : 's'} not on sale yet`}
+            icon={<AlertIcon className="size-4" />}
+          >
+            A bundle arrives from the provider priced at cost, and stays out of the shop until you
+            say what it sells for — otherwise it would sell at no margin. Set a markup below and
+            they go on sale straight away.
+          </Callout>
+        )}
+
         {broken.length > 0 && (
           <Callout
             tone="danger"

@@ -25,18 +25,74 @@ the reconciler's whole purpose is to catch a lost webhook within a minute or two
 So the API wants a host that keeps a process alive. Render, Railway and Fly.io
 all do. `Dockerfile` and `../render.yaml` are set up for that.
 
-## The database
+## Railway
 
-Any managed Postgres works — the app needs one `DATABASE_URL` and nothing else.
-Neon, Supabase, Railway and Render Postgres are all fine. Two things matter:
+Both the API and Postgres live in one Railway project, talking over its private
+network. Railway does not sleep an instance, which this platform requires — see
+above.
+
+`railway.json` sets the build and health check, so most of the setup is choosing
+the right service settings:
+
+| Setting | Value |
+| --- | --- |
+| Root directory | `backend` |
+| Builder | Dockerfile (from `railway.json`) |
+| Region | EU West (Amsterdam) — nearest to Ghana on offer |
+| Health check | `/api/health` (from `railway.json`) |
+
+### Postgres
+
+Add a Postgres service to the same project, then reference it from the API
+service rather than pasting a URL:
+
+```
+DATABASE_URL = ${{Postgres.DATABASE_URL}}
+```
+
+That resolves to the private hostname, which keeps database traffic off the
+public internet, out of your egress bill, and removes the need for `sslmode` —
+there is no untrusted network between the two services to protect.
+
+Pick Postgres **17** to match `docker-compose.yml`, and turn on backups. This
+database holds the ledger and every agent balance; a free database with no
+backups is only acceptable while nobody's real money is in it.
+
+### One replica, and it matters
+
+`railway.json` pins `numReplicas` to **1**. Do not raise it yet.
+
+Dispatch is guarded against ordering the same bundle twice by an in-process `Map`
+in `orders/fulfilment.service.ts`, plus a status check that reads the order and
+then dispatches. Two replicas share no memory, so both would pass that check and
+both would call `/data-purchase` — and DataHub accepts no idempotency key, which
+is why the client refuses to retry a purchase at all. The result is two bundles
+delivered and one payment collected.
+
+The fix is to claim the order in the database instead: an atomic transition to a
+`dispatching` state that only one process can win. Worth doing before you need a
+second replica, and not before.
+
+## Render, as an alternative
+
+`../render.yaml` describes the same deployment on Render. It expects the database
+to be a separate managed service (Neon or Render Postgres) rather than one
+Railway provisions, so `DATABASE_URL` is a plain secret there.
+
+## A database somewhere other than Railway
+
+The app needs one `DATABASE_URL` and nothing else, so Neon, Supabase and Render
+Postgres all work. Two things matter wherever it lives:
 
 - **Postgres 17**, matching `docker-compose.yml`. This schema uses enums heavily
   and has had values added to live enums repeatedly.
 - **Automated backups.** This database holds the ledger, every agent's balance
   and every payment reference. Do not put it on a free tier that has no backups.
 
-Append `?sslmode=require` to the connection string. Managed providers expect it
-and most reject a plain connection anyway.
+Append `?sslmode=require` when the database is at another provider, because the
+connection then crosses the public internet — most managed providers reject a
+plain connection anyway. It is only unnecessary inside Railway's private network,
+where there is no untrusted hop between the two services.
 
 ## First deploy, in order
 
