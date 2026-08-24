@@ -293,8 +293,9 @@ export default function Buy() {
             className="mt-4"
             loading={checking}
             disabled={checking || !check?.ok}
-            /* `needsSetup` deliberately does NOT disable this. It is something to
-               know before paying, not a reason to be turned away. */
+            /* This button only advances to the confirm step — the check runs on
+               the way through, and its result gates the pay button there. Nothing
+               is charged between here and there. */
             onClick={() => {
               setTouched(true)
               if (!check?.ok) return
@@ -358,15 +359,17 @@ export default function Buy() {
               attached. */}
           {needsSetup && (
             <Callout
-              tone="info"
+              tone="warning"
               className="mt-3"
-              title="This number needs a quick one-time setup"
+              title="We cannot send to this number yet"
               icon={<ClockIcon className="size-4" />}
             >
-              It is the first bundle going to {prettyPhone(check.phone)}, so our delivery partner has
-              to set it up before anything can be sent. That usually takes a few hours, and your
-              bundle goes out the moment it is ready. If the setup does not complete, your money
-              comes back automatically.
+              {prettyPhone(check.phone)} has to be set up with our delivery partner before a bundle
+              can reach it, and that has not happened yet. We have passed the number on to be added —
+              it usually takes a few hours.
+              <span className="mt-1.5 block font-semibold">
+                Nothing has been charged. Try again later, or use a number that has bought before.
+              </span>
             </Callout>
           )}
 
@@ -509,7 +512,12 @@ export default function Buy() {
               size="lg"
               variant="cta"
               loading={placing}
-              disabled={placing || (!ownNumber && !receiptCheck?.ok)}
+              /* `needsSetup` blocks this now. The server refuses the order for an
+                 unapproved number, so letting the button through would take the
+                 customer to a Mobile Money prompt and then a refusal — the worst
+                 possible order of events. Better to stop here, where nothing has
+                 been asked of them yet. */
+              disabled={placing || needsSetup || (!ownNumber && !receiptCheck?.ok)}
               onClick={() => void confirm()}
             >
               Confirm and pay {cedis(price)}

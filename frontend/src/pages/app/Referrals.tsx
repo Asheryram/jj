@@ -21,7 +21,7 @@ import { StoreIcon, UsersIcon, WhatsAppIcon } from '../../components/icons'
 
 /** FR-1.7, FR-5.1, FR-5.2, FR-5.4, FR-5.6, FR-5.7 */
 export default function Referrals() {
-  const { session, referralEnabled, referralRatePercent, subAgents } = useStore()
+  const { session, subAgents } = useStore()
   if (!session) return null
 
   // Two different links doing two different jobs.
@@ -104,20 +104,17 @@ export default function Referrals() {
         />
       </div>
 
-      {/* FR-5.4 / FR-5.5 / FR-5.6 */}
+      {/* What inviting somebody does, and what it does not.
+          The bonus on a referral's sales was removed at the client's request, so
+          this says plainly that there is nothing to wait for — a page that left the
+          question open would have agents watching for money that is never coming. */}
       <div className="mt-3">
-        {referralEnabled ? (
-          <Callout tone="success" title={`You earn a ${referralRatePercent}% bonus on their sales`}>
-            Every time an agent you brought in makes a sale, you are paid a bonus — and it comes out
-            of James's margin, not theirs. Your own selling price and theirs are untouched, so
-            inviting people costs you and them nothing.
-          </Callout>
-        ) : (
-          <Callout tone="info" title="Referral bonuses are switched off">
-            You can still invite agents and they will show up here, but no bonus is paid on their
-            sales at the moment. James can switch this on without anything changing for you.
-          </Callout>
-        )}
+        <Callout tone="info" title="What you get for inviting someone">
+          They join under you and show up in your chain below. You are not paid anything from what
+          they sell — every agent earns from their own sales only. What inviting does is grow the
+          chain: when someone below you buys, they buy at your price, so your margin is already
+          inside their cost.
+        </Callout>
       </div>
 
       {/* FR-5.2 */}

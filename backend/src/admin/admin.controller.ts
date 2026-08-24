@@ -97,12 +97,10 @@ export class RejectRefundDto {
 }
 
 /** Keys whose value is a number rather than a switch. */
-const NUMERIC_SETTING_KEYS = ['referralRatePercent', 'floatWatchAt', 'floatRiskAt'] as const
+const NUMERIC_SETTING_KEYS = ['floatWatchAt', 'floatRiskAt'] as const
 
 export class SetSettingDto {
   @IsIn([
-    'referralEnabled',
-    'referralRatePercent',
     'simulateFailure',
     'registrationOpen',
     'agentsAutoApprove',
@@ -110,8 +108,6 @@ export class SetSettingDto {
     'floatRiskAt',
   ])
   key!:
-    | 'referralEnabled'
-    | 'referralRatePercent'
     | 'simulateFailure'
     | 'registrationOpen'
     | 'agentsAutoApprove'

@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common'
 import type { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { ValidationError } from '../common/domain-errors'
-import type { ReferralPolicy } from '../domain/pricing'
 
 type Db = PrismaService | Prisma.TransactionClient
 
@@ -13,18 +12,6 @@ type Db = PrismaService | Prisma.TransactionClient
  * default instead of a crash.
  */
 export interface PlatformSettings {
-  /**
-   * FR-5.5 / NFR-5.2 — whether a referrer earns from the people they referred.
-   *
-   * One level only. Off, and an agent's referrals are just a list of people they
-   * brought in; on, and the referrer takes a cut of their margin.
-   */
-  referralEnabled: boolean
-  /**
-   * The referrer's share of James's margin on their referral's sales, as a whole
-   * percentage. Paid from the wholesale spread, never from the seller.
-   */
-  referralRatePercent: number
   /**
    * Force the next fulfilment to fail. This is how a tester exercises the
    * refund path (FR-2.7) on demand instead of waiting for a real outage.
@@ -60,8 +47,6 @@ export interface PlatformSettings {
 }
 
 const DEFAULTS: PlatformSettings = {
-  referralEnabled: true,
-  referralRatePercent: 25,
   simulateFailure: false,
   registrationOpen: true,
   agentsAutoApprove: true,
@@ -69,8 +54,13 @@ const DEFAULTS: PlatformSettings = {
   floatRiskAt: 0,
 }
 
-/** Keys holding a percentage rather than a switch. */
-const NUMERIC_KEYS = ['referralRatePercent'] as const
+/**
+ * Keys holding a percentage rather than a switch.
+ *
+ * Empty since the referral bonus was removed. Kept rather than deleted because
+ * `set` branches on it, and a percentage setting is the likeliest next one.
+ */
+const NUMERIC_KEYS = [] as readonly string[]
 
 /** Keys holding an amount of money in pesewas, which has no upper bound. */
 const MONEY_KEYS = ['floatWatchAt', 'floatRiskAt'] as const
@@ -83,11 +73,6 @@ export class SettingsService {
     const rows = await db.setting.findMany()
     const stored = Object.fromEntries(rows.map((r) => [r.key, r.value]))
     return {
-      referralEnabled: bool(stored.referralEnabled, DEFAULTS.referralEnabled),
-      referralRatePercent: percent(
-        stored.referralRatePercent,
-        DEFAULTS.referralRatePercent,
-      ),
       simulateFailure: bool(stored.simulateFailure, DEFAULTS.simulateFailure),
       registrationOpen: bool(stored.registrationOpen, DEFAULTS.registrationOpen),
       agentsAutoApprove: bool(stored.agentsAutoApprove, DEFAULTS.agentsAutoApprove),
@@ -108,15 +93,6 @@ export class SettingsService {
         ? percent(row.value, DEFAULTS[key] as number)
         : bool(row.value, DEFAULTS[key] as boolean)
     ) as PlatformSettings[K]
-  }
-
-  /** The referral policy, in the shape the pricing domain expects. */
-  async referralPolicy(db: Db = this.prisma): Promise<ReferralPolicy> {
-    const settings = await this.all(db)
-    return {
-      enabled: settings.referralEnabled,
-      ratePercent: settings.referralRatePercent,
-    }
   }
 
   async set(

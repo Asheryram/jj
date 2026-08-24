@@ -185,15 +185,7 @@ interface Store {
    */
   mySummary: MySummary | null
 
-  /**
-   * FR-5.5 / NFR-5.2 — whether a referrer earns from the people they referred.
-   * One level: an agent has at most one referrer.
-   */
-  referralEnabled: boolean
   /** The referrer's share of James's margin on their referral's sales. */
-  referralRatePercent: number
-  setReferralEnabled: (on: boolean) => Promise<void>
-  setReferralRatePercent: (percent: number) => Promise<void>
 
   toasts: Toast[]
   pushToast: (toast: Omit<Toast, 'id'>) => void
@@ -246,8 +238,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [agentEarningsByDay, setAgentEarningsByDay] = useState<AgentEarningsDay[]>([])
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
   const [mySummary, setMySummary] = useState<MySummary | null>(null)
-  const [referralEnabled, setReferralEnabledState] = useState(true)
-  const [referralRatePercent, setReferralRateState] = useState(25)
   const [toasts, setToasts] = useState<Toast[]>([])
 
   // ── Toasts ────────────────────────────────────────────────────────────────
@@ -281,8 +271,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // placeholder rather than blanking the name, so the shop renders and they can
     // get to the screen that fixes it.
     if (snapshot.admin) setAdmin(snapshot.admin)
-    setReferralEnabledState(snapshot.settings.referralEnabled)
-    setReferralRateState(snapshot.settings.referralRatePercent)
   }, [])
 
   /**
@@ -689,11 +677,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const previewSplit = useCallback(
     (product: Product, code: string | null) =>
-      splitFor(product, code, pricingAgents, admin, {
-        enabled: referralEnabled,
-        ratePercent: referralRatePercent,
-      }),
-    [pricingAgents, admin, referralEnabled, referralRatePercent],
+      splitFor(product, code, pricingAgents, admin),
+    [pricingAgents, admin],
   )
 
   const myShareOf = useCallback(
@@ -958,33 +943,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [reportError],
   )
 
-  const setReferralEnabled = useCallback(
-    async (on: boolean) => {
-      setReferralEnabledState(on)
-      try {
-        await api.setSetting('referralEnabled', on)
-      } catch (error) {
-        setReferralEnabledState(!on)
-        reportError(error, 'We could not change that setting.')
-      }
-    },
-    [reportError],
-  )
-
-  const setReferralRatePercent = useCallback(
-    async (percent: number) => {
-      const previous = referralRatePercent
-      setReferralRateState(percent)
-      try {
-        await api.setSetting('referralRatePercent', percent)
-      } catch (error) {
-        setReferralRateState(previous)
-        reportError(error, 'We could not save that rate.')
-      }
-    },
-    [referralRatePercent, reportError],
-  )
-
   const balance = session?.role === 'agent' ? agentBalance : customerBalance
 
   const value = useMemo<Store>(
@@ -1036,10 +994,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       agentEarningsByDay,
       adminOverview,
       mySummary,
-      referralEnabled,
-      referralRatePercent,
-      setReferralEnabled,
-      setReferralRatePercent,
       toasts,
       pushToast,
       dismissToast,
@@ -1083,11 +1037,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       profiles,
       switchProfile,
       addProfile,
-      referralEnabled,
-      referralRatePercent,
       setAgentPrice,
-      setReferralEnabled,
-      setReferralRatePercent,
       setSellerCode,
       subAgents,
       toasts,

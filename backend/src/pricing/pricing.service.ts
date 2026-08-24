@@ -122,14 +122,13 @@ export class PricingService {
     sellerCode: string | null,
     db: Db = this.prisma,
   ): Promise<{ product: PricedProduct; salePrice: number; split: OrderSplit }> {
-    const [product, agents, admin, policy] = await Promise.all([
+    const [product, agents, admin] = await Promise.all([
       this.product(productId, db),
       this.agents(db),
       this.admin(db),
-      this.settings.referralPolicy(db),
     ])
 
-    const split = splitFor(product, sellerCode, agents, admin, policy)
+    const split = splitFor(product, sellerCode, agents, admin)
     return { product, salePrice: salePriceOf(split, product), split }
   }
 

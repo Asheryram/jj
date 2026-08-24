@@ -199,9 +199,7 @@ export interface CatalogueSnapshot {
    */
   admin: { userId: string; name: string } | null
   settings: {
-    referralEnabled: boolean
     /** The referrer's share of James's margin, as a whole percentage. */
-    referralRatePercent: number
     simulateFailure?: boolean
   }
 }
@@ -280,8 +278,6 @@ export interface SupplierFloat {
 }
 
 export interface PlatformSettings {
-  referralEnabled: boolean
-  referralRatePercent: number
   simulateFailure: boolean
   registrationOpen: boolean
   /** Whether a new agent can start selling without being approved first. */
@@ -443,11 +439,22 @@ export interface FinanceStatement {
 export interface PendingApproval {
   phone: string
   networkKey: string
-  /** Paid orders parked against this number, waiting to be delivered. */
+  /**
+   * Paid orders parked against this number, waiting to be delivered.
+   *
+   * Usually zero now. A sale to an unapproved number is refused before an order
+   * exists, so nothing is charged and nothing is held — the demand shows up as
+   * `attempts` instead. Non-zero rows are orders that predate the block, or ones
+   * whose dispatch came back needing approval after payment.
+   */
   ordersHeld: number
   /** Pesewas of customer money held up by it. */
   valueHeld: number
+  /** How many sales this number has been refused. The demand signal. */
+  attempts: number
   lastProduct: string | null
+  /** Pesewas the last attempt was worth. */
+  lastValue: number | null
   waitingSince: string
 }
 
@@ -844,10 +851,16 @@ export const api = {
   pendingApprovals: () => request<PendingApproval[]>('/admin/beneficiaries'),
 
   /** Ask DataHub which of them have since been approved. */
+  /** Ask DataHub which pending numbers they have approved. Rate-limited server-side. */
   recheckApprovals: () =>
-    request<{ checked: number; approved: string[]; released: number }>('/admin/beneficiaries/recheck', {
-      method: 'POST',
-    }),
+    request<{
+      checked: number
+      approved: string[]
+      released: number
+      /** True when a check ran too recently and this call did nothing. */
+      skipped?: boolean
+      lastCheckedAt?: string
+    }>('/admin/beneficiaries/recheck', { method: 'POST' }),
 
   /** Try their submission API. Returns the reason when it refuses. */
   submitApprovals: () =>

@@ -205,20 +205,23 @@ export class FulfilmentService implements OnApplicationBootstrap {
 
     for (const share of agentShares) {
       entries.push({
-        // Keyed per user, so one order with a seller and a referrer books two
-        // distinct entries and neither can overwrite the other.
+        /**
+         * Still keyed per user, though a sale now has only one agent in it.
+         *
+         * A referrer used to take a slice of James's margin and appear as a second
+         * agent share; that was removed at the client's request. The key keeps the
+         * user in it anyway, because it costs nothing and the alternative is a
+         * scheme that silently collides the day a sale involves two agents again.
+         */
         idempotencyKey: LedgerService.key(
           'order',
           order.reference,
-          share.depth === 0 ? 'agent_margin' : 'referral_bonus',
+          'agent_margin',
           share.userId,
         ),
-        kind: share.depth === 0 ? 'agent_margin' : 'referral_bonus',
+        kind: 'agent_margin',
         amount: -share.margin,
-        description:
-          share.depth === 0
-            ? `Agent margin · ${share.name}`
-            : `Referral bonus · ${share.name}`,
+        description: `Agent margin · ${share.name}`,
         orderRef: order.reference,
         userId: share.userId,
         occurredAt: new Date(),

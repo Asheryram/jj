@@ -81,21 +81,15 @@ export interface Admin {
   name: string
 }
 
-/** FR-5.5 / NFR-5.2 — referral behaviour, changeable without a rebuild. */
-export interface ReferralPolicy {
-  /** Whether a referrer earns anything from the people they referred. */
-  enabled: boolean
-  /**
-   * The referrer's share of JAMES's margin on their referral's sales, as a whole
-   * percentage. Admin-set, platform-wide. Capped at 100, which is what keeps the
-   * bonus always payable.
-   */
-  ratePercent: number
-}
-
-export const REFERRAL_OFF: ReferralPolicy = { enabled: false, ratePercent: 0 }
-
-/** Slot numbers for `SplitShare.depth`. Fixed, so a stored split reads the same forever. */
+/**
+ * Slot numbers for `SplitShare.depth`. Fixed, so a stored split reads the same
+ * forever.
+ *
+ * `REFERRER_DEPTH` is kept although nothing produces it any more: orders placed
+ * while referrers were paid still carry a share at slot 1, and the reports that
+ * read those orders have to keep understanding them. Removing the constant would
+ * not remove the history, only the ability to describe it.
+ */
 export const SELLER_DEPTH = 0
 export const REFERRER_DEPTH = 1
 export const ADMIN_DEPTH = 2
@@ -186,31 +180,22 @@ export function retailPriceFor(
   return resalePriceFor(seller, product)
 }
 
-/** The agent who referred this seller, if referral is on and they exist. */
-export function referrerOf(
-  seller: PricingAgent,
-  agents: PricingAgent[],
-  policy: ReferralPolicy,
-): PricingAgent | null {
-  if (!policy.enabled || !seller.uplineCode) return null
-  // A self-referral would pay the seller twice out of one margin.
-  if (seller.uplineCode === seller.referralCode) return null
-  return agents.find((a) => a.referralCode === seller.uplineCode) ?? null
-}
-
 /**
- * Divide one sale between the supplier, James, the seller, and the seller's
- * referrer.
+ * Divide one sale between the supplier, James, and the seller.
  *
  * Guarantees `salePrice === supplierCost + sum(shares.margin)`, which is the
  * invariant the order transaction asserts before it commits.
+ *
+ * A referrer used to take a slice of James's margin on the people they signed up.
+ * That was removed at the client's request: an agent earns from what they sell and
+ * nothing else. Who invited whom is still recorded — it is how an agent sees the
+ * people they brought in — it simply no longer moves money.
  */
 export function splitFor(
   product: PricedProduct,
   sellerCode: string | null,
   agents: PricingAgent[],
   admin: Admin,
-  policy: ReferralPolicy = REFERRAL_OFF,
 ): OrderSplit {
   const seller = sellerCode ? (agents.find((a) => a.referralCode === sellerCode) ?? null) : null
 
@@ -236,15 +221,10 @@ export function splitFor(
   const cost = costForAgent(seller, product)
   const salePrice = resalePriceFor(seller, product)
 
-  // James's own margin on this sale, and the slice of it the referrer is paid.
-  // Rounded once, with James taking the remainder, so the two always sum back to
-  // his gross exactly — no lost or invented pesewa.
+  // James's whole margin on this sale. Nothing is taken out of it any more: the
+  // referrer bonus that used to come from here was removed at the client's
+  // request, so a sale now divides two ways above cost.
   const adminGross = product.adminPrice - product.supplierCost
-  const referrer = referrerOf(seller, agents, policy)
-  const bonus =
-    referrer && adminGross > 0
-      ? Math.min(adminGross, Math.round((adminGross * policy.ratePercent) / 100))
-      : 0
 
   const shares: SplitShare[] = [
     {
@@ -254,36 +234,20 @@ export function splitFor(
       depth: SELLER_DEPTH,
       paid: cost,
       charged: salePrice,
-      // The seller's whole margin. A referred agent is never worse off than one
-      // who registered directly — that is the point of funding the bonus from
-      // James's side.
       margin: salePrice - cost,
     },
   ]
-
-  if (referrer && bonus > 0) {
-    shares.push({
-      userId: referrer.userId,
-      name: referrer.name,
-      role: 'agent',
-      depth: REFERRER_DEPTH,
-      // A referrer neither bought nor sold — they are paid a share of James's
-      // margin, so there is no price to record on either side.
-      paid: 0,
-      charged: 0,
-      margin: bonus,
-    })
-  }
 
   shares.push({
     userId: admin.userId,
     name: admin.name,
     role: 'admin',
-    // Always slot 2, whether or not a referrer was paid. See SplitShare.depth.
+    // Still slot 2, not slot 1. The numbering is fixed so a split stored while
+    // referrers were paid keeps meaning what it meant — see SplitShare.depth.
     depth: ADMIN_DEPTH,
     paid: product.supplierCost,
     charged: product.adminPrice,
-    margin: adminGross - bonus,
+    margin: adminGross,
   })
 
   return { supplierCost: product.supplierCost, shares }

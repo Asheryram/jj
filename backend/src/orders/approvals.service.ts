@@ -28,6 +28,10 @@ import { FulfilmentService } from './fulfilment.service'
  *  · **submit** — try their API anyway. It will start working the day they fix
  *    it, and until then it reports the failure rather than pretending.
  */
+/** Where the last recheck time is kept, so the automatic call can be rate-limited. */
+const RECHECK_MARKER = 'beneficiaryRecheckAt'
+const RECHECK_COOLDOWN_MS = 60_000
+
 @Injectable()
 export class ApprovalsService {
   private readonly log = new Logger(ApprovalsService.name)
@@ -62,7 +66,14 @@ export class ApprovalsService {
 
     const byPhone = new Map<
       string,
-      { phone: string; ordersHeld: number; valueHeld: number; lastProduct: string | null; oldest: Date }
+      {
+        phone: string
+        ordersHeld: number
+        valueHeld: number
+        lastProduct: string | null
+        lastValue: number | null
+        oldest: Date
+      }
     >()
 
     for (const order of held) {
@@ -78,12 +89,23 @@ export class ApprovalsService {
         ordersHeld: 1,
         valueHeld: order.salePrice,
         lastProduct: order.productName,
+        lastValue: order.salePrice,
         oldest: order.createdAt,
       })
     }
 
-    // A number can be in the registry with no held order — a past attempt that
-    // was already refunded. Still worth approving, just less urgent.
+    /**
+     * Most rows now have no held order at all, and that is the point.
+     *
+     * A sale to an unapproved number is refused before it is created, so nothing
+     * is charged and nothing is held — which means `ordersHeld` and `valueHeld`
+     * are zero for every number refused that way. The demand shows up as
+     * `attempts` instead: how many times somebody tried and was turned away. That
+     * is the number worth sorting by, because it is the sales this is costing.
+     *
+     * Rows with a held order still exist: orders placed before the block, and
+     * orders whose dispatch came back `needs_approval` after payment.
+     */
     for (const entry of registry) {
       if (byPhone.has(entry.phone)) continue
       byPhone.set(entry.phone, {
@@ -91,20 +113,32 @@ export class ApprovalsService {
         ordersHeld: 0,
         valueHeld: 0,
         lastProduct: entry.lastProduct,
+        lastValue: entry.lastValue,
         oldest: entry.lastSeenAt,
       })
     }
 
     const networkKeys = new Map(registry.map((row) => [row.phone, row.networkKey]))
+    const attemptsBy = new Map(registry.map((row) => [row.phone, row.attempts]))
 
     return [...byPhone.values()]
-      .sort((a, b) => b.valueHeld - a.valueHeld || b.ordersHeld - a.ordersHeld)
+      .sort(
+        (a, b) =>
+          // Money actually held first, then the number of refused sales. Both
+          // matter, and with the block in place the second is usually all there is.
+          b.valueHeld - a.valueHeld ||
+          (attemptsBy.get(b.phone) ?? 0) - (attemptsBy.get(a.phone) ?? 0) ||
+          b.ordersHeld - a.ordersHeld,
+      )
       .map((row) => ({
         phone: row.phone,
         networkKey: networkKeys.get(row.phone) ?? 'YELLO',
         ordersHeld: row.ordersHeld,
         valueHeld: row.valueHeld,
+        /** How many sales this number has been refused. */
+        attempts: attemptsBy.get(row.phone) ?? 0,
         lastProduct: row.lastProduct,
+        lastValue: row.lastValue,
         waitingSince: row.oldest.toISOString(),
       }))
   }
@@ -142,7 +176,42 @@ export class ApprovalsService {
    * Rate-limited to 30/min on their side, so this runs in small batches with a
    * pause between them rather than firing everything at once.
    */
-  async recheck(): Promise<{ checked: number; approved: string[]; released: number }> {
+  async recheck(): Promise<{
+    checked: number
+    approved: string[]
+    released: number
+    /** True when this call did nothing because one ran moments ago. */
+    skipped?: boolean
+    lastCheckedAt?: string
+  }> {
+    /**
+     * One pass a minute, however often it is asked for.
+     *
+     * The approvals screen runs this on load so the list is current without
+     * anybody pressing anything — which means a few refreshes would otherwise
+     * fire a verify call per pending number each time, against a provider that
+     * allows thirty a minute. The cooldown makes the automatic call safe and
+     * leaves the manual button honest: it either checks, or says when it last did.
+     */
+    const marker = await this.prisma.setting.findUnique({ where: { key: RECHECK_MARKER } })
+    const last = typeof marker?.value === 'string' ? Date.parse(marker.value) : NaN
+    if (Number.isFinite(last) && Date.now() - last < RECHECK_COOLDOWN_MS) {
+      return {
+        checked: 0,
+        approved: [],
+        released: 0,
+        skipped: true,
+        lastCheckedAt: new Date(last).toISOString(),
+      }
+    }
+
+    const startedAt = new Date().toISOString()
+    await this.prisma.setting.upsert({
+      where: { key: RECHECK_MARKER },
+      create: { key: RECHECK_MARKER, value: startedAt },
+      update: { value: startedAt },
+    })
+
     const waiting = await this.prisma.beneficiaryRequest.findMany({
       where: { approvedAt: null },
       select: { phone: true, networkKey: true },
@@ -158,7 +227,9 @@ export class ApprovalsService {
       if (index > 0 && index % 20 === 0) await sleep(3000)
 
       const result = await this.datahub.verify(row.networkKey, row.phone).catch(() => null)
-      if (result?.verified) {
+      // Only a definite yes clears a number. `unknown` leaves it pending, which is
+      // right: a number is not approved because we failed to ask.
+      if (result?.kind === 'registered') {
         approved.push(row.phone)
         await this.prisma.beneficiaryRequest.update({
           where: { phone: row.phone },
@@ -173,7 +244,7 @@ export class ApprovalsService {
         `DataHub approved ${approved.length} number(s), releasing ${released} held order(s)`,
       )
     }
-    return { checked: waiting.length, approved, released }
+    return { checked: waiting.length, approved, released, lastCheckedAt: startedAt }
   }
 
   /**

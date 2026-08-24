@@ -52,8 +52,6 @@ export class CatalogueService {
       pricingAgents: agents,
       admin,
       settings: {
-        referralEnabled: settings.referralEnabled,
-        referralRatePercent: settings.referralRatePercent,
         // The failure switch is an admin testing aid; a customer's browser has no
         // business branching on it, and telling everyone would be odd.
         ...(isAdminRole(role) ? { simulateFailure: settings.simulateFailure } : {}),

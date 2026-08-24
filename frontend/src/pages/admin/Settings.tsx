@@ -15,28 +15,12 @@ import {
   TextInput,
   Toggle,
 } from '../../components/ui'
-import { AlertIcon, ShieldIcon, UsersIcon } from '../../components/icons'
+import { AlertIcon, ShieldIcon } from '../../components/icons'
 
 /** FR-5.5, FR-6.4, NFR-2.4, NFR-5.1, NFR-5.2 */
 export default function Settings() {
-  const {
-    referralEnabled,
-    referralRatePercent,
-    setReferralEnabled,
-    setReferralRatePercent,
-    products,
-    pushToast,
-  } = useStore()
+  const { pushToast } = useStore()
 
-  // Held as a draft so a half-typed number never hits the API mid-keystroke.
-  const [rateDraft, setRateDraft] = useState(String(referralRatePercent))
-  useEffect(() => setRateDraft(String(referralRatePercent)), [referralRatePercent])
-
-  // A representative product for the worked example. MTN 1GB is the volume
-  // seller; anything with a real margin would do.
-  const sampleProduct = products.find((p) => p.id === 'mtn-data-1gb') ?? products[0]
-  const sampleMargin = sampleProduct ? sampleProduct.adminPrice - sampleProduct.supplierCost : 0
-  const sampleBonus = Math.round((sampleMargin * referralRatePercent) / 100)
   const [retryAttempts, setRetryAttempts] = useState('1')
   const [minTopUp, setMinTopUp] = useState('1.00')
 
@@ -67,122 +51,12 @@ export default function Settings() {
     <div>
       <PageHead title="Settings" subtitle="Platform-wide switches and integration details." />
 
-      {/* ── FR-5.5 / NFR-5.2 — the toggle that must never require a rebuild ── */}
-      <Card>
-        <CardHead
-          title="Referral bonus"
-          subtitle="What an agent earns when someone they referred makes a sale."
-          action={
-            <Badge tone={referralEnabled ? 'success' : 'neutral'}>
-              {referralEnabled ? `${referralRatePercent}% of your margin` : 'Off'}
-            </Badge>
-          }
-        />
-        <div className="space-y-4 p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 p-4">
-            <div className="min-w-0">
-              <label htmlFor="referral-enabled" className="block font-semibold text-slate-900">
-                Pay a bonus on referred agents' sales
-              </label>
-              <p className="mt-1 text-sm leading-relaxed text-slate-500">
-                An agent has at most one referrer — whoever's link they signed up through. When they
-                sell, their referrer earns a share of{' '}
-                <strong className="font-semibold">your</strong> margin on that sale. The seller keeps
-                their own margin in full, so joining through a referral never costs them anything.
-              </p>
-            </div>
-            <Toggle
-              id="referral-enabled"
-              label="Pay a bonus on referred agents' sales"
-              checked={referralEnabled}
-              onChange={(next) => {
-                void setReferralEnabled(next)
-                pushToast({
-                  tone: next ? 'success' : 'info',
-                  title: next ? 'Referral bonus is on' : 'Referral bonus is off',
-                  detail: next
-                    ? `Referrers now earn ${referralRatePercent}% of your margin on their referrals' sales.`
-                    : 'Referrals are still recorded, but nobody earns from them.',
-                })
-              }}
-            />
-          </div>
+      {/* The referral bonus card stood here.
 
-          {referralEnabled && (
-            <div className="rounded-xl border border-slate-200 p-4">
-              <Field
-                label="Bonus rate"
-                htmlFor="referral-rate"
-                hint="Your share of your own margin that goes to the referrer. 0 pays nothing; 100 hands over all of it."
-              >
-                <div className="relative max-w-40">
-                  <TextInput
-                    id="referral-rate"
-                    inputMode="numeric"
-                    className="pr-10 font-bold"
-                    value={rateDraft}
-                    onChange={(event) => setRateDraft(event.target.value.replace(/[^0-9]/g, ''))}
-                    onBlur={() => {
-                      const next = Number(rateDraft)
-                      if (!Number.isInteger(next) || next < 0 || next > 100) {
-                        setRateDraft(String(referralRatePercent))
-                        pushToast({
-                          tone: 'error',
-                          title: 'A bonus rate is a whole number between 0 and 100.',
-                        })
-                        return
-                      }
-                      if (next !== referralRatePercent) {
-                        void setReferralRatePercent(next)
-                        pushToast({ tone: 'success', title: `Bonus rate set to ${next}%` })
-                      }
-                    }}
-                  />
-                  <span className="absolute inset-y-0 right-3.5 flex items-center text-sm font-semibold text-slate-500">
-                    %
-                  </span>
-                </div>
-              </Field>
-
-              {/* A rate is abstract until it is money. Show it against a real
-                  product, so what he is giving away is on screen. */}
-              {sampleProduct && sampleMargin > 0 && (
-                <div className="mt-3 rounded-xl bg-slate-50 p-3.5 text-sm">
-                  <p className="font-semibold text-slate-700">
-                    On one {sampleProduct.name} sold by a referred agent
-                  </p>
-                  <dl className="mt-2 space-y-1 text-slate-600">
-                    <div className="flex justify-between gap-3">
-                      <dt>Your margin</dt>
-                      <dd className="tabular font-medium">{cedis(sampleMargin)}</dd>
-                    </div>
-                    <div className="flex justify-between gap-3">
-                      <dt>Goes to the referrer</dt>
-                      <dd className="tabular font-semibold text-brand-700">{cedis(sampleBonus)}</dd>
-                    </div>
-                    <div className="flex justify-between gap-3 border-t border-slate-200 pt-1">
-                      <dt className="font-semibold text-slate-700">You keep</dt>
-                      <dd className="tabular font-bold text-slate-900">
-                        {cedis(sampleMargin - sampleBonus)}
-                      </dd>
-                    </div>
-                  </dl>
-                  <p className="mt-2 text-slate-500">
-                    The seller's own margin and the price the customer pays are untouched.
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          <Callout tone="info" icon={<UsersIcon className="size-4" />}>
-            This is a setting, not a code change. Every account already stores who referred it, so
-            turning the bonus on starts paying against referrals that were being recorded all along —
-            nothing needs rebuilding or backfilling. Referral is one level deep by design: an agent
-            earns on the people they brought in, not on their recruits' recruits.
-          </Callout>
-        </div>
-      </Card>
+          Removed at the client's request: an agent earns from what they sell and
+          nothing from the sales of people they invited. Who invited whom is still
+          recorded and still shown to agents — it just no longer moves money, so
+          there is no rate to set and no switch to explain. */}
 
       {/* ── Ordering behaviour (FR-4.6, NFR-3.2) ── */}
       <Card className="mt-3">

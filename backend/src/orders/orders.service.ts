@@ -73,6 +73,33 @@ export class OrdersService {
     }
 
     const buyerPhone = dto.buyerPhone ?? dto.recipient
+
+    /**
+     * Refuse before any money moves, not after.
+     *
+     * MTN will not deliver to a number that is not on DataHub's beneficiary list.
+     * Until now the check here was advisory and nothing acted on it, so the order
+     * was created, the customer paid, the dispatch came back `needs_approval`, and
+     * the money sat in an approval hold for six hours before being refunded by
+     * hand. Every one of those was a sale that could never have completed and a
+     * refund somebody had to approve.
+     *
+     * So the sale is refused up front. The number is recorded either way — see
+     * `noteApprovalNeeded` — because a refused sale is exactly the information
+     * needed to get that number approved, and once it is, the same customer can
+     * come back and buy.
+     *
+     * Only a definite refusal stops it. `verifyRecipient` returns verified for
+     * both "they say it is fine" and "we could not ask them", because a provider
+     * outage is not the customer's fault.
+     */
+    const registration = await this.verifyRecipient(dto.productId, dto.recipient)
+    if (registration.checked && !registration.verified) {
+      // Written before the throw and outside any transaction, so it survives.
+      await this.noteApprovalNeeded(dto.productId, dto.recipient).catch(() => undefined)
+      throw new ConflictError('RECIPIENT_NOT_REGISTERED', registration.message)
+    }
+
     const reference = await this.freshReference()
 
     /**
@@ -88,9 +115,7 @@ export class OrdersService {
      */
     const needsPayment = dto.payWith === 'momo' && this.payments.live
 
-    let order: Order
-    try {
-      order = await this.prisma.$transaction(async (tx) => {
+    const order = await this.prisma.$transaction(async (tx) => {
       const { product, salePrice, split } = await this.priceInside(tx, dto.productId, sellerCode, dto.recipient)
 
       // FR-2.3 — a wallet payment is debited as the order is created, and only a
@@ -128,16 +153,6 @@ export class OrdersService {
         },
       })
       })
-    } catch (error) {
-      // A refused sale is still information: somebody wanted this bundle and
-      // could not have it because their number is not approved. Recorded here
-      // rather than at the throw site because the throw unwinds the transaction,
-      // and a note written inside it would roll back with everything else.
-      if (error instanceof ConflictError && error.code === 'RECIPIENT_NOT_REGISTERED') {
-        await this.noteApprovalNeeded(dto.productId, dto.recipient).catch(() => undefined)
-      }
-      throw error
-    }
 
     if (needsPayment) {
       // Hand back somewhere to pay rather than a receipt. Fulfilment is started
@@ -495,13 +510,32 @@ export class OrdersService {
     }
 
     const result = await this.datahub.verify(supplier.networkKey as string, recipient)
-    return {
-      checked: true,
-      verified: result.verified,
-      message: result.verified
-        ? ''
-        : `${prettyGhanaPhone(recipient)} is not on our delivery partner's approved list, so this bundle cannot be sent to it yet. Contact support to have the number added.`,
+
+    /**
+     * Three answers, and only one of them stops a sale.
+     *
+     * `registered` proceeds. `not_registered` is a refusal, and the checkout has
+     * to honour it — the money must not be taken for a bundle that cannot be
+     * delivered. `unknown` proceeds too: their API being unreachable is our
+     * problem, not the customer's, and the approval hold already covers an order
+     * that turns out to be undeliverable.
+     */
+    if (result.kind === 'not_registered') {
+      return {
+        checked: true,
+        verified: false,
+        message:
+          `${prettyGhanaPhone(recipient)} is not on our delivery partner's approved list, so ` +
+          'this bundle cannot be sent to it yet. We have passed the number on to be added — ' +
+          'please try again a little later, or contact support.',
+      }
     }
+
+    if (result.kind === 'unknown') {
+      this.log.warn(`could not verify ${recipient}: ${result.reason} — allowing the sale`)
+    }
+
+    return { checked: true, verified: true, message: '' }
   }
 
   /** NFR-3.3 — money held for a Mobile Money payer whose order failed. */

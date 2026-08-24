@@ -226,7 +226,9 @@ export class SupplierService implements OnModuleInit {
     // because /verify covers MTN alone.
     if (VERIFIABLE_KEYS.includes(supplier.networkKey)) {
       const check = await this.datahub.verify(supplier.networkKey, order.recipient).catch(() => null)
-      if (check && !check.verified) {
+      // Only a definite refusal holds the order. `unknown` falls through to the
+      // purchase, which checks the same thing and is the authority anyway.
+      if (check?.kind === 'not_registered') {
         return { outcome: 'needs_approval', reason: check.message }
       }
     }

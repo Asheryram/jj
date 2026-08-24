@@ -45,6 +45,26 @@ export type PurchaseOutcome =
   /** The request may or may not have been executed. Never retry on this. */
   | { kind: 'unknown'; reason: string; raw: string }
 
+/**
+ * How they phrase a number that is not on the beneficiary list.
+ *
+ * Matched on rather than inferred from `success`, because `success: false` is also
+ * how they report a malformed number — and refusing a sale for that reason would
+ * be blaming the customer for our own validation.
+ */
+const NOT_A_BENEFICIARY = /not\s+(added|registered)\s+to\s+.*beneficiar/i
+
+/**
+ * Whether the provider will deliver to a number.
+ *
+ * Three states, not two. `unknown` exists because "we could not ask" and "they
+ * said no" have opposite consequences: one must not stop a sale, the other must.
+ */
+export type VerifyOutcome =
+  | { kind: 'registered' }
+  | { kind: 'not_registered'; message: string }
+  | { kind: 'unknown'; reason: string }
+
 export type StatusOutcome =
   | { kind: 'found'; providerStatus: string; raw: unknown }
   | { kind: 'not_found' }
@@ -340,9 +360,9 @@ export class DatahubClient {
    * purchase, or the order fails after the money has moved. Advisory: a failure
    * to verify does not block the sale, it only warns.
    */
-  async verify(networkKey: string, recipient: string): Promise<{ verified: boolean; message: string }> {
+  async verify(networkKey: string, recipient: string): Promise<VerifyOutcome> {
     const key = this.apiKey
-    if (!key) return { verified: false, message: 'No DataHub API key configured.' }
+    if (!key) return { kind: 'unknown', reason: 'No DataHub API key configured.' }
 
     try {
       const response = await this.fetchRepeatable(
@@ -363,12 +383,42 @@ export class DatahubClient {
       const body = (await response.json().catch(() => ({}))) as DatahubEnvelope & {
         data?: { exists?: boolean; message?: string }
       }
-      return {
-        verified: Boolean(body.success && body.data?.exists),
-        message: body.data?.message ?? body.error ?? body.message ?? 'No reply.',
+      /**
+       * Three answers, read from what they actually send.
+       *
+       * Checked against the live endpoint rather than assumed, because the shape
+       * is not the obvious one. A number on the list comes back as
+       * `{success: true, data: {exists: true}}`. A number that is NOT on the list
+       * comes back as **`success: false`** with the reason in `message`:
+       *
+       *     { success: false, message: "0509999999 is not added to our beneficiary list" }
+       *
+       * So `success: false` is not automatically an error — it carries the refusal
+       * we most need to act on. It also carries genuine errors, like
+       * "Recipient must be a valid 10-digit phone number", which must NOT be read
+       * as a refusal. Hence matching the message: a refusal is specific and
+       * anything else is treated as not knowing.
+       *
+       * Reading `success: false` as merely "unknown" would have meant the block
+       * never fired at all, and the sale proceeding exactly as before.
+       */
+      const said = body.data?.message ?? body.message ?? body.error ?? ''
+
+      if (body.success && body.data?.exists) return { kind: 'registered' }
+
+      if (NOT_A_BENEFICIARY.test(said)) {
+        return { kind: 'not_registered', message: said }
       }
+
+      // `success: true` with `exists` absent or false — defensive, and the same
+      // conclusion as the message form above.
+      if (body.success && body.data && body.data.exists === false) {
+        return { kind: 'not_registered', message: said || 'Not on their approved list.' }
+      }
+
+      return { kind: 'unknown', reason: said || 'They did not answer the question.' }
     } catch (error) {
-      return { verified: false, message: String(error) }
+      return { kind: 'unknown', reason: String(error) }
     }
   }
 
