@@ -66,8 +66,14 @@ export default function ReservePanel() {
     )
   }
 
-  const { balance, liabilities, available, covered, balanceError } = position
+  const { balance, liabilities, available, covered, balanceError, inTransit } = position
   const short = available !== null && available < 0
+  const settledSince = inTransit.settledSince
+    ? new Date(inTransit.settledSince).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+      })
+    : null
 
   return (
     <Card className="mt-3">
@@ -84,7 +90,16 @@ export default function ReservePanel() {
         )}
 
         <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200">
-          <Row label="Paystack is holding" value={balance} strong />
+          <Row
+            label="Paystack is holding"
+            value={balance}
+            strong
+            hint={
+              inTransit.amount > 0
+                ? `+ ${cedis(inTransit.amount)} already collected, still settling${settledSince ? ` (last settled ${settledSince})` : ''} — on its way, not lost`
+                : undefined
+            }
+          />
           <Row label="Owed to agents" value={liabilities.agentEarnings} negative />
           <Row
             label="Customer wallets and refunds owed"

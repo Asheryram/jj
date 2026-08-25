@@ -442,6 +442,8 @@ export interface ReservePosition {
   /** Pesewas Paystack holds. Null when they could not be reached — not zero. */
   balance: number | null
   balanceError: string | null
+  /** Collected since the last settlement, net of Paystack's fee — on its way, not lost. */
+  inTransit: { amount: number; settledSince: string | null; error: string | null }
   liabilities: {
     agentEarnings: number
     customerMoney: number

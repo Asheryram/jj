@@ -81,13 +81,30 @@ export class SolvencyService {
     const undelivered = heldOrders._sum.salePrice ?? 0
     const liabilities = owedToAgents + owedToCustomers + undelivered
 
-    const balanceResult = await this.paystack.balance()
+    const [balanceResult, settlementResult] = await Promise.all([
+      this.paystack.balance(),
+      this.paystack.lastSettlementAt(),
+    ])
     const balance = balanceResult.ok ? balanceResult.balance : null
+    const settledSince = settlementResult.ok ? settlementResult.at : null
+    const inTransit = await this.collectedSince(settledSince)
 
     return {
       /** What Paystack holds. Null when they could not be reached — not zero. */
       balance,
       balanceError: balanceResult.ok ? null : balanceResult.reason,
+      /**
+       * Paystack is one reservoir: every sale flows in immediately, but nothing
+       * flows out to us until their next settlement. `balance` only ever answers
+       * "what can I spend right now" — a sale from ten minutes ago is real money,
+       * just not yet in that number. This is the difference: money already
+       * collected, net of their fee, since the last time they actually settled.
+       */
+      inTransit: {
+        amount: inTransit,
+        settledSince,
+        error: settlementResult.ok ? null : settlementResult.reason,
+      },
       liabilities: {
         agentEarnings: owedToAgents,
         customerMoney: owedToCustomers,
@@ -141,5 +158,14 @@ export class SolvencyService {
     }
 
     return { ok: true, reason: null }
+  }
+
+  /** Net of Paystack's own fee — what will actually land once this settles. */
+  private async collectedSince(at: Date | null): Promise<number> {
+    const paid = await this.prisma.payment.aggregate({
+      where: { status: 'paid', ...(at ? { paidAt: { gt: at } } : {}) },
+      _sum: { amount: true, fee: true },
+    })
+    return (paid._sum.amount ?? 0) - (paid._sum.fee ?? 0)
   }
 }

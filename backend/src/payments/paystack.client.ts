@@ -187,6 +187,38 @@ export class PaystackClient {
   }
 
   /**
+   * When money last actually left the balance for our bank account.
+   *
+   * `balance()` only ever answers "right now" — it cannot say whether a fresh
+   * sale is still in transit or genuinely missing. Knowing the last settlement
+   * date lets a caller draw the line: anything paid after it is still on its way,
+   * not lost. Null with no error means the account has never settled anything yet.
+   */
+  async lastSettlementAt(): Promise<{ ok: true; at: Date | null } | { ok: false; reason: string }> {
+    const key = this.secretKey
+    if (!key) return { ok: false, reason: 'No Paystack secret key configured.' }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/settlement?perPage=1`, {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(15_000),
+      })
+      const body = (await response.json().catch(() => ({}))) as PaystackEnvelope<
+        { settlement_date?: string }[]
+      >
+
+      if (!response.ok || body.status !== true || !Array.isArray(body.data)) {
+        return { ok: false, reason: body.message ?? `HTTP ${response.status}` }
+      }
+
+      const latest = body.data[0]?.settlement_date
+      return { ok: true, at: latest ? new Date(latest) : null }
+    } catch (error) {
+      return { ok: false, reason: `Could not reach Paystack: ${String(error)}` }
+    }
+  }
+
+  /**
    * A Mobile Money recipient, created once per agent number and reused.
    *
    * Ghana pays out to Mobile Money rather than a bank account, so `type` is
