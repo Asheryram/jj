@@ -49,6 +49,28 @@ const THROUGH_TUNNEL =
     })(),
   )
 
+/**
+ * Resolve a path the API gave us against the API's own origin.
+ *
+ * The server returns logo paths as `/api/branding/logo/:key` — relative, because
+ * it has no business knowing its public address. That is correct same-origin, and
+ * wrong the moment the app and the API are on different hosts: the browser asks
+ * Vercel for it, the single-page-app catch-all answers with `index.html`, and an
+ * `<img>` receives HTML. It fails as a blank logo with a 200 status, which is why
+ * it looked like the upload had not worked.
+ *
+ * Used for anything the browser fetches *by URL* rather than through `request` —
+ * images, downloads — since those never pass through the client that already knows
+ * where the API lives.
+ */
+export function apiAsset(path: string | null): string | null {
+  if (!path) return path
+  if (/^(https?:|data:|blob:)/.test(path)) return path
+  // API_URL is the API base and ends in `/api`; the path starts with it too.
+  const origin = API_URL.replace(/\/api$/, '')
+  return `${origin}${path.startsWith('/') ? '' : '/'}${path}`
+}
+
 const TOKEN_KEY = 'jdc.token'
 
 export const token = {

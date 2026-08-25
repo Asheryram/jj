@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, ApiError, type MyBranding } from '../../lib/api'
+import { apiAsset, api, ApiError, type MyBranding } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { deriveBrand } from '../../lib/branding'
 import { dateTime } from '../../lib/format'
@@ -106,8 +106,10 @@ export default function ShopBranding() {
     }
   }
 
+  // Resolved against the API origin — see apiAsset. A bare path works on one
+  // host and silently returns the app's HTML on two.
   const liveLogoUrl = state?.live?.hasLogo
-    ? `/api/branding/logo/${encodeURIComponent(session?.referralCode ?? '')}`
+    ? apiAsset(`/api/branding/logo/${encodeURIComponent(session?.referralCode ?? '')}`)
     : null
 
   return (

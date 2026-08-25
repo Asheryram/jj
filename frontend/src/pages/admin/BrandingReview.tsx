@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, ApiError, type BrandingRequestRow } from '../../lib/api'
+import { apiAsset, api, ApiError, type BrandingRequestRow } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { deriveBrand } from '../../lib/branding'
 import { dateTime } from '../../lib/format'
@@ -259,7 +259,7 @@ function AgentQueue() {
                     <div className="flex items-start gap-3">
                       {row.logoUrl ? (
                         <img
-                          src={row.logoUrl}
+                          src={apiAsset(row.logoUrl) ?? undefined}
                           alt={`${row.agentName}'s proposed logo`}
                           className="size-14 rounded-xl border border-slate-200 object-contain"
                         />

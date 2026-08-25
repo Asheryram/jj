@@ -7,6 +7,7 @@ import { cedis, initials } from '../lib/format'
 import { isAdmin } from '../lib/roles'
 import type { Role } from '../data/types'
 import { Badge, Button, Modal, cn } from './ui'
+import { apiAsset } from '../lib/api'
 import {
   AlertIcon,
   CashIcon,
@@ -47,7 +48,7 @@ export function Logo({ compact }: { compact?: boolean }) {
           else's brand. */}
       {branding.logoUrl ? (
         <img
-          src={branding.logoUrl}
+          src={apiAsset(branding.logoUrl) ?? undefined}
           alt={branding.shopName}
           className="size-9 shrink-0 rounded-xl object-contain"
         />

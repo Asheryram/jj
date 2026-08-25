@@ -97,9 +97,21 @@ export default function CostPrices() {
 
     return order.map((key) => {
       const items = (byNetwork.get(key) ?? []).sort((a, b) => a.supplierCost - b.supplierCost)
-      // Named in the header rather than repeated on every row. Usually one, and
-      // worth seeing the moment it is not.
-      const providers = [...new Set(items.map((p) => p.provider ?? 'unassigned'))].sort()
+      /**
+       * Named in the header rather than repeated on every row. Usually one, and
+       * worth seeing the moment it is not.
+       *
+       * `undefined` and `null` mean different things and must not be collapsed:
+       * null is a product with no supplier linked, which is worth flagging;
+       * undefined is an API that did not send the field at all, which says nothing
+       * about the product. Treating the second as the first labelled every bundle
+       * "no supplier" against an older server — a claim the client had no basis
+       * for. When nothing is known, nothing is shown.
+       */
+      const known = items.filter((p) => p.provider !== undefined)
+      const providers = known.length
+        ? [...new Set(known.map((p) => p.provider ?? 'unassigned'))].sort()
+        : []
       return {
         key,
         label: key === 'Other' ? 'No network' : NETWORK_STYLES[key as Network].label,
