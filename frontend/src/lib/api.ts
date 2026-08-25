@@ -751,10 +751,19 @@ export const api = {
     request<{
       id: string
       email: string
-      setupLink: string
+      /**
+       * Null when the address already had an account.
+       *
+       * That case is a person gaining a second profile, not a new person being
+       * invited: they already have a password, and issuing a link would create a
+       * second way into one identity. There is nothing to pass on.
+       */
+      setupLink: string | null
       /** False when mail is not configured or the send failed. */
       emailed: boolean
       emailProblem: string | null
+      /** True when this added a profile to an account that already existed. */
+      addedToExistingAccount: boolean
     }>('/platform/team', { method: 'POST', body }),
 
   resendTeamLink: (id: string) =>

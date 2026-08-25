@@ -218,13 +218,31 @@ export default function Team() {
         open={adding}
         onClose={() => setAdding(false)}
         onCreated={async (result) => {
-          setIssued({
-            email: result.email,
-            link: result.setupLink,
-            purpose: 'setup',
-            emailed: result.emailed,
-            emailProblem: result.emailProblem,
-          })
+          /**
+           * Two different outcomes, and only one of them involves a link.
+           *
+           * An address that already has an account gains a *profile*: same person,
+           * same password, reachable from the switcher. There is no link to pass
+           * on, and showing the link modal with an empty value would invite
+           * somebody to send nothing.
+           */
+          if (result.addedToExistingAccount || !result.setupLink) {
+            pushToast({
+              tone: 'success',
+              title: 'Admin profile added to that account',
+              detail:
+                `${result.email} already had an account, so no new password is needed. ` +
+                'Sign in as usual and switch profiles from the picker at the top.',
+            })
+          } else {
+            setIssued({
+              email: result.email,
+              link: result.setupLink,
+              purpose: 'setup',
+              emailed: result.emailed,
+              emailProblem: result.emailProblem,
+            })
+          }
           await load()
         }}
       />
@@ -243,9 +261,10 @@ function AddAdminModal({
   onClose: () => void
   onCreated: (result: {
     email: string
-    setupLink: string
+    setupLink: string | null
     emailed: boolean
     emailProblem: string | null
+    addedToExistingAccount: boolean
   }) => Promise<void>
 }) {
   const [name, setName] = useState('')

@@ -167,8 +167,29 @@ export class TeamService {
       throw new NotFoundError('We could not find that account.')
     }
 
-    const purpose = user.passwordHash ? 'reset' : 'setup'
-    const { link, sent, reason } = await this.tokens.issueAndSend(user.id, purpose)
+    /**
+     * The link belongs to the person, not to the profile that was clicked.
+     *
+     * One person may hold several profiles and exactly one of them carries a
+     * password — that invariant is what makes a single sign-in able to reach all
+     * of them. Issuing a link against a password-less secondary profile would set
+     * a password on *that* row, giving one human two credentials; `login` then
+     * picks whichever row the database happens to return first, which is not a
+     * thing anybody should have to reason about.
+     *
+     * So the token is always issued against the credential-holding row. When no
+     * row has a password yet, this is a genuine first-time setup and the clicked
+     * profile is the right target.
+     */
+    const credentialRow = await this.prisma.user.findFirst({
+      where: { email: user.email, passwordHash: { not: null } },
+      select: { id: true, passwordHash: true },
+    })
+
+    const target = credentialRow ?? user
+    const purpose = credentialRow ? 'reset' : 'setup'
+
+    const { link, sent, reason } = await this.tokens.issueAndSend(target.id, purpose)
 
     this.log.warn(`${purpose} link re-issued for ${user.email}`)
     return {
