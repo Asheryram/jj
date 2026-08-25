@@ -210,6 +210,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
   const [offline, setOffline] = useState<string | null>(null)
   const [session, setSession] = useState<Session | null>(null)
+  /**
+   * Never undefined, whatever the API sends.
+   *
+   * The header reads `profiles.length` to decide whether to show the switcher, so
+   * a payload without the field took the whole app down with a TypeError the
+   * moment somebody logged in — a white screen, and only for signed-in users. That
+   * is exactly what a frontend deployed ahead of its API looks like, and it is not
+   * a state the client should be able to reach.
+   */
   const [profiles, setProfiles] = useState<Profile[]>([])
 
   const [sellerCode, setSellerCodeState] = useState<string | null>(() =>
@@ -394,7 +403,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         const { user, profiles: mine } = await api.me()
         setSession(user)
-        setProfiles(mine)
+        setProfiles(mine ?? [])
         await loadForSession(user)
       } catch (error) {
         /**
@@ -441,7 +450,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const result = await api.login(email, password)
       token.set(result.accessToken)
       setSession(result.user)
-      setProfiles(result.profiles)
+      setProfiles(result.profiles ?? [])
       if (result.user.role === 'customer') setCustomerBalance(result.balance)
       if (result.user.role === 'agent') setAgentBalance(result.balance)
 
@@ -471,7 +480,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const result = await api.switchProfile(userId)
       token.set(result.accessToken)
       setSession(result.user)
-      setProfiles(result.profiles)
+      setProfiles(result.profiles ?? [])
       if (result.user.role === 'customer') setCustomerBalance(result.balance)
       if (result.user.role === 'agent') setAgentBalance(result.balance)
       await Promise.all([loadCatalogue(), loadForSession(result.user)])
@@ -486,7 +495,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         await api.addProfile(role)
         const { profiles: mine } = await api.me()
-        setProfiles(mine)
+        setProfiles(mine ?? [])
         pushToast({
           tone: 'success',
           title: `${role === 'agent' ? 'Agent' : 'Admin'} profile added`,
@@ -504,7 +513,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const result = await api.register(input)
       token.set(result.accessToken)
       setSession(result.user)
-      setProfiles(result.profiles)
+      setProfiles(result.profiles ?? [])
       // Reload the catalogue too: a new agent joins the referral chain, which
       // changes what prices resolve to.
       await Promise.all([loadCatalogue(), loadForSession(result.user)])
@@ -887,7 +896,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         const result = await api.updatePhone(phone)
         setSession(result.user)
-        setProfiles(result.profiles)
+        setProfiles(result.profiles ?? [])
         pushToast({ tone: 'success', title: 'Number updated', detail: `Earnings will be paid to ${phone}.` })
       } catch (error) {
         reportError(error, 'We could not update that number.')

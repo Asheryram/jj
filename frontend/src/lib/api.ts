@@ -186,8 +186,13 @@ export interface AuthResult {
   accessToken: string
   user: Session
   balance: number
-  /** Every hat this person has. One entry means no switcher is shown. */
-  profiles: Profile[]
+  /**
+   * Every hat this person has. One entry means no switcher is shown.
+   *
+   * Optional because an API older than this client does not send it, and a client
+   * deployed ahead of its server has to survive that rather than white-screen.
+   */
+  profiles?: Profile[]
 }
 
 export interface CatalogueSnapshot {
@@ -518,7 +523,7 @@ export const api = {
     referralCode?: string
   }) => request<AuthResult>('/auth/register', { method: 'POST', body, auth: false }),
 
-  me: () => request<{ user: Session; balance: number; profiles: Profile[] }>('/auth/me'),
+  me: () => request<{ user: Session; balance: number; profiles?: Profile[] }>('/auth/me'),
 
   // Catalogue — one call for products, the referral chain and platform switches.
   catalogue: () => request<CatalogueSnapshot>('/catalogue', { auth: true }),
