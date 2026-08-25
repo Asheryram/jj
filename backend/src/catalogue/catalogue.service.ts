@@ -55,6 +55,15 @@ export class CatalogueService {
         // The failure switch is an admin testing aid; a customer's browser has no
         // business branching on it, and telling everyone would be odd.
         ...(isAdminRole(role) ? { simulateFailure: settings.simulateFailure } : {}),
+        /**
+         * Sent to everyone, unlike the switch above — it is a rate, not a
+         * secret, and the browser needs it to preview a price the same way the
+         * server will actually charge it. An agent's own default markup is
+         * computed live in the browser from this exact number (see
+         * `resalePriceFor`), so a stale or missing value here would let the
+         * preview promise a margin the real order does not deliver.
+         */
+        paystackFeeBp: settings.paystackFeeBp,
       },
     }
   }

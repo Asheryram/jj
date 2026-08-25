@@ -97,7 +97,7 @@ export class RejectRefundDto {
 }
 
 /** Keys whose value is a number rather than a switch. */
-const NUMERIC_SETTING_KEYS = ['floatWatchAt', 'floatRiskAt'] as const
+const NUMERIC_SETTING_KEYS = ['floatWatchAt', 'floatRiskAt', 'paystackFeeBp'] as const
 
 export class SetSettingDto {
   @IsIn([
@@ -106,6 +106,7 @@ export class SetSettingDto {
     'agentsAutoApprove',
     'floatWatchAt',
     'floatRiskAt',
+    'paystackFeeBp',
   ])
   key!:
     | 'simulateFailure'
@@ -113,6 +114,7 @@ export class SetSettingDto {
     | 'agentsAutoApprove'
     | 'floatWatchAt'
     | 'floatRiskAt'
+    | 'paystackFeeBp'
 
   /**
    * A whole number for the numeric keys, a boolean for the switches.

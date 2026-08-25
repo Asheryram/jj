@@ -65,7 +65,15 @@ const TIER_LABELS: Record<Tier, { label: string; help: string }> = {
  * not capped. See EDITABLE_TIERS above.
  */
 export default function CostPrices() {
-  const { products, updateProductTier, setProductOnSale, refresh, pushToast } = useStore()
+  const { products, updateProductTier, setProductOnSale, refresh, pushToast, paystackFeeBp } = useStore()
+
+  /**
+   * What Paystack's cut leaves behind. A price can clear cost and still be a
+   * real loss once this comes off — the exact bug that started this feature: a
+   * 2GB bundle costing 9.50, sold at 9.60, cleared the raw floor and still lost
+   * 9 pesewas on every sale once ~2% was taken.
+   */
+  const netOfFee = (price: number) => Math.floor((price * (10_000 - paystackFeeBp)) / 10_000)
   const [category, setCategory] = useState<Category>('data')
   const [editing, setEditing] = useState<Product | null>(null)
   const [marking, setMarking] = useState(false)
@@ -164,7 +172,7 @@ export default function CostPrices() {
   // Both selling prices must clear cost. Walk-up vs agent price is deliberately
   // not checked, and there is no ceiling to check — see EDITABLE_TIERS.
   const broken = products.filter(
-    (p) => p.adminPrice < p.supplierCost || p.standardPrice < p.supplierCost,
+    (p) => netOfFee(p.adminPrice) < p.supplierCost || netOfFee(p.standardPrice) < p.supplierCost,
   )
 
   return (
@@ -222,8 +230,9 @@ export default function CostPrices() {
             title={`${broken.length} product${broken.length === 1 ? '' : 's'} priced wrong`}
             icon={<AlertIcon className="size-4" />}
           >
-            A selling price is below what you pay the provider, so every one of those sales loses
-            money. Fix these before they sell.
+            A selling price is below what you pay the provider once Paystack's cut on the sale is
+            taken out, so every one of those sales loses money — even where the price alone looks
+            fine. Fix these before they sell.
           </Callout>
         )}
         <Callout
@@ -320,14 +329,19 @@ export default function CostPrices() {
                 </tr>
                 {!collapsed.has(group.key) &&
                   group.items.map((product) => {
-              const margin = product.adminPrice - product.supplierCost
+              // What actually lands after Paystack's cut — the number worth
+              // showing, since the raw gap between price and cost is not it any
+              // more.
+              const margin = netOfFee(product.adminPrice) - product.supplierCost
+              const grossMargin = product.adminPrice - product.supplierCost
               const invalid =
-                product.adminPrice < product.supplierCost ||
-                product.standardPrice < product.supplierCost
-              // Publishing needs a margin on both channels, not merely a legal price.
+                netOfFee(product.adminPrice) < product.supplierCost ||
+                netOfFee(product.standardPrice) < product.supplierCost
+              // Publishing needs a margin on both channels after the fee, not
+              // merely a legal price — matches the server's own guard.
               const invalidToPublish =
-                product.adminPrice <= product.supplierCost ||
-                product.standardPrice <= product.supplierCost
+                netOfFee(product.adminPrice) <= product.supplierCost ||
+                netOfFee(product.standardPrice) <= product.supplierCost
               return (
                 <tr key={product.id} className={cn('hover:bg-slate-50', invalid && 'bg-red-50/50')}>
                   <Td>
@@ -349,9 +363,16 @@ export default function CostPrices() {
                         'tabular font-semibold',
                         margin > 0 ? 'text-brand-700' : 'text-red-600',
                       )}
+                      title="After Paystack's cut on the sale"
                     >
                       {margin > 0 ? cedis(margin, { sign: true }) : cedis(margin)}
                     </span>
+                    {/* Only shown once the fee is actually taking something
+                        visible, so a healthy margin is not cluttered with a
+                        difference of a pesewa. */}
+                    {grossMargin !== margin && (
+                      <p className="text-[11px] text-slate-400">before fee {cedis(grossMargin)}</p>
+                    )}
                   </Td>
                   <Td align="right" className="tabular text-slate-600">
                     {cedis(product.standardPrice)}

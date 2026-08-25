@@ -13,8 +13,16 @@ import type { Mail } from './mailer.service'
  * blocks remote content.
  */
 
-/** Inline styles only. Email clients strip stylesheets. */
-function wrap(shopName: string, heading: string, body: string): string {
+/**
+ * Inline styles only. Email clients strip stylesheets.
+ *
+ * Exported so other senders — the float alert, for one — get the same card,
+ * font and brand colour as a password email rather than inventing their own
+ * look. One visual language for every platform email, not one per sender.
+ */
+export function wrap(shopName: string, heading: string, body: string, footer?: string): string {
+  const defaultFooter = `You are getting this because somebody with access to ${escape(shopName)} asked us to send it.
+      If that was not you, you can ignore it — nothing changes until the link is used.`
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:24px;background:#f8fafc;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#1e293b">
@@ -24,15 +32,14 @@ function wrap(shopName: string, heading: string, body: string): string {
       ${body}
     </div>
     <p style="max-width:520px;margin:16px auto 0;font-size:12px;line-height:1.5;color:#64748b">
-      You are getting this because somebody with access to ${escape(shopName)} asked us to send it.
-      If that was not you, you can ignore it — nothing changes until the link is used.
+      ${footer ?? defaultFooter}
     </p>
   </body>
 </html>`
 }
 
 /** A name or a URL in an attribute is untrusted input. */
-function escape(value: string): string {
+export function escape(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

@@ -122,20 +122,25 @@ export class PricingService {
     sellerCode: string | null,
     db: Db = this.prisma,
   ): Promise<{ product: PricedProduct; salePrice: number; split: OrderSplit }> {
-    const [product, agents, admin] = await Promise.all([
+    const [product, agents, admin, settings] = await Promise.all([
       this.product(productId, db),
       this.agents(db),
       this.admin(db),
+      this.settings.all(db),
     ])
 
-    const split = splitFor(product, sellerCode, agents, admin)
+    const split = splitFor(product, sellerCode, agents, admin, settings.paystackFeeBp)
     return { product, salePrice: salePriceOf(split, product), split }
   }
 
   /** What a buyer arriving through `sellerCode` pays. */
   async retailPrice(productId: string, sellerCode: string | null): Promise<number> {
-    const [product, agents] = await Promise.all([this.product(productId), this.agents()])
-    return retailPriceFor(sellerCode, product, agents)
+    const [product, agents, settings] = await Promise.all([
+      this.product(productId),
+      this.agents(),
+      this.settings.all(),
+    ])
+    return retailPriceFor(sellerCode, product, agents, settings.paystackFeeBp)
   }
 
   /**

@@ -153,6 +153,8 @@ interface Store {
 
   /** Pricing helpers, all backed by lib/pricing. */
   pricingAgents: PricingAgent[]
+  /** What Paystack keeps on a Mobile Money payment, in basis points. */
+  paystackFeeBp: number
   retailPrice: (product: Product, sellerCode?: string | null) => number
   myBand: (product: Product) => PriceBand
   myResalePrice: (product: Product) => number
@@ -235,6 +237,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>([])
   const [prices, setPrices] = useState<AgentPrice[]>([])
   const [remoteAgents, setRemoteAgents] = useState<PricingAgent[]>([])
+  /**
+   * The Paystack fee, in basis points, sent with the catalogue so a price
+   * derived here locally (an agent's own default markup) matches what the
+   * server would actually charge. Defaults to 0 — no gross-up — until the first
+   * snapshot arrives, which only matters for the instant before it does.
+   */
+  const [paystackFeeBp, setPaystackFeeBp] = useState(0)
+
   const [admin, setAdmin] = useState<{ userId: string; name: string }>({
     userId: '',
     name: 'JamesDataConsult',
@@ -280,6 +290,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // placeholder rather than blanking the name, so the shop renders and they can
     // get to the screen that fixes it.
     if (snapshot.admin) setAdmin(snapshot.admin)
+    setPaystackFeeBp(snapshot.settings.paystackFeeBp)
   }, [])
 
   /**
@@ -590,8 +601,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const retailPrice = useCallback(
     (product: Product, code?: string | null) =>
-      retailPriceFor(code === undefined ? sellerCode : code, product, pricingAgents),
-    [pricingAgents, sellerCode],
+      retailPriceFor(code === undefined ? sellerCode : code, product, pricingAgents, paystackFeeBp),
+    [pricingAgents, sellerCode, paystackFeeBp],
   )
 
   const meAsAgent = useMemo(
@@ -610,9 +621,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const myResalePrice = useCallback(
     (product: Product) =>
       meAsAgent
-        ? retailPriceFor(meAsAgent.referralCode, product, pricingAgents)
+        ? retailPriceFor(meAsAgent.referralCode, product, pricingAgents, paystackFeeBp)
         : product.standardPrice,
-    [meAsAgent, pricingAgents],
+    [meAsAgent, pricingAgents, paystackFeeBp],
   )
 
   const hasOwnPrice = useCallback(
@@ -686,8 +697,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const previewSplit = useCallback(
     (product: Product, code: string | null) =>
-      splitFor(product, code, pricingAgents, admin),
-    [pricingAgents, admin],
+      splitFor(product, code, pricingAgents, admin, paystackFeeBp),
+    [pricingAgents, admin, paystackFeeBp],
   )
 
   const myShareOf = useCallback(
@@ -984,6 +995,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updateProductTier,
       setProductOnSale,
       pricingAgents,
+      paystackFeeBp,
       retailPrice,
       myBand,
       myResalePrice,
@@ -1031,6 +1043,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       placeOrder,
       previewSplit,
       pricingAgents,
+      paystackFeeBp,
       products,
       pushToast,
       ready,

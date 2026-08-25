@@ -233,6 +233,8 @@ export default function Settings() {
 
       <YourProfiles />
 
+      <PaystackFeeSetting />
+
       <FloatThresholds />
 
       <ProviderCatalogue />
@@ -252,6 +254,94 @@ export default function Settings() {
  * off, and says so — a threshold of nothing would otherwise look like a threshold
  * that never triggers, which is the same behaviour with none of the honesty.
  */
+/**
+ * What Paystack keeps on a Mobile Money payment — and the one number that
+ * decides whether a markup actually survives it.
+ *
+ * Every price derived from a percentage (yours, or an agent's own default
+ * markup) is grossed up by this rate so the intended margin lands after the
+ * fee — see `priceFromMarkup`. It is not the fee itself, which is whatever
+ * Paystack actually reports per transaction and is recorded exactly regardless
+ * of this setting; it only decides what gets charged, never what gets booked.
+ */
+function PaystackFeeSetting() {
+  const { pushToast } = useStore()
+  const [draft, setDraft] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api
+      .adminSettings()
+      .then((settings) => {
+        if (!live) return
+        setDraft((settings.paystackFeeBp / 100).toString())
+        setLoaded(true)
+      })
+      .catch(() => live && setLoaded(true))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const save = async () => {
+    const percent = draft.trim() === '' ? 0 : Number(draft)
+    if (!Number.isFinite(percent) || percent < 0 || percent >= 100) {
+      pushToast({ tone: 'error', title: 'Enter a rate like 2 or 2.35 — under 100.' })
+      return
+    }
+    const bp = Math.round(percent * 100)
+    try {
+      await api.setSetting('paystackFeeBp', bp)
+      pushToast({ tone: 'success', title: `Fee rate set to ${(bp / 100).toFixed(2)}%` })
+    } catch (error) {
+      pushToast({
+        tone: 'error',
+        title: error instanceof Error ? error.message : 'We could not save that.',
+      })
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Paystack's fee"
+        subtitle="What every Mobile Money price is grossed up to cover"
+      />
+      <div className="space-y-3 px-4 pb-4">
+        <p className="text-sm text-slate-600">
+          Every price built from a percentage — yours, or an agent's own default markup — is raised
+          just enough that after Paystack takes this rate off the top, the margin that was intended
+          is what actually lands. Check your Paystack dashboard for their current rate now and then;
+          the money audit script also reports the rate <em>actually</em> observed on real payments,
+          which is the one to trust once you have some.
+        </p>
+
+        <Field
+          label="Fee rate (%)"
+          htmlFor="paystack-fee"
+          hint="Starts at 2%, Paystack's usual Mobile Money rate. This only changes what customers are charged — the real fee on each payment is still recorded exactly as Paystack reports it."
+        >
+          <div className="relative max-w-40">
+            <TextInput
+              id="paystack-fee"
+              inputMode="decimal"
+              className="pr-8 font-bold"
+              disabled={!loaded}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value.replace(/[^0-9.]/g, ''))}
+              onBlur={() => void save()}
+            />
+            <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-400">
+              %
+            </span>
+          </div>
+        </Field>
+      </div>
+    </Card>
+  )
+}
+
 function FloatThresholds() {
   const { pushToast } = useStore()
   const [watch, setWatch] = useState('')

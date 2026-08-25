@@ -44,6 +44,20 @@ export interface PlatformSettings {
    */
   floatWatchAt: number
   floatRiskAt: number
+  /**
+   * What Paystack keeps on a Mobile Money payment, in basis points.
+   *
+   * Used to gross prices up so their charge never erodes the margin that was
+   * actually intended — see `priceFromMarkup` in the pricing domain. Basis
+   * points rather than a whole percent, because Paystack's real rate is not
+   * always a round number and this is meant to track it, not approximate it.
+   *
+   * Defaults to 200 (2%), which is what their Mobile Money transactions have
+   * shown so far. `scripts/money-audit.ts` reports the *observed* rate from
+   * real payments once there are any — check it occasionally and nudge this to
+   * match, rather than trusting the default forever.
+   */
+  paystackFeeBp: number
 }
 
 const DEFAULTS: PlatformSettings = {
@@ -52,6 +66,7 @@ const DEFAULTS: PlatformSettings = {
   agentsAutoApprove: true,
   floatWatchAt: 0,
   floatRiskAt: 0,
+  paystackFeeBp: 200,
 }
 
 /**
@@ -64,6 +79,9 @@ const NUMERIC_KEYS = [] as readonly string[]
 
 /** Keys holding an amount of money in pesewas, which has no upper bound. */
 const MONEY_KEYS = ['floatWatchAt', 'floatRiskAt'] as const
+
+/** Keys holding a fee rate in basis points — bounded, unlike a plain amount. */
+const FEE_BP_KEYS = ['paystackFeeBp'] as const
 
 @Injectable()
 export class SettingsService {
@@ -78,6 +96,7 @@ export class SettingsService {
       agentsAutoApprove: bool(stored.agentsAutoApprove, DEFAULTS.agentsAutoApprove),
       floatWatchAt: money(stored.floatWatchAt, DEFAULTS.floatWatchAt),
       floatRiskAt: money(stored.floatRiskAt, DEFAULTS.floatRiskAt),
+      paystackFeeBp: feeBp(stored.paystackFeeBp, DEFAULTS.paystackFeeBp),
     }
   }
 
@@ -130,6 +149,24 @@ export class SettingsService {
       return this.all()
     }
 
+    if ((FEE_BP_KEYS as readonly string[]).includes(key)) {
+      const bp = Number(value)
+      // 10,000 basis points is the whole price — a fee rate that size or larger
+      // divides by zero or goes negative in `priceFromMarkup`, so it is refused
+      // here rather than left to produce a nonsense price later.
+      if (!Number.isInteger(bp) || bp < 0 || bp >= 10_000) {
+        throw new ValidationError(
+          'A fee rate is a whole number of basis points, from 0 up to (not including) 10,000 — 200 is 2%.',
+        )
+      }
+      await this.prisma.setting.upsert({
+        where: { key },
+        create: { key, value: bp },
+        update: { value: bp },
+      })
+      return this.all()
+    }
+
     if ((NUMERIC_KEYS as readonly string[]).includes(key)) {
       const rate = Number(value)
       // A rate above 100 would owe a referrer more than the whole margin, and a
@@ -178,5 +215,12 @@ function bool(value: unknown, fallback: boolean): boolean {
 function percent(value: unknown, fallback: number): number {
   const parsed = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) return fallback
+  return Math.round(parsed)
+}
+
+/** A stored fee rate in basis points, bounded below 10,000 (the whole price). */
+function feeBp(value: unknown, fallback: number): number {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed >= 10_000) return fallback
   return Math.round(parsed)
 }

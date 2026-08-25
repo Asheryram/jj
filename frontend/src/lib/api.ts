@@ -228,6 +228,15 @@ export interface CatalogueSnapshot {
   settings: {
     /** The referrer's share of James's margin, as a whole percentage. */
     simulateFailure?: boolean
+    /**
+     * What Paystack keeps on a Mobile Money payment, in basis points.
+     *
+     * Sent to everyone — it is a rate, not a secret — so the browser can preview
+     * a price exactly as the server will actually charge it. Used wherever a
+     * price is derived from a markup locally: an agent's own default markup, in
+     * particular, is computed here rather than looked up.
+     */
+    paystackFeeBp: number
   }
 }
 
@@ -312,6 +321,8 @@ export interface PlatformSettings {
   /** Provider float thresholds, in pesewas. Zero switches the alert off. */
   floatWatchAt: number
   floatRiskAt: number
+  /** What Paystack keeps on a Mobile Money payment, in basis points. */
+  paystackFeeBp: number
 }
 
 /** One SKU in the provider's catalogue. */

@@ -140,12 +140,23 @@ export function costForAgent(_agent: PricingAgent, product: PricedProduct): Pese
 
 /**
  * What this agent charges. An explicit price wins; otherwise their default
- * markup is applied to the agent price. Always clamped into the legal band.
+ * markup is applied to the agent price, through the same fee-aware
+ * `priceFromMarkup` James's own prices use — one rule for what a percentage
+ * markup means, wherever it is set. Always clamped into the legal band.
+ *
+ * An explicit price is never adjusted for the fee. The agent typed a number;
+ * there is no percentage behind it to correct, and their own earning
+ * (`salePrice - cost`) is unconditionally credited by the split regardless of
+ * what Paystack keeps — see `splitFor`.
  */
-export function resalePriceFor(agent: PricingAgent, product: PricedProduct): Pesewas {
+export function resalePriceFor(
+  agent: PricingAgent,
+  product: PricedProduct,
+  feeBp: BasisPoints = 0,
+): Pesewas {
   const cost = costForAgent(agent, product)
   const explicit = agent.prices?.find((p) => p.productId === product.id)?.resalePrice
-  const raw = explicit ?? Math.round(cost * (1 + agent.markupPercent / 100))
+  const raw = explicit ?? priceFromMarkup(cost, agent.markupPercent * 100, feeBp)
   return floorAtCost(raw, cost)
 }
 
@@ -173,11 +184,12 @@ export function retailPriceFor(
   sellerCode: string | null,
   product: PricedProduct,
   agents: PricingAgent[],
+  feeBp: BasisPoints = 0,
 ): Pesewas {
   if (!sellerCode) return product.standardPrice
   const seller = agents.find((a) => a.referralCode === sellerCode)
   if (!seller) return product.standardPrice
-  return resalePriceFor(seller, product)
+  return resalePriceFor(seller, product, feeBp)
 }
 
 /**
@@ -196,6 +208,7 @@ export function splitFor(
   sellerCode: string | null,
   agents: PricingAgent[],
   admin: Admin,
+  feeBp: BasisPoints = 0,
 ): OrderSplit {
   const seller = sellerCode ? (agents.find((a) => a.referralCode === sellerCode) ?? null) : null
 
@@ -219,7 +232,7 @@ export function splitFor(
   }
 
   const cost = costForAgent(seller, product)
-  const salePrice = resalePriceFor(seller, product)
+  const salePrice = resalePriceFor(seller, product, feeBp)
 
   // James's whole margin on this sale. Nothing is taken out of it any more: the
   // referrer bonus that used to come from here was removed at the client's
@@ -311,9 +324,38 @@ export function validateResalePrice(price: Pesewas | null, band: PriceBand): str
  */
 export type BasisPoints = number
 
-/** The price a markup implies, floored at cost. */
-export function priceFromMarkup(cost: Pesewas, markupBp: BasisPoints): Pesewas {
-  return Math.max(cost, Math.round((cost * (10_000 + markupBp)) / 10_000))
+/**
+ * A fee rate is a fraction between 0 and (just under) 100%. Clamped rather than
+ * trusted, because these are pure functions and 10,000 or more basis points
+ * would divide by zero or go negative — a data problem, not something either
+ * caller should have to guard against before calling in.
+ */
+function clampFeeBp(feeBp: BasisPoints): BasisPoints {
+  if (!Number.isFinite(feeBp)) return 0
+  return Math.min(Math.max(Math.round(feeBp), 0), 9_999)
+}
+
+/**
+ * The price a markup implies, floored at cost.
+ *
+ * `feeBp` is the Paystack fee, in basis points, taken as a percentage of the
+ * final price. Grossing the price up by it — dividing rather than adding — is
+ * what makes the margin survive the fee: adding the fee on top charges it on
+ * too small a base, and the shortfall grows the more expensive the bundle is.
+ *
+ *   price × (1 − fee) = cost × (1 + markup)      ⇒      price = cost(1+markup) / (1−fee)
+ *
+ * `feeBp = 0` collapses to the plain markup — no gross-up, unchanged.
+ *
+ * Rounds up rather than to the nearest pesewa, so a price can never quietly
+ * undershoot the margin it was meant to guarantee by half a pesewa of rounding.
+ * That is a deliberate, one-pesewa-at-most change from the rounding this used to
+ * do even before the fee existed.
+ */
+export function priceFromMarkup(cost: Pesewas, markupBp: BasisPoints, feeBp: BasisPoints = 0): Pesewas {
+  const fee = clampFeeBp(feeBp)
+  const withMargin = cost * (10_000 + markupBp)
+  return Math.max(cost, Math.ceil(withMargin / (10_000 - fee)))
 }
 
 /**
@@ -321,10 +363,18 @@ export function priceFromMarkup(cost: Pesewas, markupBp: BasisPoints): Pesewas {
  *
  * Zero when cost is zero: no markup is meaningful over nothing, and dividing
  * would give Infinity.
+ *
+ * `feeBp` matters here too: a price that includes a fee gross-up implies a
+ * *smaller* markup than reading the raw numbers would suggest, because part of
+ * the gap between cost and price is the fee, not margin. Left out (0), this is
+ * exactly the calculation that was always here.
  */
-export function markupFromPrice(cost: Pesewas, price: Pesewas): BasisPoints {
+export function markupFromPrice(cost: Pesewas, price: Pesewas, feeBp: BasisPoints = 0): BasisPoints {
   if (cost <= 0) return 0
-  return Math.max(0, Math.round((price / cost - 1) * 10_000))
+  const fee = clampFeeBp(feeBp)
+  // What the fee leaves behind, before it is compared against cost.
+  const net = (price * (10_000 - fee)) / 10_000
+  return Math.max(0, Math.round((net / cost - 1) * 10_000))
 }
 
 /** For display: 1517 → "15.17%", 1500 → "15%". */

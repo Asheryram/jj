@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
 import { MailerService } from '../mail/mailer.service'
+import { escape, wrap } from '../mail/templates'
 
 /** Where the balance sits relative to the two thresholds. */
 export type FloatLevel = 'ok' | 'watch' | 'risk'
@@ -136,70 +137,117 @@ export class FloatMonitorService {
     })
   }
 
-  /**
-   * Tell whoever funds the float.
-   *
-   * The admin, because it is their money and their top-up. Falls back to the
-   * superadmin so a platform without an admin yet is not silent.
-   */
+  private async platformName(): Promise<string> {
+    const branding = await this.prisma.branding.findFirst({ where: { userId: null } })
+    return branding?.shopName ?? 'JamesDataConsult'
+  }
+
+  /** Tell whoever funds the float — see the doc comment on the query below. */
   private async alert(
     level: FloatLevel,
     balance: number,
     watchAt: number,
     riskAt: number,
   ): Promise<void> {
-    const recipient =
-      (await this.prisma.user.findFirst({
-        where: { role: 'admin', status: 'active' },
-        select: { name: true, email: true },
-      })) ??
-      (await this.prisma.user.findFirst({
-        where: { role: 'superadmin', status: 'active' },
-        select: { name: true, email: true },
-      }))
+    /**
+     * Every active admin, because it is everyone's business when the float
+     * runs out — an order fails for a customer no matter which admin happens
+     * to be looking. Falls back to every active superadmin only when no admin
+     * exists yet, so a platform mid-setup is not silent either.
+     */
+    const admins = await this.prisma.user.findMany({
+      where: { role: 'admin', status: 'active' },
+      select: { name: true, email: true },
+    })
+    const recipients =
+      admins.length > 0
+        ? admins
+        : await this.prisma.user.findMany({
+            where: { role: 'superadmin', status: 'active' },
+            select: { name: true, email: true },
+          })
 
     const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
 
-    if (!recipient) {
+    if (recipients.length === 0) {
       this.log.warn(`float is ${level} at ${ghs(balance)} — nobody to tell`)
       return
     }
 
     const threshold = level === 'risk' ? riskAt : watchAt
     const urgent = level === 'risk'
+    const shopName = await this.platformName()
 
     const consequence = urgent
-      ? 'When it runs out, orders stop being delivered after the customer has already paid, and each one has to be refunded by hand. Top up before that happens.'
-      : 'There is still time to top up without anything failing.'
+      ? 'This is urgent: once it runs out, every paid order fails after the customer has already been charged, and each one then has to be refunded by hand. Top up your DataHub float now to avoid that.'
+      : 'There is still time to top up before anything fails — no order has been affected yet.'
 
-    await this.mailer.send({
-      to: recipient.email,
-      subject: urgent
-        ? `Provider float is low — ${ghs(balance)} left`
-        : `Provider float is getting low — ${ghs(balance)} left`,
-      html:
-        `<p>Hello ${recipient.name},</p>` +
-        `<p>Your DataHub GH float is down to <strong>${ghs(balance)}</strong>, ` +
-        `below the ${ghs(threshold)} you asked to be told about.</p>` +
-        `<p>${consequence}</p>` +
-        '<p style="color:#475569;font-size:13px">This figure comes from the reply to your most ' +
-        'recent order. DataHub has no way to ask for it, so it is only ever as current as your ' +
-        'last sale.</p>' +
-        '<p style="color:#475569;font-size:13px">You will not get this again until the float ' +
-        'recovers and falls past the same point, so it will not repeat on every order.</p>',
-      text: [
+    const subject = urgent
+      ? `Float critically low — ${ghs(balance)} left`
+      : `Float getting low — ${ghs(balance)} left`
+
+    const pillBg = urgent ? '#fee2e2' : '#fef3c7'
+    const pillFg = urgent ? '#b3261e' : '#92400e'
+    const statBg = urgent ? '#fef2f2' : '#fffbeb'
+    const statBorder = urgent ? '#fecaca' : '#fde68a'
+
+    const footer =
+      `You are getting this because you are an active admin on ${escape(shopName)}. ` +
+      "It is sent only when the float's status gets worse, never on every order."
+
+    // Sent one at a time rather than in parallel — this is a handful of admins
+    // at most, and one slow send should not race a second SMTP connection for
+    // no benefit.
+    for (const recipient of recipients) {
+      const html = wrap(
+        shopName,
+        urgent ? 'Your float is critically low' : 'Your float is running low',
+        `<div style="text-align:center;margin:0 0 20px">
+           <span style="display:inline-block;padding:4px 14px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.4px;background:${pillBg};color:${pillFg}">
+             ${urgent ? 'ACTION NEEDED' : 'HEADS UP'}
+           </span>
+         </div>
+         <p style="margin:0 0 18px;font-size:15px;line-height:1.6">Hello ${escape(recipient.name)}, your DataHub GH
+           float ${urgent ? 'is critically low' : 'is getting low'}.</p>
+         <div style="text-align:center;background:${statBg};border:1px solid ${statBorder};border-radius:12px;padding:20px;margin:0 0 20px">
+           <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.4px;color:${pillFg};text-transform:uppercase">Float remaining</p>
+           <p style="margin:0;font-size:34px;font-weight:800;color:${pillFg}">${ghs(balance)}</p>
+           <p style="margin:8px 0 0;font-size:12.5px;color:${pillFg}">below your ${ghs(threshold)} alert line</p>
+         </div>
+         <p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;font-weight:${urgent ? '700' : '400'};color:${urgent ? '#b3261e' : '#1e293b'}">${escape(consequence)}</p>
+         <p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">This figure comes from the reply to
+           your most recent order — DataHub has no balance endpoint to ask directly, so it is only ever as current
+           as your last sale.</p>
+         <p style="margin:0;font-size:12.5px;line-height:1.6;color:#64748b">You will not get this again until the
+           float recovers and falls past the same point, so it will not repeat on every order.</p>`,
+        footer,
+      )
+
+      const text = [
         `Hello ${recipient.name},`,
         '',
-        `Your DataHub GH float is down to ${ghs(balance)}, below the ${ghs(threshold)} you asked to be told about.`,
+        urgent ? '*** ACTION NEEDED ***' : '*** HEADS UP ***',
+        `Your DataHub GH float ${urgent ? 'is critically low' : 'is getting low'}.`,
+        '',
+        `FLOAT REMAINING: ${ghs(balance)} (below your ${ghs(threshold)} alert line)`,
         '',
         consequence,
         '',
-        'This figure comes from the reply to your most recent order. DataHub has no way to ask for it, so it is only ever as current as your last sale.',
+        'This figure comes from the reply to your most recent order — DataHub has no balance endpoint to ask directly, so it is only ever as current as your last sale.',
         '',
         'You will not get this again until the float recovers and falls past the same point, so it will not repeat on every order.',
-      ].join('\n'),
-    })
+      ].join('\n')
 
-    this.log.warn(`float ${level}: ${ghs(balance)} (threshold ${ghs(threshold)}) — told ${recipient.email}`)
+      await this.mailer.send({ to: recipient.email, subject, html, text }).catch((error) => {
+        // One admin's mail server having a bad day must not stop the rest
+        // from being warned.
+        this.log.error(`could not tell ${recipient.email} about the float: ${String(error)}`)
+      })
+    }
+
+    this.log.warn(
+      `float ${level}: ${ghs(balance)} (threshold ${ghs(threshold)}) — told ` +
+        recipients.map((r) => r.email).join(', '),
+    )
   }
 }

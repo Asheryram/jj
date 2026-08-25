@@ -134,13 +134,24 @@ export class AdminService {
     const row = await this.prisma.product.findUnique({ where: { id: productId } })
     if (!row) throw new NotFoundError('We could not find that product.')
 
+    const { paystackFeeBp: feeBp } = await this.settings.all()
+
     const next = { ...row, [tier]: value }
 
     const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
+    /**
+     * What is left of a price once Paystack's cut on the sale is taken out.
+     *
+     * Checked instead of the raw price, because a price that clears cost before
+     * the fee can still be a real loss after it — the exact shape of the bug
+     * that started this: a 2GB bundle at cost 9.50, sold at 9.60, cleared the old
+     * floor and still lost 9 pesewas on every sale once Paystack's ~2% was taken.
+     */
+    const netOfFee = (price: number) => Math.floor((price * (10_000 - feeBp)) / 10_000)
 
-    if (next.adminPrice < next.supplierCost) {
+    if (netOfFee(next.adminPrice) < next.supplierCost) {
       throw new ValidationError(
-        `You pay ${ghs(next.supplierCost)} for this, so the agent price cannot be below that.`,
+        `After Paystack's cut, the agent price would net below the ${ghs(next.supplierCost)} you pay for this. Raise it a little.`,
       )
     }
 
@@ -154,9 +165,9 @@ export class AdminService {
      * counter; level with it, and he is indifferent to which channel a sale comes
      * through. Forcing retail above wholesale would take that choice away.
      */
-    if (next.standardPrice < next.supplierCost) {
+    if (netOfFee(next.standardPrice) < next.supplierCost) {
       throw new ValidationError(
-        `You pay ${ghs(next.supplierCost)} for this, so you cannot sell it for less than that.`,
+        `After Paystack's cut, this would net below the ${ghs(next.supplierCost)} you pay for it. Raise it a little.`,
       )
     }
 
@@ -187,7 +198,7 @@ export class AdminService {
       where: { id: productId },
       data: {
         [tier]: value,
-        [markupField]: markupFromPrice(row.supplierCost, value),
+        [markupField]: markupFromPrice(row.supplierCost, value, feeBp),
         ...(!row.active && bothPricesClearCost ? { active: true } : {}),
       },
       include: PRODUCT_INCLUDE,
@@ -215,13 +226,17 @@ export class AdminService {
      * the margin report came out flat.
      */
     if (active) {
+      const { paystackFeeBp: feeBp } = await this.settings.all()
+      const netOfFee = (price: number) => Math.floor((price * (10_000 - feeBp)) / 10_000)
+
       const flat: string[] = []
-      if (row.adminPrice <= row.supplierCost) flat.push('the agent price')
-      if (row.standardPrice <= row.supplierCost) flat.push('the walk-up price')
+      if (netOfFee(row.adminPrice) <= row.supplierCost) flat.push('the agent price')
+      if (netOfFee(row.standardPrice) <= row.supplierCost) flat.push('the walk-up price')
       if (flat.length > 0) {
         throw new ValidationError(
-          `${flat.join(' and ')} ${flat.length === 1 ? 'is' : 'are'} still at what you pay for ` +
-            'this, so selling it would earn nothing. Set a price above cost first.',
+          `${flat.join(' and ')} ${flat.length === 1 ? 'is' : 'are'} at or below what you pay for ` +
+            'this once Paystack takes its cut, so selling it would earn nothing or lose money. ' +
+            'Set a price that clears cost after the fee first.',
         )
       }
     }
@@ -271,10 +286,11 @@ export class AdminService {
    * SKU was available after the supplier had withdrawn it.
    */
   async syncFromProvider() {
-    const imported = await this.catalogueImport.importFromProvider()
+    const { paystackFeeBp: feeBp } = await this.settings.all()
+    const imported = await this.catalogueImport.importFromProvider(feeBp)
     // Costs may have moved under products the import did not itself touch, so
     // run the downward pass afterwards.
-    const { updated } = await this.syncSupplierCosts()
+    const { updated } = await this.syncSupplierCosts(feeBp)
     return { ...imported, productsUpdated: updated }
   }
 
@@ -310,6 +326,7 @@ export class AdminService {
 
     const agentBp = Math.round(agentPercent * 100)
     const walkupBp = Math.round(walkupPercent * 100)
+    const { paystackFeeBp: feeBp } = await this.settings.all()
 
     await this.prisma.$transaction(
       targets.map((product) =>
@@ -318,8 +335,8 @@ export class AdminService {
           data: {
             agentMarkupBp: agentBp,
             walkupMarkupBp: walkupBp,
-            adminPrice: priceFromMarkup(product.supplierCost, agentBp),
-            standardPrice: priceFromMarkup(product.supplierCost, walkupBp),
+            adminPrice: priceFromMarkup(product.supplierCost, agentBp, feeBp),
+            standardPrice: priceFromMarkup(product.supplierCost, walkupBp, feeBp),
             // Anything being priced is by definition ready to sell.
             active: true,
           },
@@ -340,7 +357,7 @@ export class AdminService {
    * Both selling prices are re-derived from the markup James set, so a cost
    * change moves them and leaves his margin intact.
    */
-  async syncSupplierCosts() {
+  async syncSupplierCosts(feeBp: number) {
     const suppliers = await this.prisma.supplierProduct.findMany({
       include: { products: true },
     })
@@ -363,8 +380,8 @@ export class AdminService {
           where: { id: product.id },
           data: {
             supplierCost: cost,
-            adminPrice: priceFromMarkup(cost, product.agentMarkupBp),
-            standardPrice: priceFromMarkup(cost, product.walkupMarkupBp),
+            adminPrice: priceFromMarkup(cost, product.agentMarkupBp, feeBp),
+            standardPrice: priceFromMarkup(cost, product.walkupMarkupBp, feeBp),
           },
         })
         changed++
