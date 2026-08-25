@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import ReservePanel from './ReservePanel'
 import FloatPanel from './FloatPanel'
 import { useStore } from '../../state/store'
+import { api, type FinanceStatement } from '../../lib/api'
 import { cedis, cedisCompact, dateTime } from '../../lib/format'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
 import { BarChart, Donut } from '../../components/charts'
@@ -11,6 +13,7 @@ import {
   Callout,
   Card,
   CardHead,
+  EmptyState,
   NetworkChip,
   PageHead,
   StatTile,
@@ -62,6 +65,24 @@ function MoneyBand({
 export default function Overview() {
   const { orders, users, withdrawals, revenueByDay, subAgents } = useStore()
 
+  const [statement, setStatement] = useState<FinanceStatement | null>(null)
+  const [health, setHealth] = useState<Awaited<ReturnType<typeof api.health>> | null>(null)
+
+  useEffect(() => {
+    let live = true
+    api
+      .financeStatement(7)
+      .then((result) => live && setStatement(result))
+      .catch(() => undefined)
+    api
+      .health()
+      .then((result) => live && setHealth(result))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+
   const weekRevenue = revenueByDay.reduce((sum, day) => sum + day.revenue, 0)
   const weekOrders = revenueByDay.reduce((sum, day) => sum + day.orders, 0)
   /**
@@ -78,28 +99,27 @@ export default function Overview() {
   const failedOrders = orders.filter((o) => o.status === 'failed')
   const inFlight = orders.filter((o) => o.status === 'processing' || o.status === 'pending')
 
-  // FR-6.3 — James's own margin, taken from the recorded split of each order
-  // rather than estimated. His share is the gap between his supplier cost and
-  // what he charges (agents pay adminPrice; walk-up customers pay standard).
-  const myMargin = orders
-    .filter((o) => o.status === 'completed')
-    .reduce(
-      (sum, o) => sum + (o.split.shares.find((s) => s.role === 'admin')?.margin ?? 0),
-      0,
-    )
-  const trackedRevenue = orders
-    .filter((o) => o.status === 'completed')
-    .reduce((sum, o) => sum + o.salePrice, 0)
-  const agentShare = orders
-    .filter((o) => o.status === 'completed')
-    .reduce(
-      (sum, o) =>
-        sum + o.split.shares.filter((s) => s.role === 'agent').reduce((n, s) => n + s.margin, 0),
-      0,
-    )
-  const supplierSpend = orders
-    .filter((o) => o.status === 'completed')
-    .reduce((sum, o) => sum + o.split.supplierCost, 0)
+  /**
+   * FR-6.3 — James's own margin, read from the ledger rather than recomputed
+   * from the orders list.
+   *
+   * The orders list is capped (the same 100 rows the "Latest orders" table
+   * uses), so a reduce over it silently undercounts once the platform does more
+   * than a page of business. The ledger has no such cap, and it is the only
+   * place that knows what the supplier actually charged and what Paystack
+   * actually kept — both of which can differ from the price quoted at sale
+   * time. `profit` is revenue less every real cost: supplier, Paystack's fee,
+   * agent margins, and anything else that ever hits the books.
+   */
+  const trackedRevenue = statement?.revenue ?? 0
+  const supplierSpend = statement?.costs.supplier ?? 0
+  const paystackFee = statement?.costs.paymentFees ?? 0
+  const agentShare = statement?.costs.agentMargins ?? 0
+  const otherCosts =
+    (statement?.costs.referralBonuses ?? 0) +
+    (statement?.costs.refunds ?? 0) +
+    (statement?.costs.payoutFees ?? 0)
+  const myMargin = statement?.profit ?? 0
 
   const byCategory = CATEGORY_ORDER.map((category) => ({
     label: CATEGORY_META[category].label,
@@ -151,9 +171,9 @@ export default function Overview() {
           icon={<TrendUpIcon className="size-5" />}
         />
         <StatTile
-          label="Your margin, tracked orders"
+          label="Your margin, last 7 days"
           value={cedisCompact(myMargin)}
-          hint="Your price less supplier cost"
+          hint="Revenue less supplier cost, Paystack's fee and agent payouts"
           tone="success"
           icon={<CashIcon className="size-5" />}
         />
@@ -231,6 +251,13 @@ export default function Overview() {
               </Link>
             }
           />
+          {subAgents.length === 0 ? (
+            <EmptyState
+              icon={<UsersIcon className="size-6" />}
+              title="No agent sales yet"
+              detail="Volume shows up here once a customer buys through an agent's own shop link."
+            />
+          ) : (
           <ul className="divide-y divide-slate-100">
             {[...subAgents]
               .sort((a, b) => b.volume - a.volume)
@@ -252,6 +279,7 @@ export default function Overview() {
                 </li>
               ))}
           </ul>
+          )}
         </Card>
 
         {/* Live order feed */}
@@ -293,18 +321,19 @@ export default function Overview() {
         </Card>
       </div>
 
-      {/* FR-6.6 — where every cedi of tracked turnover actually went. */}
+      {/* FR-6.6 — where every cedi that came in over the last 7 days actually went. */}
       <Card className="mt-3">
-        <CardHead
-          title="Where the money goes"
-          subtitle="Split across tracked completed orders"
-        />
+        <CardHead title="Where the money goes" subtitle="Last 7 days, from the ledger" />
         <div className="p-4 sm:p-5">
           <div className="flex h-3 overflow-hidden rounded-full bg-slate-100">
             {[
               { label: 'Supplier', value: supplierSpend, className: 'bg-slate-400' },
+              { label: 'Paystack fee', value: paystackFee, className: 'bg-amber-400' },
               { label: 'You', value: myMargin, className: 'bg-brand-600' },
               { label: 'Agents', value: agentShare, className: 'bg-brand-300' },
+              ...(otherCosts > 0
+                ? [{ label: 'Other', value: otherCosts, className: 'bg-slate-300' }]
+                : []),
             ].map((band) => (
               <div
                 key={band.label}
@@ -317,27 +346,52 @@ export default function Overview() {
               />
             ))}
           </div>
-          <dl className="mt-4 grid gap-3 sm:grid-cols-4">
+          <dl className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <MoneyBand label="Customers paid" value={cedis(trackedRevenue)} />
             <MoneyBand label="To DataHub GH" value={cedis(supplierSpend)} dot="bg-slate-400" />
+            <MoneyBand label="Paystack fee" value={cedis(paystackFee)} dot="bg-amber-400" />
             <MoneyBand label="Your margin" value={cedis(myMargin)} dot="bg-brand-600" strong />
             <MoneyBand label="To your agents" value={cedis(agentShare)} dot="bg-brand-300" />
           </dl>
           <p className="mt-3 text-xs text-slate-500">
-            Every order stores its own split, so these figures cannot drift from what was actually
-            charged — even after you change a price.
+            From the ledger, not the price you were quoted at sale time — so it reflects what
+            DataHub actually charged and what Paystack actually kept, not the catalogue estimate.
           </p>
         </div>
       </Card>
 
-      {/* Provider health — NFR-3.1, NFR-3.2 made visible */}
+      {/* Provider health — NFR-3.1, NFR-3.2 made visible. Read from /health, not
+          hardcoded: a badge that always says "Operational" answers nothing. */}
       <Card className="mt-3">
-        <CardHead title="Integrations" subtitle="Live status of the services orders depend on" />
-        <div className="grid gap-3 p-4 sm:grid-cols-3 sm:p-5">
+        <CardHead title="Integrations" subtitle="What's actually live right now, not what's configured" />
+        <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
           {[
-            { name: 'DataHub GH API', detail: 'Bundle fulfilment', ok: true },
-            { name: 'Paystack', detail: 'Wallet top-ups', ok: true },
-            { name: 'SMS gateway', detail: 'Order notifications', ok: true },
+            {
+              name: 'DataHub GH API',
+              detail: 'Bundle fulfilment',
+              label:
+                health?.providers.datahub === 'live'
+                  ? 'Live — real orders'
+                  : health?.providers.datahub === 'live-requested-no-key'
+                    ? 'Misconfigured'
+                    : health
+                      ? 'Simulated'
+                      : 'Checking…',
+              tone:
+                health?.providers.datahub === 'live'
+                  ? 'success'
+                  : health?.providers.datahub === 'live-requested-no-key'
+                    ? 'danger'
+                    : health
+                      ? 'warning'
+                      : 'neutral',
+            },
+            {
+              name: 'Paystack',
+              detail: 'Checkout & agent payouts',
+              label: health ? (health.providers.paystack === 'live' ? 'Configured' : 'Not configured') : 'Checking…',
+              tone: health ? (health.providers.paystack === 'live' ? 'success' : 'danger') : 'neutral',
+            },
           ].map((service) => (
             <div
               key={service.name}
@@ -347,8 +401,8 @@ export default function Overview() {
                 <p className="text-sm font-semibold text-slate-900">{service.name}</p>
                 <p className="text-xs text-slate-500">{service.detail}</p>
               </div>
-              <Badge tone={service.ok ? 'success' : 'danger'}>
-                {service.ok ? 'Operational' : 'Down'}
+              <Badge tone={service.tone as 'success' | 'warning' | 'danger' | 'neutral'}>
+                {service.label}
               </Badge>
             </div>
           ))}
