@@ -110,6 +110,21 @@ export default function App() {
               <Route path="checkers" element={<Checkers />} />
               <Route path="track" element={<Track />} />
               <Route path="buy/:productId" element={<Buy />} />
+              {/* Where Paystack sends a buyer back to, when they paid from
+                  inside this shop — the backend builds this URL itself from
+                  the order's own seller code (see PaymentsService.callbackUrl),
+                  so it only ever appears here for a real completed checkout. */}
+              <Route path="pay/return" element={<PaymentReturn />} />
+              {/* An agent or admin using their own shop link still needs to log
+                  in, reset a password or set one from inside it — the URL
+                  should say so, not silently drop back to the platform's own
+                  path. This matters beyond tidiness: once an agent's own
+                  domain points at /s/<code>, nothing outside that path is
+                  reachable from it at all. */}
+              <Route path="login" element={<Login />} />
+              <Route path="register" element={<Register />} />
+              <Route path="forgot-password" element={<ForgotPassword />} />
+              <Route path="set-password" element={<SetPassword />} />
             </Route>
           </Route>
 

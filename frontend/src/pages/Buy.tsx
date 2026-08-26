@@ -656,7 +656,7 @@ export default function Buy() {
                   <Link to={shopPath('/shop')} className="flex-1">
                     <Button block>Buy another</Button>
                   </Link>
-                  <Link to={session ? '/app/orders' : '/track'} className="flex-1">
+                  <Link to={session ? '/app/orders' : shopPath('/track')} className="flex-1">
                     <Button block variant="outline">
                       <ReceiptIcon className="size-4" /> {session ? 'My orders' : 'Track order'}
                     </Button>

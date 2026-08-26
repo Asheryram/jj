@@ -61,12 +61,22 @@ export class SetupTokensService {
     return createHash('sha256').update(token).digest('hex')
   }
 
-  private link(token: string): string {
+  /**
+   * `agentCode` routes the link through that agent's own shop path
+   * (`/s/<code>/set-password`) instead of the bare platform path.
+   *
+   * Only ever an agent's own `referralCode` — see `issueAndSend`, the one
+   * caller that resolves it. Never anything a request supplied: this URL goes
+   * out in an email, so it has to come from something the server already
+   * trusts, not from a client-controlled origin or query string.
+   */
+  private link(token: string, agentCode?: string | null): string {
     const base = (this.config.get<string>('PUBLIC_APP_URL')?.trim() || 'http://localhost:5173').replace(
       /\/$/,
       '',
     )
-    return `${base}/set-password?token=${token}`
+    const path = agentCode ? `/s/${agentCode}/set-password` : '/set-password'
+    return `${base}${path}?token=${token}`
   }
 
   /**
@@ -75,7 +85,11 @@ export class SetupTokensService {
    * Cancelling matters: two live links for the same account means a superadmin who
    * re-sends because the first went astray has left the first one working.
    */
-  async issue(userId: string, purpose: SetupTokenPurpose): Promise<{ link: string }> {
+  async issue(
+    userId: string,
+    purpose: SetupTokenPurpose,
+    agentCode?: string | null,
+  ): Promise<{ link: string }> {
     const token = randomBytes(TOKEN_BYTES).toString('base64url')
 
     await this.prisma.$transaction(async (tx) => {
@@ -90,7 +104,7 @@ export class SetupTokensService {
       })
     })
 
-    return { link: this.link(token) }
+    return { link: this.link(token, agentCode) }
   }
 
   /**
@@ -108,10 +122,15 @@ export class SetupTokensService {
   ): Promise<{ link: string; sent: boolean; reason?: string }> {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { name: true, email: true },
+      select: { name: true, email: true, role: true, referralCode: true },
     })
 
-    const { link } = await this.issue(userId, purpose)
+    // Only an agent's own code ever routes the link through /s/<code> — an
+    // admin's referralCode is an identifier, not a sell link (see TeamService),
+    // and nobody else reaches this without one of the two roles.
+    const agentCode = user.role === 'agent' ? user.referralCode : null
+
+    const { link } = await this.issue(userId, purpose, agentCode)
 
     // The platform's own name, so the message matches the product the recipient
     // is being asked to sign in to.

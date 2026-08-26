@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useStore } from '../state/store'
+import { useRegisterPath, useShopPath } from '../lib/shopPath'
 import { Button, Callout, Card, Field, TextInput } from '../components/ui'
 import { AlertIcon } from '../components/icons'
 import { isAdmin } from '../lib/roles'
@@ -15,6 +16,8 @@ import { isAdmin } from '../lib/roles'
 export default function Login() {
   const { login } = useStore()
   const navigate = useNavigate()
+  const shopPath = useShopPath()
+  const registerPath = useRegisterPath()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -55,7 +58,7 @@ export default function Login() {
       <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">Welcome back</h1>
       <p className="mt-1.5 text-slate-500 dark:text-slate-400">
         For agents and admin. If you just want to buy a bundle,{' '}
-        <Link to="/" className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
+        <Link to={shopPath('/')} className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
           go straight to the shop
         </Link>{' '}
         — no account needed.
@@ -110,10 +113,10 @@ export default function Login() {
         <div className="mt-4 flex items-center justify-between text-sm">
           {/* FR-1.4. This was a button wired to nothing — it looked like a working
               reset and was the reason nobody noticed there was not one. */}
-          <Link to="/forgot-password" className="font-medium text-brand-700 dark:text-brand-300 hover:underline">
+          <Link to={shopPath('/forgot-password')} className="font-medium text-brand-700 dark:text-brand-300 hover:underline">
             Forgot password?
           </Link>
-          <Link to="/register" className="font-medium text-brand-700 dark:text-brand-300 hover:underline">
+          <Link to={registerPath} className="font-medium text-brand-700 dark:text-brand-300 hover:underline">
             Create an account
           </Link>
         </div>

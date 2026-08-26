@@ -183,7 +183,7 @@ export default function Home() {
               <Link to={registerPath}>
                 <Button size="lg">Create an agent account</Button>
               </Link>
-              <Link to="/login">
+              <Link to={shopPath('/login')}>
                 <Button size="lg" variant="outline">
                   Agent log in
                 </Button>

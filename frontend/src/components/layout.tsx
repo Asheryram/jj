@@ -431,7 +431,7 @@ export function PublicShell() {
               </Link>
             ) : (
               <>
-                <Link to="/login">
+                <Link to={shopPath('/login')}>
                   <Button variant="ghost" size="sm">
                     Log in
                   </Button>
@@ -484,7 +484,7 @@ export function PublicFooter() {
           title="Agents"
           links={[
             ['Become an agent', registerPath],
-            ['Log in', '/login'],
+            ['Log in', shopPath('/login')],
           ]}
         />
         <div>

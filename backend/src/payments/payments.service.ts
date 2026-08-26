@@ -41,13 +41,22 @@ export class PaymentsService {
     return this.paystack.configured
   }
 
-  /** Where Paystack sends the customer back to. */
-  private callbackUrl(reference: string): string {
+  /**
+   * Where Paystack sends the customer back to.
+   *
+   * `agentCode` routes it through that agent's own shop path
+   * (`/s/<code>/pay/return`) instead of the bare platform path, so a buyer who
+   * paid from inside an agent's shop lands back inside it — same reasoning,
+   * and same rule of only ever using a code the order already carries, as
+   * `SetupTokensService.link`.
+   */
+  private callbackUrl(reference: string, agentCode?: string | null): string {
     const base = (this.config.get<string>('PUBLIC_APP_URL')?.trim() || 'http://localhost:5173').replace(
       /\/$/,
       '',
     )
-    return `${base}/pay/return?reference=${encodeURIComponent(reference)}`
+    const path = agentCode ? `/s/${agentCode}/pay/return` : '/pay/return'
+    return `${base}${path}?reference=${encodeURIComponent(reference)}`
   }
 
   /**
@@ -76,6 +85,7 @@ export class PaymentsService {
     productName: string
     recipient: string
     buyerUserId: string | null
+    sellerCode: string | null
   }): Promise<{ paymentUrl: string }> {
     const email = await this.prisma.user
       .findUnique({
@@ -99,7 +109,7 @@ export class PaymentsService {
       reference: order.reference,
       amount: order.salePrice,
       email: this.emailFor(order.buyerPhone, email),
-      callbackUrl: this.callbackUrl(order.reference),
+      callbackUrl: this.callbackUrl(order.reference, order.sellerCode),
       metadata: {
         purpose: 'order',
         product: order.productName,

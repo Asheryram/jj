@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { useStore } from '../state/store'
+import { useShopPath } from '../lib/shopPath'
 import { Button, Callout, Card, Field, Spinner, TextInput } from '../components/ui'
 import { AlertIcon, CheckIcon, ShieldIcon } from '../components/icons'
 
@@ -24,6 +25,7 @@ export default function SetPassword() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const { pushToast } = useStore()
+  const shopPath = useShopPath()
 
   const token = params.get('token') ?? ''
   const [check, setCheck] = useState<
@@ -67,7 +69,7 @@ export default function SetPassword() {
         title: 'Password set',
         detail: 'Sign in with your email and the password you just chose.',
       })
-      navigate('/login', { replace: true })
+      navigate(shopPath('/login'), { replace: true })
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'We could not set that password.')
     } finally {
@@ -94,7 +96,7 @@ export default function SetPassword() {
               Setup links expire after 48 hours and stop working once they have been used. Ask
               whoever set up your account for a new one.
             </p>
-            <Link to="/login" className="mt-4 block">
+            <Link to={shopPath('/login')} className="mt-4 block">
               <Button block variant="outline">
                 Go to sign in
               </Button>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
+import { useShopPath } from '../lib/shopPath'
 import { Button, Callout, Card, Field, TextInput } from '../components/ui'
 import { AlertIcon, CheckIcon } from '../components/icons'
 
@@ -17,6 +18,7 @@ import { AlertIcon, CheckIcon } from '../components/icons'
  * pretending otherwise leaves somebody waiting for mail that was never sent.
  */
 export default function ForgotPassword() {
+  const shopPath = useShopPath()
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
@@ -55,7 +57,7 @@ export default function ForgotPassword() {
             <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
               Nothing has changed yet — your current password keeps working until you use the link.
             </p>
-            <Link to="/login" className="mt-5 block">
+            <Link to={shopPath('/login')} className="mt-5 block">
               <Button block variant="outline">
                 Back to sign in
               </Button>
@@ -94,7 +96,7 @@ export default function ForgotPassword() {
                 Email me a link
               </Button>
 
-              <Link to="/login" className="block text-center text-sm font-semibold text-brand-700 dark:text-brand-300">
+              <Link to={shopPath('/login')} className="block text-center text-sm font-semibold text-brand-700 dark:text-brand-300">
                 Back to sign in
               </Link>
             </div>

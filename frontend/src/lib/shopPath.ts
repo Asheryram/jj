@@ -42,12 +42,17 @@ export function useShopPath(): (path: string) => string {
  * leak as an unscoped shop link, just on the recruiting side instead of the
  * selling side.
  *
- * The field stays editable on the form (FR-1.2), so a visitor can still clear or
- * change it.
+ * Routed through `/s/<code>/register`, the same as every other path here — not
+ * `/register?ref=<code>` any more. Once an agent's own domain points at nothing
+ * but `/s/<code>`, a query string on a different path is unreachable from it;
+ * the code has to live in the path itself. `Register` still reads an incoming
+ * `?ref=` too, so an already-shared link in that shape keeps working.
+ *
+ * The referral field stays editable on the form (FR-1.2) either way, so a
+ * visitor can still clear or change it.
  */
 export function useRegisterPath(): string {
-  const { sellerCode } = useStore()
-  return sellerCode ? `/register?ref=${sellerCode}` : '/register'
+  return useShopPath()('/register')
 }
 
 /**

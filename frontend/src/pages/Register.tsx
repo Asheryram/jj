@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useStore } from '../state/store'
+import { useShopPath } from '../lib/shopPath'
 import { checkPhone } from '../lib/networks'
 import { Button, Callout, Card, Field, TextInput, cn } from '../components/ui'
 import { AlertIcon, CheckIcon, StoreIcon, UsersIcon } from '../components/icons'
@@ -18,8 +19,9 @@ type AccountType = 'agent'
 
 /** FR-1.1, FR-1.2, FR-1.6, FR-1.7, NFR-7.3 */
 export default function Register() {
-  const { register, pushToast } = useStore()
+  const { register, pushToast, sellerCode } = useStore()
   const navigate = useNavigate()
+  const shopPath = useShopPath()
   const [params] = useSearchParams()
 
   // Fixed: this page only creates agents.
@@ -28,8 +30,15 @@ export default function Register() {
   const [phone, setPhone] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  // FR-1.2 — a referral link pre-fills this and it stays editable.
-  const [referral, setReferral] = useState(params.get('ref') ?? '')
+  /**
+   * FR-1.2 — a referral link pre-fills this and it stays editable.
+   *
+   * Two sources, checked in order: an explicit `?ref=` (an already-shared link
+   * in the old shape), then the sell link this page was reached through
+   * (`/s/<code>/register`) — the code in the path is the referrer once there
+   * is no query string carrying one.
+   */
+  const [referral, setReferral] = useState(params.get('ref') ?? sellerCode ?? '')
   const [accepted, setAccepted] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
@@ -93,7 +102,7 @@ export default function Register() {
       <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">Create your account</h1>
       <p className="mt-1.5 text-slate-500 dark:text-slate-400">
         Takes under a minute. You do not need an account to buy —{' '}
-        <Link to="/" className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
+        <Link to={shopPath('/')} className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
           the shop is open to everyone
         </Link>
         . Register if you want to sell, or to keep a wallet balance.
@@ -126,7 +135,7 @@ export default function Register() {
             </p>
             <p className="mt-1.5">
               Just buying a bundle? You do not need an account —{' '}
-              <Link to="/shop" className="font-semibold underline">
+              <Link to={shopPath('/shop')} className="font-semibold underline">
                 go straight to the shop
               </Link>{' '}
               and pay with Mobile Money.
@@ -254,7 +263,7 @@ export default function Register() {
 
         <p className="mt-4 text-center text-sm text-slate-500 dark:text-slate-400">
           Already registered?{' '}
-          <Link to="/login" className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
+          <Link to={shopPath('/login')} className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
             Log in
           </Link>
         </p>

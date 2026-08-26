@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useStore } from '../state/store'
+import { useShopPath } from '../lib/shopPath'
 import { Button, Card, Spinner } from '../components/ui'
 import { AlertIcon, CheckIcon, ClockIcon, SearchIcon } from '../components/icons'
 
@@ -26,6 +27,7 @@ export default function PaymentReturn() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const { refresh } = useStore()
+  const shopPath = useShopPath()
 
   const reference = params.get('reference') ?? params.get('trxref') ?? ''
   const [state, setState] = useState<'checking' | 'pending' | 'failed' | 'missing'>(
@@ -51,16 +53,17 @@ export default function PaymentReturn() {
           productId: string
         }
         // Straight to the ordinary receipt, which knows how to watch a delivery.
-        navigate(`/buy/${productId}?order=${orderId}`, { replace: true })
+        navigate(`${shopPath(`/buy/${productId}`)}?order=${orderId}`, { replace: true })
         return
       } catch {
         // Unreadable, so fall through to tracking rather than crashing here.
       }
     }
-    navigate(reference ? `/track?ref=${encodeURIComponent(reference)}` : '/track', {
-      replace: true,
-    })
-  }, [navigate, refresh, reference])
+    navigate(
+      reference ? `${shopPath('/track')}?ref=${encodeURIComponent(reference)}` : shopPath('/track'),
+      { replace: true },
+    )
+  }, [navigate, refresh, reference, shopPath])
 
   useEffect(() => {
     if (!reference) return
@@ -138,7 +141,7 @@ export default function PaymentReturn() {
             <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
               Nothing was taken from you. You can try again whenever you are ready.
             </p>
-            <Link to="/shop" className="mt-4 inline-block">
+            <Link to={shopPath('/shop')} className="mt-4 inline-block">
               <Button>Back to shop</Button>
             </Link>
           </>
@@ -154,7 +157,7 @@ export default function PaymentReturn() {
               The link did not carry a reference. If you have paid, use Track order with the
               reference from your SMS.
             </p>
-            <Link to="/track" className="mt-4 inline-block">
+            <Link to={shopPath('/track')} className="mt-4 inline-block">
               <Button variant="outline">Track an order</Button>
             </Link>
           </>

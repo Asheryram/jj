@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../../state/store'
+import { useShopPath } from '../../lib/shopPath'
 import { cedis, dateTime } from '../../lib/format'
 import type { Order, OrderStatus } from '../../data/types'
 import {
@@ -27,6 +28,7 @@ type Filter = 'all' | OrderStatus
 /** FR-6.1 — the signed-in user's own orders. */
 export default function Orders() {
   const { orders, session, myShareOf } = useStore()
+  const shopPath = useShopPath()
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Order | null>(null)
@@ -124,7 +126,7 @@ export default function Orders() {
                   Clear search
                 </Button>
               ) : (
-                <Link to={isAgent ? '/app/referrals' : '/shop'}>
+                <Link to={isAgent ? '/app/referrals' : shopPath('/shop')}>
                   <Button>{isAgent ? 'Get my sell link' : 'Buy a bundle'}</Button>
                 </Link>
               )

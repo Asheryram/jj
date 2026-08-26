@@ -162,6 +162,7 @@ export class OrdersService {
         productName: order.productName,
         recipient: order.recipient,
         buyerUserId: order.buyerUserId,
+        sellerCode: order.soldByCode,
       })
       return { ...toOrder(order), paymentUrl }
     }

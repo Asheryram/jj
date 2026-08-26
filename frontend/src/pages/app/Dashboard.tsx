@@ -222,7 +222,7 @@ export default function Dashboard() {
                   : 'Your first purchase will show up here with its delivery status.'
               }
               action={
-                <Link to={isAgent ? '/app/referrals' : '/shop'}>
+                <Link to={isAgent ? '/app/referrals' : shopPath('/shop')}>
                   <Button>{isAgent ? 'Get my sell link' : 'Buy your first bundle'}</Button>
                 </Link>
               }
