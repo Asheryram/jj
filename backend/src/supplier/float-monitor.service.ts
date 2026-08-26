@@ -2,7 +2,43 @@ import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
 import { MailerService } from '../mail/mailer.service'
+import { LedgerService } from '../finance/ledger.service'
+import { ValidationError } from '../common/domain-errors'
 import { escape, wrap } from '../mail/templates'
+
+/** One deliberate movement of James's own money into or out of the float. */
+export interface CapitalSummary {
+  /** Pesewas James has logged putting in, all time. */
+  totalIn: number
+  /** Pesewas James has logged taking out, all time. */
+  totalOut: number
+  /** totalIn - totalOut. */
+  net: number
+  /** When the first entry was logged, or null before anything has been. */
+  since: string | null
+}
+
+/**
+ * Whether the float holds what the logged capital and known spending say it
+ * should. Null wherever there isn't enough to check yet — no capital logged,
+ * or no observation to compare against.
+ */
+export interface FloatReconciliation {
+  /** Pesewas the float should hold: the baseline, plus capital moved, minus cost, since tracking began. */
+  expected: number
+  /** Pesewas DataHub actually reports right now. */
+  observed: number
+  /** expected - observed. Positive means the float holds less than it should. */
+  shortfall: number
+  /** shortfall exceeds the rounding tolerance, AND the live reading is fresh enough to trust — worth telling someone about. */
+  flagged: boolean
+  /**
+   * The live reading predates the most recent logged capital move, so it
+   * cannot possibly reflect it yet — only the next order will. Not a
+   * discrepancy, just not confirmed.
+   */
+  pending: boolean
+}
 
 /** Where the balance sits relative to the two thresholds. */
 export type FloatLevel = 'ok' | 'watch' | 'risk'
@@ -15,10 +51,26 @@ export interface FloatObservation {
   /** The order whose reply revealed it, for tracing. */
   orderRef: string | null
   level: FloatLevel
+  /**
+   * What actually decided `level` — the lower of `balance` and what tracked
+   * capital says the float should hold. Equal to `balance` unless tracked
+   * capital is the more pessimistic of the two, so the screen can explain
+   * when the level disagrees with the number shown.
+   */
+  reference: number
 }
 
 const OBSERVATION_KEY = 'supplierFloat'
 const ALERT_LEVEL_KEY = 'supplierFloatAlertLevel'
+const CAPITAL_BASELINE_KEY = 'supplierFloatCapitalBaseline'
+const DISCREPANCY_ALERTED_KEY = 'supplierFloatDiscrepancyAlerted'
+
+/**
+ * Pesewas of slack before a shortfall is worth mentioning. DataHub's balance
+ * only ever arrives rounded to whole cedis, so a gap under this is rounding
+ * noise, not a missing top-up.
+ */
+const DISCREPANCY_TOLERANCE = 100
 
 const SEVERITY: Record<FloatLevel, number> = { ok: 0, watch: 1, risk: 2 }
 
@@ -56,6 +108,7 @@ export class FloatMonitorService {
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
     private readonly mailer: MailerService,
+    private readonly ledger: LedgerService,
   ) {}
 
   /**
@@ -70,8 +123,6 @@ export class FloatMonitorService {
 
     try {
       const balance = Math.round(balanceCedis * 100)
-      const { floatWatchAt, floatRiskAt } = await this.settings.all()
-      const level = levelFor(balance, floatWatchAt, floatRiskAt)
 
       await this.write(OBSERVATION_KEY, {
         balance,
@@ -79,29 +130,48 @@ export class FloatMonitorService {
         orderRef,
       })
 
-      const previous = await this.alertLevel()
-
-      /**
-       * Only on a change, and only email downwards.
-       *
-       * Every order reports the balance, so alerting on the level itself would
-       * send one email per order for as long as the float stayed low — dozens on
-       * a busy afternoon, which trains you to ignore them. A recovery is recorded
-       * silently: seeing the balance climb is not news, and it re-arms the alert
-       * for the next time it falls.
-       */
-      if (level !== previous) {
-        await this.write(ALERT_LEVEL_KEY, level)
-        if (SEVERITY[level] > SEVERITY[previous]) {
-          await this.alert(level, balance, floatWatchAt, floatRiskAt)
-        } else {
-          this.log.log(`float recovered to ${level} (GHS ${(balance / 100).toFixed(2)})`)
-        }
-      }
+      await this.checkFloat(balance)
     } catch (error) {
       // Deliberately swallowed — see the doc comment above.
       this.log.error(`could not record the provider float: ${String(error)}`)
     }
+  }
+
+  /**
+   * Re-check the watch/risk level and the capital-vs-float shortfall against
+   * a balance, and alert on either one crossing a line since the last check.
+   *
+   * Called after anything that could move either side of the comparison — a
+   * fresh order (via `record`), or James logging capital (via `logCapital`) —
+   * so a risk that tracked capital reveals never has to sit unnoticed until
+   * the next sale happens to confirm it.
+   */
+  private async checkFloat(balance: number): Promise<void> {
+    const { floatWatchAt, floatRiskAt } = await this.settings.all()
+    const reference = await this.referenceBalance(balance)
+    const level = levelFor(reference, floatWatchAt, floatRiskAt)
+    const previous = await this.alertLevel()
+
+    /**
+     * Only on a change, and only email downwards.
+     *
+     * Every order reports the balance, so alerting on the level itself would
+     * send one email per order for as long as the float stayed low — dozens on
+     * a busy afternoon, which trains you to ignore them. A recovery is recorded
+     * silently: seeing the balance climb is not news, and it re-arms the alert
+     * for the next time it falls.
+     */
+    if (level !== previous) {
+      await this.write(ALERT_LEVEL_KEY, level)
+      if (SEVERITY[level] > SEVERITY[previous]) {
+        await this.alert(level, balance, reference, floatWatchAt, floatRiskAt)
+      } else {
+        this.log.log(`float recovered to ${level} (GHS ${(reference / 100).toFixed(2)})`)
+      }
+    }
+
+    const reconciliation = await this.reconcile()
+    if (reconciliation) await this.checkDiscrepancy(reconciliation)
   }
 
   /** The last reading, for the admin screens. Null before any purchase. */
@@ -114,12 +184,196 @@ export class FloatMonitorService {
     if (!Number.isFinite(balance)) return null
 
     const { floatWatchAt, floatRiskAt } = await this.settings.all()
+    const reference = await this.referenceBalance(balance)
     return {
       balance,
       observedAt:
         typeof stored.observedAt === 'string' ? stored.observedAt : row.updatedAt.toISOString(),
       orderRef: typeof stored.orderRef === 'string' ? stored.orderRef : null,
-      level: levelFor(balance, floatWatchAt, floatRiskAt),
+      level: levelFor(reference, floatWatchAt, floatRiskAt),
+      reference,
+    }
+  }
+
+  /**
+   * Record James putting his own money into the float, or taking it back out.
+   *
+   * DataHub sends no notice when a top-up happens, so this only exists because
+   * James says so. Written as `capital_in`/`capital_out` with `affectsProfit:
+   * false` — it is a balance-sheet movement, not income or cost, and must
+   * never shift the P&L in `money-audit.ts`.
+   */
+  async logCapital(input: {
+    direction: 'in' | 'out'
+    amount: number
+    note?: string
+    idempotencyKey: string
+  }): Promise<void> {
+    if (!Number.isInteger(input.amount) || input.amount <= 0) {
+      throw new ValidationError('Enter an amount greater than zero.')
+    }
+
+    /**
+     * The anchor for `reconcile()`, captured once — the first time James logs
+     * anything — from whatever the float last read. Everything before this
+     * moment is out of scope: DataHub gave no notice of any earlier top-up or
+     * spend, so there is nothing honest to reconstruct that far back.
+     *
+     * Falls back to zero when there is no reading yet at all — a shop that has
+     * never dispatched an order has, by definition, never spent from the
+     * float, so zero is the only honest place for tracking to start. Leaving
+     * the baseline uncaptured here would only defer it to some later log,
+     * which then double-counts whatever was logged in between.
+     */
+    const hasBaseline = await this.prisma.setting.findUnique({ where: { key: CAPITAL_BASELINE_KEY } })
+    if (!hasBaseline) {
+      const observation = await this.latest()
+      await this.write(CAPITAL_BASELINE_KEY, {
+        balance: observation?.balance ?? 0,
+        capturedAt: new Date().toISOString(),
+      })
+    }
+
+    const ghs = (input.amount / 100).toFixed(2)
+    const description = input.note
+      ? input.note
+      : input.direction === 'in'
+        ? `Capital added: GHS ${ghs}`
+        : `Capital withdrawn: GHS ${ghs}`
+
+    await this.ledger.record([
+      {
+        kind: input.direction === 'in' ? 'capital_in' : 'capital_out',
+        amount: input.direction === 'in' ? input.amount : -input.amount,
+        description,
+        occurredAt: new Date(),
+        affectsProfit: false,
+        idempotencyKey: input.idempotencyKey,
+      },
+    ])
+
+    /**
+     * A logged withdrawal can push tracked capital into risk on its own,
+     * without any order to trigger a re-check — waiting for the next sale to
+     * notice would leave that risk silent for however long it takes to sell
+     * again. Skipped only when there is truly no live reading yet to check
+     * against (a shop that has never dispatched an order).
+     */
+    const observation = await this.latest()
+    if (observation) await this.checkFloat(observation.balance)
+  }
+
+  /** Cumulative capital James has logged putting in and taking out, all time. */
+  async capitalSummary(): Promise<CapitalSummary> {
+    const [totals, first] = await Promise.all([
+      this.prisma.ledgerEntry.groupBy({
+        by: ['kind'],
+        where: { kind: { in: ['capital_in', 'capital_out'] } },
+        _sum: { amount: true },
+      }),
+      this.prisma.ledgerEntry.findFirst({
+        where: { kind: { in: ['capital_in', 'capital_out'] } },
+        orderBy: { occurredAt: 'asc' },
+        select: { occurredAt: true },
+      }),
+    ])
+
+    const totalIn = totals.find((t) => t.kind === 'capital_in')?._sum.amount ?? 0
+    const totalOut = -(totals.find((t) => t.kind === 'capital_out')?._sum.amount ?? 0)
+
+    return {
+      totalIn,
+      totalOut,
+      net: totalIn - totalOut,
+      since: first?.occurredAt.toISOString() ?? null,
+    }
+  }
+
+  /**
+   * What the float should hold right now, going only by tracked capital —
+   * independent of any live reading. Forward-only from the baseline captured
+   * at the first logged top-up: the baseline plus every capital move since,
+   * minus every bundle paid for since. It deliberately does not reach further
+   * back: sales from before capital tracking began have no matching top-up on
+   * record, so pulling in their cost would make the float look short for no
+   * real reason.
+   *
+   * Null until James has logged at least one capital move.
+   */
+  private async expectedBalance(): Promise<{ balance: number; capturedAt: Date } | null> {
+    const baselineRow = await this.prisma.setting.findUnique({ where: { key: CAPITAL_BASELINE_KEY } })
+    if (!baselineRow) return null
+
+    const stored = baselineRow.value as { balance?: unknown; capturedAt?: unknown }
+    const baselineBalance = Number(stored.balance)
+    const capturedAt = typeof stored.capturedAt === 'string' ? new Date(stored.capturedAt) : null
+    if (!Number.isFinite(baselineBalance) || !capturedAt) return null
+
+    const [capital, cost] = await Promise.all([
+      this.capitalSummary(),
+      this.prisma.ledgerEntry.aggregate({
+        where: { kind: 'supplier_cost', occurredAt: { gte: capturedAt } },
+        _sum: { amount: true },
+      }),
+    ])
+
+    // supplier_cost entries are already negative (money leaving the float).
+    return { balance: baselineBalance + capital.net + (cost._sum.amount ?? 0), capturedAt }
+  }
+
+  /**
+   * The number that actually gates risk: the lower of the live reading and
+   * what tracked capital says the float should hold.
+   *
+   * Neither number alone is safe to rely on. The live reading only refreshes
+   * per order, so it can sit stale-high for a while right after an unlogged
+   * withdrawal — and tracked capital can sit stale-low right after a real
+   * top-up the live reading hasn't caught up to yet. Taking the lower of the
+   * two means a bigger number on either side can never mask a real risk the
+   * other one is already showing.
+   */
+  private async referenceBalance(observedBalance: number): Promise<number> {
+    const expected = await this.expectedBalance()
+    return expected ? Math.min(observedBalance, expected.balance) : observedBalance
+  }
+
+  /**
+   * Does the float hold what it should? Null until there is a baseline and a
+   * live reading to compare it to.
+   */
+  async reconcile(): Promise<FloatReconciliation | null> {
+    const expected = await this.expectedBalance()
+    if (!expected) return null
+
+    const observation = await this.latest()
+    if (!observation) return null
+
+    const lastMovement = await this.prisma.ledgerEntry.findFirst({
+      where: { kind: { in: ['capital_in', 'capital_out'] } },
+      orderBy: { occurredAt: 'desc' },
+      select: { occurredAt: true },
+    })
+
+    const observed = observation.balance
+    const shortfall = expected.balance - observed
+
+    /**
+     * A reading older than the last logged move cannot possibly reflect it —
+     * DataHub only ever reports the balance in the reply to an order, so
+     * nothing short of a new order can confirm a top-up or withdrawal just
+     * logged. Flagging against a stale reading would call every log a
+     * shortfall the moment it's saved.
+     */
+    const pending = Boolean(
+      lastMovement && new Date(observation.observedAt) < lastMovement.occurredAt,
+    )
+
+    return {
+      expected: expected.balance,
+      observed,
+      shortfall,
+      pending,
+      flagged: !pending && shortfall > DISCREPANCY_TOLERANCE,
     }
   }
 
@@ -127,6 +381,31 @@ export class FloatMonitorService {
     const row = await this.prisma.setting.findUnique({ where: { key: ALERT_LEVEL_KEY } })
     const value = row?.value
     return value === 'watch' || value === 'risk' ? value : 'ok'
+  }
+
+  /**
+   * Email only on the shortfall's edges — appearing and clearing — the same
+   * debounce as the watch/risk alert above. A float holding *more* than
+   * expected is never flagged: that just means a top-up hasn't been logged
+   * yet, or there is simply headroom, neither of which is a problem.
+   */
+  private async checkDiscrepancy(r: FloatReconciliation): Promise<void> {
+    const wasAlerted = await this.discrepancyAlerted()
+    if (r.flagged && !wasAlerted) {
+      await this.write(DISCREPANCY_ALERTED_KEY, true)
+      await this.alertDiscrepancy(r)
+    } else if (!r.flagged && wasAlerted) {
+      await this.write(DISCREPANCY_ALERTED_KEY, false)
+      this.log.log(
+        `float discrepancy cleared (expected GHS ${(r.expected / 100).toFixed(2)}, ` +
+          `observed GHS ${(r.observed / 100).toFixed(2)})`,
+      )
+    }
+  }
+
+  private async discrepancyAlerted(): Promise<boolean> {
+    const row = await this.prisma.setting.findUnique({ where: { key: DISCREPANCY_ALERTED_KEY } })
+    return row?.value === true
   }
 
   private async write(key: string, value: unknown): Promise<void> {
@@ -146,6 +425,7 @@ export class FloatMonitorService {
   private async alert(
     level: FloatLevel,
     balance: number,
+    reference: number,
     watchAt: number,
     riskAt: number,
   ): Promise<void> {
@@ -170,7 +450,7 @@ export class FloatMonitorService {
     const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
 
     if (recipients.length === 0) {
-      this.log.warn(`float is ${level} at ${ghs(balance)} — nobody to tell`)
+      this.log.warn(`float is ${level} at ${ghs(reference)} — nobody to tell`)
       return
     }
 
@@ -178,13 +458,21 @@ export class FloatMonitorService {
     const urgent = level === 'risk'
     const shopName = await this.platformName()
 
+    /**
+     * The live reading and tracked capital can disagree — see `referenceBalance`.
+     * When tracked capital is the more pessimistic of the two, say so plainly:
+     * otherwise this email shows a number lower than what DataHub itself
+     * reports, which reads as a mistake rather than the point of the check.
+     */
+    const trackedIsLower = reference < balance
+
     const consequence = urgent
       ? 'This is urgent: once it runs out, every paid order fails after the customer has already been charged, and each one then has to be refunded by hand. Top up your DataHub float now to avoid that.'
       : 'There is still time to top up before anything fails — no order has been affected yet.'
 
     const subject = urgent
-      ? `Float critically low — ${ghs(balance)} left`
-      : `Float getting low — ${ghs(balance)} left`
+      ? `Float critically low — ${ghs(reference)} left`
+      : `Float getting low — ${ghs(reference)} left`
 
     const pillBg = urgent ? '#fee2e2' : '#fef3c7'
     const pillFg = urgent ? '#b3261e' : '#92400e'
@@ -211,10 +499,17 @@ export class FloatMonitorService {
            float ${urgent ? 'is critically low' : 'is getting low'}.</p>
          <div style="text-align:center;background:${statBg};border:1px solid ${statBorder};border-radius:12px;padding:20px;margin:0 0 20px">
            <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.4px;color:${pillFg};text-transform:uppercase">Float remaining</p>
-           <p style="margin:0;font-size:34px;font-weight:800;color:${pillFg}">${ghs(balance)}</p>
+           <p style="margin:0;font-size:34px;font-weight:800;color:${pillFg}">${ghs(reference)}</p>
            <p style="margin:8px 0 0;font-size:12.5px;color:${pillFg}">below your ${ghs(threshold)} alert line</p>
          </div>
          <p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;font-weight:${urgent ? '700' : '400'};color:${urgent ? '#b3261e' : '#1e293b'}">${escape(consequence)}</p>
+         ${
+           trackedIsLower
+             ? `<p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">DataHub itself still reports ${escape(ghs(balance))} —
+           this is based on the capital you've logged instead, which is lower and hasn't been confirmed by a fresh
+           order yet.</p>`
+             : ''
+         }
          <p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">This figure comes from the reply to
            your most recent order — DataHub has no balance endpoint to ask directly, so it is only ever as current
            as your last sale.</p>
@@ -229,10 +524,16 @@ export class FloatMonitorService {
         urgent ? '*** ACTION NEEDED ***' : '*** HEADS UP ***',
         `Your DataHub GH float ${urgent ? 'is critically low' : 'is getting low'}.`,
         '',
-        `FLOAT REMAINING: ${ghs(balance)} (below your ${ghs(threshold)} alert line)`,
+        `FLOAT REMAINING: ${ghs(reference)} (below your ${ghs(threshold)} alert line)`,
         '',
         consequence,
         '',
+        ...(trackedIsLower
+          ? [
+              `DataHub itself still reports ${ghs(balance)} — this is based on the capital you've logged instead, which is lower and hasn't been confirmed by a fresh order yet.`,
+              '',
+            ]
+          : []),
         'This figure comes from the reply to your most recent order — DataHub has no balance endpoint to ask directly, so it is only ever as current as your last sale.',
         '',
         'You will not get this again until the float recovers and falls past the same point, so it will not repeat on every order.',
@@ -246,8 +547,58 @@ export class FloatMonitorService {
     }
 
     this.log.warn(
-      `float ${level}: ${ghs(balance)} (threshold ${ghs(threshold)}) — told ` +
+      `float ${level}: ${ghs(reference)} (threshold ${ghs(threshold)}${trackedIsLower ? `, live is ${ghs(balance)}` : ''}) — told ` +
         recipients.map((r) => r.email).join(', '),
+    )
+  }
+
+  /** Tell whoever funds the float that it holds less than the logged capital says it should. */
+  private async alertDiscrepancy(r: FloatReconciliation): Promise<void> {
+    const admins = await this.prisma.user.findMany({
+      where: { role: 'admin', status: 'active' },
+      select: { name: true, email: true },
+    })
+    const recipients =
+      admins.length > 0
+        ? admins
+        : await this.prisma.user.findMany({
+            where: { role: 'superadmin', status: 'active' },
+            select: { name: true, email: true },
+          })
+
+    const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
+    const shopName = await this.platformName()
+
+    if (recipients.length === 0) {
+      this.log.warn(`float short by ${ghs(r.shortfall)} — nobody to tell`)
+      return
+    }
+
+    const subject = `Float is short by ${ghs(r.shortfall)}`
+    const body =
+      `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">The DataHub GH float should hold ` +
+      `${escape(ghs(r.expected))}, going by the capital you've logged and what orders have spent since. ` +
+      `It actually holds ${escape(ghs(r.observed))} — ${escape(ghs(r.shortfall))} short.</p>` +
+      `<p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;color:#1e293b">This usually means a top-up or ` +
+      `withdrawal happened without being logged. Check the float panel and log it if so — this note will not ` +
+      `repeat until the gap changes.</p>`
+
+    const html = wrap(shopName, 'Your float is short', body, `You are getting this because you are an active admin on ${escape(shopName)}.`)
+    const text =
+      `The DataHub GH float should hold ${ghs(r.expected)}, going by the capital you've logged and what orders ` +
+      `have spent since. It actually holds ${ghs(r.observed)} — ${ghs(r.shortfall)} short.\n\n` +
+      `This usually means a top-up or withdrawal happened without being logged. Check the float panel and log it ` +
+      `if so — this note will not repeat until the gap changes.`
+
+    for (const recipient of recipients) {
+      await this.mailer
+        .send({ to: recipient.email, subject, html, text })
+        .catch((error) => this.log.error(`could not tell ${recipient.email} about the float shortfall: ${String(error)}`))
+    }
+
+    this.log.warn(
+      `float short by ${ghs(r.shortfall)} (expected ${ghs(r.expected)}, observed ${ghs(r.observed)}) — told ` +
+        recipients.map((rec) => rec.email).join(', '),
     )
   }
 }

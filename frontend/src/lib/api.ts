@@ -307,10 +307,30 @@ export interface SupplierFloat {
     observedAt: string
     orderRef: string | null
     level: FloatLevel
+    /** What actually decided `level` — the lower of `balance` and tracked capital. Equal to `balance` unless tracked capital is more pessimistic. */
+    reference: number
   } | null
   /** Pesewas. Zero means the alert is switched off. */
   watchAt: number
   riskAt: number
+  /** James's own capital moved into and out of the float, self-reported. */
+  capital: {
+    /** Pesewas. */
+    totalIn: number
+    totalOut: number
+    net: number
+    since: string | null
+  }
+  /** Whether the float holds what the logged capital and known spending say it should. Null until there's enough to check. */
+  reconciliation: {
+    /** Pesewas. */
+    expected: number
+    observed: number
+    shortfall: number
+    flagged: boolean
+    /** The live reading predates the last logged move, so it can't confirm it yet — only the next order can. */
+    pending: boolean
+  } | null
 }
 
 export interface PlatformSettings {
@@ -882,6 +902,13 @@ export const api = {
     }),
 
   supplierFloat: () => request<SupplierFloat>('/admin/supplier/float'),
+
+  /** James saying he moved his own money into or out of the DataHub float. */
+  logFloatCapital: (direction: 'in' | 'out', amount: number, note?: string) =>
+    request<void>('/admin/supplier/float/capital', {
+      method: 'POST',
+      body: { direction, amount, note, idempotencyKey: newIdempotencyKey() },
+    }),
 
   setProductActive: (productId: string, active: boolean) =>
     request<Product>(`/admin/products/${encodeURIComponent(productId)}/active`, {

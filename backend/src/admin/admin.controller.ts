@@ -39,6 +39,23 @@ export class SetActiveDto {
   active!: boolean
 }
 
+export class LogCapitalDto {
+  @IsIn(['in', 'out'])
+  direction!: 'in' | 'out'
+
+  @IsInt({ message: 'Enter an amount like 500.00.' })
+  @Min(1)
+  amount!: number
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  note?: string
+
+  @IsString()
+  idempotencyKey!: string
+}
+
 export class ApplyMarkupDto {
   /**
    * Percentage over supplier cost. Fractional is allowed — a price of GHS 6.40
@@ -207,15 +224,30 @@ export class AdminController {
    */
   @Get('supplier/float')
   async float_() {
-    const [observation, settings] = await Promise.all([
+    const [observation, settings, capital, reconciliation] = await Promise.all([
       this.float.latest(),
       this.platformSettings.all(),
+      this.float.capitalSummary(),
+      this.float.reconcile(),
     ])
     return {
       observation,
       watchAt: settings.floatWatchAt,
       riskAt: settings.floatRiskAt,
+      capital,
+      reconciliation,
     }
+  }
+
+  /**
+   * James saying he moved his own money into or out of the float. DataHub
+   * gives no notice when this happens, so it is only ever known because he
+   * logged it — this is what lets the platform tell his capital apart from
+   * the profit the business has actually earned.
+   */
+  @Post('supplier/float/capital')
+  logCapital(@Body() dto: LogCapitalDto) {
+    return this.float.logCapital(dto)
   }
 
   /** Re-read every configured supplier's catalogue. */

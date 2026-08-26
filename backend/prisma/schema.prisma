@@ -679,6 +679,10 @@ enum LedgerKind {
   payout_fee
   /// A customer adding money to their wallet. Cash in, but theirs, not revenue.
   topup
+  /// James adding his own money to the DataHub float. Capital, not revenue.
+  capital_in
+  /// James taking his own money back out of the float, or correcting an entry.
+  capital_out
 }
 
 /// Every movement of money, once.
