@@ -14,13 +14,13 @@ export default function Checkers() {
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 sm:py-14">
       <div className="text-center">
-        <span className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-700">
+        <span className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400">
           <CertificateIcon className="size-7" />
         </span>
-        <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+        <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:text-3xl">
           BECE &amp; WASSCE Result Checkers
         </h1>
-        <p className="mx-auto mt-2 max-w-xl text-slate-500">
+        <p className="mx-auto mt-2 max-w-xl text-slate-500 dark:text-slate-400">
           Buy a voucher and get the serial number and PIN on screen straight away — plus an SMS copy
           so you do not lose it.
         </p>
@@ -31,22 +31,22 @@ export default function Checkers() {
           <Card key={product.id} className="flex flex-col p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-lg font-bold text-slate-900">{product.name}</p>
-                <p className="mt-0.5 text-sm text-slate-500">{product.validity}</p>
+                <p className="text-lg font-bold text-slate-900 dark:text-slate-50">{product.name}</p>
+                <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{product.validity}</p>
               </div>
               <Badge tone="success">In stock</Badge>
             </div>
-            <p className="tabular mt-4 text-2xl font-bold text-brand-800">
+            <p className="tabular mt-4 text-2xl font-bold text-brand-800 dark:text-brand-300">
               {cedis(retailPrice(product))}
             </p>
-            <ul className="mt-4 flex-1 space-y-2 text-sm text-slate-600">
+            <ul className="mt-4 flex-1 space-y-2 text-sm text-slate-600 dark:text-slate-300">
               {[
                 'Serial and PIN shown immediately',
                 'SMS backup to your number',
                 'Works on the official WAEC portal',
               ].map((line) => (
                 <li key={line} className="flex items-start gap-2">
-                  <CheckIcon className="mt-0.5 size-4 shrink-0 text-brand-600" />
+                  <CheckIcon className="mt-0.5 size-4 shrink-0 text-brand-600 dark:text-brand-300" />
                   {line}
                 </li>
               ))}
@@ -79,7 +79,7 @@ export default function Checkers() {
       </div>
 
       <div className="mt-10">
-        <h2 className="font-bold text-slate-900">How it works</h2>
+        <h2 className="font-bold text-slate-900 dark:text-slate-50">How it works</h2>
         <ol className="mt-4 grid gap-4 sm:grid-cols-4">
           {[
             ['Pick BECE or WASSCE', 'Choose the checker you need.'],
@@ -91,8 +91,8 @@ export default function Checkers() {
               <span className="flex size-8 items-center justify-center rounded-full bg-brand-700 text-sm font-bold text-white">
                 {index + 1}
               </span>
-              <p className="mt-2.5 text-sm font-semibold text-slate-900">{title}</p>
-              <p className="mt-0.5 text-sm text-slate-500">{detail}</p>
+              <p className="mt-2.5 text-sm font-semibold text-slate-900 dark:text-slate-50">{title}</p>
+              <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{detail}</p>
             </li>
           ))}
         </ol>

@@ -69,10 +69,10 @@ export default function Dashboard() {
   return (
     <div>
       <div className="mb-5">
-        <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+        <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:text-2xl">
           {greeting()}, {session.name.split(' ')[0]}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
           {isAgent
             ? 'Here is how your business is doing today.'
             : 'Here is your wallet and recent activity.'}
@@ -122,18 +122,18 @@ export default function Dashboard() {
       {isAgent && (
         <Card className="mt-3 p-4">
           <div className="mb-2.5 flex items-center justify-between gap-3">
-            <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
-              <StoreIcon className="size-4 text-brand-600" /> Your sell link
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+              <StoreIcon className="size-4 text-brand-600 dark:text-brand-300" /> Your sell link
             </p>
             <Link
               to="/app/referrals"
-              className="flex items-center gap-0.5 text-sm font-semibold text-brand-700 hover:underline"
+              className="flex items-center gap-0.5 text-sm font-semibold text-brand-700 dark:text-brand-300 hover:underline"
             >
               Share it <ChevronRightIcon className="size-4" />
             </Link>
           </div>
           <CopyField value={sellLink} />
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
             Customers who buy here pay your prices, and your margin is credited automatically.
           </p>
         </Card>
@@ -206,7 +206,7 @@ export default function Dashboard() {
             action={
               <Link
                 to="/app/orders"
-                className="flex items-center gap-0.5 text-sm font-semibold text-brand-700 hover:underline"
+                className="flex items-center gap-0.5 text-sm font-semibold text-brand-700 dark:text-brand-300 hover:underline"
               >
                 See all <ChevronRightIcon className="size-4" />
               </Link>
@@ -234,8 +234,8 @@ export default function Dashboard() {
                 return (
                   <li key={order.id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-slate-900">{order.productName}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+                      <p className="truncate font-medium text-slate-900 dark:text-slate-50">{order.productName}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
                         <NetworkChip network={order.network} />
                         <span className="tabular">{order.recipient}</span>
                         <span aria-hidden="true">·</span>
@@ -243,7 +243,7 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="tabular font-semibold text-slate-900">
+                      <p className="tabular font-semibold text-slate-900 dark:text-slate-50">
                         {isAgent && share
                           ? cedis(share.margin, { sign: true })
                           : cedis(order.salePrice)}
@@ -264,21 +264,21 @@ export default function Dashboard() {
           {isAgent && (
             <Card className="p-4">
               <div className="flex items-baseline justify-between">
-                <p className="text-sm font-semibold text-slate-500">Earnings, last 7 days</p>
-                <span className="tabular text-sm font-bold text-brand-700">
+                <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">Earnings, last 7 days</p>
+                <span className="tabular text-sm font-bold text-brand-700 dark:text-brand-300">
                   {cedis(agentEarningsByDay.reduce((s, d) => s + d.revenue, 0))}
                 </span>
               </div>
               <div className="mt-3 text-brand-500">
                 <Sparkline values={agentEarningsByDay.map((d) => d.revenue)} />
               </div>
-              <div className="mt-1.5 flex justify-between text-xs text-slate-500">
+              <div className="mt-1.5 flex justify-between text-xs text-slate-500 dark:text-slate-400">
                 <span>{agentEarningsByDay[0].day}</span>
                 <span>{agentEarningsByDay[agentEarningsByDay.length - 1].day}</span>
               </div>
               <Link
                 to="/app/reports"
-                className="mt-3 flex items-center gap-0.5 text-sm font-semibold text-brand-700 hover:underline"
+                className="mt-3 flex items-center gap-0.5 text-sm font-semibold text-brand-700 dark:text-brand-300 hover:underline"
               >
                 Full report <ChevronRightIcon className="size-4" />
               </Link>
@@ -294,7 +294,7 @@ export default function Dashboard() {
                 <Link
                   key={action.label}
                   to={action.to}
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50"
+                  className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-800"
                 >
                   <span
                     className={cn(
@@ -305,12 +305,12 @@ export default function Dashboard() {
                     <action.icon className="size-4.5" />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold text-slate-800">
+                    <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">
                       {action.label}
                     </span>
-                    <span className="block text-xs text-slate-500">{action.hint}</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">{action.hint}</span>
                   </span>
-                  <ChevronRightIcon className="size-4 shrink-0 text-slate-300" />
+                  <ChevronRightIcon className="size-4 shrink-0 text-slate-300 dark:text-slate-600" />
                 </Link>
               ))}
             </div>
@@ -343,14 +343,14 @@ function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
         label: 'Share my shop',
         hint: 'Send your sell link on WhatsApp',
         icon: StoreIcon,
-        accent: 'bg-brand-50 text-brand-700',
+        accent: 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300',
       },
       {
         to: '/app/pricing',
         label: 'Set my prices',
         hint: 'Change what you charge',
         icon: TrendUpIcon,
-        accent: 'bg-sky-50 text-sky-700',
+        accent: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400',
       },
       {
         to: '/app/referrals',
@@ -364,7 +364,7 @@ function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
         label: 'Withdraw earnings',
         hint: 'Paid to your MoMo',
         icon: CashIcon,
-        accent: 'bg-amber-50 text-amber-700',
+        accent: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400',
       },
     ]
   }
@@ -375,7 +375,7 @@ function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
       label: 'Buy data',
       hint: 'MTN, Telecel, AirtelTigo',
       icon: DataIcon,
-      accent: 'bg-brand-50 text-brand-700',
+      accent: 'bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300',
     },
     {
       // Was "Top up wallet", pointing at a route that no longer exists.
@@ -383,7 +383,7 @@ function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
       label: 'Your orders',
       hint: 'Track a delivery',
       icon: ReceiptIcon,
-      accent: 'bg-sky-50 text-sky-700',
+      accent: 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400',
     },
     {
       to: '/register',

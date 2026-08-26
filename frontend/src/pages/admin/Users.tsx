@@ -94,7 +94,7 @@ export default function Users() {
           onChange={setFilter}
         />
         <div className="relative sm:w-64">
-          <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-500" />
+          <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-500 dark:text-slate-400" />
           <TextInput
             placeholder="Name, phone or email"
             className="pl-9"
@@ -127,15 +127,15 @@ export default function Users() {
             </thead>
             <tbody>
               {visible.map((user) => (
-                <tr key={user.id} className="hover:bg-slate-50">
+                <tr key={user.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                   <Td>
                     <div className="flex items-center gap-2.5">
                       <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-slate-800 text-[11px] font-bold text-white">
                         {initials(user.name)}
                       </span>
                       <div className="min-w-0">
-                        <p className="truncate font-medium text-slate-900">{user.name}</p>
-                        <p className="tabular truncate text-xs text-slate-500">{user.phone}</p>
+                        <p className="truncate font-medium text-slate-900 dark:text-slate-50">{user.name}</p>
+                        <p className="tabular truncate text-xs text-slate-500 dark:text-slate-400">{user.phone}</p>
                       </div>
                     </div>
                   </Td>
@@ -146,11 +146,11 @@ export default function Users() {
                       {user.role}
                     </Badge>
                   </Td>
-                  <Td className="text-slate-600">{user.referredBy ?? '—'}</Td>
+                  <Td className="text-slate-600 dark:text-slate-300">{user.referredBy ?? '—'}</Td>
                   <Td align="right" className="tabular">
                     {user.orders}
                   </Td>
-                  <Td align="right" className="tabular font-semibold text-slate-900">
+                  <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                     {cedis(user.balance)}
                   </Td>
                   <Td>
@@ -167,7 +167,7 @@ export default function Users() {
                       session?.role === 'superadmin' && (
                         <Link
                           to="/admin/team"
-                          className="text-xs font-semibold text-brand-700 hover:underline"
+                          className="text-xs font-semibold text-brand-700 dark:text-brand-300 hover:underline"
                         >
                           Manage in Platform team
                         </Link>
@@ -181,7 +181,7 @@ export default function Users() {
                          Text rather than a link: the queue is already on this page, and
                          it renders nothing when empty, so a link would sometimes point
                          at an element that is not there. */
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
                         {user.status === 'pending' ? 'Decide above' : 'Turned down'}
                       </span>
                     ) : (
@@ -199,7 +199,7 @@ export default function Users() {
             </tbody>
           </TableWrap>
         )}
-        <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
+        <p className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
           Suspending an account blocks new orders and withdrawals. Nothing is deleted — order history
           and the wallet ledger stay intact.
         </p>
@@ -212,13 +212,13 @@ export default function Users() {
       >
         {confirming && (
           <div className="space-y-4">
-            <div className="flex items-center gap-3 rounded-xl bg-slate-50 p-3.5">
+            <div className="flex items-center gap-3 rounded-xl bg-slate-50 dark:bg-slate-800 p-3.5">
               <span className="flex size-10 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-white">
                 {initials(confirming.name)}
               </span>
               <div className="min-w-0">
-                <p className="font-semibold text-slate-900">{confirming.name}</p>
-                <p className="tabular text-sm text-slate-500">{confirming.phone}</p>
+                <p className="font-semibold text-slate-900 dark:text-slate-50">{confirming.name}</p>
+                <p className="tabular text-sm text-slate-500 dark:text-slate-400">{confirming.phone}</p>
               </div>
             </div>
 

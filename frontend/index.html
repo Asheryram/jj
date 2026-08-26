@@ -8,6 +8,17 @@
     <link rel="apple-touch-icon" href="/logo.svg" />
     <meta name="theme-color" content="#0B3B8F" />
 
+    <!-- Applied before anything paints, so a returning visitor who chose dark
+         never sees a flash of the light theme first. Kept to one read and one
+         attribute set — nothing here can fail loudly enough to block the page. -->
+    <script>
+      try {
+        if (localStorage.getItem('jdc.theme') === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'dark')
+        }
+      } catch (e) {}
+    </script>
+
     <!-- Primary meta. RouteMeta.tsx rewrites these per route on navigation. -->
     <title>Buy Data Bundles, Airtime &amp; Result Checkers in Ghana | JamesDataConsult</title>
     <meta

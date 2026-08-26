@@ -124,26 +124,26 @@ export default function Wallet() {
           </thead>
           <tbody>
             {visible.map((tx) => (
-              <tr key={tx.id} className="hover:bg-slate-50">
+              <tr key={tx.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                 <Td>
-                  <p className="font-medium text-slate-900">{tx.description}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">{dateTime(tx.createdAt)}</p>
+                  <p className="font-medium text-slate-900 dark:text-slate-50">{tx.description}</p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{dateTime(tx.createdAt)}</p>
                 </Td>
                 <Td>
                   <Badge tone={TX_META[tx.type].tone}>{TX_META[tx.type].label}</Badge>
                 </Td>
-                <Td className="tabular text-xs text-slate-500">{tx.reference}</Td>
+                <Td className="tabular text-xs text-slate-500 dark:text-slate-400">{tx.reference}</Td>
                 <Td align="right">
                   <span
                     className={cn(
                       'tabular font-semibold',
-                      tx.amount > 0 ? 'text-emerald-700' : 'text-slate-800',
+                      tx.amount > 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-800 dark:text-slate-100',
                     )}
                   >
                     {cedis(tx.amount, { sign: true })}
                   </span>
                 </Td>
-                <Td align="right" className="tabular text-slate-600">
+                <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                   {cedis(tx.balanceAfter)}
                 </Td>
               </tr>
@@ -151,7 +151,7 @@ export default function Wallet() {
           </tbody>
         </TableWrap>
         {/* NFR-2.6 — tell the user the ledger is immutable; it is a trust signal. */}
-        <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
+        <p className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
           This ledger is append-only. Entries cannot be edited or deleted, by you or by us — a
           correction is always a new entry.
         </p>
@@ -221,11 +221,11 @@ function TopUpModal({
     >
       {stage === 'redirecting' ? (
         <div className="py-8 text-center">
-          <div className="mx-auto flex size-12 animate-pulse items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
+          <div className="mx-auto flex size-12 animate-pulse items-center justify-center rounded-2xl bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300">
             <ShieldIcon className="size-6" />
           </div>
-          <p className="mt-4 font-semibold text-slate-900">Opening Paystack…</p>
-          <p className="mx-auto mt-1.5 max-w-xs text-sm text-slate-500">
+          <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">Opening Paystack…</p>
+          <p className="mx-auto mt-1.5 max-w-xs text-sm text-slate-500 dark:text-slate-400">
             You will get a prompt on{' '}
             {network === 'MTN' ? 'MTN MoMo' : network === 'Telecel' ? 'Telecel Cash' : 'AirtelTigo Money'}
             . Your wallet is credited once Paystack confirms the payment.
@@ -234,7 +234,7 @@ function TopUpModal({
       ) : (
         <div className="space-y-4">
           <div>
-            <p className="mb-2 text-sm font-medium text-slate-700">Choose an amount</p>
+            <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">Choose an amount</p>
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
               {QUICK_AMOUNTS.map((value) => (
                 <button
@@ -248,7 +248,7 @@ function TopUpModal({
                     'tabular rounded-xl border py-2.5 text-sm font-bold transition-colors',
                     !custom && amount === value
                       ? 'border-brand-600 bg-brand-700 text-white'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-slate-300',
                   )}
                 >
                   {value / 100}
@@ -259,7 +259,7 @@ function TopUpModal({
 
           <Field label="Or enter another amount" htmlFor="topup-custom" error={error}>
             <div className="relative">
-              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
+              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500 dark:text-slate-400">
                 GHS
               </span>
               <TextInput
@@ -278,7 +278,7 @@ function TopUpModal({
           </Field>
 
           <div>
-            <p className="mb-2 text-sm font-medium text-slate-700">Pay with</p>
+            <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">Pay with</p>
             <div className="space-y-2">
               {NETWORKS.map((option) => (
                 <button
@@ -288,19 +288,19 @@ function TopUpModal({
                   className={cn(
                     'flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors',
                     network === option
-                      ? 'border-brand-500 bg-brand-50'
-                      : 'border-slate-200 hover:bg-slate-50',
+                      ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/40'
+                      : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800',
                   )}
                 >
                   <span
                     className={cn(
                       'flex size-5 items-center justify-center rounded-full border-2',
-                      network === option ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300',
+                      network === option ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 dark:border-slate-600',
                     )}
                   >
                     {network === option && <CheckIcon className="size-3" strokeWidth={3} />}
                   </span>
-                  <span className="text-sm font-semibold text-slate-800">
+                  <span className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                     {option === 'MTN'
                       ? 'MTN Mobile Money'
                       : option === 'Telecel'
@@ -312,9 +312,9 @@ function TopUpModal({
             </div>
           </div>
 
-          <div className="flex items-baseline justify-between rounded-xl bg-slate-50 px-3.5 py-3">
-            <span className="text-sm text-slate-600">You will be charged</span>
-            <span className="tabular text-lg font-bold text-slate-900">
+          <div className="flex items-baseline justify-between rounded-xl bg-slate-50 dark:bg-slate-800 px-3.5 py-3">
+            <span className="text-sm text-slate-600 dark:text-slate-300">You will be charged</span>
+            <span className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">
               {chosen === null ? '—' : cedis(chosen)}
             </span>
           </div>
@@ -323,7 +323,7 @@ function TopUpModal({
             Continue to Paystack
           </Button>
 
-          <p className="flex items-start gap-1.5 text-xs text-slate-500">
+          <p className="flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
             <AlertIcon className="mt-0.5 size-3.5 shrink-0" />
             Your balance updates only after Paystack confirms the payment — not when the prompt
             closes.

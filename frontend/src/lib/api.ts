@@ -376,17 +376,26 @@ export interface PublicBranding {
   brandColor: string
   /** Every Tailwind step, keyed '50' through '900'. */
   ramp: BrandRamp
+  /** Used on a dark background — equal to brandColor/ramp when none was chosen. */
+  brandColorDark: string
+  rampDark: BrandRamp
   logoUrl: string | null
   /** True when this is an agent's own branding rather than the platform's. */
   custom: boolean
 }
 
 export interface MyBranding {
-  live: { shopName: string | null; brandColor: string | null; hasLogo: boolean } | null
+  live: {
+    shopName: string | null
+    brandColor: string | null
+    brandColorDark: string | null
+    hasLogo: boolean
+  } | null
   pending: {
     id: string
     shopName: string | null
     brandColor: string | null
+    brandColorDark: string | null
     hasLogo: boolean
     createdAt: string
   } | null
@@ -399,6 +408,7 @@ export interface BrandingRequestRow {
   agentCode: string
   shopName: string | null
   brandColor: string | null
+  brandColorDark: string | null
   logoUrl: string | null
   status: 'pending' | 'approved' | 'rejected'
   note: string | null

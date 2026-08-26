@@ -146,13 +146,13 @@ export default function Referrals() {
               {subAgents.map((agent) => {
                 const isDirect = agent.uplineCode === session.referralCode
                 return (
-                  <tr key={agent.id} className="hover:bg-slate-50">
+                  <tr key={agent.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                     <Td>
                       <div className="flex items-center gap-2">
-                        {!isDirect && <span className="text-slate-300">↳</span>}
+                        {!isDirect && <span className="text-slate-300 dark:text-slate-600">↳</span>}
                         <div className="min-w-0">
-                          <p className="truncate font-medium text-slate-900">{agent.name}</p>
-                          <p className="tabular mt-0.5 text-xs text-slate-500">{agent.phone}</p>
+                          <p className="truncate font-medium text-slate-900 dark:text-slate-50">{agent.name}</p>
+                          <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">{agent.phone}</p>
                         </div>
                       </div>
                     </Td>
@@ -160,7 +160,7 @@ export default function Referrals() {
                       {isDirect ? (
                         <Badge tone="brand">You</Badge>
                       ) : (
-                        <span className="text-sm text-slate-600">
+                        <span className="text-sm text-slate-600 dark:text-slate-300">
                           {subAgents.find((a) => a.referralCode === agent.uplineCode)?.name ?? '—'}
                         </span>
                       )}
@@ -168,10 +168,10 @@ export default function Referrals() {
                     <Td align="right" className="tabular">
                       {agent.orders}
                     </Td>
-                    <Td align="right" className="tabular text-slate-600">
+                    <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                       {cedis(agent.volume)}
                     </Td>
-                    <Td align="right" className="tabular font-semibold text-brand-700">
+                    <Td align="right" className="tabular font-semibold text-brand-700 dark:text-brand-300">
                       {cedis(agent.earnedForUpline)}
                     </Td>
                     <Td>
@@ -191,7 +191,7 @@ export default function Referrals() {
             with no downline saw a completely blank page with every link gone and
             nothing in the console to explain it. */}
         {subAgents.length > 0 && (
-          <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
+          <p className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
             Joined dates run from {longDate(subAgents[subAgents.length - 1].joinedAt)} to{' '}
             {longDate(subAgents[0].joinedAt)}.
           </p>

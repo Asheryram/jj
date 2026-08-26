@@ -123,7 +123,7 @@ export default function CostPrices() {
       return {
         key,
         label: key === 'Other' ? 'No network' : NETWORK_STYLES[key as Network].label,
-        dot: key === 'Other' ? 'bg-slate-300' : NETWORK_STYLES[key as Network].dot,
+        dot: key === 'Other' ? 'bg-slate-300 dark:bg-slate-600' : NETWORK_STYLES[key as Network].dot,
         items,
         providers,
       }
@@ -284,25 +284,25 @@ export default function CostPrices() {
           <tbody>
             {groups.map((group) => (
               <Fragment key={group.key}>
-                <tr className="bg-slate-50/80">
+                <tr className="bg-slate-50/80 dark:bg-slate-800/80">
                   <td colSpan={8} className="p-0">
                     <button
                       type="button"
                       onClick={() => toggle(group.key)}
                       aria-expanded={!collapsed.has(group.key)}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-100"
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
                     >
                       <ChevronDownIcon
                         className={cn(
-                          'size-4 shrink-0 text-slate-400 transition-transform',
+                          'size-4 shrink-0 text-slate-400 dark:text-slate-500 transition-transform',
                           collapsed.has(group.key) && '-rotate-90',
                         )}
                       />
                       <span className={cn('size-2 shrink-0 rounded-full', group.dot)} />
-                      <span className="text-xs font-bold tracking-wide text-slate-600 uppercase">
+                      <span className="text-xs font-bold tracking-wide text-slate-600 dark:text-slate-300 uppercase">
                         {group.label}
                       </span>
-                      <span className="text-xs font-semibold text-slate-400">
+                      <span className="text-xs font-semibold text-slate-400 dark:text-slate-500">
                         {group.items.length} bundle{group.items.length === 1 ? '' : 's'} ·{' '}
                         {group.items.filter((p) => p.active).length} on sale
                       </span>
@@ -316,8 +316,8 @@ export default function CostPrices() {
                             className={cn(
                               'rounded-lg px-2 py-0.5 text-[11px] font-semibold',
                               provider === 'unassigned'
-                                ? 'bg-amber-50 text-amber-700'
-                                : 'bg-slate-100 text-slate-600',
+                                ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300',
                             )}
                           >
                             {provider === 'unassigned' ? 'no supplier' : provider}
@@ -343,25 +343,25 @@ export default function CostPrices() {
                 netOfFee(product.adminPrice) <= product.supplierCost ||
                 netOfFee(product.standardPrice) <= product.supplierCost
               return (
-                <tr key={product.id} className={cn('hover:bg-slate-50', invalid && 'bg-red-50/50')}>
+                <tr key={product.id} className={cn('hover:bg-slate-50 dark:hover:bg-slate-800', invalid && 'bg-red-50/50')}>
                   <Td>
-                    <p className="font-medium text-slate-900">{product.name}</p>
+                    <p className="font-medium text-slate-900 dark:text-slate-50">{product.name}</p>
                     <div className="mt-1 flex items-center gap-2">
                       <NetworkChip network={product.network} />
-                      <span className="text-xs text-slate-500">{product.validity}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{product.validity}</span>
                     </div>
                   </Td>
-                  <Td align="right" className="tabular text-slate-600">
+                  <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                     {cedis(product.supplierCost)}
                   </Td>
-                  <Td align="right" className="tabular font-bold text-slate-900">
+                  <Td align="right" className="tabular font-bold text-slate-900 dark:text-slate-50">
                     {cedis(product.adminPrice)}
                   </Td>
                   <Td align="right">
                     <span
                       className={cn(
                         'tabular font-semibold',
-                        margin > 0 ? 'text-brand-700' : 'text-red-600',
+                        margin > 0 ? 'text-brand-700 dark:text-brand-300' : 'text-red-600 dark:text-red-400',
                       )}
                       title="After Paystack's cut on the sale"
                     >
@@ -371,16 +371,16 @@ export default function CostPrices() {
                         visible, so a healthy margin is not cluttered with a
                         difference of a pesewa. */}
                     {grossMargin !== margin && (
-                      <p className="text-[11px] text-slate-400">before fee {cedis(grossMargin)}</p>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-500">before fee {cedis(grossMargin)}</p>
                     )}
                   </Td>
-                  <Td align="right" className="tabular text-slate-600">
+                  <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                     {cedis(product.standardPrice)}
                   </Td>
                   <Td align="right">
                     {/* Agent / walk-up. This is what survives a provider price
                         change, so it is worth seeing next to the prices. */}
-                    <span className="tabular text-xs text-slate-500">
+                    <span className="tabular text-xs text-slate-500 dark:text-slate-400">
                       {product.agentMarkupBp === undefined
                         ? '—'
                         : `${formatMarkup(product.agentMarkupBp)} / ${formatMarkup(product.walkupMarkupBp ?? 0)}`}
@@ -519,22 +519,22 @@ function EditPricesModal({
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <NetworkChip network={product.network} />
-          <span className="text-sm text-slate-500">{product.validity}</span>
+          <span className="text-sm text-slate-500 dark:text-slate-400">{product.validity}</span>
         </div>
 
         {/* Read-only, because it is the provider's number and not ours. Shown
             first because it is the floor the three editable tiers sit above. */}
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5">
           <div className="flex items-baseline justify-between gap-3">
-            <p className="text-sm font-semibold text-slate-700">{TIER_LABELS.supplierCost.label}</p>
-            <p className="tabular text-lg font-bold text-slate-900">
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{TIER_LABELS.supplierCost.label}</p>
+            <p className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">
               {cedis(product.supplierCost)}
             </p>
           </div>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             Comes from the provider catalogue, so it always matches what you are actually invoiced.
             Change it under{' '}
-            <strong className="font-semibold text-slate-700">Settings → Provider catalogue</strong>{' '}
+            <strong className="font-semibold text-slate-700 dark:text-slate-200">Settings → Provider catalogue</strong>{' '}
             and it flows down here.
           </p>
         </div>
@@ -547,7 +547,7 @@ function EditPricesModal({
             hint={TIER_LABELS[tier].help}
           >
             <div className="relative">
-              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
+              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500 dark:text-slate-400">
                 GHS
               </span>
               <TextInput
@@ -572,16 +572,16 @@ function EditPricesModal({
             <div
               className={cn(
                 'rounded-xl px-3.5 py-3',
-                agentMargin >= 0 ? 'bg-brand-50' : 'bg-red-50',
+                agentMargin >= 0 ? 'bg-brand-50 dark:bg-brand-900/40' : 'bg-red-50 dark:bg-red-950/40',
               )}
             >
-              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+              <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
                 Margin per agent sale
               </p>
               <p
                 className={cn(
                   'tabular mt-0.5 text-lg font-bold',
-                  agentMargin >= 0 ? 'text-brand-800' : 'text-red-700',
+                  agentMargin >= 0 ? 'text-brand-800 dark:text-brand-300' : 'text-red-700 dark:text-red-400',
                 )}
               >
                 {cedis(agentMargin, { sign: agentMargin >= 0 })}
@@ -590,16 +590,16 @@ function EditPricesModal({
             <div
               className={cn(
                 'rounded-xl px-3.5 py-3',
-                directMargin >= 0 ? 'bg-emerald-50' : 'bg-red-50',
+                directMargin >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/40' : 'bg-red-50 dark:bg-red-950/40',
               )}
             >
-              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+              <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
                 Margin per direct sale
               </p>
               <p
                 className={cn(
                   'tabular mt-0.5 text-lg font-bold',
-                  directMargin >= 0 ? 'text-emerald-700' : 'text-red-700',
+                  directMargin >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400',
                 )}
               >
                 {cedis(directMargin, { sign: directMargin >= 0 })}
@@ -612,7 +612,7 @@ function EditPricesModal({
             which channel he earns more from. Say which one he has chosen, so the
             consequence is on screen rather than worked out afterwards. */}
         {agentMargin !== null && directMargin !== null && (
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
             {directMargin > agentMargin
               ? 'You earn more selling this yourself than through an agent.'
               : directMargin < agentMargin
@@ -715,7 +715,7 @@ function MarkupModal({
   return (
     <Modal open onClose={onClose} title={`Set markup — ${CATEGORY_META[category].label}`}>
       <div className="space-y-4">
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
           Reprices all {count} product{count === 1 ? '' : 's'} in this category from what the
           provider charges you.
         </p>
@@ -733,7 +733,7 @@ function MarkupModal({
                   setError('')
                 }}
               />
-              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500">
+              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500 dark:text-slate-400">
                 %
               </span>
             </div>
@@ -752,25 +752,25 @@ function MarkupModal({
                   setError('')
                 }}
               />
-              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500">
+              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500 dark:text-slate-400">
                 %
               </span>
             </div>
           </Field>
         </div>
 
-        {error && <p className="text-sm font-medium text-red-600">{error}</p>}
+        {error && <p className="text-sm font-medium text-red-600 dark:text-red-400">{error}</p>}
 
         {sample && valid && (
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-sm">
-            <p className="font-medium text-slate-900">{sample.name}</p>
-            <p className="mt-1 text-slate-600">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
+            <p className="font-medium text-slate-900 dark:text-slate-50">{sample.name}</p>
+            <p className="mt-1 text-slate-600 dark:text-slate-300">
               You pay {cedis(sample.supplierCost)} → agents{' '}
-              <strong className="font-semibold text-slate-900">
+              <strong className="font-semibold text-slate-900 dark:text-slate-50">
                 {cedis(priceFromMarkup(sample.supplierCost, Math.round(agentPercent * 100)))}
               </strong>
               , walk-up{' '}
-              <strong className="font-semibold text-slate-900">
+              <strong className="font-semibold text-slate-900 dark:text-slate-50">
                 {cedis(priceFromMarkup(sample.supplierCost, Math.round(walkupPercent * 100)))}
               </strong>
             </p>

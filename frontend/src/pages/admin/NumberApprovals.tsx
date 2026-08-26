@@ -180,7 +180,7 @@ export default function NumberApprovals() {
               {/* When the figures below were last true. The list is only as current
                   as the last check, and saying so beats implying it is live. */}
               {lastChecked && (
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-slate-500 dark:text-slate-400">
                   Checked {dateTime(lastChecked)}
                 </span>
               )}
@@ -205,7 +205,7 @@ export default function NumberApprovals() {
 
           {rows === null ? (
             <div className="py-8 text-center">
-              <Spinner className="mx-auto size-6 text-brand-600" />
+              <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
             </div>
           ) : rows.length === 0 ? (
             <EmptyState
@@ -270,15 +270,15 @@ export default function NumberApprovals() {
                 </thead>
                 <tbody>
                   {rows.map((row) => (
-                    <tr key={row.phone} className="hover:bg-slate-50">
+                    <tr key={row.phone} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                       <Td>
-                        <p className="tabular font-semibold text-slate-900">
+                        <p className="tabular font-semibold text-slate-900 dark:text-slate-50">
                           {prettyPhone(row.phone)}
                         </p>
-                        <p className="mt-0.5 text-xs text-slate-500">{row.networkKey}</p>
+                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{row.networkKey}</p>
                       </Td>
                       <Td>
-                        <p className="text-slate-800">{row.lastProduct ?? '—'}</p>
+                        <p className="text-slate-800 dark:text-slate-100">{row.lastProduct ?? '—'}</p>
                       </Td>
                       <Td align="right">
                         {/* What this number has actually cost. Since the sale is
@@ -293,10 +293,10 @@ export default function NumberApprovals() {
                           {row.ordersHeld}
                         </Badge>
                       </Td>
-                      <Td align="right" className="tabular font-semibold text-slate-900">
+                      <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                         {row.valueHeld > 0 ? cedis(row.valueHeld) : '—'}
                       </Td>
-                      <Td align="right" className="text-xs text-slate-500">
+                      <Td align="right" className="text-xs text-slate-500 dark:text-slate-400">
                         {dateTime(row.waitingSince)}
                       </Td>
                     </tr>

@@ -74,7 +74,7 @@ export default function AgentApplications() {
 
   return (
     <>
-      <Card className="mt-3 border-amber-200">
+      <Card className="mt-3 border-amber-200 dark:border-amber-800">
         <CardHead
           title={
             rows === null
@@ -86,29 +86,29 @@ export default function AgentApplications() {
         <div className="space-y-3 p-4 sm:p-5">
           {rows === null ? (
             <div className="py-6 text-center">
-              <Spinner className="mx-auto size-6 text-brand-600" />
+              <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
             </div>
           ) : (
             rows.map((row) => (
               <div
                 key={row.id}
-                className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 p-4"
+                className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-4"
               >
                 <div className="min-w-0">
-                  <p className="font-semibold text-slate-900">{row.name}</p>
-                  <p className="mt-0.5 text-sm text-slate-600">
+                  <p className="font-semibold text-slate-900 dark:text-slate-50">{row.name}</p>
+                  <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">
                     {row.email} · <span className="tabular">{prettyPhone(row.phone)}</span>
                   </p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-2">
                     <Badge tone="neutral">{row.referralCode}</Badge>
                     {row.referredBy ? (
-                      <span className="text-xs text-slate-600">
+                      <span className="text-xs text-slate-600 dark:text-slate-300">
                         referred by <strong className="font-semibold">{row.referredBy}</strong>
                       </span>
                     ) : (
-                      <span className="text-xs text-slate-500">signed up directly</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">signed up directly</span>
                     )}
-                    <span className="text-xs text-slate-500">{dateTime(row.appliedAt)}</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">{dateTime(row.appliedAt)}</span>
                   </div>
                 </div>
 

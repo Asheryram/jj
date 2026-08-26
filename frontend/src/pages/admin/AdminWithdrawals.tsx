@@ -112,17 +112,17 @@ export default function AdminWithdrawals() {
             </thead>
             <tbody>
               {visible.map((request) => (
-                <tr key={request.id} className="hover:bg-slate-50">
+                <tr key={request.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                   <Td>
-                    <p className="font-medium text-slate-900">{request.agentName}</p>
-                    <p className="tabular mt-0.5 text-xs text-slate-500">{request.id}</p>
+                    <p className="font-medium text-slate-900 dark:text-slate-50">{request.agentName}</p>
+                    <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">{request.id}</p>
                   </Td>
-                  <Td className="text-slate-600">{dateTime(request.requestedAt)}</Td>
+                  <Td className="text-slate-600 dark:text-slate-300">{dateTime(request.requestedAt)}</Td>
                   <Td>
-                    <p className="tabular text-slate-800">{request.agentPhone}</p>
-                    <p className="mt-0.5 text-xs text-slate-500">{request.momoNetwork}</p>
+                    <p className="tabular text-slate-800 dark:text-slate-100">{request.agentPhone}</p>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{request.momoNetwork}</p>
                   </Td>
-                  <Td align="right" className="tabular font-bold text-slate-900">
+                  <Td align="right" className="tabular font-bold text-slate-900 dark:text-slate-50">
                     {cedis(request.amount)}
                   </Td>
                   <Td>
@@ -148,7 +148,7 @@ export default function AdminWithdrawals() {
                         Review
                       </Button>
                     ) : (
-                      <span className="text-xs text-slate-500">Decided</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">Decided</span>
                     )}
                   </Td>
                 </tr>
@@ -165,12 +165,12 @@ export default function AdminWithdrawals() {
       >
         {reviewing && (
           <div className="space-y-4">
-            <div className="rounded-xl bg-slate-50 p-4 text-center">
-              <p className="text-sm text-slate-500">{reviewing.agentName} is requesting</p>
-              <p className="tabular mt-1 text-3xl font-bold text-slate-900">
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-800 p-4 text-center">
+              <p className="text-sm text-slate-500 dark:text-slate-400">{reviewing.agentName} is requesting</p>
+              <p className="tabular mt-1 text-3xl font-bold text-slate-900 dark:text-slate-50">
                 {cedis(reviewing.amount)}
               </p>
-              <p className="mt-1 text-sm text-slate-500">
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                 to {reviewing.momoNetwork} · {reviewing.agentPhone}
               </p>
             </div>

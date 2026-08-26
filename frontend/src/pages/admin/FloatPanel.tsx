@@ -86,15 +86,15 @@ export default function FloatPanel() {
                 className={cn(
                   'tabular text-3xl font-bold',
                   observation.level === 'risk'
-                    ? 'text-red-700'
+                    ? 'text-red-700 dark:text-red-400'
                     : observation.level === 'watch'
-                      ? 'text-amber-700'
-                      : 'text-slate-900',
+                      ? 'text-amber-700 dark:text-amber-400'
+                      : 'text-slate-900 dark:text-slate-50',
                 )}
               >
                 {cedis(observation.balance)}
               </p>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 read {dateTime(observation.observedAt)}
                 {observation.orderRef ? ` · from ${observation.orderRef}` : ''}
               </p>
@@ -123,7 +123,7 @@ export default function FloatPanel() {
             )}
 
             {observation.level === 'ok' && watchAt > 0 && (
-              <p className="flex items-center gap-1.5 text-xs text-emerald-700">
+              <p className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400">
                 <CheckIcon className="size-3.5" />
                 Above your {cedis(watchAt)} warning level.
               </p>
@@ -132,9 +132,9 @@ export default function FloatPanel() {
         )}
 
         {watchAt === 0 && riskAt === 0 && (
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             No warning levels set, so nothing will email you when this runs low.{' '}
-            <Link to="/admin/settings" className="font-semibold text-brand-700 hover:underline">
+            <Link to="/admin/settings" className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
               Set them in Settings
             </Link>
             .

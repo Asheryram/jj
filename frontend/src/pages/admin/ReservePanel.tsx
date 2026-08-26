@@ -60,7 +60,7 @@ export default function ReservePanel() {
       <Card className="mt-3">
         <CardHead title="Money held and money owed" />
         <div className="py-10 text-center">
-          <Spinner className="mx-auto size-6 text-brand-600" />
+          <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
         </div>
       </Card>
     )
@@ -89,7 +89,7 @@ export default function ReservePanel() {
           </Callout>
         )}
 
-        <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+        <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200 dark:border-slate-700">
           <Row
             label="Paystack is holding"
             value={balance}
@@ -123,28 +123,28 @@ export default function ReservePanel() {
         <div
           className={cn(
             'flex items-start gap-3 rounded-xl border p-4',
-            short ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50',
+            short ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40' : 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40',
           )}
         >
           <span
             className={cn(
               'mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full',
-              short ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700',
+              short ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400',
             )}
           >
             {short ? <AlertIcon className="size-5" /> : <CashIcon className="size-5" />}
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-slate-700">Free to spend</p>
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Free to spend</p>
             <p
               className={cn(
                 'tabular text-2xl font-bold',
-                short ? 'text-red-700' : 'text-emerald-800',
+                short ? 'text-red-700 dark:text-red-400' : 'text-emerald-800 dark:text-emerald-300',
               )}
             >
               {available === null ? 'Unknown' : cedis(available)}
             </p>
-            <p className="mt-1 text-sm text-slate-700">
+            <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
               {short ? (
                 <>
                   You owe more than you are holding. Do not top up supplier float or draw profit
@@ -208,14 +208,14 @@ function Row({
 }) {
   return (
     <div className="flex items-start justify-between gap-3 px-4 py-2.5">
-      <dt className="text-sm text-slate-600">
-        <span className={strong ? 'font-semibold text-slate-800' : undefined}>{label}</span>
-        {hint && <span className="mt-0.5 block text-xs text-slate-500">{hint}</span>}
+      <dt className="text-sm text-slate-600 dark:text-slate-300">
+        <span className={strong ? 'font-semibold text-slate-800 dark:text-slate-100' : undefined}>{label}</span>
+        {hint && <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{hint}</span>}
       </dt>
       <dd
         className={cn(
           'tabular shrink-0 text-sm',
-          strong ? 'font-bold text-slate-900' : 'font-semibold text-slate-700',
+          strong ? 'font-bold text-slate-900 dark:text-slate-50' : 'font-semibold text-slate-700 dark:text-slate-200',
         )}
       >
         {value === null ? '—' : `${negative && value > 0 ? '−' : ''}${cedis(value)}`}

@@ -90,10 +90,10 @@ export default function Register() {
 
   return (
     <div className="mx-auto w-full max-w-lg px-4 py-12 sm:py-16">
-      <h1 className="text-2xl font-bold tracking-tight text-slate-900">Create your account</h1>
-      <p className="mt-1.5 text-slate-500">
+      <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">Create your account</h1>
+      <p className="mt-1.5 text-slate-500 dark:text-slate-400">
         Takes under a minute. You do not need an account to buy —{' '}
-        <Link to="/" className="font-semibold text-brand-700 hover:underline">
+        <Link to="/" className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
           the shop is open to everyone
         </Link>
         . Register if you want to sell, or to keep a wallet balance.
@@ -220,27 +220,27 @@ export default function Register() {
             <button
               type="button"
               onClick={() => setAccepted(!accepted)}
-              className="flex w-full items-start gap-3 rounded-xl border border-slate-200 p-3.5 text-left hover:bg-slate-50"
+              className="flex w-full items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800"
             >
               <span
                 className={cn(
                   'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors',
-                  accepted ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300',
+                  accepted ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 dark:border-slate-600',
                 )}
                 role="checkbox"
                 aria-checked={accepted}
               >
                 {accepted && <CheckIcon className="size-3.5" strokeWidth={3} />}
               </span>
-              <span className="text-sm leading-relaxed text-slate-600">
+              <span className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
                 I accept the{' '}
-                <span className="font-semibold text-brand-700 underline">Terms of Service</span> and{' '}
-                <span className="font-semibold text-brand-700 underline">Privacy Policy</span>, and I
+                <span className="font-semibold text-brand-700 dark:text-brand-300 underline">Terms of Service</span> and{' '}
+                <span className="font-semibold text-brand-700 dark:text-brand-300 underline">Privacy Policy</span>, and I
                 consent to my details being used to fulfil my orders.
               </span>
             </button>
             {errors.accepted && (
-              <p className="mt-1.5 flex items-start gap-1.5 text-sm text-red-600">
+              <p className="mt-1.5 flex items-start gap-1.5 text-sm text-red-600 dark:text-red-400">
                 <AlertIcon className="mt-0.5 size-4 shrink-0" />
                 {errors.accepted}
               </p>
@@ -252,9 +252,9 @@ export default function Register() {
           </Button>
         </form>
 
-        <p className="mt-4 text-center text-sm text-slate-500">
+        <p className="mt-4 text-center text-sm text-slate-500 dark:text-slate-400">
           Already registered?{' '}
-          <Link to="/login" className="font-semibold text-brand-700 hover:underline">
+          <Link to="/login" className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
             Log in
           </Link>
         </p>

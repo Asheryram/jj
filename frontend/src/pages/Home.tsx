@@ -54,7 +54,7 @@ export default function Home() {
   return (
     <>
       {/* ── Slim hero. Enough to say what this is, not enough to delay a purchase. ── */}
-      <section className="border-b border-slate-200 bg-brand-700">
+      <section className="border-b border-slate-200 dark:border-slate-700 bg-brand-700">
         <div className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
           <div className="flex flex-wrap items-end justify-between gap-5">
             <div className="max-w-xl">
@@ -96,23 +96,23 @@ export default function Home() {
       <section className="mx-auto max-w-6xl px-4 pb-10">
         <div className="grid gap-3 sm:grid-cols-3">
           <Card className="flex items-start gap-3 p-4">
-            <ShieldIcon className="size-5 shrink-0 text-brand-600" />
-            <p className="text-sm text-slate-600">
-              <strong className="block font-semibold text-slate-900">Payments via Paystack</strong>
+            <ShieldIcon className="size-5 shrink-0 text-brand-600 dark:text-brand-300" />
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              <strong className="block font-semibold text-slate-900 dark:text-slate-50">Payments via Paystack</strong>
               MTN MoMo, Telecel Cash, AirtelTigo Money and cards. We never see your card details.
             </p>
           </Card>
           <Card className="flex items-start gap-3 p-4">
-            <WalletIcon className="size-5 shrink-0 text-brand-600" />
-            <p className="text-sm text-slate-600">
-              <strong className="block font-semibold text-slate-900">Failed order? Refunded.</strong>
+            <WalletIcon className="size-5 shrink-0 text-brand-600 dark:text-brand-300" />
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              <strong className="block font-semibold text-slate-900 dark:text-slate-50">Failed order? Refunded.</strong>
               If a bundle does not reach the number, your money comes straight back.
             </p>
           </Card>
           <Card className="flex items-start gap-3 p-4">
-            <CertificateIcon className="size-5 shrink-0 text-brand-600" />
-            <p className="text-sm text-slate-600">
-              <strong className="block font-semibold text-slate-900">
+            <CertificateIcon className="size-5 shrink-0 text-brand-600 dark:text-brand-300" />
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              <strong className="block font-semibold text-slate-900 dark:text-slate-50">
                 Checkers: independent reseller
               </strong>
               We sell genuine vouchers but are not affiliated with WAEC.
@@ -122,9 +122,9 @@ export default function Home() {
       </section>
 
       {/* ── How it works ── */}
-      <section className="border-y border-slate-200 bg-slate-50">
+      <section className="border-y border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
         <div className="mx-auto max-w-6xl px-4 py-12">
-          <h2 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+          <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:text-2xl">
             Four steps, every time
           </h2>
           <ol className="mt-7 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -138,14 +138,14 @@ export default function Home() {
                 <span className="flex size-9 items-center justify-center rounded-full bg-brand-700 text-sm font-bold text-white">
                   {index + 1}
                 </span>
-                <p className="mt-3 font-semibold text-slate-900">{title}</p>
-                <p className="mt-1 text-sm leading-relaxed text-slate-500">{detail}</p>
+                <p className="mt-3 font-semibold text-slate-900 dark:text-slate-50">{title}</p>
+                <p className="mt-1 text-sm leading-relaxed text-slate-500 dark:text-slate-400">{detail}</p>
               </li>
             ))}
           </ol>
-          <p className="mt-6 text-sm text-slate-500">
+          <p className="mt-6 text-sm text-slate-500 dark:text-slate-400">
             Bought something already?{' '}
-            <Link to={shopPath('/track')} className="font-semibold text-brand-700 hover:underline">
+            <Link to={shopPath('/track')} className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
               Track your order
             </Link>{' '}
             with your reference and phone number.
@@ -158,10 +158,10 @@ export default function Home() {
         <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
           <div>
             <Badge tone="brand">Want to sell?</Badge>
-            <h2 className="mt-3 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+            <h2 className="mt-3 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:text-3xl">
               Become an agent. Set your own prices.
             </h2>
-            <p className="mt-3 leading-relaxed text-slate-600">
+            <p className="mt-3 leading-relaxed text-slate-600 dark:text-slate-300">
               You get your own shop link to share. Customers buy at your prices and pay directly —
               you never handle the money or carry any stock. The difference between your price and
               what you pay is yours the moment the order completes.
@@ -169,12 +169,12 @@ export default function Home() {
             <ul className="mt-6 space-y-3.5">
               {AGENT_BENEFITS.map((benefit) => (
                 <li key={benefit.title} className="flex gap-3.5">
-                  <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300">
                     <benefit.icon className="size-5" />
                   </span>
                   <span>
-                    <span className="block font-semibold text-slate-900">{benefit.title}</span>
-                    <span className="mt-0.5 block text-sm text-slate-500">{benefit.detail}</span>
+                    <span className="block font-semibold text-slate-900 dark:text-slate-50">{benefit.title}</span>
+                    <span className="mt-0.5 block text-sm text-slate-500 dark:text-slate-400">{benefit.detail}</span>
                   </span>
                 </li>
               ))}
@@ -193,13 +193,13 @@ export default function Home() {
 
           {/* Margin illustration, from the real catalogue */}
           <Card className="p-5">
-            <p className="text-sm font-semibold text-slate-500">
+            <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">
               Example — {example ? example.name : 'MTN 5GB'}
             </p>
             <div className="mt-4 space-y-3">
               <Row label="Your agent price" value={cedis(exampleCost)} />
               <Row label="You charge your customer" value={cedis(exampleSale)} strong />
-              <div className="border-t border-dashed border-slate-200 pt-3">
+              <div className="border-t border-dashed border-slate-200 dark:border-slate-700 pt-3">
                 <Row
                   label="Your profit per order"
                   value={cedis(exampleMargin)}
@@ -209,7 +209,7 @@ export default function Home() {
               </div>
             </div>
             <div className="mt-5 space-y-2.5">
-              <div className="rounded-xl bg-brand-50 p-3.5 text-sm text-brand-900">
+              <div className="rounded-xl bg-brand-50 dark:bg-brand-900/40 p-3.5 text-sm text-brand-900 dark:text-brand-200">
                 Sell 20 of these a day and that is{' '}
                 <strong className="font-bold">{cedis(exampleMargin * 20)}</strong> in daily profit.
               </div>
@@ -219,8 +219,8 @@ export default function Home() {
                   'Paid the instant each order completes',
                   'Withdraw to MoMo whenever you like',
                 ].map((line) => (
-                  <li key={line} className="flex items-start gap-2 text-xs text-slate-500">
-                    <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-brand-600" />
+                  <li key={line} className="flex items-start gap-2 text-xs text-slate-500 dark:text-slate-400">
+                    <CheckIcon className="mt-0.5 size-3.5 shrink-0 text-brand-600 dark:text-brand-300" />
                     {line}
                   </li>
                 ))}
@@ -246,12 +246,12 @@ function Row({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-4">
-      <span className="text-sm text-slate-600">{label}</span>
+      <span className="text-sm text-slate-600 dark:text-slate-300">{label}</span>
       <span
         className={cn(
           'tabular',
           strong ? 'text-lg font-bold' : 'font-semibold',
-          tone === 'brand' ? 'text-brand-700' : 'text-slate-900',
+          tone === 'brand' ? 'text-brand-700 dark:text-brand-300' : 'text-slate-900 dark:text-slate-50',
         )}
       >
         {value}

@@ -80,17 +80,17 @@ export default function SetPassword() {
       <Card className="p-6">
         {check === null ? (
           <div className="py-8 text-center">
-            <Spinner className="mx-auto size-6 text-brand-600" />
+            <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
           </div>
         ) : !check.valid ? (
           <>
-            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-red-100 text-red-700">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400">
               <AlertIcon className="size-6" />
             </span>
-            <h1 className="mt-4 text-center text-lg font-bold text-slate-900">
+            <h1 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-slate-50">
               This link no longer works
             </h1>
-            <p className="mt-2 text-center text-sm text-slate-600">
+            <p className="mt-2 text-center text-sm text-slate-600 dark:text-slate-300">
               Setup links expire after 48 hours and stop working once they have been used. Ask
               whoever set up your account for a new one.
             </p>
@@ -102,13 +102,13 @@ export default function SetPassword() {
           </>
         ) : (
           <>
-            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-brand-50 text-brand-700">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300">
               <ShieldIcon className="size-6" />
             </span>
-            <h1 className="mt-4 text-center text-lg font-bold text-slate-900">
+            <h1 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-slate-50">
               {check.purpose === 'reset' ? 'Choose a new password' : 'Choose your password'}
             </h1>
-            <p className="mt-1.5 text-center text-sm text-slate-600">
+            <p className="mt-1.5 text-center text-sm text-slate-600 dark:text-slate-300">
               {check.name ? `Signing in as ${check.name}. ` : ''}
               Nobody else knows this password, including whoever created your account.
             </p>

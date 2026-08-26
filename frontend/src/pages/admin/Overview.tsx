@@ -44,15 +44,15 @@ function MoneyBand({
 }) {
   return (
     <div>
-      <dt className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+      <dt className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
         {dot && <span className={`size-2 rounded-full ${dot}`} />}
         {label}
       </dt>
       <dd
         className={
           strong
-            ? 'tabular mt-1 text-lg font-bold text-brand-700'
-            : 'tabular mt-1 text-lg font-semibold text-slate-900'
+            ? 'tabular mt-1 text-lg font-bold text-brand-700 dark:text-brand-300'
+            : 'tabular mt-1 text-lg font-semibold text-slate-900 dark:text-slate-50'
         }
       >
         {value}
@@ -212,7 +212,7 @@ export default function Overview() {
             action={
               <Link
                 to="/admin/orders"
-                className="flex items-center gap-0.5 text-sm font-semibold text-brand-700 hover:underline"
+                className="flex items-center gap-0.5 text-sm font-semibold text-brand-700 dark:text-brand-300 hover:underline"
               >
                 All orders <ChevronRightIcon className="size-4" />
               </Link>
@@ -245,7 +245,7 @@ export default function Overview() {
             action={
               <Link
                 to="/admin/users"
-                className="flex items-center gap-0.5 text-sm font-semibold text-brand-700 hover:underline"
+                className="flex items-center gap-0.5 text-sm font-semibold text-brand-700 dark:text-brand-300 hover:underline"
               >
                 All users <ChevronRightIcon className="size-4" />
               </Link>
@@ -264,16 +264,16 @@ export default function Overview() {
               .slice(0, 5)
               .map((agent, index) => (
                 <li key={agent.id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
-                  <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-500">
+                  <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400">
                     {index + 1}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium text-slate-900">{agent.name}</p>
-                    <p className="tabular mt-0.5 text-xs text-slate-500">
+                    <p className="truncate font-medium text-slate-900 dark:text-slate-50">{agent.name}</p>
+                    <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                       {agent.orders} orders · {agent.phone}
                     </p>
                   </div>
-                  <p className="tabular shrink-0 font-semibold text-slate-900">
+                  <p className="tabular shrink-0 font-semibold text-slate-900 dark:text-slate-50">
                     {cedis(agent.volume)}
                   </p>
                 </li>
@@ -296,22 +296,22 @@ export default function Overview() {
             </thead>
             <tbody>
               {orders.slice(0, 6).map((order) => (
-                <tr key={order.id} className="hover:bg-slate-50">
+                <tr key={order.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                   <Td>
-                    <p className="font-medium text-slate-900">{order.productName}</p>
+                    <p className="font-medium text-slate-900 dark:text-slate-50">{order.productName}</p>
                     <div className="mt-1 flex items-center gap-2">
                       <NetworkChip network={order.network} />
-                      <span className="text-xs text-slate-500">{dateTime(order.createdAt)}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{dateTime(order.createdAt)}</span>
                     </div>
                   </Td>
-                  <Td className="text-slate-600">
+                  <Td className="text-slate-600 dark:text-slate-300">
                     {order.split.shares.find((s) => s.depth === 0 && s.role === 'agent')?.name ??
                       'Direct'}
                   </Td>
                   <Td>
                     <StatusBadge status={order.status} />
                   </Td>
-                  <Td align="right" className="tabular font-semibold text-slate-900">
+                  <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                     {cedis(order.salePrice)}
                   </Td>
                 </tr>
@@ -325,14 +325,14 @@ export default function Overview() {
       <Card className="mt-3">
         <CardHead title="Where the money goes" subtitle="Last 7 days, from the ledger" />
         <div className="p-4 sm:p-5">
-          <div className="flex h-3 overflow-hidden rounded-full bg-slate-100">
+          <div className="flex h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
             {[
               { label: 'Supplier', value: supplierSpend, className: 'bg-slate-400' },
               { label: 'Paystack fee', value: paystackFee, className: 'bg-amber-400' },
               { label: 'You', value: myMargin, className: 'bg-brand-600' },
               { label: 'Agents', value: agentShare, className: 'bg-brand-300' },
               ...(otherCosts > 0
-                ? [{ label: 'Other', value: otherCosts, className: 'bg-slate-300' }]
+                ? [{ label: 'Other', value: otherCosts, className: 'bg-slate-300 dark:bg-slate-600' }]
                 : []),
             ].map((band) => (
               <div
@@ -353,7 +353,7 @@ export default function Overview() {
             <MoneyBand label="Your margin" value={cedis(myMargin)} dot="bg-brand-600" strong />
             <MoneyBand label="To your agents" value={cedis(agentShare)} dot="bg-brand-300" />
           </dl>
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
             From the ledger, not the price you were quoted at sale time — so it reflects what
             DataHub actually charged and what Paystack actually kept, not the catalogue estimate.
           </p>
@@ -395,11 +395,11 @@ export default function Overview() {
           ].map((service) => (
             <div
               key={service.name}
-              className="flex items-center justify-between rounded-xl border border-slate-200 px-3.5 py-3"
+              className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 px-3.5 py-3"
             >
               <div>
-                <p className="text-sm font-semibold text-slate-900">{service.name}</p>
-                <p className="text-xs text-slate-500">{service.detail}</p>
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">{service.name}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{service.detail}</p>
               </div>
               <Badge tone={service.tone as 'success' | 'warning' | 'danger' | 'neutral'}>
                 {service.label}
@@ -407,7 +407,7 @@ export default function Overview() {
             </div>
           ))}
         </div>
-        <div className="border-t border-slate-100 px-4 py-3 sm:px-5">
+        <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 sm:px-5">
           <Link to="/admin/settings">
             <Button size="sm" variant="outline">
               Integration settings

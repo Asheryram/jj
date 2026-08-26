@@ -147,7 +147,7 @@ export default function AdminOrders() {
           onChange={setFilter}
         />
         <div className="relative sm:w-72">
-          <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-500" />
+          <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-500 dark:text-slate-400" />
           <TextInput
             placeholder="Number, reference, agent or product"
             className="pl-9"
@@ -188,23 +188,23 @@ export default function AdminOrders() {
               {visible.map((order) => {
                 const agentShares = order.split.shares.filter((s) => s.role === 'agent')
                 return (
-                  <tr key={order.id} className="hover:bg-slate-50">
+                  <tr key={order.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                     <Td>
-                      <p className="font-medium text-slate-900">{order.productName}</p>
+                      <p className="font-medium text-slate-900 dark:text-slate-50">{order.productName}</p>
                       <div className="mt-1 flex items-center gap-2">
                         <NetworkChip network={order.network} />
-                        <span className="tabular text-xs text-slate-500">{order.reference}</span>
+                        <span className="tabular text-xs text-slate-500 dark:text-slate-400">{order.reference}</span>
                       </div>
                     </Td>
                     <Td>
                       {agentShares.length > 0 ? (
-                        <p className="text-slate-800">
+                        <p className="text-slate-800 dark:text-slate-100">
                           {agentShares.map((s) => s.name).join(' ← ')}
                         </p>
                       ) : (
                         <Badge tone="neutral">Direct sale</Badge>
                       )}
-                      <p className="mt-0.5 text-xs text-slate-500">
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                         {order.buyer} · {dateTime(order.createdAt)}
                       </p>
                     </Td>
@@ -224,24 +224,24 @@ export default function AdminOrders() {
                         <button
                           type="button"
                           onClick={() => setInspecting(order)}
-                          className="mt-1 block text-xs font-semibold text-brand-700 underline underline-offset-2 hover:text-brand-800"
+                          className="mt-1 block text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2 hover:text-brand-800"
                         >
                           Why?
                         </button>
                       )}
                     </Td>
-                    <Td align="right" className="tabular font-semibold text-slate-900">
+                    <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                       {cedis(order.salePrice)}
                     </Td>
-                    <Td align="right" className="tabular text-slate-500">
+                    <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
                       {cedis(order.split.supplierCost)}
                     </Td>
-                    <Td align="right" className="tabular font-semibold text-brand-700">
+                    <Td align="right" className="tabular font-semibold text-brand-700 dark:text-brand-300">
                       {order.status === 'completed'
                         ? cedis(adminMarginOf(order), { sign: true })
                         : '—'}
                     </Td>
-                    <Td align="right" className="tabular text-slate-600">
+                    <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                       {order.status === 'completed' && agentShares.length > 0
                         ? cedis(agentShares.reduce((n, s) => n + s.margin, 0))
                         : '—'}
@@ -415,13 +415,13 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
   return (
     <Modal open onClose={onClose} title={`Order ${order.reference}`}>
       <div className="space-y-3">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="font-semibold text-slate-900">{order.productName}</p>
-              <p className="tabular mt-0.5 text-sm text-slate-500">{order.recipient}</p>
+              <p className="font-semibold text-slate-900 dark:text-slate-50">{order.productName}</p>
+              <p className="tabular mt-0.5 text-sm text-slate-500 dark:text-slate-400">{order.recipient}</p>
             </div>
-            <p className="tabular text-lg font-bold text-slate-900">{cedis(order.salePrice)}</p>
+            <p className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">{cedis(order.salePrice)}</p>
           </div>
         </div>
 
@@ -433,7 +433,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
 
         {attempts === null && !error && (
           <div className="py-8 text-center">
-            <Spinner className="mx-auto size-6 text-brand-600" />
+            <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
           </div>
         )}
 
@@ -455,10 +455,10 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
               key={attempt.id}
               className={cn(
                 'overflow-hidden rounded-xl border',
-                said.tone === 'success' && 'border-emerald-200 bg-emerald-50/50',
-                said.tone === 'danger' && 'border-red-200 bg-red-50/50',
-                said.tone === 'warning' && 'border-amber-200 bg-amber-50/50',
-                said.tone === 'info' && 'border-slate-200 bg-slate-50/50',
+                said.tone === 'success' && 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/50',
+                said.tone === 'danger' && 'border-red-200 dark:border-red-800 bg-red-50/50',
+                said.tone === 'warning' && 'border-amber-200 dark:border-amber-800 bg-amber-50/50',
+                said.tone === 'info' && 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50',
               )}
             >
               <div className="p-3.5">
@@ -466,10 +466,10 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
                   <span
                     className={cn(
                       'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full',
-                      said.tone === 'success' && 'bg-emerald-100 text-emerald-700',
-                      said.tone === 'danger' && 'bg-red-100 text-red-700',
-                      said.tone === 'warning' && 'bg-amber-100 text-amber-700',
-                      said.tone === 'info' && 'bg-slate-200 text-slate-600',
+                      said.tone === 'success' && 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400',
+                      said.tone === 'danger' && 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400',
+                      said.tone === 'warning' && 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400',
+                      said.tone === 'info' && 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300',
                     )}
                   >
                     {said.tone === 'success' ? (
@@ -481,32 +481,32 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
                     )}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-slate-900">{said.title}</p>
-                    <p className="mt-1 text-sm leading-relaxed text-slate-700">{said.detail}</p>
+                    <p className="font-semibold text-slate-900 dark:text-slate-50">{said.title}</p>
+                    <p className="mt-1 text-sm leading-relaxed text-slate-700 dark:text-slate-200">{said.detail}</p>
                   </div>
                 </div>
 
                 {said.action && (
-                  <div className="mt-2.5 rounded-lg border border-white/80 bg-white/80 p-2.5 text-sm font-medium text-slate-800">
+                  <div className="mt-2.5 rounded-lg border border-white/80 bg-white/80 p-2.5 text-sm font-medium text-slate-800 dark:text-slate-100">
                     {said.action}
                   </div>
                 )}
               </div>
 
-              <div className="border-t border-white/60 bg-white/50 px-3.5 py-2 text-xs text-slate-500">
+              <div className="border-t border-white/60 bg-white/50 px-3.5 py-2 text-xs text-slate-500 dark:text-slate-400">
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span>{dateTime(attempt.createdAt)}</span>
                   {attempts.length > 1 && <span>Try {attempt.attempt}</span>}
                   <span>
                     Bundle cost{' '}
-                    <span className="tabular font-semibold text-slate-700">
+                    <span className="tabular font-semibold text-slate-700 dark:text-slate-200">
                       {cedis(attempt.costPrice)}
                     </span>
                   </span>
                   {attempt.providerCharged != null && (
                     <span>
                       They charged{' '}
-                      <span className="tabular font-semibold text-slate-900">
+                      <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
                         {cedis(attempt.providerCharged)}
                       </span>
                     </span>
@@ -518,7 +518,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
                     first thing anyone has to read. */}
                 {(attempt.providerResponse || attempt.providerReference) && (
                   <details className="mt-1.5">
-                    <summary className="cursor-pointer font-semibold text-slate-500 hover:text-slate-700">
+                    <summary className="cursor-pointer font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
                       Technical details
                     </summary>
                     <div className="mt-1.5 space-y-1">

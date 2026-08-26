@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { api, type PublicBranding } from '../lib/api'
 import { deriveBrand } from '../lib/branding'
+import { useTheme } from '../lib/theme'
 
 /**
  * The shop's identity — its name, mark and colour — applied at runtime.
@@ -31,6 +32,8 @@ const DEFAULT: PublicBranding = {
   shopName: 'JamesDataConsult',
   brandColor: '#0B3B8F',
   ramp: deriveBrand('#0B3B8F')!.ramp,
+  brandColorDark: '#0B3B8F',
+  rampDark: deriveBrand('#0B3B8F')!.ramp,
   logoUrl: null,
   custom: false,
 }
@@ -56,6 +59,7 @@ export function BrandingProvider({
   children: ReactNode
 }) {
   const [branding, setBranding] = useState<PublicBranding>(DEFAULT)
+  const { theme } = useTheme()
 
   useEffect(() => {
     let live = true
@@ -82,22 +86,28 @@ export function BrandingProvider({
 
   useEffect(() => {
     const root = document.documentElement
-    for (const [step, hex] of Object.entries(branding.ramp)) {
+    // Picks the ramp for whichever theme is live, so `bg-brand-700` and friends
+    // resolve to the right colour without needing a `dark:` class anywhere —
+    // the variable itself changes under them. Depends on `theme` as well as
+    // `branding` below, so toggling day/night updates it immediately rather
+    // than waiting for some unrelated re-render to catch up.
+    const active = theme === 'dark' ? branding.rampDark : branding.ramp
+    for (const [step, hex] of Object.entries(active)) {
       root.style.setProperty(`--color-brand-${step}`, hex)
     }
     // The tab title and the browser theme colour are part of the shop's identity
     // too, and the second one is what a phone paints around the page.
     const meta = document.querySelector('meta[name="theme-color"]')
-    if (meta) meta.setAttribute('content', branding.ramp[700])
+    if (meta) meta.setAttribute('content', active[700])
 
     return () => {
       // Cleared rather than left behind: navigating from an agent's shop to the
       // platform's own pages must not keep the agent's colour.
-      for (const step of Object.keys(branding.ramp)) {
+      for (const step of Object.keys(active)) {
         root.style.removeProperty(`--color-brand-${step}`)
       }
     }
-  }, [branding])
+  }, [branding, theme])
 
   return <BrandingContext.Provider value={branding}>{children}</BrandingContext.Provider>
 }

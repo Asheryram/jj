@@ -8,6 +8,13 @@ export interface PublicBranding {
   shopName: string
   brandColor: string
   ramp: BrandRamp
+  /**
+   * The colour and ramp used on a dark background. Equal to `brandColor`/`ramp`
+   * when nobody has chosen a separate one — same colour, applied through
+   * whichever ramp step a dark surface calls for.
+   */
+  brandColorDark: string
+  rampDark: BrandRamp
   /** Where to fetch the logo, or null to use the platform mark. */
   logoUrl: string | null
   /** True when this is an agent's own branding rather than the platform's. */
@@ -98,6 +105,12 @@ export class BrandingService {
     const color = agent?.brandColor ?? platform?.brandColor ?? DEFAULT_COLOR
     const derived = deriveBrand(color) ?? deriveBrand(DEFAULT_COLOR)!
 
+    // Falls all the way back to the light colour, not just to a default — a
+    // shop that has not picked a dark variant still gets a working dark theme,
+    // built from the one colour it does have.
+    const colorDark = agent?.brandColorDark ?? platform?.brandColorDark ?? color
+    const derivedDark = deriveBrand(colorDark) ?? derived
+
     // Only offer a logo URL when there are bytes behind it, so the client never
     // renders a broken image where a mark should be.
     const logoUrl = agent?.logoBytes
@@ -110,6 +123,8 @@ export class BrandingService {
       shopName: agent?.shopName ?? platform?.shopName ?? DEFAULT_NAME,
       brandColor: derived.requested,
       ramp: derived.ramp,
+      brandColorDark: derivedDark.requested,
+      rampDark: derivedDark.ramp,
       logoUrl,
       custom: Boolean(agent?.shopName || agent?.brandColor || agent?.logoBytes),
     }
@@ -154,6 +169,7 @@ export class BrandingService {
         ? {
             shopName: live.shopName,
             brandColor: live.brandColor,
+            brandColorDark: live.brandColorDark,
             hasLogo: Boolean(live.logoBytes),
           }
         : null,
@@ -162,6 +178,7 @@ export class BrandingService {
             id: pending.id,
             shopName: pending.shopName,
             brandColor: pending.brandColor,
+            brandColorDark: pending.brandColorDark,
             hasLogo: Boolean(pending.logoBytes),
             createdAt: pending.createdAt.toISOString(),
           }
@@ -185,7 +202,12 @@ export class BrandingService {
    */
   async submit(
     user: { id: string; name: string; referralCode: string },
-    input: { shopName?: string; brandColor?: string; logo?: { buffer: Buffer } },
+    input: {
+      shopName?: string
+      brandColor?: string
+      brandColorDark?: string
+      logo?: { buffer: Buffer }
+    },
   ) {
     const shopName = input.shopName?.trim()
     if (shopName !== undefined && shopName.length > 0 && shopName.length < 2) {
@@ -198,10 +220,15 @@ export class BrandingService {
     if (input.brandColor && !deriveBrand(input.brandColor)) {
       throw new ValidationError('That is not a colour we recognise. Use a hex value like #0B3B8F.')
     }
+    if (input.brandColorDark && !deriveBrand(input.brandColorDark)) {
+      throw new ValidationError(
+        'That dark-mode colour is not one we recognise. Use a hex value like #0B3B8F.',
+      )
+    }
 
     const logo = input.logo ? this.checkLogo(input.logo.buffer) : null
 
-    if (!shopName && !input.brandColor && !logo) {
+    if (!shopName && !input.brandColor && !input.brandColorDark && !logo) {
       throw new ValidationError('Change at least one thing before sending it for approval.')
     }
 
@@ -219,6 +246,7 @@ export class BrandingService {
         agentCode: user.referralCode,
         shopName: shopName || null,
         brandColor: input.brandColor ?? null,
+        brandColorDark: input.brandColorDark ?? null,
         logoMime: logo?.mime ?? null,
         logoBytes: logo?.bytes ?? null,
       },
@@ -267,6 +295,7 @@ export class BrandingService {
       agentCode: row.agentCode,
       shopName: row.shopName,
       brandColor: row.brandColor,
+      brandColorDark: row.brandColorDark,
       /** Preview URL for the submitted logo — the pending one, not the live one. */
       logoUrl: row.logoBytes ? `/api/admin/branding/requests/${row.id}/logo` : null,
       status: row.status,
@@ -299,6 +328,9 @@ export class BrandingService {
       const changes = {
         ...(request.shopName !== null ? { shopName: request.shopName } : {}),
         ...(request.brandColor !== null ? { brandColor: request.brandColor } : {}),
+        ...(request.brandColorDark !== null
+          ? { brandColorDark: request.brandColorDark }
+          : {}),
         ...(request.logoBytes !== null
           ? { logoMime: request.logoMime, logoBytes: request.logoBytes }
           : {}),
@@ -347,13 +379,23 @@ export class BrandingService {
    *
    * No queue: it is their platform, and there is nobody above them to approve it.
    */
-  async setPlatform(input: { shopName?: string; brandColor?: string; logo?: { buffer: Buffer } }) {
+  async setPlatform(input: {
+    shopName?: string
+    brandColor?: string
+    brandColorDark?: string
+    logo?: { buffer: Buffer }
+  }) {
     const shopName = input.shopName?.trim()
     if (shopName && shopName.length > 40) {
       throw new ValidationError('Keep the name under 40 characters.')
     }
     if (input.brandColor && !deriveBrand(input.brandColor)) {
       throw new ValidationError('That is not a colour we recognise. Use a hex value like #0B3B8F.')
+    }
+    if (input.brandColorDark && !deriveBrand(input.brandColorDark)) {
+      throw new ValidationError(
+        'That dark-mode colour is not one we recognise. Use a hex value like #0B3B8F.',
+      )
     }
 
     const logo = input.logo ? this.checkLogo(input.logo.buffer) : null
@@ -362,6 +404,7 @@ export class BrandingService {
     const changes = {
       ...(shopName !== undefined ? { shopName: shopName || null } : {}),
       ...(input.brandColor ? { brandColor: input.brandColor } : {}),
+      ...(input.brandColorDark ? { brandColorDark: input.brandColorDark } : {}),
       ...(logo ? { logoMime: logo.mime, logoBytes: logo.bytes } : {}),
     }
 

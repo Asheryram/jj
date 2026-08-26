@@ -95,7 +95,7 @@ export default function Catalogue() {
                   'flex shrink-0 items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-semibold transition-colors',
                   active
                     ? 'border-brand-600 bg-brand-700 text-white'
-                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300',
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:border-slate-300',
                 )}
               >
                 <meta.icon className="size-4.5" />
@@ -110,7 +110,7 @@ export default function Catalogue() {
       {/* Network filter (FR-3.2) */}
       {networksInCategory.length > 1 && (
         <div className="mb-5 flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-slate-500">Network</span>
+          <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Network</span>
           <button
             type="button"
             onClick={() => setParam('network', null)}
@@ -118,8 +118,8 @@ export default function Catalogue() {
             className={cn(
               'rounded-full border px-3 py-1 text-sm font-semibold',
               !network
-                ? 'border-slate-800 bg-slate-800 text-white'
-                : 'border-slate-200 bg-white text-slate-600',
+                ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-600 dark:bg-slate-600'
+                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
             )}
           >
             All
@@ -133,8 +133,8 @@ export default function Catalogue() {
               className={cn(
                 'rounded-full border px-3 py-1 text-sm font-semibold',
                 network === n
-                  ? 'border-slate-800 bg-slate-800 text-white'
-                  : 'border-slate-200 bg-white text-slate-600',
+                  ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-600 dark:bg-slate-600'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
               )}
             >
               {n}
@@ -202,30 +202,30 @@ function ProductCard({
       <Link to={shopPath(`/buy/${product.id}`)} className="flex h-full flex-col p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-semibold text-slate-900">{product.name}</p>
-            <p className="mt-0.5 text-sm text-slate-500">{product.validity}</p>
+            <p className="font-semibold text-slate-900 dark:text-slate-50">{product.name}</p>
+            <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{product.validity}</p>
           </div>
           <NetworkChip network={product.network} />
         </div>
 
-        <div className="mt-4 flex items-end justify-between gap-3 border-t border-slate-100 pt-3.5">
+        <div className="mt-4 flex items-end justify-between gap-3 border-t border-slate-100 dark:border-slate-800 pt-3.5">
           <div>
-            <p className="tabular text-xl font-bold tracking-tight text-brand-800">
+            <p className="tabular text-xl font-bold tracking-tight text-brand-800 dark:text-brand-300">
               {cedis(price)}
             </p>
             {agentMargin && (
-              <p className="tabular mt-0.5 text-xs text-slate-500">
+              <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                 you pay {cedis(agentMargin.cost)} ·{' '}
                 <span
                   className={
-                    agentMargin.margin > 0 ? 'font-semibold text-brand-700' : 'text-amber-700'
+                    agentMargin.margin > 0 ? 'font-semibold text-brand-700 dark:text-brand-300' : 'text-amber-700 dark:text-amber-400'
                   }
                 >
                   {agentMargin.margin > 0
                     ? `you keep ${cedis(agentMargin.margin).replace('GHS ', '')}`
                     : 'at cost'}
                 </span>
-                {agentMargin.isDefault && <span className="text-slate-500"> · default</span>}
+                {agentMargin.isDefault && <span className="text-slate-500 dark:text-slate-400"> · default</span>}
               </p>
             )}
           </div>

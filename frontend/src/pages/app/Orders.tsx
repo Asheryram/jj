@@ -95,7 +95,7 @@ export default function Orders() {
           onChange={setFilter}
         />
         <div className="relative sm:w-64">
-          <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-500" />
+          <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-500 dark:text-slate-400" />
           <TextInput
             placeholder="Number, reference or product"
             className="pl-9"
@@ -148,14 +148,14 @@ export default function Orders() {
                 return (
                   <tr
                     key={order.id}
-                    className="cursor-pointer hover:bg-slate-50"
+                    className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800"
                     onClick={() => setSelected(order)}
                   >
                     <Td>
-                      <p className="font-medium text-slate-900">{order.productName}</p>
+                      <p className="font-medium text-slate-900 dark:text-slate-50">{order.productName}</p>
                       <div className="mt-1 flex items-center gap-2">
                         <NetworkChip network={order.network} />
-                        <span className="text-xs text-slate-500">{dateTime(order.createdAt)}</span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">{dateTime(order.createdAt)}</span>
                       </div>
                     </Td>
                     <Td className="tabular">{order.recipient}</Td>
@@ -167,12 +167,12 @@ export default function Orders() {
                         </Badge>
                       )}
                     </Td>
-                    <Td align="right" className="tabular font-semibold text-slate-900">
+                    <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                       {cedis(order.salePrice)}
                     </Td>
                     {isAgent && (
                       <Td align="right">
-                        <span className="tabular font-semibold text-brand-700">
+                        <span className="tabular font-semibold text-brand-700 dark:text-brand-300">
                           {order.status === 'completed' && share
                             ? cedis(share.margin, { sign: true })
                             : '—'}
@@ -184,7 +184,7 @@ export default function Orders() {
                         )}
                       </Td>
                     )}
-                    <Td align="right" className="tabular text-xs text-slate-500">
+                    <Td align="right" className="tabular text-xs text-slate-500 dark:text-slate-400">
                       {order.reference}
                     </Td>
                   </tr>
@@ -218,13 +218,13 @@ function OrderDetail({
         <div className="space-y-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-lg font-bold text-slate-900">{order.productName}</p>
+              <p className="text-lg font-bold text-slate-900 dark:text-slate-50">{order.productName}</p>
               <div className="mt-1.5 flex items-center gap-2">
                 <NetworkChip network={order.network} />
                 <StatusBadge status={order.status} />
               </div>
             </div>
-            <p className="tabular text-xl font-bold text-brand-800">{cedis(order.salePrice)}</p>
+            <p className="tabular text-xl font-bold text-brand-800 dark:text-brand-300">{cedis(order.salePrice)}</p>
           </div>
 
           {order.status === 'failed' && (
@@ -248,7 +248,7 @@ function OrderDetail({
             </div>
           )}
 
-          <dl className="space-y-2.5 border-t border-slate-100 pt-4 text-sm">
+          <dl className="space-y-2.5 border-t border-slate-100 dark:border-slate-800 pt-4 text-sm">
             <Row label="Recipient" value={order.recipient} />
             <Row label="Buyer" value={order.buyer} />
             <Row label="Paid with" value={order.paidWith === 'wallet' ? 'Wallet' : 'Mobile Money'} />
@@ -258,14 +258,14 @@ function OrderDetail({
 
           {/* FR-5.8 — an agent can see exactly where the money went. */}
           {isAgent && (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5">
+              <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
                 How this {cedis(order.salePrice)} split
               </p>
               <ul className="mt-2.5 space-y-1.5 text-sm">
                 <li className="flex items-baseline justify-between gap-3">
-                  <span className="text-slate-600">DataHub GH (supplier)</span>
-                  <span className="tabular font-medium text-slate-700">
+                  <span className="text-slate-600 dark:text-slate-300">DataHub GH (supplier)</span>
+                  <span className="tabular font-medium text-slate-700 dark:text-slate-200">
                     {cedis(order.split.supplierCost)}
                   </span>
                 </li>
@@ -274,14 +274,14 @@ function OrderDetail({
                   .map((entry) => (
                     <li key={entry.userId} className="flex items-baseline justify-between gap-3">
                       <span className="flex min-w-0 items-center gap-1.5">
-                        <span className="truncate text-slate-600">{entry.name}</span>
+                        <span className="truncate text-slate-600 dark:text-slate-300">{entry.name}</span>
                         {entry.userId === session?.id && <Badge tone="brand">you</Badge>}
                       </span>
                       <span
                         className={
                           entry.userId === session?.id
-                            ? 'tabular font-semibold text-brand-700'
-                            : 'tabular font-medium text-slate-700'
+                            ? 'tabular font-semibold text-brand-700 dark:text-brand-300'
+                            : 'tabular font-medium text-slate-700 dark:text-slate-200'
                         }
                       >
                         {cedis(entry.margin, { sign: true })}
@@ -290,7 +290,7 @@ function OrderDetail({
                   ))}
               </ul>
               {share && (
-                <p className="mt-2.5 border-t border-slate-200 pt-2.5 text-xs text-slate-500">
+                <p className="mt-2.5 border-t border-slate-200 dark:border-slate-700 pt-2.5 text-xs text-slate-500 dark:text-slate-400">
                   {share.depth === 0
                     ? 'You sold this directly.'
                     : `Sold ${share.depth} level${share.depth > 1 ? 's' : ''} below you.`}
@@ -318,8 +318,8 @@ function OrderDetail({
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-4">
-      <dt className="text-slate-500">{label}</dt>
-      <dd className="tabular font-medium text-slate-800">{value}</dd>
+      <dt className="text-slate-500 dark:text-slate-400">{label}</dt>
+      <dd className="tabular font-medium text-slate-800 dark:text-slate-100">{value}</dd>
     </div>
   )
 }

@@ -117,18 +117,18 @@ export default function Pricing() {
               const margin = mine - band.floor
               const own = hasOwnPrice(product.id)
               return (
-                <tr key={product.id} className="hover:bg-slate-50">
+                <tr key={product.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                   <Td>
-                    <p className="font-medium text-slate-900">{product.name}</p>
+                    <p className="font-medium text-slate-900 dark:text-slate-50">{product.name}</p>
                     <div className="mt-1">
                       <NetworkChip network={product.network} />
                     </div>
                   </Td>
-                  <Td align="right" className="tabular text-slate-600">
+                  <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                     {cedis(band.floor)}
                   </Td>
                   <Td align="right">
-                    <span className="tabular font-bold text-slate-900">{cedis(mine)}</span>
+                    <span className="tabular font-bold text-slate-900 dark:text-slate-50">{cedis(mine)}</span>
                     {!own && (
                       <Badge tone="neutral" className="ml-1.5">
                         default
@@ -139,7 +139,7 @@ export default function Pricing() {
                     <span
                       className={cn(
                         'tabular font-semibold',
-                        margin > 0 ? 'text-brand-700' : 'text-amber-700',
+                        margin > 0 ? 'text-brand-700 dark:text-brand-300' : 'text-amber-700 dark:text-amber-400',
                       )}
                     >
                       {margin > 0 ? cedis(margin, { sign: true }) : 'at cost'}
@@ -228,19 +228,19 @@ function EditPriceModal({
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <NetworkChip network={product.network} />
-          <span className="text-sm text-slate-500">{product.validity}</span>
+          <span className="text-sm text-slate-500 dark:text-slate-400">{product.validity}</span>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-xl bg-slate-50 px-3.5 py-3">
-            <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">You pay</p>
-            <p className="tabular mt-0.5 font-bold text-slate-900">{cedis(band.floor)}</p>
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-800 px-3.5 py-3">
+            <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">You pay</p>
+            <p className="tabular mt-0.5 font-bold text-slate-900 dark:text-slate-50">{cedis(band.floor)}</p>
           </div>
-          <div className="rounded-xl bg-slate-50 px-3.5 py-3">
-            <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+          <div className="rounded-xl bg-slate-50 dark:bg-slate-800 px-3.5 py-3">
+            <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
               You keep
             </p>
-            <p className="tabular mt-0.5 font-bold text-brand-800">
+            <p className="tabular mt-0.5 font-bold text-brand-800 dark:text-brand-300">
               {margin === null ? '—' : cedis(margin, { sign: margin > 0 })}
             </p>
           </div>
@@ -253,7 +253,7 @@ function EditPriceModal({
           hint={`Anything from ${cedis(band.floor)} upwards — there is no maximum.`}
         >
           <div className="relative">
-            <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
+            <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500 dark:text-slate-400">
               GHS
             </span>
             <TextInput
@@ -271,9 +271,9 @@ function EditPriceModal({
         </Field>
 
         {margin !== null && margin >= 0 && (
-          <div className="flex items-baseline justify-between rounded-xl bg-brand-50 px-3.5 py-3">
-            <span className="text-sm text-brand-900">Your profit per order</span>
-            <span className="tabular text-lg font-bold text-brand-800">
+          <div className="flex items-baseline justify-between rounded-xl bg-brand-50 dark:bg-brand-900/40 px-3.5 py-3">
+            <span className="text-sm text-brand-900 dark:text-brand-200">Your profit per order</span>
+            <span className="tabular text-lg font-bold text-brand-800 dark:text-brand-300">
               {cedis(margin, { sign: true })}
             </span>
           </div>
@@ -306,7 +306,7 @@ function BulkMarkupModal({
   return (
     <Modal open={open} onClose={onClose} title="Apply a markup to every product">
       <div className="space-y-4">
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
           Sets each of your prices to your own cost plus this percentage. Anything that would go
           over James&apos;s retail cap is set to the cap instead. You can still edit individual
           products afterwards.
@@ -322,7 +322,7 @@ function BulkMarkupModal({
                 'tabular rounded-xl border px-4 py-2.5 text-sm font-bold',
                 percent === option
                   ? 'border-brand-600 bg-brand-700 text-white'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-slate-300',
               )}
             >
               +{option}%

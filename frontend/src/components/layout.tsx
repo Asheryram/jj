@@ -5,6 +5,7 @@ import { useBranding } from '../state/branding'
 import { useRegisterPath, useShopPath } from '../lib/shopPath'
 import { cedis, initials } from '../lib/format'
 import { isAdmin } from '../lib/roles'
+import { useTheme } from '../lib/theme'
 import type { Role } from '../data/types'
 import { Badge, Button, Modal, cn } from './ui'
 import { apiAsset } from '../lib/api'
@@ -16,10 +17,12 @@ import {
   HomeIcon,
   LogoutIcon,
   MenuIcon,
+  MoonIcon,
   ReceiptIcon,
   SettingsIcon,
   ShieldIcon,
   StoreIcon,
+  SunIcon,
   TagIcon,
   UsersIcon,
   WalletIcon,
@@ -59,10 +62,10 @@ export function Logo({ compact }: { compact?: boolean }) {
       )}
       {!compact && (
         <span className="leading-tight">
-          <span className="block font-bold tracking-tight text-slate-900">
+          <span className="block font-bold tracking-tight text-slate-900 dark:text-slate-50">
             {branding.shopName}
           </span>
-          <span className="block text-[11px] font-medium text-slate-500">
+          <span className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">
             Data · Airtime · Checkers
           </span>
         </span>
@@ -154,8 +157,8 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   cn(
     'flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors',
     isActive
-      ? 'bg-brand-50 text-brand-800'
-      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+      ? 'bg-brand-50 dark:bg-brand-900/40 text-brand-800 dark:text-brand-300'
+      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-50',
   )
 
 // ─── Shell ──────────────────────────────────────────────────────────────────
@@ -222,13 +225,13 @@ export function AppShell() {
   const overflow = items.slice(4)
 
   return (
-    <div className="min-h-dvh bg-slate-50">
+    <div className="min-h-dvh bg-slate-50 dark:bg-slate-950">
       <SkipLink />
 
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-3 sm:px-4">
           <Logo compact />
-          <span className="hidden font-bold tracking-tight text-slate-900 sm:block">
+          <span className="hidden font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:block">
             {branding.shopName}
           </span>
 
@@ -239,7 +242,7 @@ export function AppShell() {
                    accounts, so the other branch pointed at nothing. */
                 to="/app/earnings"
                 title={session.role === 'agent' ? 'Earnings available' : 'Balance'}
-                className="tabular flex items-center gap-2 rounded-xl border border-brand-100 bg-brand-50 px-3 py-1.5 text-sm font-bold text-brand-800 hover:bg-brand-100"
+                className="tabular flex items-center gap-2 rounded-xl border border-brand-100 dark:border-brand-800 bg-brand-50 dark:bg-brand-900/40 px-3 py-1.5 text-sm font-bold text-brand-800 dark:text-brand-300 hover:bg-brand-100"
               >
                 <WalletIcon className="size-4" />
                 {cedis(balance)}
@@ -250,12 +253,12 @@ export function AppShell() {
             {profiles.length > 1 ? (
               <label className="flex items-center gap-1.5">
                 <span className="sr-only">Switch profile</span>
-                <ShieldIcon className="size-3.5 text-brand-700" />
+                <ShieldIcon className="size-3.5 text-brand-700 dark:text-brand-300" />
                 <select
                   value={session.id}
                   disabled={switching}
                   onChange={(event) => void swap(event.target.value)}
-                  className="rounded-xl border border-brand-100 bg-brand-50 px-2 py-1.5 text-sm font-bold text-brand-800 disabled:opacity-60"
+                  className="rounded-xl border border-brand-100 dark:border-brand-800 bg-brand-50 dark:bg-brand-900/40 px-2 py-1.5 text-sm font-bold text-brand-800 dark:text-brand-300 disabled:opacity-60"
                 >
                   {profiles.map((profile) => (
                     <option key={profile.id} value={profile.id}>
@@ -272,14 +275,15 @@ export function AppShell() {
                 </Badge>
               )
             )}
-            <span className="flex size-9 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-white">
+            <span className="flex size-9 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-white dark:bg-slate-200 dark:text-slate-900">
               {initials(session.name)}
             </span>
+            <ThemeToggle />
             <button
               type="button"
               onClick={logout}
               aria-label="Log out"
-              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+              className="rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200"
             >
               <LogoutIcon className="size-5" />
             </button>
@@ -297,11 +301,11 @@ export function AppShell() {
               </NavLink>
             ))}
           </nav>
-          <div className="mt-5 rounded-xl border border-slate-200 bg-white p-3.5">
-            <p className="text-xs font-semibold text-slate-700">{session.name}</p>
-            <p className="mt-0.5 text-xs text-slate-500">{session.phone}</p>
+          <div className="mt-5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3.5">
+            <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">{session.name}</p>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{session.phone}</p>
             {session.role === 'agent' && (
-              <p className="mt-2 font-mono text-xs text-brand-700">{session.referralCode}</p>
+              <p className="mt-2 font-mono text-xs text-brand-700 dark:text-brand-300">{session.referralCode}</p>
             )}
           </div>
         </aside>
@@ -312,7 +316,7 @@ export function AppShell() {
       </div>
 
       {/* Mobile bottom navigation — four thumb targets plus overflow. */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
         <div className="flex">
           {primary.map((item) => (
             <NavLink
@@ -322,7 +326,7 @@ export function AppShell() {
               className={({ isActive }) =>
                 cn(
                   'flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-semibold',
-                  isActive ? 'text-brand-700' : 'text-slate-500',
+                  isActive ? 'text-brand-700 dark:text-brand-300' : 'text-slate-500 dark:text-slate-400',
                 )
               }
             >
@@ -334,7 +338,7 @@ export function AppShell() {
             <button
               type="button"
               onClick={() => setMoreOpen(true)}
-              className="flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-semibold text-slate-500"
+              className="flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400"
             >
               <MenuIcon className="size-5.5" />
               More
@@ -375,36 +379,52 @@ export function SkipLink() {
   )
 }
 
+/** Switches `data-theme` on `<html>` — see `useTheme` for what that drives. */
+export function ThemeToggle() {
+  const { theme, toggle } = useTheme()
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+      className="rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200"
+    >
+      {theme === 'dark' ? <SunIcon className="size-5" /> : <MoonIcon className="size-5" />}
+    </button>
+  )
+}
+
 export function PublicShell() {
   const { session } = useStore()
   const shopPath = useShopPath()
   const registerPath = useRegisterPath()
 
   return (
-    <div className="min-h-dvh bg-white">
+    <div className="min-h-dvh bg-white dark:bg-slate-950">
       <SkipLink />
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4">
           <Logo />
           <nav className="ml-auto flex items-center gap-2 sm:gap-3">
             <Link
               to={shopPath('/shop')}
-              className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:block"
+              className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 sm:block"
             >
               Buy data
             </Link>
             <Link
               to={shopPath('/checkers')}
-              className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 sm:block"
+              className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 sm:block"
             >
               Result checkers
             </Link>
             <Link
               to={shopPath('/track')}
-              className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 lg:block"
+              className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 lg:block"
             >
               Track order
             </Link>
+            <ThemeToggle />
             {session ? (
               <Link to={isAdmin(session.role) ? '/admin' : '/app'}>
                 <Button size="sm">My dashboard</Button>
@@ -442,11 +462,11 @@ export function PublicFooter() {
   const registerPath = useRegisterPath()
 
   return (
-    <footer className="mt-16 border-t border-slate-200 bg-slate-50">
+    <footer className="mt-16 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950">
       <div className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <Logo />
-          <p className="mt-3 max-w-xs text-sm text-slate-500">
+          <p className="mt-3 max-w-xs text-sm text-slate-500 dark:text-slate-400">
             Data bundles, airtime, voice and SMS bundles, MTN AFA registration and result checkers —
             delivered in seconds.
           </p>
@@ -468,16 +488,16 @@ export function PublicFooter() {
           ]}
         />
         <div>
-          <p className="text-sm font-semibold text-slate-800">Legal</p>
-          <ul className="mt-3 space-y-2 text-sm text-slate-500">
+          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Legal</p>
+          <ul className="mt-3 space-y-2 text-sm text-slate-500 dark:text-slate-400">
             <li>Terms of Service</li>
             <li>Privacy Policy</li>
             <li>Refund Policy</li>
           </ul>
         </div>
       </div>
-      <div className="border-t border-slate-200 px-4 py-5">
-        <div className="mx-auto max-w-6xl space-y-2 text-xs text-slate-500">
+      <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-5">
+        <div className="mx-auto max-w-6xl space-y-2 text-xs text-slate-500 dark:text-slate-400">
           {/* NFR-7.1 */}
           <p>
             JamesDataConsult is an independent reseller. We are not affiliated with, endorsed by, or
@@ -498,11 +518,11 @@ export function PublicFooter() {
 function FooterColumn({ title, links }: { title: string; links: [string, string][] }) {
   return (
     <div>
-      <p className="text-sm font-semibold text-slate-800">{title}</p>
+      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{title}</p>
       <ul className="mt-3 space-y-2 text-sm">
         {links.map(([label, to]) => (
           <li key={label}>
-            <Link to={to} className="text-slate-500 hover:text-brand-700">
+            <Link to={to} className="text-slate-500 dark:text-slate-400 hover:text-brand-700">
               {label}
             </Link>
           </li>
@@ -563,9 +583,9 @@ function VisualToasts({
           key={toast.id}
           className={cn(
             'pointer-events-auto flex gap-2.5 rounded-xl border p-3.5 shadow-lg',
-            toast.tone === 'success' && 'border-emerald-200 bg-emerald-50 text-emerald-900',
-            toast.tone === 'error' && 'border-red-200 bg-red-50 text-red-900',
-            toast.tone === 'info' && 'border-sky-200 bg-sky-50 text-sky-900',
+            toast.tone === 'success' && 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-300',
+            toast.tone === 'error' && 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40 text-red-900 dark:text-red-300',
+            toast.tone === 'info' && 'border-sky-200 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/40 text-sky-900 dark:text-sky-300',
           )}
         >
           <span className="mt-0.5 shrink-0">

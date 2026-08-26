@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-dom'
 import { StoreProvider, useStore } from './state/store'
 import { BrandingProvider } from './state/branding'
+import { ThemeProvider } from './lib/theme'
 import { AppShell, PublicShell, RequireAuth } from './components/layout'
 import RouteMeta from './components/RouteMeta'
 import { Button, Card, EmptyState, Spinner } from './components/ui'
@@ -65,6 +66,7 @@ function ShopTheme({ children }: { children: ReactNode }) {
 
 export default function App() {
   return (
+    <ThemeProvider>
     <StoreProvider>
       <Boot>
         <BrowserRouter>
@@ -159,6 +161,7 @@ export default function App() {
         </BrowserRouter>
       </Boot>
     </StoreProvider>
+    </ThemeProvider>
   )
 }
 

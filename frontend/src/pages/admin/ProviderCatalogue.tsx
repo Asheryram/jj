@@ -146,7 +146,7 @@ export default function ProviderCatalogue() {
 
         {skus === null ? (
           <div className="py-8 text-center">
-            <Spinner className="mx-auto size-6 text-brand-600" />
+            <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
           </div>
         ) : all.length === 0 ? (
           <EmptyState
@@ -178,7 +178,7 @@ export default function ProviderCatalogue() {
                   </Button>
                   <Link
                     to="/admin/prices"
-                    className="text-sm font-semibold text-brand-700 hover:underline"
+                    className="text-sm font-semibold text-brand-700 dark:text-brand-300 hover:underline"
                   >
                     Or price them individually
                   </Link>
@@ -239,14 +239,14 @@ export default function ProviderCatalogue() {
                 {visible.map((sku) => (
                   <tr
                     key={sku.code}
-                    className={cn('hover:bg-slate-50', !sku.available && 'bg-amber-50/60')}
+                    className={cn('hover:bg-slate-50 dark:hover:bg-slate-800', !sku.available && 'bg-amber-50/60')}
                   >
                     <Td>
-                      <p className="font-mono text-xs font-semibold text-slate-700">{sku.code}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">{sku.provider}</p>
+                      <p className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-200">{sku.code}</p>
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{sku.provider}</p>
                     </Td>
                     <Td>
-                      <p className="font-medium text-slate-900">{sku.name}</p>
+                      <p className="font-medium text-slate-900 dark:text-slate-50">{sku.name}</p>
                       <div className="mt-1 flex flex-wrap items-center gap-2">
                         <NetworkChip network={sku.network} />
                         {sku.mappedTo.length === 0 && <Badge tone="warning">not mapped</Badge>}
@@ -259,7 +259,7 @@ export default function ProviderCatalogue() {
                         )}
                       </div>
                     </Td>
-                    <Td align="right" className="tabular font-bold text-slate-900">
+                    <Td align="right" className="tabular font-bold text-slate-900 dark:text-slate-50">
                       {cedis(sku.costPrice)}
                     </Td>
                     <Td align="right">
@@ -367,7 +367,7 @@ function PublishModal({
                   setError('')
                 }}
               />
-              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500">
+              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500 dark:text-slate-400">
                 %
               </span>
             </div>
@@ -386,14 +386,14 @@ function PublishModal({
                   setError('')
                 }}
               />
-              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500">
+              <span className="absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500 dark:text-slate-400">
                 %
               </span>
             </div>
           </Field>
         </div>
 
-        {error && <p className="text-sm font-medium text-red-600">{error}</p>}
+        {error && <p className="text-sm font-medium text-red-600 dark:text-red-400">{error}</p>}
 
         <Callout tone="info" icon={<AlertIcon className="size-4" />}>
           The markup is remembered, so when a supplier changes what something costs these prices move

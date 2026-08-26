@@ -219,7 +219,7 @@ export default function Buy() {
       <button
         type="button"
         onClick={() => (step <= 1 || step === 3 ? navigate(shopPath('/shop')) : setStep(step - 1))}
-        className="mb-4 -ml-1 flex items-center gap-1 rounded-lg px-1 py-1 text-sm font-semibold text-slate-500 hover:text-slate-800"
+        className="mb-4 -ml-1 flex items-center gap-1 rounded-lg px-1 py-1 text-sm font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800"
       >
         <ChevronLeftIcon className="size-4" />
         {step <= 1 || step === 3 ? 'Back to shop' : 'Back'}
@@ -239,17 +239,17 @@ export default function Buy() {
             <meta.icon className="size-5.5" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="font-semibold text-slate-900">{product.name}</p>
+            <p className="font-semibold text-slate-900 dark:text-slate-50">{product.name}</p>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <NetworkChip network={product.network} />
-              <span className="text-sm text-slate-500">{product.validity}</span>
+              <span className="text-sm text-slate-500 dark:text-slate-400">{product.validity}</span>
             </div>
           </div>
-          <p className="tabular shrink-0 text-lg font-bold text-brand-800">{cedis(price)}</p>
+          <p className="tabular shrink-0 text-lg font-bold text-brand-800 dark:text-brand-300">{cedis(price)}</p>
         </div>
         {sellerName && sellerCode && (
-          <p className="mt-3 border-t border-slate-100 pt-3 text-xs text-slate-500">
-            Sold by <strong className="font-semibold text-slate-700">{sellerName}</strong>, an
+          <p className="mt-3 border-t border-slate-100 dark:border-slate-800 pt-3 text-xs text-slate-500 dark:text-slate-400">
+            Sold by <strong className="font-semibold text-slate-700 dark:text-slate-200">{sellerName}</strong>, an
             authorised agent.
           </p>
         )}
@@ -322,7 +322,7 @@ export default function Buy() {
           </Button>
 
           {!session && (
-            <p className="mt-3 text-center text-sm text-slate-500">
+            <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
               No account needed. Pay with Mobile Money and we deliver straight away.
             </p>
           )}
@@ -332,13 +332,13 @@ export default function Buy() {
       {/* ── Step 3: confirm. The highest-stakes screen in the product. ── */}
       {step === 2 && check?.ok && (
         <Card className="mt-3 p-5">
-          <p className="text-sm font-semibold tracking-wide text-slate-500 uppercase">
+          <p className="text-sm font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
             Check this carefully
           </p>
 
-          <div className="mt-3 rounded-xl border-2 border-brand-200 bg-brand-50 p-4 text-center">
-            <p className="text-sm text-brand-900">Sending to</p>
-            <p className="tabular mt-1 text-2xl font-bold tracking-wide text-brand-900">
+          <div className="mt-3 rounded-xl border-2 border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-900/40 p-4 text-center">
+            <p className="text-sm text-brand-900 dark:text-brand-200">Sending to</p>
+            <p className="tabular mt-1 text-2xl font-bold tracking-wide text-brand-900 dark:text-brand-200">
               {prettyPhone(check.phone)}
             </p>
             <div className="mt-2 flex justify-center">
@@ -375,7 +375,7 @@ export default function Buy() {
 
           {/* Where the receipt goes. Defaults to the recipient so most buyers
               never touch this — it keeps the flow inside its step budget. */}
-          <div className="mt-4 border-t border-slate-100 pt-4">
+          <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
             <button
               type="button"
               onClick={() => setOwnNumber(!ownNumber)}
@@ -384,14 +384,14 @@ export default function Buy() {
               <span
                 className={cn(
                   'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors',
-                  ownNumber ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300',
+                  ownNumber ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 dark:border-slate-600',
                 )}
                 role="checkbox"
                 aria-checked={ownNumber}
               >
                 {ownNumber && <CheckIcon className="size-3.5" strokeWidth={3} />}
               </span>
-              <span className="text-sm text-slate-600">Send my receipt to this same number</span>
+              <span className="text-sm text-slate-600 dark:text-slate-300">Send my receipt to this same number</span>
             </button>
 
             {!ownNumber && (
@@ -417,8 +417,8 @@ export default function Buy() {
           </div>
 
           {/* Payment method */}
-          <div className="mt-4 border-t border-slate-100 pt-4">
-            <p className="mb-2 text-sm font-medium text-slate-700">How would you like to pay?</p>
+          <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
+            <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">How would you like to pay?</p>
             <div className="space-y-2">
               {isCustomer && (
                 <PayOption
@@ -454,7 +454,7 @@ export default function Buy() {
                       'rounded-xl border px-3 py-2 text-sm font-semibold',
                       momoNetwork === option
                         ? 'border-brand-600 bg-brand-700 text-white'
-                        : 'border-slate-200 bg-white text-slate-600',
+                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
                     )}
                   >
                     {momoLabel(option)}
@@ -464,7 +464,7 @@ export default function Buy() {
             )}
           </div>
 
-          <dl className="mt-4 space-y-2.5 border-t border-slate-100 pt-4 text-sm">
+          <dl className="mt-4 space-y-2.5 border-t border-slate-100 dark:border-slate-800 pt-4 text-sm">
             <Line label="Product" value={product.name} />
             <Line label="You pay" value={cedis(price)} strong />
             {payWith === 'wallet' && (
@@ -544,40 +544,40 @@ export default function Buy() {
                of it. What they need is that their money is safe, that the bundle
                is coming, and that they are not required to sit and watch. */
             <Card className="mt-3 p-8 text-center" role="status" aria-live="polite">
-              <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+              <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400">
                 <ClockIcon className="size-7" />
               </span>
-              <p className="mt-4 font-semibold text-slate-900">
+              <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">
                 Setting up {prettyPhone(placed.recipient)}
               </p>
-              <p className="mt-1.5 text-sm text-slate-600">
+              <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
                 This is the first bundle sent to this number, so it needs a one-time setup with our
                 delivery partner. It usually finishes within a few hours, and your bundle is sent
                 the moment it does.
               </p>
-              <p className="mt-3 text-sm font-medium text-slate-800">
+              <p className="mt-3 text-sm font-medium text-slate-800 dark:text-slate-100">
                 Your {cedis(placed.salePrice)} is safe. If the setup does not complete, it comes
                 back to you automatically — you do not need to ask.
               </p>
-              <p className="mt-3 text-sm text-slate-500">
+              <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
                 You can close this page. We will text {prettyPhone(placed.buyerPhone)} when it is
                 delivered.
               </p>
-              <p className="tabular mt-4 text-xs text-slate-500">Reference {placed.reference}</p>
+              <p className="tabular mt-4 text-xs text-slate-500 dark:text-slate-400">Reference {placed.reference}</p>
             </Card>
           ) : placed.status === 'processing' || placed.status === 'pending' ? (
             /* The status flips from a provider callback, not from a click, so it
                needs announcing (WCAG 4.1.3). */
             <Card className="mt-3 p-8 text-center" role="status" aria-live="polite">
-              <Spinner className="mx-auto size-9 text-brand-600" />
-              <p className="mt-4 font-semibold text-slate-900">
+              <Spinner className="mx-auto size-9 text-brand-600 dark:text-brand-300" />
+              <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">
                 Sending to {prettyPhone(placed.recipient)}
               </p>
-              <p className="mt-1.5 text-sm text-slate-500">
+              <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
                 {placed.paidWith === 'wallet' ? 'Paid from your wallet.' : 'Payment confirmed.'} We
                 are waiting for the network to confirm delivery — this usually takes a few seconds.
               </p>
-              <p className="tabular mt-4 text-xs text-slate-500">Reference {placed.reference}</p>
+              <p className="tabular mt-4 text-xs text-slate-500 dark:text-slate-400">Reference {placed.reference}</p>
             </Card>
           ) : placed.status === 'completed' ? (
             <Card className="mt-3 overflow-hidden">
@@ -761,24 +761,24 @@ function PayOption({
       disabled={disabled}
       className={cn(
         'flex w-full items-start gap-3 rounded-xl border px-3.5 py-3 text-left transition-colors',
-        selected ? 'border-brand-500 bg-brand-50' : 'border-slate-200 hover:bg-slate-50',
+        selected ? 'border-brand-500 bg-brand-50 dark:bg-brand-900/40' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800',
         disabled && 'cursor-not-allowed opacity-60',
       )}
     >
       <span
         className={cn(
           'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border-2',
-          selected ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300',
+          selected ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 dark:border-slate-600',
         )}
       >
         {selected && <CheckIcon className="size-3" strokeWidth={3} />}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 dark:text-slate-50">
           {icon}
           {title}
         </span>
-        <span className="mt-0.5 block text-sm text-slate-500">{detail}</span>
+        <span className="mt-0.5 block text-sm text-slate-500 dark:text-slate-400">{detail}</span>
       </span>
     </button>
   )
@@ -795,28 +795,28 @@ function SplitBreakdown({
   youId: string
 }) {
   return (
-    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3.5">
-      <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+    <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5">
+      <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
         <TrendUpIcon className="size-3.5" /> How this {cedis(salePrice)} splits
       </p>
       <ul className="mt-2.5 space-y-1.5 text-sm">
         <li className="flex items-baseline justify-between gap-3">
-          <span className="text-slate-600">DataHub GH (supplier)</span>
-          <span className="tabular font-medium text-slate-700">{cedis(split.supplierCost)}</span>
+          <span className="text-slate-600 dark:text-slate-300">DataHub GH (supplier)</span>
+          <span className="tabular font-medium text-slate-700 dark:text-slate-200">{cedis(split.supplierCost)}</span>
         </li>
         {[...split.shares]
           .sort((a, b) => a.depth - b.depth)
           .map((share) => (
             <li key={share.userId} className="flex items-baseline justify-between gap-3">
               <span className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate text-slate-600">{share.name}</span>
+                <span className="truncate text-slate-600 dark:text-slate-300">{share.name}</span>
                 {share.userId === youId && <Badge tone="brand">you</Badge>}
                 {share.role === 'admin' && <Badge tone="neutral">platform</Badge>}
               </span>
               <span
                 className={cn(
                   'tabular font-semibold',
-                  share.userId === youId ? 'text-brand-700' : 'text-slate-700',
+                  share.userId === youId ? 'text-brand-700 dark:text-brand-300' : 'text-slate-700 dark:text-slate-200',
                 )}
               >
                 {cedis(share.margin, { sign: true })}
@@ -841,13 +841,13 @@ function Line({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-4">
-      <dt className="text-slate-500">{label}</dt>
+      <dt className="text-slate-500 dark:text-slate-400">{label}</dt>
       <dd
         className={cn(
           'tabular text-right',
-          strong ? 'font-bold text-slate-900' : 'font-medium text-slate-700',
-          tone === 'danger' && 'font-bold text-red-600',
-          tone === 'brand' && 'font-bold text-brand-700',
+          strong ? 'font-bold text-slate-900 dark:text-slate-50' : 'font-medium text-slate-700 dark:text-slate-200',
+          tone === 'danger' && 'font-bold text-red-600 dark:text-red-400',
+          tone === 'brand' && 'font-bold text-brand-700 dark:text-brand-300',
         )}
       >
         {value}

@@ -864,6 +864,11 @@ model Branding {
   /// storing its output would freeze today's rules into every existing shop.
   brandColor String? @map("brand_color")
 
+  /// The colour used instead, on a dark background. Null means the shop has not
+  /// chosen a separate one, and `brandColor`'s own ramp is reused for both — so
+  /// nobody is forced to pick two colours to get a working dark theme.
+  brandColorDark String? @map("brand_color_dark")
+
   /// The logo, in the database rather than on a disk or in a bucket.
   ///
   /// A shop logo is a few kilobytes, and the alternatives both cost more than
@@ -899,10 +904,11 @@ model BrandingRequest {
   agentName String @map("agent_name")
   agentCode String @map("agent_code")
 
-  shopName   String? @map("shop_name")
-  brandColor String? @map("brand_color")
-  logoMime   String? @map("logo_mime")
-  logoBytes  Bytes?  @map("logo_bytes")
+  shopName       String? @map("shop_name")
+  brandColor     String? @map("brand_color")
+  brandColorDark String? @map("brand_color_dark")
+  logoMime       String? @map("logo_mime")
+  logoBytes      Bytes?  @map("logo_bytes")
 
   status BrandingStatus @default(pending)
   /// Required on a refusal, and kept: the agent is told why, and the record

@@ -58,11 +58,11 @@ export default function Track() {
   return (
     <div className="mx-auto max-w-lg px-4 py-10 sm:py-14">
       <div className="text-center">
-        <span className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">
+        <span className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-brand-50 dark:bg-brand-900/40 text-brand-700 dark:text-brand-300">
           <SearchIcon className="size-6" />
         </span>
-        <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">Track your order</h1>
-        <p className="mx-auto mt-2 max-w-sm text-slate-500">
+        <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">Track your order</h1>
+        <p className="mx-auto mt-2 max-w-sm text-slate-500 dark:text-slate-400">
           Enter the reference from your receipt and the phone number you used. No account needed.
         </p>
       </div>
@@ -119,15 +119,15 @@ export default function Track() {
 
       {result && (
         <Card className="mt-4">
-          <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-5">
+          <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800 p-5">
             <div>
-              <p className="text-lg font-bold text-slate-900">{result.productName}</p>
+              <p className="text-lg font-bold text-slate-900 dark:text-slate-50">{result.productName}</p>
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
                 <NetworkChip network={result.network} />
                 <StatusBadge status={result.status} />
               </div>
             </div>
-            <p className="tabular text-xl font-bold text-brand-800">{cedis(result.salePrice)}</p>
+            <p className="tabular text-xl font-bold text-brand-800 dark:text-brand-300">{cedis(result.salePrice)}</p>
           </div>
 
           <div className="space-y-4 p-5">
@@ -168,9 +168,9 @@ export default function Track() {
         </Card>
       )}
 
-      <p className="mt-6 text-center text-sm text-slate-500">
+      <p className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
         Buy often?{' '}
-        <Link to={registerPath} className="font-semibold text-brand-700 hover:underline">
+        <Link to={registerPath} className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
           Create an account
         </Link>{' '}
         and every order is saved automatically.
@@ -182,8 +182,8 @@ export default function Track() {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-4">
-      <dt className="text-slate-500">{label}</dt>
-      <dd className="tabular font-medium text-slate-800">{value}</dd>
+      <dt className="text-slate-500 dark:text-slate-400">{label}</dt>
+      <dd className="tabular font-medium text-slate-800 dark:text-slate-100">{value}</dd>
     </div>
   )
 }

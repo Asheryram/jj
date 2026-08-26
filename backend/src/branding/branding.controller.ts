@@ -28,6 +28,11 @@ export class SubmitBrandingDto {
   @IsOptional()
   @IsHexColor({ message: 'Use a hex colour like #0B3B8F.' })
   brandColor?: string
+
+  /** Used on a dark background instead of `brandColor`. Optional either way. */
+  @IsOptional()
+  @IsHexColor({ message: 'Use a hex colour like #0B3B8F.' })
+  brandColorDark?: string
 }
 
 export class RejectBrandingDto {
@@ -98,7 +103,12 @@ export class BrandingController {
   ) {
     return this.branding.submit(
       { id: user.id, name: user.name, referralCode: user.referralCode },
-      { shopName: dto.shopName, brandColor: dto.brandColor, logo },
+      {
+        shopName: dto.shopName,
+        brandColor: dto.brandColor,
+        brandColorDark: dto.brandColorDark,
+        logo,
+      },
     )
   }
 }
@@ -122,6 +132,7 @@ export class AdminBrandingController {
     return this.branding.setPlatform({
       shopName: dto.shopName,
       brandColor: dto.brandColor,
+      brandColorDark: dto.brandColorDark,
       logo,
     })
   }

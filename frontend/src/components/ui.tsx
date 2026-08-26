@@ -44,12 +44,17 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
    * The text is deep blue, never white — #FFC107 behind white text fails AA
    * badly (1.9:1), behind brand-900 it passes at 6.4:1.
    */
+  // Self-contained colour blocks: the fill and its required text colour
+  // (see the comment above) don't depend on the page around them, so neither
+  // gets a dark: override.
   cta: 'bg-accent-500 text-brand-900 hover:bg-accent-400 active:bg-accent-600 shadow-sm',
-  secondary: 'bg-brand-50 text-brand-800 hover:bg-brand-100 border border-brand-100',
-  outline: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50',
-  ghost: 'text-slate-600 hover:bg-slate-100',
+  secondary: 'bg-brand-50 dark:bg-brand-900/40 text-brand-800 dark:text-brand-300 hover:bg-brand-100 border border-brand-100 dark:border-brand-800',
+  outline: 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800',
+  ghost: 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800',
   danger: 'bg-red-600 text-white hover:bg-red-700',
-  // For use on top of a brand-coloured surface.
+  // For use on top of a brand-coloured surface, which is the same blue in
+  // both themes — so this stays plain white-on-blue rather than following
+  // the page theme.
   onBrand: 'bg-white text-brand-800 hover:bg-brand-50 shadow-sm',
   onBrandOutline: 'border border-white/30 bg-white/10 text-white hover:bg-white/20',
   whatsapp: 'bg-[#25D366] text-white hover:bg-[#1eb959] shadow-sm',
@@ -117,7 +122,7 @@ export function Spinner({ className }: { className?: string }) {
 // ─── Surfaces ───────────────────────────────────────────────────────────────
 
 const CARD_TONES = {
-  default: 'border-slate-200 bg-white',
+  default: 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900',
   /** Filled Deep Blue, for a figure that should read as the headline on a page. */
   brand: 'border-brand-800 bg-brand-700 text-white',
 } as const
@@ -172,10 +177,10 @@ export function CardHead({
   action?: ReactNode
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-3.5 sm:px-5">
+    <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800 px-4 py-3.5 sm:px-5">
       <div className="min-w-0">
-        <h2 className="truncate font-semibold text-slate-900">{title}</h2>
-        {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
+        <h2 className="truncate font-semibold text-slate-900 dark:text-slate-50">{title}</h2>
+        {subtitle && <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -194,8 +199,8 @@ export function PageHead({
   return (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+        <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:text-2xl">{title}</h1>
+        {subtitle && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -215,13 +220,14 @@ type BadgeTone =
   | 'onBrand'
 
 const BADGE_TONES: Record<BadgeTone, string> = {
-  neutral: 'bg-slate-100 text-slate-700',
-  success: 'bg-emerald-100 text-emerald-800',
-  warning: 'bg-amber-100 text-amber-900',
-  danger: 'bg-red-100 text-red-800',
-  info: 'bg-sky-100 text-sky-800',
-  brand: 'bg-brand-100 text-brand-800',
-  /** Golden Yellow, for offers and highlights. Deep-blue text keeps it legible. */
+  neutral: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200',
+  success: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300',
+  warning: 'bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-300',
+  danger: 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300',
+  info: 'bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300',
+  brand: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-300',
+  // Golden Yellow, self-contained like the `cta` button above — the fill and
+  // its required deep-blue text stay the same in both themes.
   accent: 'bg-accent-500 text-brand-900',
   /** For sitting on top of a filled Deep Blue surface. */
   onBrand: 'bg-white/15 text-white',
@@ -352,7 +358,7 @@ export function Field({
 
   return (
     <div className={cn('space-y-1.5', className)}>
-      <label htmlFor={htmlFor} className="block text-sm font-medium text-slate-700">
+      <label htmlFor={htmlFor} className="block text-sm font-medium text-slate-700 dark:text-slate-200">
         {label}
       </label>
       {/* Passed by context rather than cloned onto the child: the control is
@@ -362,12 +368,12 @@ export function Field({
         {children}
       </FieldContext.Provider>
       {error ? (
-        <p id={errorId} role="alert" className="flex items-start gap-1.5 text-sm text-red-600">
+        <p id={errorId} role="alert" className="flex items-start gap-1.5 text-sm text-red-600 dark:text-red-400">
           <AlertIcon className="mt-0.5 size-4 shrink-0" />
           <span>{error}</span>
         </p>
       ) : hint ? (
-        <p id={hintId} className="text-sm text-slate-500">
+        <p id={hintId} className="text-sm text-slate-500 dark:text-slate-400">
           {hint}
         </p>
       ) : null}
@@ -376,7 +382,7 @@ export function Field({
 }
 
 const CONTROL_BASE =
-  'w-full rounded-xl border bg-white px-3.5 text-[15px] text-slate-900 placeholder:text-slate-500/90 transition-colors focus:outline-none'
+  'w-full rounded-xl border bg-white dark:bg-slate-900 px-3.5 text-[15px] text-slate-900 dark:text-slate-50 placeholder:text-slate-500/90 transition-colors focus:outline-none'
 
 export function TextInput({
   invalid,
@@ -394,7 +400,7 @@ export function TextInput({
         'h-11',
         isInvalid
           ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100'
-          : 'border-slate-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-100',
+          : 'border-slate-300 dark:border-slate-600 focus:border-brand-500 focus:ring-2 focus:ring-brand-100',
         className,
       )}
       {...rest}
@@ -414,7 +420,7 @@ export function Select({
       aria-describedby={rest['aria-describedby'] ?? field.describedBy}
       className={cn(
         CONTROL_BASE,
-        'h-11 appearance-none border-slate-300 pr-9 focus:border-brand-500 focus:ring-2 focus:ring-brand-100',
+        'h-11 appearance-none border-slate-300 dark:border-slate-600 pr-9 focus:border-brand-500 focus:ring-2 focus:ring-brand-100',
         'bg-[url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%2364748b\' stroke-width=\'2\' stroke-linecap=\'round\'%3E%3Cpath d=\'M6 9.5 12 15.5 18 9.5\'/%3E%3C/svg%3E")] bg-[length:18px] bg-[right_0.75rem_center] bg-no-repeat',
         className,
       )}
@@ -446,12 +452,12 @@ export function Toggle({
       onClick={() => onChange(!checked)}
       className={cn(
         'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
-        checked ? 'bg-brand-600' : 'bg-slate-300',
+        checked ? 'bg-brand-600' : 'bg-slate-300 dark:bg-slate-600',
       )}
     >
       <span
         className={cn(
-          'inline-block size-5 rounded-full bg-white shadow transition-transform',
+          'inline-block size-5 rounded-full bg-white dark:bg-slate-200 shadow transition-transform',
           checked ? 'translate-x-5.5' : 'translate-x-0.5',
         )}
       />
@@ -473,7 +479,7 @@ export function Segmented<T extends string>({
   return (
     <div
       className={cn(
-        'inline-flex rounded-xl border border-slate-200 bg-slate-100 p-1',
+        'inline-flex rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-1',
         className,
       )}
     >
@@ -486,8 +492,8 @@ export function Segmented<T extends string>({
           className={cn(
             'rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
             value === option.value
-              ? 'bg-white text-brand-800 shadow-sm'
-              : 'text-slate-600 hover:text-slate-900',
+              ? 'bg-white dark:bg-slate-600 text-brand-800 dark:text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-50',
           )}
         >
           {option.label}
@@ -584,23 +590,23 @@ export function Modal({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative w-full max-w-md rounded-t-2xl bg-white shadow-xl outline-none sm:rounded-2xl"
+        className="relative w-full max-w-md rounded-t-2xl bg-white dark:bg-slate-900 shadow-xl outline-none sm:rounded-2xl"
       >
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3.5">
-          <h2 id={titleId} className="font-semibold text-slate-900">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-4 py-3.5">
+          <h2 id={titleId} className="font-semibold text-slate-900 dark:text-slate-50">
             {title}
           </h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-600"
+            className="-mr-1 rounded-lg p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300"
           >
             <XIcon className="size-5" />
           </button>
         </div>
         <div className="max-h-[70vh] overflow-y-auto px-4 py-4">{children}</div>
-        {footer && <div className="border-t border-slate-100 px-4 py-3.5">{footer}</div>}
+        {footer && <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-3.5">{footer}</div>}
       </div>
     </div>
   )
@@ -622,19 +628,19 @@ export function StatTile({
   tone?: 'neutral' | 'brand' | 'success' | 'warning'
 }) {
   const tones = {
-    neutral: 'text-slate-900',
-    brand: 'text-brand-800',
-    success: 'text-emerald-700',
-    warning: 'text-amber-700',
+    neutral: 'text-slate-900 dark:text-slate-50',
+    brand: 'text-brand-800 dark:text-brand-300',
+    success: 'text-emerald-700 dark:text-emerald-400',
+    warning: 'text-amber-700 dark:text-amber-400',
   }
   return (
     <Card className="p-4">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-medium text-slate-500">{label}</p>
-        {icon && <span className="text-slate-300">{icon}</span>}
+        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
+        {icon && <span className="text-slate-300 dark:text-slate-600">{icon}</span>}
       </div>
       <p className={cn('tabular mt-2 text-2xl font-bold tracking-tight', tones[tone])}>{value}</p>
-      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+      {hint && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
     </Card>
   )
 }
@@ -653,12 +659,12 @@ export function EmptyState({
   return (
     <div className="flex flex-col items-center px-6 py-12 text-center">
       {icon && (
-        <div className="mb-3 flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
+        <div className="mb-3 flex size-12 items-center justify-center rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
           {icon}
         </div>
       )}
-      <p className="font-semibold text-slate-800">{title}</p>
-      {detail && <p className="mt-1 max-w-sm text-sm text-slate-500">{detail}</p>}
+      <p className="font-semibold text-slate-800 dark:text-slate-100">{title}</p>
+      {detail && <p className="mt-1 max-w-sm text-sm text-slate-500 dark:text-slate-400">{detail}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   )
@@ -705,7 +711,7 @@ export function Th({
     <th
       scope="col"
       className={cn(
-        'border-b border-slate-200 bg-slate-50/80 px-4 py-2.5 text-xs font-semibold tracking-wide text-slate-500 uppercase',
+        'border-b border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/80 px-4 py-2.5 text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase',
         align === 'right' && 'text-right',
         align === 'center' && 'text-center',
         align === 'left' && 'text-left',
@@ -729,7 +735,7 @@ export function Td({
   return (
     <td
       className={cn(
-        'border-b border-slate-100 px-4 py-3 text-slate-700',
+        'border-b border-slate-100 dark:border-slate-800 px-4 py-3 text-slate-700 dark:text-slate-200',
         align === 'right' && 'text-right',
         align === 'center' && 'text-center',
         className,
@@ -758,13 +764,13 @@ export function Stepper({ steps, current }: { steps: string[]; current: number }
                 'h-1.5 rounded-full transition-colors',
                 state === 'done' && 'bg-brand-500',
                 state === 'active' && 'bg-brand-700',
-                state === 'todo' && 'bg-slate-200',
+                state === 'todo' && 'bg-slate-200 dark:bg-slate-700',
               )}
             />
             <span
               className={cn(
                 'truncate text-[11px] font-semibold tracking-wide uppercase',
-                state === 'todo' ? 'text-slate-500' : 'text-brand-800',
+                state === 'todo' ? 'text-slate-500 dark:text-slate-400' : 'text-brand-800 dark:text-brand-300',
               )}
             >
               {step}
@@ -796,10 +802,10 @@ export function Callout({
   className?: string
 }) {
   const tones = {
-    info: 'bg-sky-50 border-sky-200 text-sky-900',
-    warning: 'bg-amber-50 border-amber-200 text-amber-900',
-    danger: 'bg-red-50 border-red-200 text-red-900',
-    success: 'bg-emerald-50 border-emerald-200 text-emerald-900',
+    info: 'bg-sky-50 dark:bg-sky-950/40 border-sky-200 dark:border-sky-800 text-sky-900 dark:text-sky-300',
+    warning: 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-300',
+    danger: 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800 text-red-900 dark:text-red-300',
+    success: 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-300',
   }
   return (
     <div className={cn('rounded-xl border px-3.5 py-3 text-sm', tones[tone], className)}>
@@ -839,12 +845,12 @@ export function CopyField({
 
   return (
     <div className="flex items-stretch gap-2">
-      <div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5">
-        {label && <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{label}</p>}
-        <p className={cn('truncate text-slate-800', mono && 'font-mono tracking-wide')}>{value}</p>
+      <div className="min-w-0 flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5">
+        {label && <p className="text-[11px] font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">{label}</p>}
+        <p className={cn('truncate text-slate-800 dark:text-slate-100', mono && 'font-mono tracking-wide')}>{value}</p>
       </div>
       <Button variant="outline" onClick={copy} className="shrink-0" aria-label={`Copy ${label ?? value}`}>
-        {copied ? <CheckIcon className="size-4 text-brand-600" /> : <CopyIcon className="size-4" />}
+        {copied ? <CheckIcon className="size-4 text-brand-600 dark:text-brand-300" /> : <CopyIcon className="size-4" />}
         <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy'}</span>
       </Button>
     </div>

@@ -201,15 +201,15 @@ export default function Reports() {
           </thead>
           <tbody>
             {byCategory.map((row) => (
-              <tr key={row.label} className="hover:bg-slate-50">
-                <Td className="font-medium text-slate-900">{row.label}</Td>
+              <tr key={row.label} className="hover:bg-slate-50 dark:hover:bg-slate-800">
+                <Td className="font-medium text-slate-900 dark:text-slate-50">{row.label}</Td>
                 <Td align="right" className="tabular">
                   {row.orders}
                 </Td>
-                <Td align="right" className="tabular font-semibold text-slate-900">
+                <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                   {cedis(row.value)}
                 </Td>
-                <Td align="right" className="tabular text-slate-500">
+                <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
                   {revenue > 0 ? Math.round((row.value / revenue) * 100) : 0}%
                 </Td>
               </tr>

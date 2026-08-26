@@ -93,13 +93,13 @@ export default function Withdrawals() {
             </thead>
             <tbody>
               {mine.map((request) => (
-                <tr key={request.id} className="hover:bg-slate-50">
-                  <Td className="text-slate-600">{dateTime(request.requestedAt)}</Td>
+                <tr key={request.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
+                  <Td className="text-slate-600 dark:text-slate-300">{dateTime(request.requestedAt)}</Td>
                   <Td>
-                    <p className="tabular font-medium text-slate-900">{request.agentPhone}</p>
-                    <p className="mt-0.5 text-xs text-slate-500">{request.momoNetwork}</p>
+                    <p className="tabular font-medium text-slate-900 dark:text-slate-50">{request.agentPhone}</p>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{request.momoNetwork}</p>
                   </Td>
-                  <Td align="right" className="tabular font-semibold text-slate-900">
+                  <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                     {cedis(request.amount)}
                   </Td>
                   <Td>
@@ -192,14 +192,14 @@ function RequestModal({
   return (
     <Modal open={open} onClose={onClose} title="Request a withdrawal">
       <div className="space-y-4">
-        <div className="flex items-baseline justify-between rounded-xl bg-slate-50 px-3.5 py-3">
-          <span className="text-sm text-slate-600">Available</span>
-          <span className="tabular text-lg font-bold text-slate-900">{cedis(balance)}</span>
+        <div className="flex items-baseline justify-between rounded-xl bg-slate-50 dark:bg-slate-800 px-3.5 py-3">
+          <span className="text-sm text-slate-600 dark:text-slate-300">Available</span>
+          <span className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">{cedis(balance)}</span>
         </div>
 
         <Field label="Amount to withdraw" htmlFor="wd-amount" error={error}>
           <div className="relative">
-            <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
+            <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500 dark:text-slate-400">
               GHS
             </span>
             <TextInput
@@ -220,7 +220,7 @@ function RequestModal({
         <button
           type="button"
           onClick={() => setValue((balance / 100).toFixed(2))}
-          className="text-sm font-semibold text-brand-700 hover:underline"
+          className="text-sm font-semibold text-brand-700 dark:text-brand-300 hover:underline"
         >
           Withdraw everything ({cedis(balance)})
         </button>

@@ -106,36 +106,36 @@ export default function PaymentReturn() {
       <Card className="p-8 text-center" role="status" aria-live="polite">
         {state === 'checking' && (
           <>
-            <Spinner className="mx-auto size-9 text-brand-600" />
-            <p className="mt-4 font-semibold text-slate-900">Checking your payment</p>
-            <p className="mt-1.5 text-sm text-slate-500">This takes a few seconds.</p>
+            <Spinner className="mx-auto size-9 text-brand-600 dark:text-brand-300" />
+            <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">Checking your payment</p>
+            <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">This takes a few seconds.</p>
           </>
         )}
 
         {state === 'pending' && (
           <>
-            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400">
               <ClockIcon className="size-7" />
             </span>
-            <p className="mt-4 font-semibold text-slate-900">Waiting for your payment</p>
-            <p className="mt-1.5 text-sm text-slate-600">
+            <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">Waiting for your payment</p>
+            <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
               If you are paying with Mobile Money, approve the prompt on your phone. This page
               updates on its own.
             </p>
-            <p className="mt-3 text-sm text-slate-500">
+            <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
               Nothing has been taken yet. Your bundle is sent as soon as the payment lands.
             </p>
-            <p className="tabular mt-4 text-xs text-slate-500">Reference {reference}</p>
+            <p className="tabular mt-4 text-xs text-slate-500 dark:text-slate-400">Reference {reference}</p>
           </>
         )}
 
         {state === 'failed' && (
           <>
-            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-red-100 text-red-700">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400">
               <AlertIcon className="size-7" />
             </span>
-            <p className="mt-4 font-semibold text-slate-900">That payment did not go through</p>
-            <p className="mt-1.5 text-sm text-slate-600">
+            <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">That payment did not go through</p>
+            <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
               Nothing was taken from you. You can try again whenever you are ready.
             </p>
             <Link to="/shop" className="mt-4 inline-block">
@@ -146,11 +146,11 @@ export default function PaymentReturn() {
 
         {state === 'missing' && (
           <>
-            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
               <SearchIcon className="size-7" />
             </span>
-            <p className="mt-4 font-semibold text-slate-900">We could not find that payment</p>
-            <p className="mt-1.5 text-sm text-slate-600">
+            <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">We could not find that payment</p>
+            <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
               The link did not carry a reference. If you have paid, use Track order with the
               reference from your SMS.
             </p>
@@ -161,7 +161,7 @@ export default function PaymentReturn() {
         )}
 
         {state !== 'failed' && state !== 'missing' && (
-          <p className="mt-5 text-xs text-slate-400">
+          <p className="mt-5 text-xs text-slate-400 dark:text-slate-500">
             <CheckIcon className="mr-1 inline size-3.5" />
             Payments are handled by Paystack. We never see your PIN or card details.
           </p>

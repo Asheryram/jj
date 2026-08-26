@@ -35,7 +35,7 @@ export function BarChart({
             const pct = (point.revenue / max) * 100
             return (
               <div key={point.day} className="group flex h-full min-w-0 flex-1 flex-col justify-end">
-                <span className="tabular mb-1 text-center text-[10px] font-semibold text-slate-500 opacity-0 transition-opacity group-hover:opacity-100 sm:text-[11px]">
+                <span className="tabular mb-1 text-center text-[10px] font-semibold text-slate-500 dark:text-slate-400 opacity-0 transition-opacity group-hover:opacity-100 sm:text-[11px]">
                   {valueLabel(point.revenue)}
                 </span>
                 <div
@@ -50,7 +50,7 @@ export function BarChart({
           {data.map((point) => (
             <span
               key={point.day}
-              className="min-w-0 flex-1 truncate text-center text-[11px] text-slate-500"
+              className="min-w-0 flex-1 truncate text-center text-[11px] text-slate-500 dark:text-slate-400"
             >
               {point.day}
             </span>
@@ -203,9 +203,9 @@ export function Donut({
                 className="size-2.5 shrink-0 rounded-full"
                 style={{ background: DONUT_COLOURS[index % DONUT_COLOURS.length] }}
               />
-              <span className="truncate text-slate-600">{segment.label}</span>
+              <span className="truncate text-slate-600 dark:text-slate-300">{segment.label}</span>
             </span>
-            <span className="tabular shrink-0 font-semibold text-slate-800">
+            <span className="tabular shrink-0 font-semibold text-slate-800 dark:text-slate-100">
               {total > 0 ? Math.round((segment.value / total) * 100) : 0}%
             </span>
           </li>

@@ -16,6 +16,7 @@ import {
   Segmented,
   Spinner,
   TextInput,
+  Toggle,
 } from '../../components/ui'
 import { AlertIcon, CheckIcon, StoreIcon } from '../../components/icons'
 
@@ -51,6 +52,8 @@ function PlatformBranding() {
   const { pushToast } = useStore()
   const [shopName, setShopName] = useState('')
   const [color, setColor] = useState('')
+  const [darkEnabled, setDarkEnabled] = useState(false)
+  const [colorDark, setColorDark] = useState('')
   const [logo, setLogo] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -62,17 +65,25 @@ function PlatformBranding() {
       .then((b) => {
         setShopName(b.shopName)
         setColor(b.brandColor)
+        // `brandColorDark` always resolves to something — it falls back to the
+        // light colour when nothing was chosen. Equal to it means "unset", not
+        // a genuine, deliberately identical pair — the one case that reads
+        // wrong here changes nothing visually either way.
+        setDarkEnabled(Boolean(b.brandColorDark && b.brandColorDark !== b.brandColor))
+        setColorDark(b.brandColorDark)
         setLoaded(true)
       })
       .catch(() => setLoaded(true))
   }, [])
 
   const derived = deriveBrand(color || '#0B3B8F')
+  const derivedDark = darkEnabled ? deriveBrand(colorDark || '#0B3B8F') : null
 
   const save = async () => {
     const form = new FormData()
     if (shopName.trim()) form.set('shopName', shopName.trim())
     if (derived) form.set('brandColor', derived.requested)
+    if (derivedDark) form.set('brandColorDark', derivedDark.requested)
     if (logo) form.set('logo', logo)
 
     setBusy(true)
@@ -106,7 +117,7 @@ function PlatformBranding() {
       <div className="space-y-4 p-4 sm:p-5">
         {!loaded ? (
           <div className="py-6 text-center">
-            <Spinner className="mx-auto size-6 text-brand-600" />
+            <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
           </div>
         ) : (
           <>
@@ -119,14 +130,14 @@ function PlatformBranding() {
                   onChange={(event) => setShopName(event.target.value)}
                 />
               </Field>
-              <Field label="Brand colour" htmlFor="platform-color">
+              <Field label="Light mode colour" htmlFor="platform-color">
                 <div className="flex items-center gap-2">
                   <input
                     id="platform-color"
                     type="color"
                     value={derived?.requested ?? '#0B3B8F'}
                     onChange={(event) => setColor(event.target.value)}
-                    className="h-11 w-16 cursor-pointer rounded-xl border border-slate-200 bg-white p-1"
+                    className="h-11 w-16 cursor-pointer rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1"
                   />
                   <TextInput
                     value={color}
@@ -138,6 +149,50 @@ function PlatformBranding() {
               </Field>
             </div>
 
+            <div className="flex items-center gap-2.5">
+              <Toggle
+                id="platform-dark-color-toggle"
+                checked={darkEnabled}
+                onChange={setDarkEnabled}
+                label="Use a different colour in dark mode"
+              />
+              {/* A <label> would not activate a button-based Toggle, so this is
+                  a second, plain click target rather than one wired to `for`. */}
+              <button
+                type="button"
+                onClick={() => setDarkEnabled(!darkEnabled)}
+                className="text-sm font-medium text-slate-700 dark:text-slate-200"
+              >
+                Use a different colour in dark mode
+              </button>
+            </div>
+            {!darkEnabled && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Off means the light colour is reused for dark mode too, chosen automatically so
+                text stays readable. Turn this on for full control over both.
+              </p>
+            )}
+
+            {darkEnabled && (
+              <Field label="Dark mode colour" htmlFor="platform-color-dark">
+                <div className="flex items-center gap-2">
+                  <input
+                    id="platform-color-dark"
+                    type="color"
+                    value={derivedDark?.requested ?? '#0B3B8F'}
+                    onChange={(event) => setColorDark(event.target.value)}
+                    className="h-11 w-16 cursor-pointer rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1"
+                  />
+                  <TextInput
+                    value={colorDark}
+                    className="font-mono"
+                    invalid={!derivedDark}
+                    onChange={(event) => setColorDark(event.target.value)}
+                  />
+                </div>
+              </Field>
+            )}
+
             <Field
               label="Logo"
               htmlFor="platform-logo"
@@ -148,27 +203,75 @@ function PlatformBranding() {
                 id="platform-logo"
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
-                className="block w-full rounded-xl border border-slate-200 bg-white p-2.5 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-brand-700"
+                className="block w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-2.5 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-brand-700"
                 onChange={(event) => setLogo(event.target.files?.[0] ?? null)}
               />
             </Field>
 
             {derived && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {Object.entries(derived.ramp).map(([step, hex]) => (
-                  <div
-                    key={step}
-                    className="size-8 rounded-lg border border-slate-200"
-                    style={{ backgroundColor: hex }}
-                    title={`${step} · ${hex}`}
-                  />
-                ))}
-                {derived.adjusted && (
-                  <span className="ml-2 text-xs text-slate-500">
-                    buttons darkened so white text stays readable
-                  </span>
-                )}
-              </div>
+              <>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {Object.entries((darkEnabled && derivedDark ? derivedDark : derived).ramp).map(
+                    ([step, hex]) => (
+                      <div
+                        key={step}
+                        className="size-8 rounded-lg border border-slate-200 dark:border-slate-700"
+                        style={{ backgroundColor: hex }}
+                        title={`${step} · ${hex}`}
+                      />
+                    ),
+                  )}
+                  {derived.adjusted && (
+                    <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+                      buttons darkened so white text stays readable
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
+                    How it will look
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Visitors can read the platform in either theme — a mock of the same bundle card
+                    shown both ways, so you can check this colour works in both before saving.
+                  </p>
+
+                  {/* Two fixed swatches, not `dark:` classes — shows both themes
+                      at once regardless of which one you are viewing this page in. */}
+                  <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+                      <p className="mb-2.5 text-[11px] font-semibold text-slate-400 uppercase">
+                        Light
+                      </p>
+                      <p className="font-semibold text-slate-900">1GB Data</p>
+                      <p className="text-sm text-slate-500">30 days</p>
+                      <div className="mt-3 flex items-end justify-between border-t border-slate-100 pt-3">
+                        <p className="text-xl font-bold tracking-tight" style={{ color: derived.ramp[800] }}>
+                          GHS 4.94
+                        </p>
+                        <Badge tone="accent">Buy</Badge>
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-700 bg-slate-900 p-3.5">
+                      <p className="mb-2.5 text-[11px] font-semibold text-slate-500 uppercase">
+                        Dark{!darkEnabled && ' (auto)'}
+                      </p>
+                      <p className="font-semibold text-slate-50">1GB Data</p>
+                      <p className="text-sm text-slate-400">30 days</p>
+                      <div className="mt-3 flex items-end justify-between border-t border-slate-800 pt-3">
+                        <p
+                          className="text-xl font-bold tracking-tight"
+                          style={{ color: (darkEnabled && derivedDark ? derivedDark : derived).ramp[300] }}
+                        >
+                          GHS 4.94
+                        </p>
+                        <Badge tone="accent">Buy</Badge>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
             )}
 
             <Button loading={busy} onClick={() => void save()}>
@@ -238,7 +341,7 @@ function AgentQueue() {
         <div className="space-y-3 p-4 sm:p-5">
           {rows === null ? (
             <div className="py-8 text-center">
-              <Spinner className="mx-auto size-6 text-brand-600" />
+              <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
             </div>
           ) : rows.length === 0 ? (
             <EmptyState
@@ -254,38 +357,38 @@ function AgentQueue() {
             rows.map((row) => {
               const derived = row.brandColor ? deriveBrand(row.brandColor) : null
               return (
-                <div key={row.id} className="rounded-xl border border-slate-200 p-4">
+                <div key={row.id} className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex items-start gap-3">
                       {row.logoUrl ? (
                         <img
                           src={apiAsset(row.logoUrl) ?? undefined}
                           alt={`${row.agentName}'s proposed logo`}
-                          className="size-14 rounded-xl border border-slate-200 object-contain"
+                          className="size-14 rounded-xl border border-slate-200 dark:border-slate-700 object-contain"
                         />
                       ) : (
-                        <span className="flex size-14 items-center justify-center rounded-xl border border-dashed border-slate-300 text-xs text-slate-400">
+                        <span className="flex size-14 items-center justify-center rounded-xl border border-dashed border-slate-300 dark:border-slate-600 text-xs text-slate-400 dark:text-slate-500">
                           no logo
                         </span>
                       )}
                       <div>
-                        <p className="font-semibold text-slate-900">
-                          {row.shopName ?? <span className="text-slate-400">name unchanged</span>}
+                        <p className="font-semibold text-slate-900 dark:text-slate-50">
+                          {row.shopName ?? <span className="text-slate-400 dark:text-slate-500">name unchanged</span>}
                         </p>
-                        <p className="mt-0.5 text-xs text-slate-500">
+                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                           {row.agentName} · {row.agentCode} · {dateTime(row.createdAt)}
                         </p>
                         {derived && (
                           <div className="mt-1.5 flex items-center gap-1.5">
                             <span
-                              className="size-4 rounded-full border border-slate-200"
+                              className="size-4 rounded-full border border-slate-200 dark:border-slate-700"
                               style={{ backgroundColor: derived.ramp[700] }}
                             />
-                            <span className="font-mono text-xs text-slate-600">
+                            <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
                               {row.brandColor}
                             </span>
                             {derived.adjusted && (
-                              <span className="text-xs text-slate-500">(darkened)</span>
+                              <span className="text-xs text-slate-500 dark:text-slate-400">(darkened)</span>
                             )}
                           </div>
                         )}
@@ -318,7 +421,7 @@ function AgentQueue() {
                     )}
                   </div>
 
-                  {row.note && <p className="mt-2 text-xs text-red-700">Refused: {row.note}</p>}
+                  {row.note && <p className="mt-2 text-xs text-red-700 dark:text-red-400">Refused: {row.note}</p>}
                 </div>
               )
             })

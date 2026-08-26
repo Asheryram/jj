@@ -136,7 +136,7 @@ export default function Refunds() {
 
           {rows === null ? (
             <div className="py-10 text-center">
-              <Spinner className="mx-auto size-6 text-brand-600" />
+              <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
             </div>
           ) : rows.length === 0 ? (
             <EmptyState
@@ -161,19 +161,19 @@ export default function Refunds() {
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.id} className="hover:bg-slate-50">
+                  <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                     <Td>
-                      <p className="font-medium text-slate-900">{row.buyerName}</p>
-                      <p className="tabular mt-0.5 text-xs text-slate-500">
+                      <p className="font-medium text-slate-900 dark:text-slate-50">{row.buyerName}</p>
+                      <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                         {prettyPhone(row.buyerPhone)}
                       </p>
                     </Td>
                     <Td>
-                      <p className="tabular text-sm text-slate-800">{row.orderRef}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">{row.productName}</p>
+                      <p className="tabular text-sm text-slate-800 dark:text-slate-100">{row.orderRef}</p>
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{row.productName}</p>
                     </Td>
                     <Td>
-                      <p className="max-w-xs text-sm text-slate-700">{row.reason}</p>
+                      <p className="max-w-xs text-sm text-slate-700 dark:text-slate-200">{row.reason}</p>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <Badge tone="neutral">
                           {row.method === 'wallet'
@@ -182,23 +182,23 @@ export default function Refunds() {
                               ? `to ${row.momoNetwork ?? 'Mobile Money'}`
                               : 'claim link'}
                         </Badge>
-                        <span className="text-xs text-slate-500">{dateTime(row.createdAt)}</span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">{dateTime(row.createdAt)}</span>
                       </div>
                       {row.note && (
-                        <p className="mt-1 text-xs text-red-700">Refused: {row.note}</p>
+                        <p className="mt-1 text-xs text-red-700 dark:text-red-400">Refused: {row.note}</p>
                       )}
                       {/* A transfer that did not go says so here, rather than
                           looking like an approval that quietly achieved nothing. */}
                       {row.transferNote && (
-                        <p className="mt-1 text-xs text-amber-700">{row.transferNote}</p>
+                        <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{row.transferNote}</p>
                       )}
                       {row.transferStatus === 'success' && (
-                        <p className="mt-1 text-xs text-emerald-700">
+                        <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-400">
                           Confirmed delivered{row.paidAt ? ` · ${dateTime(row.paidAt)}` : ''}
                         </p>
                       )}
                     </Td>
-                    <Td align="right" className="tabular font-bold text-slate-900">
+                    <Td align="right" className="tabular font-bold text-slate-900 dark:text-slate-50">
                       {cedis(row.amount)}
                     </Td>
                     <Td align="right">
@@ -306,11 +306,11 @@ function RefuseModal({
   return (
     <Modal open onClose={onClose} title={`Refuse refund — ${request.orderRef}`}>
       <div className="space-y-4">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-sm">
-          <p className="font-semibold text-slate-900">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
+          <p className="font-semibold text-slate-900 dark:text-slate-50">
             {request.buyerName} · {cedis(request.amount)}
           </p>
-          <p className="mt-1 text-slate-600">{request.reason}</p>
+          <p className="mt-1 text-slate-600 dark:text-slate-300">{request.reason}</p>
         </div>
 
         <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
@@ -379,12 +379,12 @@ function SendRefundModal({
   return (
     <Modal open onClose={onClose} title={`Send ${cedis(request.amount)} back`}>
       <div className="space-y-4">
-        <div className="rounded-xl border-2 border-brand-200 bg-brand-50 p-4 text-center">
-          <p className="text-sm text-brand-900">Sending to</p>
-          <p className="tabular mt-1 text-2xl font-bold tracking-wide text-brand-900">
+        <div className="rounded-xl border-2 border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-900/40 p-4 text-center">
+          <p className="text-sm text-brand-900 dark:text-brand-200">Sending to</p>
+          <p className="tabular mt-1 text-2xl font-bold tracking-wide text-brand-900 dark:text-brand-200">
             {prettyPhone(request.buyerPhone)}
           </p>
-          <p className="mt-1 text-sm text-brand-900">{request.buyerName}</p>
+          <p className="mt-1 text-sm text-brand-900 dark:text-brand-200">{request.buyerName}</p>
         </div>
 
         <Field label="Which Mobile Money network?" htmlFor="refund-network">

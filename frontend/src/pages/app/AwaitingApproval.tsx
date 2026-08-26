@@ -40,40 +40,40 @@ export default function AwaitingApproval() {
         <span
           className={
             refused
-              ? 'mx-auto flex size-14 items-center justify-center rounded-full bg-red-100 text-red-700'
-              : 'mx-auto flex size-14 items-center justify-center rounded-full bg-amber-100 text-amber-700'
+              ? 'mx-auto flex size-14 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400'
+              : 'mx-auto flex size-14 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400'
           }
         >
           {refused ? <AlertIcon className="size-7" /> : <ClockIcon className="size-7" />}
         </span>
 
-        <h1 className="mt-4 text-xl font-bold text-slate-900">
+        <h1 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">
           {refused ? 'Your application was not approved' : 'Your application is being reviewed'}
         </h1>
 
         {refused ? (
           <>
-            <p className="mt-2 text-sm text-slate-600">
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
               {session.statusNote ??
                 `${branding.shopName} did not approve this application. No reason was recorded.`}
             </p>
-            <p className="mt-3 text-sm text-slate-500">
+            <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
               If you think this is a mistake, call {branding.shopName} on 020 987 6543.
             </p>
           </>
         ) : (
           <>
-            <p className="mt-2 text-sm text-slate-600">
+            <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
               Selling under {branding.shopName}'s name means setting the prices their customers pay,
               so a person checks each new agent before switching them on. It usually takes less than
               a day.
             </p>
 
-            <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4 text-left">
-              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+            <div className="mt-5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4 text-left">
+              <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
                 What happens next
               </p>
-              <ul className="mt-2 space-y-1.5 text-sm text-slate-700">
+              <ul className="mt-2 space-y-1.5 text-sm text-slate-700 dark:text-slate-200">
                 <li>· We email {session.email} the moment you are approved.</li>
                 <li>· Your shop link and prices are waiting for you when you sign back in.</li>
                 <li>· Nothing you do now is lost — the account is already yours.</li>

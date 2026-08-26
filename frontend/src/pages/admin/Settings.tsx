@@ -84,7 +84,7 @@ export default function Settings() {
             hint="Stops tiny top-ups that cost more in fees than they are worth."
           >
             <div className="relative">
-              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500">
+              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500 dark:text-slate-400">
                 GHS
               </span>
               <TextInput
@@ -97,7 +97,7 @@ export default function Settings() {
             </div>
           </Field>
         </div>
-        <div className="border-t border-slate-100 px-4 py-3.5 sm:px-5">
+        <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-3.5 sm:px-5">
           <Button onClick={() => pushToast({ tone: 'success', title: 'Order settings saved' })}>
             Save order settings
           </Button>
@@ -130,12 +130,12 @@ export default function Settings() {
           ].map((integration) => (
             <div
               key={integration.field}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 px-3.5 py-3"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 px-3.5 py-3"
             >
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-900">{integration.name}</p>
-                <p className="mt-0.5 font-mono text-xs text-slate-500">{integration.field}</p>
-                <p className="mt-1 text-sm text-slate-500">{integration.note}</p>
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">{integration.name}</p>
+                <p className="mt-0.5 font-mono text-xs text-slate-500 dark:text-slate-400">{integration.field}</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{integration.note}</p>
               </div>
               {integration.state === undefined ? (
                 <Badge tone="neutral">Checking…</Badge>
@@ -212,7 +212,7 @@ export default function Settings() {
             </Callout>
           )}
 
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
             This is an environment setting rather than a button, on purpose: going live spends real
             money on every order, so it should take a deliberate change and a restart — not a click,
             and not something a stolen admin session can do.
@@ -309,7 +309,7 @@ function PaystackFeeSetting() {
         subtitle="What every Mobile Money price is grossed up to cover"
       />
       <div className="space-y-3 px-4 pb-4">
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
           Every price built from a percentage — yours, or an agent's own default markup — is raised
           just enough that after Paystack takes this rate off the top, the margin that was intended
           is what actually lands. Check your Paystack dashboard for their current rate now and then;
@@ -332,7 +332,7 @@ function PaystackFeeSetting() {
               onChange={(event) => setDraft(event.target.value.replace(/[^0-9.]/g, ''))}
               onBlur={() => void save()}
             />
-            <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-400">
+            <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-400 dark:text-slate-500">
               %
             </span>
           </div>
@@ -393,7 +393,7 @@ function FloatThresholds() {
         subtitle="When to email you that DataHub GH is running low"
       />
       <div className="space-y-3 px-4 pb-4">
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
           The float is prepaid, and when it empties every order fails after the customer has already
           paid. DataHub publishes no balance, so it is read from the reply to each order — which
           means a warning is the only advance notice possible.
@@ -427,7 +427,7 @@ function FloatThresholds() {
           </Field>
         </div>
 
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
           You get one email each time the balance falls past a level, not one per order. If it
           climbs back above and falls again, you are told again.
         </p>
@@ -473,9 +473,9 @@ function YourProfiles() {
           {profiles.map((profile) => (
             <li
               key={profile.id}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2"
             >
-              <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <span className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-50">
                 {profile.role === 'superadmin'
                   ? 'Platform'
                   : profile.role === 'admin'
@@ -485,7 +485,7 @@ function YourProfiles() {
                       : 'Customer'}
                 {profile.id === session.id && <Badge tone="brand">Signed in</Badge>}
               </span>
-              <span className="tabular text-xs text-slate-500">{profile.referralCode}</span>
+              <span className="tabular text-xs text-slate-500 dark:text-slate-400">{profile.referralCode}</span>
             </li>
           ))}
         </ul>
@@ -508,7 +508,7 @@ function YourProfiles() {
           )}
         </div>
 
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
           Switch between them from the picker at the top of the page. Each keeps its own earnings and
           shop link; you sign in once, with the password you already have.
         </p>
@@ -589,7 +589,7 @@ function YourDetails() {
           </div>
         </Field>
 
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
           Changing this updates every profile you hold. A withdrawal can still be sent to a different
           number — you choose it when you request one.
         </p>
@@ -643,10 +643,10 @@ function AgentApproval() {
       <CardHead title="New agents" subtitle="Who may start selling, and when" />
       <div className="flex items-start justify-between gap-4 px-4 pb-4">
         <div>
-          <label htmlFor="auto-approve" className="block font-semibold text-slate-900">
+          <label htmlFor="auto-approve" className="block font-semibold text-slate-900 dark:text-slate-50">
             Approve new agents automatically
           </label>
-          <p className="mt-1 text-sm leading-relaxed text-slate-500">
+          <p className="mt-1 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
             On, and anyone who signs up can sell immediately. Off, and every sign-up waits in Agent
             applications until you decide — which is what you want once people you do not recognise
             are finding the form. Either way the account is real and your decision is recorded.

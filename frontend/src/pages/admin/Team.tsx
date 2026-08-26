@@ -127,7 +127,7 @@ export default function Team() {
         <div className="p-4 sm:p-5">
           {rows === null ? (
             <div className="py-8 text-center">
-              <Spinner className="mx-auto size-6 text-brand-600" />
+              <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
             </div>
           ) : (
             <TableWrap caption="Platform accounts">
@@ -141,10 +141,10 @@ export default function Team() {
               </thead>
               <tbody>
                 {rows.map((member) => (
-                  <tr key={member.id} className="hover:bg-slate-50">
+                  <tr key={member.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                     <Td>
-                      <p className="font-medium text-slate-900">{member.name}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">{member.email}</p>
+                      <p className="font-medium text-slate-900 dark:text-slate-50">{member.name}</p>
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{member.email}</p>
                     </Td>
                     <Td>
                       <Badge tone={member.role === 'superadmin' ? 'brand' : 'neutral'}>
@@ -165,7 +165,7 @@ export default function Team() {
                       ) : (
                         <Badge tone="success">active</Badge>
                       )}
-                      <p className="mt-0.5 text-xs text-slate-500">
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                         added {dateTime(member.joinedAt)}
                       </p>
                     </Td>
@@ -294,7 +294,7 @@ function AddAdminModal({
   return (
     <Modal open onClose={onClose} title="Add an admin">
       <div className="space-y-4">
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
           They run the business — prices, orders, refunds, payouts. You will get a one-time link to
           pass on; they choose their own password.
         </p>
@@ -403,7 +403,7 @@ function LinkModal({
 
         <CopyField label="One-time link" value={issued.link} />
 
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
           It works once and expires in{' '}
           {issued.purpose === 'reset' ? 'an hour' : '48 hours'}. If it goes astray, create another
           from the team list — doing so cancels this one.

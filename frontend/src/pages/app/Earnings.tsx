@@ -142,10 +142,10 @@ export default function Earnings() {
           </thead>
           <tbody>
             {visible.map((entry) => (
-              <tr key={entry.id} className="hover:bg-slate-50">
+              <tr key={entry.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                 <Td>
-                  <p className="font-medium text-slate-900">{entry.description}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="font-medium text-slate-900 dark:text-slate-50">{entry.description}</p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                     {dateTime(entry.createdAt)}
                     {entry.depth > 0 && ` · ${entry.depth} level${entry.depth > 1 ? 's' : ''} below you`}
                   </p>
@@ -153,18 +153,18 @@ export default function Earnings() {
                 <Td>
                   <Badge tone={TYPE_META[entry.type].tone}>{TYPE_META[entry.type].label}</Badge>
                 </Td>
-                <Td className="tabular text-xs text-slate-500">{entry.reference}</Td>
+                <Td className="tabular text-xs text-slate-500 dark:text-slate-400">{entry.reference}</Td>
                 <Td align="right">
                   <span
                     className={cn(
                       'tabular font-semibold',
-                      entry.amount > 0 ? 'text-emerald-700' : 'text-slate-800',
+                      entry.amount > 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-800 dark:text-slate-100',
                     )}
                   >
                     {cedis(entry.amount, { sign: true })}
                   </span>
                 </Td>
-                <Td align="right" className="tabular text-slate-600">
+                <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                   {cedis(entry.balanceAfter)}
                 </Td>
               </tr>
@@ -172,7 +172,7 @@ export default function Earnings() {
           </tbody>
         </TableWrap>
         {/* NFR-2.6 */}
-        <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
+        <p className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
           This ledger is append-only. Entries cannot be edited or deleted, by you or by us — a
           correction is always a new entry.
         </p>

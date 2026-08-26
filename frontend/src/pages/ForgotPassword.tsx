@@ -44,15 +44,15 @@ export default function ForgotPassword() {
       <Card className="p-6">
         {sent ? (
           <>
-            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400">
               <CheckIcon className="size-6" />
             </span>
-            <h1 className="mt-4 text-center text-lg font-bold text-slate-900">Check your email</h1>
-            <p className="mt-2 text-center text-sm text-slate-600">
+            <h1 className="mt-4 text-center text-lg font-bold text-slate-900 dark:text-slate-50">Check your email</h1>
+            <p className="mt-2 text-center text-sm text-slate-600 dark:text-slate-300">
               If <strong className="font-semibold">{email.trim()}</strong> has an account here, a
               reset link is on its way to it. The link works once and expires in an hour.
             </p>
-            <p className="mt-3 text-center text-sm text-slate-500">
+            <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
               Nothing has changed yet — your current password keeps working until you use the link.
             </p>
             <Link to="/login" className="mt-5 block">
@@ -63,8 +63,8 @@ export default function ForgotPassword() {
           </>
         ) : (
           <>
-            <h1 className="text-lg font-bold text-slate-900">Forgotten your password?</h1>
-            <p className="mt-1.5 text-sm text-slate-600">
+            <h1 className="text-lg font-bold text-slate-900 dark:text-slate-50">Forgotten your password?</h1>
+            <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
               Tell us the address you sign in with and we will email you a link to choose a new
               password.
             </p>
@@ -94,7 +94,7 @@ export default function ForgotPassword() {
                 Email me a link
               </Button>
 
-              <Link to="/login" className="block text-center text-sm font-semibold text-brand-700">
+              <Link to="/login" className="block text-center text-sm font-semibold text-brand-700 dark:text-brand-300">
                 Back to sign in
               </Link>
             </div>
