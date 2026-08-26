@@ -601,8 +601,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const retailPrice = useCallback(
     (product: Product, code?: string | null) =>
-      retailPriceFor(code === undefined ? sellerCode : code, product, pricingAgents, paystackFeeBp),
-    [pricingAgents, sellerCode, paystackFeeBp],
+      retailPriceFor(code === undefined ? sellerCode : code, product, pricingAgents),
+    [pricingAgents, sellerCode],
   )
 
   const meAsAgent = useMemo(
@@ -621,9 +621,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const myResalePrice = useCallback(
     (product: Product) =>
       meAsAgent
-        ? retailPriceFor(meAsAgent.referralCode, product, pricingAgents, paystackFeeBp)
+        ? retailPriceFor(meAsAgent.referralCode, product, pricingAgents)
         : product.standardPrice,
-    [meAsAgent, pricingAgents, paystackFeeBp],
+    [meAsAgent, pricingAgents],
   )
 
   const hasOwnPrice = useCallback(

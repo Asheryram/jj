@@ -47,10 +47,11 @@ export interface PlatformSettings {
   /**
    * What Paystack keeps on a Mobile Money payment, in basis points.
    *
-   * Used to gross prices up so their charge never erodes the margin that was
-   * actually intended — see `priceFromMarkup` in the pricing domain. Basis
-   * points rather than a whole percent, because Paystack's real rate is not
-   * always a round number and this is meant to track it, not approximate it.
+   * Shown to the buyer as its own line at checkout and added on top of the
+   * listed price — see `checkoutTotal` in the pricing domain — rather than
+   * folded invisibly into it. Basis points rather than a whole percent,
+   * because Paystack's real rate is not always a round number and this is
+   * meant to track it, not approximate it.
    *
    * Defaults to 200 (2%), which is what their Mobile Money transactions have
    * shown so far. `scripts/money-audit.ts` reports the *observed* rate from

@@ -231,48 +231,38 @@ async function solvency() {
   }
   if (feesPaid > 0 && collected > 0) {
     notes.push(
-      `Paystack fees run at ${((feesPaid / collected) * 100).toFixed(2)}% of collections. Any ` +
-        'product whose margin is thinner than that loses money on every Mobile Money sale.',
+      `Paystack fees run at ${((feesPaid / collected) * 100).toFixed(2)}% of collections. Charged ` +
+        'to the buyer as a checkout surcharge, not out of any margin here — see `checkoutTotal`.',
     )
   }
 }
 
 /**
- * 7 — Prices that cannot cover their own costs.
+ * 7 — Prices that cannot cover their own cost.
  *
- * A margin has to clear the supplier's cost AND the payment fee. One that clears
- * only the first is a sale that quietly loses money, and nothing else on any
- * screen would say so.
+ * Paystack's fee no longer comes out of this margin — it is charged to the
+ * buyer as a separate checkout surcharge (`checkoutTotal`) and never touches
+ * what a price has to clear. So the only real question left is the plain one:
+ * does the price beat what the bundle actually costs.
  */
-async function pricesCoverFees() {
-  const feeStats = await prisma.payment.aggregate({
-    where: { status: 'paid', fee: { not: null } },
-    _sum: { fee: true, amount: true },
-  })
-  const collected = feeStats._sum.amount ?? 0
-  // Fall back to 2%, which is what their test transactions charged. An estimate,
-  // and labelled as one, used only until real payments provide a better figure.
-  const feeRate = collected > 0 ? (feeStats._sum.fee ?? 0) / collected : 0.02
-
+async function pricesCoverCost() {
   const products = await prisma.product.findMany({
     where: { active: true },
     select: { name: true, network: true, supplierCost: true, adminPrice: true, standardPrice: true },
   })
 
-  const underwater = products.filter((p) => {
-    const walkupFee = Math.round(p.standardPrice * feeRate)
-    return p.standardPrice - p.supplierCost <= walkupFee
-  })
-
-  console.log(
-    `\n  Fee rate used: ${(feeRate * 100).toFixed(2)}%` +
-      (collected > 0 ? ' (observed)' : ' (estimated — no paid transactions yet)'),
+  const underwater = products.filter(
+    (p) => p.standardPrice <= p.supplierCost || p.adminPrice <= p.supplierCost,
   )
+
   report(
-    'every active price clears its supplier cost plus the payment fee',
+    'every active price clears its supplier cost',
     underwater.length === 0,
     underwater
-      .map((p) => `${p.network} ${p.name}: margin ${ghs(p.standardPrice - p.supplierCost)} vs fee ${ghs(Math.round(p.standardPrice * feeRate))}`)
+      .map(
+        (p) =>
+          `${p.network} ${p.name}: standard ${ghs(p.standardPrice)} / agent ${ghs(p.adminPrice)} vs cost ${ghs(p.supplierCost)}`,
+      )
       .join(' | '),
   )
 }
@@ -386,7 +376,7 @@ async function main() {
   await nothingDeliveredUnpaid()
   await failedOrdersAccountedFor()
   await paymentsAreAttributed()
-  await pricesCoverFees()
+  await pricesCoverCost()
   await ledgerMatchesSources()
   await solvency()
   await profitAndLoss()

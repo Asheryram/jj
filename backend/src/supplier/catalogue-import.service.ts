@@ -59,7 +59,7 @@ export class CatalogueImportService {
     }))
   }
 
-  async importFromProvider(feeBp: number): Promise<ImportResult> {
+  async importFromProvider(): Promise<ImportResult> {
     const results: SourceResult[] = []
 
     for (const source of this.sources) {
@@ -79,7 +79,7 @@ export class CatalogueImportService {
       }
 
       try {
-        results.push(await this.importSource(source, feeBp))
+        results.push(await this.importSource(source))
       } catch (error) {
         this.log.error(`${source.label} sync failed: ${String(error)}`)
         results.push({
@@ -102,7 +102,7 @@ export class CatalogueImportService {
     }
   }
 
-  private async importSource(source: CatalogueSource, feeBp: number): Promise<SourceResult> {
+  private async importSource(source: CatalogueSource): Promise<SourceResult> {
     const skus = await source.fetch()
     const seen = new Set<string>()
     let created = 0
@@ -155,7 +155,7 @@ export class CatalogueImportService {
         created++
       }
 
-      if (await this.upsertProduct(sku, feeBp)) unpriced++
+      if (await this.upsertProduct(sku)) unpriced++
     }
 
     // Anything from this source that it no longer lists. Not deleted — orders
@@ -199,7 +199,7 @@ export class CatalogueImportService {
   }
 
   /** Returns true when the product is new and still needs a price. */
-  private async upsertProduct(sku: SourceSku, feeBp: number): Promise<boolean> {
+  private async upsertProduct(sku: SourceSku): Promise<boolean> {
     const product = await this.prisma.product.findUnique({ where: { id: sku.productId } })
 
     if (!product) {
@@ -244,8 +244,8 @@ export class CatalogueImportService {
         name: sku.name,
         validity: '',
         supplierCost: sku.costPrice,
-        adminPrice: priceFromMarkup(sku.costPrice, product.agentMarkupBp, feeBp),
-        standardPrice: priceFromMarkup(sku.costPrice, product.walkupMarkupBp, feeBp),
+        adminPrice: priceFromMarkup(sku.costPrice, product.agentMarkupBp),
+        standardPrice: priceFromMarkup(sku.costPrice, product.walkupMarkupBp),
       },
     })
     return false

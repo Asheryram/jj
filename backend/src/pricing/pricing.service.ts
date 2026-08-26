@@ -133,14 +133,10 @@ export class PricingService {
     return { product, salePrice: salePriceOf(split, product), split }
   }
 
-  /** What a buyer arriving through `sellerCode` pays. */
+  /** What a buyer arriving through `sellerCode` pays, before the checkout fee. */
   async retailPrice(productId: string, sellerCode: string | null): Promise<number> {
-    const [product, agents, settings] = await Promise.all([
-      this.product(productId),
-      this.agents(),
-      this.settings.all(),
-    ])
-    return retailPriceFor(sellerCode, product, agents, settings.paystackFeeBp)
+    const [product, agents] = await Promise.all([this.product(productId), this.agents()])
+    return retailPriceFor(sellerCode, product, agents)
   }
 
   /**

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { momoLabel, useStore } from '../state/store'
 import { useShopPath } from '../lib/shopPath'
 import { api } from '../lib/api'
+import { checkoutTotal } from '../lib/pricing'
 import { cedis, dateTime } from '../lib/format'
 import { NETWORKS, checkPhone, prettyPhone } from '../lib/networks'
 import type { Network, OrderSplit } from '../data/types'
@@ -57,6 +58,7 @@ export default function Buy() {
     customerBalance,
     retailPrice,
     previewSplit,
+    paystackFeeBp,
     placeOrder,
     watchOrder,
     orders,
@@ -136,6 +138,18 @@ export default function Buy() {
   const price = retailPrice(product, effectiveSeller)
   const split = previewSplit(product, effectiveSeller)
   const myShare = split.shares.find((s) => s.userId === session?.id)
+  /**
+   * What Paystack keeps, passed on as its own line rather than folded into the
+   * listed price — see `checkoutTotal` in the pricing domain.
+   *
+   * Computed straight from `price`, not read off `split.processingFee`: the
+   * split's other numbers come from `product.supplierCost`, which the server
+   * strips for anyone who is not James (FR-6.x) — a guest or customer buying
+   * here would otherwise see every fee line as "—", NaN having travelled
+   * through a subtraction against a field that was never sent to them.
+   */
+  const fee = checkoutTotal(price, paystackFeeBp)
+  const total = fee.total
 
   const check = recipient.trim() ? checkPhone(recipient) : null
 
@@ -157,7 +171,7 @@ export default function Buy() {
   // whole point of NFR-4.2. Derived rather than stored, so it stays correct if
   // the price or the balance changes underneath.
   const payWith = payChoice ?? (canUseWallet ? 'wallet' : 'momo')
-  const walletShort = isCustomer && customerBalance < price
+  const walletShort = isCustomer && customerBalance < total
 
   const confirm = async () => {
     if (!check?.ok) return
@@ -430,7 +444,7 @@ export default function Buy() {
                   detail={
                     canUseWallet
                       ? `Balance ${cedis(customerBalance)} — no Mobile Money prompt.`
-                      : `Balance ${cedis(customerBalance)} — you need ${cedis(price - customerBalance)} more.`
+                      : `Balance ${cedis(customerBalance)} — you need ${cedis(total - customerBalance)} more.`
                   }
                 />
               )}
@@ -466,9 +480,13 @@ export default function Buy() {
 
           <dl className="mt-4 space-y-2.5 border-t border-slate-100 dark:border-slate-800 pt-4 text-sm">
             <Line label="Product" value={product.name} />
-            <Line label="You pay" value={cedis(price)} strong />
+            <Line label="Bundle price" value={cedis(price)} />
+            {/* Shown as its own line rather than folded into the price, so a
+                buyer can see exactly what it costs — see `checkoutTotal`. */}
+            <Line label="Processing fee" value={cedis(fee.processingFee)} />
+            <Line label="You pay" value={cedis(total)} strong />
             {payWith === 'wallet' && (
-              <Line label="Wallet after" value={cedis(customerBalance - price)} />
+              <Line label="Wallet after" value={cedis(customerBalance - total)} />
             )}
             {/* An agent buying through their own shop gets their margin back. */}
             {myShare && myShare.margin > 0 && (
@@ -479,7 +497,7 @@ export default function Buy() {
               />
             )}
             {myShare && myShare.margin > 0 && (
-              <Line label="Your net cost" value={cedis(price - myShare.margin)} strong />
+              <Line label="Your net cost" value={cedis(total - myShare.margin)} strong />
             )}
           </dl>
 
@@ -492,7 +510,7 @@ export default function Buy() {
               title="Your wallet cannot cover this"
               icon={<AlertIcon className="size-4" />}
             >
-              You have {cedis(customerBalance)} and need {cedis(price - customerBalance)} more. Pay
+              You have {cedis(customerBalance)} and need {cedis(total - customerBalance)} more. Pay
               the difference with Mobile Money below.
             </Callout>
           )}
@@ -520,7 +538,7 @@ export default function Buy() {
               disabled={placing || needsSetup || (!ownNumber && !receiptCheck?.ok)}
               onClick={() => void confirm()}
             >
-              Confirm and pay {cedis(price)}
+              Confirm and pay {cedis(total)}
             </Button>
             <Button block variant="ghost" disabled={placing} onClick={() => setStep(1)}>
               Change number
@@ -529,7 +547,7 @@ export default function Buy() {
 
           {/* Transparency for people inside the chain; customers never see this. */}
           {session && session.role !== 'customer' && (
-            <SplitBreakdown split={split} salePrice={price} youId={session.id} />
+            <SplitBreakdown split={split} salePrice={total} youId={session.id} />
           )}
         </Card>
       )}
@@ -823,6 +841,15 @@ function SplitBreakdown({
               </span>
             </li>
           ))}
+        {/* Neither a cost nor anyone's margin — the buyer's own surcharge,
+            passed straight to Paystack. Listed so the shares above still add
+            up to the full amount charged. */}
+        <li className="flex items-baseline justify-between gap-3">
+          <span className="text-slate-600 dark:text-slate-300">Paystack (processing fee)</span>
+          <span className="tabular font-medium text-slate-700 dark:text-slate-200">
+            {cedis(split.processingFee)}
+          </span>
+        </li>
       </ul>
     </div>
   )

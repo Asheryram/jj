@@ -128,6 +128,12 @@ export interface SplitShare {
 export interface OrderSplit {
   supplierCost: Pesewas
   shares: SplitShare[]
+  /**
+   * Paystack's processing fee, passed on to the buyer as its own line rather
+   * than folded invisibly into the price — see `checkoutTotal`. Never anyone's
+   * margin: `salePriceOf` adds it on top of what the seller charged.
+   */
+  processingFee: Pesewas
 }
 
 /**
@@ -143,23 +149,20 @@ export function costForAgent(_agent: PricingAgent, product: PricedProduct): Pese
 
 /**
  * What this agent charges. An explicit price wins; otherwise their default
- * markup is applied to the agent price, through the same fee-aware
- * `priceFromMarkup` James's own prices use — one rule for what a percentage
- * markup means, wherever it is set. Always clamped into the legal band.
+ * markup is applied to the agent price, through the same `priceFromMarkup`
+ * James's own prices use — one rule for what a percentage markup means,
+ * wherever it is set. Always clamped into the legal band.
  *
- * An explicit price is never adjusted for the fee. The agent typed a number;
- * there is no percentage behind it to correct, and their own earning
- * (`salePrice - cost`) is unconditionally credited by the split regardless of
- * what Paystack keeps — see `splitFor`.
+ * Not fee-adjusted, on either branch: the price an agent sets is exactly what
+ * they mean to charge. Paystack's cut is added on top of the final sale price
+ * as its own visible line at checkout (`checkoutTotal`) rather than folded in
+ * here, so nothing about what the seller charges — typed or from a markup —
+ * has to account for it.
  */
-export function resalePriceFor(
-  agent: PricingAgent,
-  product: PricedProduct,
-  feeBp: BasisPoints = 0,
-): Pesewas {
+export function resalePriceFor(agent: PricingAgent, product: PricedProduct): Pesewas {
   const cost = costForAgent(agent, product)
   const explicit = agent.prices?.find((p) => p.productId === product.id)?.resalePrice
-  const raw = explicit ?? priceFromMarkup(cost, agent.markupPercent * 100, feeBp)
+  const raw = explicit ?? priceFromMarkup(cost, agent.markupPercent * 100)
   return floorAtCost(raw, cost)
 }
 
@@ -187,19 +190,19 @@ export function retailPriceFor(
   sellerCode: string | null,
   product: PricedProduct,
   agents: PricingAgent[],
-  feeBp: BasisPoints = 0,
 ): Pesewas {
   if (!sellerCode) return product.standardPrice
   const seller = agents.find((a) => a.referralCode === sellerCode)
   if (!seller) return product.standardPrice
-  return resalePriceFor(seller, product, feeBp)
+  return resalePriceFor(seller, product)
 }
 
 /**
- * Divide one sale between the supplier, James, and the seller.
+ * Divide one sale between the supplier, James, and the seller — plus, on top,
+ * what the buyer pays to cover Paystack's cut.
  *
- * Guarantees `salePrice === supplierCost + sum(shares.margin)`, which is the
- * invariant the order transaction asserts before it commits.
+ * Guarantees `salePrice === supplierCost + sum(shares.margin) + processingFee`,
+ * which is the invariant the order transaction asserts before it commits.
  *
  * A referrer used to take a slice of James's margin on the people they signed up.
  * That was removed at the client's request: an agent earns from what they sell and
@@ -218,24 +221,27 @@ export function splitFor(
   // No sell link: James sells to the customer directly at his own walk-up price
   // and keeps the whole spread.
   if (!seller) {
-    return {
-      supplierCost: product.supplierCost,
-      shares: [
-        {
-          userId: admin.userId,
-          name: admin.name,
-          role: 'admin',
-          depth: 0,
-          paid: product.supplierCost,
-          charged: product.standardPrice,
-          margin: product.standardPrice - product.supplierCost,
-        },
-      ],
-    }
+    return withProcessingFee(
+      {
+        supplierCost: product.supplierCost,
+        shares: [
+          {
+            userId: admin.userId,
+            name: admin.name,
+            role: 'admin',
+            depth: 0,
+            paid: product.supplierCost,
+            charged: product.standardPrice,
+            margin: product.standardPrice - product.supplierCost,
+          },
+        ],
+      },
+      feeBp,
+    )
   }
 
   const cost = costForAgent(seller, product)
-  const salePrice = resalePriceFor(seller, product, feeBp)
+  const salePrice = resalePriceFor(seller, product)
 
   // James's whole margin on this sale. Nothing is taken out of it any more: the
   // referrer bonus that used to come from here was removed at the client's
@@ -266,19 +272,45 @@ export function splitFor(
     margin: adminGross,
   })
 
-  return { supplierCost: product.supplierCost, shares }
+  return withProcessingFee({ supplierCost: product.supplierCost, shares }, feeBp)
 }
 
-/** The sale price is whatever the seller charged. */
+/**
+ * Layers the checkout surcharge onto an otherwise-complete split.
+ *
+ * Kept separate from the rest of `splitFor` so what the seller and James
+ * actually earn is computed exactly the same regardless of the fee rate — the
+ * surcharge is added afterward, on the total they charged, and is never
+ * counted as anyone's margin.
+ */
+function withProcessingFee(
+  split: Omit<OrderSplit, 'processingFee'>,
+  feeBp: BasisPoints,
+): OrderSplit {
+  const subtotal = split.supplierCost + split.shares.reduce((sum, share) => sum + share.margin, 0)
+  return { ...split, processingFee: checkoutTotal(subtotal, feeBp).processingFee }
+}
+
+/** The sale price is whatever the seller charged, plus the processing fee. */
 export function salePriceOf(split: OrderSplit, product: PricedProduct): Pesewas {
   const seller = split.shares.find((share) => share.depth === 0)
-  return seller ? seller.charged : product.standardPrice
+  const subtotal = seller ? seller.charged : product.standardPrice
+  return subtotal + (split.processingFee ?? 0)
 }
 
-/** The invariant. Returns the discrepancy in pesewas; 0 means balanced. */
+/**
+ * The invariant. Returns the discrepancy in pesewas; 0 means balanced.
+ *
+ * `processingFee` defaults to 0 rather than being trusted present: this reads
+ * splits stored before the field existed, on orders placed before this feature
+ * shipped, and an old one arriving as `undefined` here must not turn every
+ * order that predates it into a reported imbalance.
+ */
 export function splitDiscrepancy(salePrice: Pesewas, split: OrderSplit): Pesewas {
   const distributed =
-    split.supplierCost + split.shares.reduce((sum, share) => sum + share.margin, 0)
+    split.supplierCost +
+    split.shares.reduce((sum, share) => sum + share.margin, 0) +
+    (split.processingFee ?? 0)
   return salePrice - distributed
 }
 
@@ -341,24 +373,17 @@ function clampFeeBp(feeBp: BasisPoints): BasisPoints {
 /**
  * The price a markup implies, floored at cost.
  *
- * `feeBp` is the Paystack fee, in basis points, taken as a percentage of the
- * final price. Grossing the price up by it — dividing rather than adding — is
- * what makes the margin survive the fee: adding the fee on top charges it on
- * too small a base, and the shortfall grows the more expensive the bundle is.
- *
- *   price × (1 − fee) = cost × (1 + markup)      ⇒      price = cost(1+markup) / (1−fee)
- *
- * `feeBp = 0` collapses to the plain markup — no gross-up, unchanged.
+ * Not fee-aware. Paystack's cut is added afterward, as its own visible line at
+ * checkout (`checkoutTotal`) rather than baked into this number — so a price
+ * set here means exactly what it says, and this is the plain markup with
+ * nothing gone missing into a processor's fee.
  *
  * Rounds up rather than to the nearest pesewa, so a price can never quietly
  * undershoot the margin it was meant to guarantee by half a pesewa of rounding.
- * That is a deliberate, one-pesewa-at-most change from the rounding this used to
- * do even before the fee existed.
  */
-export function priceFromMarkup(cost: Pesewas, markupBp: BasisPoints, feeBp: BasisPoints = 0): Pesewas {
-  const fee = clampFeeBp(feeBp)
+export function priceFromMarkup(cost: Pesewas, markupBp: BasisPoints): Pesewas {
   const withMargin = cost * (10_000 + markupBp)
-  return Math.max(cost, Math.ceil(withMargin / (10_000 - fee)))
+  return Math.max(cost, Math.ceil(withMargin / 10_000))
 }
 
 /**
@@ -366,18 +391,45 @@ export function priceFromMarkup(cost: Pesewas, markupBp: BasisPoints, feeBp: Bas
  *
  * Zero when cost is zero: no markup is meaningful over nothing, and dividing
  * would give Infinity.
- *
- * `feeBp` matters here too: a price that includes a fee gross-up implies a
- * *smaller* markup than reading the raw numbers would suggest, because part of
- * the gap between cost and price is the fee, not margin. Left out (0), this is
- * exactly the calculation that was always here.
  */
-export function markupFromPrice(cost: Pesewas, price: Pesewas, feeBp: BasisPoints = 0): BasisPoints {
+export function markupFromPrice(cost: Pesewas, price: Pesewas): BasisPoints {
   if (cost <= 0) return 0
+  return Math.max(0, Math.round((price / cost - 1) * 10_000))
+}
+
+// ─── Checkout surcharge ──────────────────────────────────────────────────────
+
+export interface CheckoutTotal {
+  /** The listed price. Unchanged by the fee. */
+  subtotal: Pesewas
+  /** Shown to the buyer as its own line, not folded into the price. */
+  processingFee: Pesewas
+  /** What is actually charged: subtotal + processingFee. */
+  total: Pesewas
+}
+
+/**
+ * What the buyer pays: the listed price, plus Paystack's cut shown as its own
+ * line and added on top.
+ *
+ * Deliberately simple and additive — `subtotal + subtotal × feeBp` — not the
+ * gross-up division this used to be. The point of a visible fee line is that a
+ * buyer can see exactly what it costs; recalculating the price to hide the fee
+ * inside one number defeats that, however precisely it protects the margin.
+ *
+ * Because nothing about the seller's price changes any more, their margin is
+ * never eroded by the fee in the first place — the buyer's surcharge covers it
+ * instead, which is the whole reason to add this line rather than adjust that
+ * price.
+ *
+ * Rounds up, so the fee collected never falls short of what the processor
+ * actually charges — any rounding slack belongs to the platform, never taken
+ * from the buyer's short.
+ */
+export function checkoutTotal(subtotal: Pesewas, feeBp: BasisPoints = 0): CheckoutTotal {
   const fee = clampFeeBp(feeBp)
-  // What the fee leaves behind, before it is compared against cost.
-  const net = (price * (10_000 - fee)) / 10_000
-  return Math.max(0, Math.round((net / cost - 1) * 10_000))
+  const processingFee = Math.ceil((subtotal * fee) / 10_000)
+  return { subtotal, processingFee, total: subtotal + processingFee }
 }
 
 /** For display: 1517 → "15.17%", 1500 → "15%". */

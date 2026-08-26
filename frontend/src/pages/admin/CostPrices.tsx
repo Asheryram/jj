@@ -65,15 +65,8 @@ const TIER_LABELS: Record<Tier, { label: string; help: string }> = {
  * not capped. See EDITABLE_TIERS above.
  */
 export default function CostPrices() {
-  const { products, updateProductTier, setProductOnSale, refresh, pushToast, paystackFeeBp } = useStore()
+  const { products, updateProductTier, setProductOnSale, refresh, pushToast } = useStore()
 
-  /**
-   * What Paystack's cut leaves behind. A price can clear cost and still be a
-   * real loss once this comes off — the exact bug that started this feature: a
-   * 2GB bundle costing 9.50, sold at 9.60, cleared the raw floor and still lost
-   * 9 pesewas on every sale once ~2% was taken.
-   */
-  const netOfFee = (price: number) => Math.floor((price * (10_000 - paystackFeeBp)) / 10_000)
   const [category, setCategory] = useState<Category>('data')
   const [editing, setEditing] = useState<Product | null>(null)
   const [marking, setMarking] = useState(false)
@@ -172,7 +165,7 @@ export default function CostPrices() {
   // Both selling prices must clear cost. Walk-up vs agent price is deliberately
   // not checked, and there is no ceiling to check — see EDITABLE_TIERS.
   const broken = products.filter(
-    (p) => netOfFee(p.adminPrice) < p.supplierCost || netOfFee(p.standardPrice) < p.supplierCost,
+    (p) => p.adminPrice < p.supplierCost || p.standardPrice < p.supplierCost,
   )
 
   return (
@@ -329,19 +322,13 @@ export default function CostPrices() {
                 </tr>
                 {!collapsed.has(group.key) &&
                   group.items.map((product) => {
-              // What actually lands after Paystack's cut — the number worth
-              // showing, since the raw gap between price and cost is not it any
-              // more.
-              const margin = netOfFee(product.adminPrice) - product.supplierCost
-              const grossMargin = product.adminPrice - product.supplierCost
-              const invalid =
-                netOfFee(product.adminPrice) < product.supplierCost ||
-                netOfFee(product.standardPrice) < product.supplierCost
-              // Publishing needs a margin on both channels after the fee, not
-              // merely a legal price — matches the server's own guard.
+              const margin = product.adminPrice - product.supplierCost
+              const invalid = product.adminPrice < product.supplierCost || product.standardPrice < product.supplierCost
+              // Publishing needs a margin on both channels, not merely a legal
+              // price — matches the server's own guard.
               const invalidToPublish =
-                netOfFee(product.adminPrice) <= product.supplierCost ||
-                netOfFee(product.standardPrice) <= product.supplierCost
+                product.adminPrice <= product.supplierCost ||
+                product.standardPrice <= product.supplierCost
               return (
                 <tr key={product.id} className={cn('hover:bg-slate-50 dark:hover:bg-slate-800', invalid && 'bg-red-50/50')}>
                   <Td>
@@ -363,16 +350,9 @@ export default function CostPrices() {
                         'tabular font-semibold',
                         margin > 0 ? 'text-brand-700 dark:text-brand-300' : 'text-red-600 dark:text-red-400',
                       )}
-                      title="After Paystack's cut on the sale"
                     >
                       {margin > 0 ? cedis(margin, { sign: true }) : cedis(margin)}
                     </span>
-                    {/* Only shown once the fee is actually taking something
-                        visible, so a healthy margin is not cluttered with a
-                        difference of a pesewa. */}
-                    {grossMargin !== margin && (
-                      <p className="text-[11px] text-slate-400 dark:text-slate-500">before fee {cedis(grossMargin)}</p>
-                    )}
                   </Td>
                   <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                     {cedis(product.standardPrice)}

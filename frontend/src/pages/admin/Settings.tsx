@@ -255,14 +255,13 @@ export default function Settings() {
  * that never triggers, which is the same behaviour with none of the honesty.
  */
 /**
- * What Paystack keeps on a Mobile Money payment — and the one number that
- * decides whether a markup actually survives it.
+ * What Paystack keeps on a Mobile Money payment — shown to every buyer as a
+ * "processing fee" line at checkout and charged on top of the listed price.
  *
- * Every price derived from a percentage (yours, or an agent's own default
- * markup) is grossed up by this rate so the intended margin lands after the
- * fee — see `priceFromMarkup`. It is not the fee itself, which is whatever
- * Paystack actually reports per transaction and is recorded exactly regardless
- * of this setting; it only decides what gets charged, never what gets booked.
+ * See `checkoutTotal`. It is not the fee itself, which is whatever Paystack
+ * actually reports per transaction and is recorded exactly regardless of this
+ * setting; it only decides what the buyer is asked to cover, never what gets
+ * booked.
  */
 function PaystackFeeSetting() {
   const { pushToast } = useStore()
@@ -306,21 +305,22 @@ function PaystackFeeSetting() {
     <Card className="mt-3">
       <CardHead
         title="Paystack's fee"
-        subtitle="What every Mobile Money price is grossed up to cover"
+        subtitle="Shown to every buyer as a processing fee at checkout, on top of the price"
       />
       <div className="space-y-3 px-4 pb-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Every price built from a percentage — yours, or an agent's own default markup — is raised
-          just enough that after Paystack takes this rate off the top, the margin that was intended
-          is what actually lands. Check your Paystack dashboard for their current rate now and then;
-          the money audit script also reports the rate <em>actually</em> observed on real payments,
-          which is the one to trust once you have some.
+          Buyers see this as its own line at checkout — "Bundle price" plus "Processing fee" — and
+          pay the total. Your own prices and an agent's default markup keep meaning exactly what they
+          say; the buyer's fee line covers Paystack's cut instead of it coming out of anyone's margin.
+          Check your Paystack dashboard for their current rate now and then; the money audit script
+          also reports the rate <em>actually</em> observed on real payments, which is the one to
+          trust once you have some.
         </p>
 
         <Field
           label="Fee rate (%)"
           htmlFor="paystack-fee"
-          hint="Starts at 2%, Paystack's usual Mobile Money rate. This only changes what customers are charged — the real fee on each payment is still recorded exactly as Paystack reports it."
+          hint="Starts at 2%, Paystack's usual Mobile Money rate. Changes what customers see and pay at checkout — the real fee on each payment is still recorded exactly as Paystack reports it."
         >
           <div className="relative max-w-40">
             <TextInput

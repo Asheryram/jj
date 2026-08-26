@@ -122,6 +122,8 @@ export interface SplitShare {
 export interface OrderSplit {
   supplierCost: Pesewas
   shares: SplitShare[]
+  /** Paystack's fee, passed on to the buyer as its own line — never a margin. */
+  processingFee: Pesewas
 }
 
 export interface Order {
