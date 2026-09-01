@@ -23,7 +23,6 @@ import {
   CashIcon,
   StoreIcon,
   TrendUpIcon,
-  UsersIcon,
 } from '../../components/icons'
 
 const TYPE_META: Record<
@@ -48,7 +47,6 @@ export default function Earnings() {
   const visible = filter === 'all' ? earnings : earnings.filter((e) => e.type === filter)
 
   const own = earnings.filter((e) => e.type === 'sale').reduce((s, e) => s + e.amount, 0)
-  const downline = earnings.filter((e) => e.type === 'downline').reduce((s, e) => s + e.amount, 0)
   const reversed = earnings
     .filter((e) => e.type === 'reversal')
     .reduce((s, e) => s + Math.abs(e.amount), 0)
@@ -70,7 +68,7 @@ export default function Earnings() {
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Card tone="brand" className="p-4 sm:col-span-2 lg:col-span-1">
           <p className="text-sm text-brand-100">Available to withdraw</p>
           <p className="tabular mt-2 text-3xl font-bold tracking-tight">{cedis(agentBalance)}</p>
@@ -80,13 +78,6 @@ export default function Earnings() {
           label="From your own sales"
           value={cedis(own)}
           icon={<StoreIcon className="size-5" />}
-        />
-        <StatTile
-          label="From your downline"
-          value={cedis(downline)}
-          hint="Agents you registered, and theirs"
-          tone="brand"
-          icon={<UsersIcon className="size-5" />}
         />
         <StatTile
           label="Withdrawn to date"
@@ -101,12 +92,13 @@ export default function Earnings() {
         <Callout tone="info" icon={<AlertIcon className="size-4" />} title="How this works">
           You do not buy stock or hold a float. When someone buys through your sell link, the
           platform takes the payment and credits you the difference between your price and what you
-          pay — instantly. Everyone above you is paid their own margin the same way.
+          pay — instantly. Referring another agent does not add to this; you only earn from your own
+          sales.
         </Callout>
       </div>
 
       <Card className="mt-3">
-        <CardHead title="Earnings, last 7 days" subtitle="Your own sales plus your downline" />
+        <CardHead title="Earnings, last 7 days" subtitle="Your own sales, day by day" />
         <div className="p-4 sm:p-5">
           <BarChart data={agentEarningsByDay} />
         </div>
@@ -121,7 +113,6 @@ export default function Earnings() {
               options={[
                 { value: 'all', label: 'All' },
                 { value: 'sale', label: 'My sales' },
-                { value: 'downline', label: 'Downline' },
                 { value: 'withdrawal', label: 'Withdrawals' },
               ]}
               value={filter}

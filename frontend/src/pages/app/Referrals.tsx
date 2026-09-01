@@ -32,7 +32,6 @@ export default function Referrals() {
   const indirect = subAgents.filter((a) => a.uplineCode !== session.referralCode)
   const active = subAgents.filter((a) => a.status === 'active')
   const totalVolume = subAgents.reduce((sum, a) => sum + a.volume, 0)
-  const earnedFromDownline = subAgents.reduce((sum, a) => sum + a.earnedForUpline, 0)
 
   const shareSell = encodeURIComponent(
     `Buy data, airtime and result checkers from me — instant delivery: ${sellLink}`,
@@ -87,7 +86,7 @@ export default function Referrals() {
         </div>
       </Card>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <StatTile
           label="Agents under you"
           value={String(active.length)}
@@ -95,13 +94,7 @@ export default function Referrals() {
           tone="brand"
           icon={<UsersIcon className="size-5" />}
         />
-        <StatTile label="Their total volume" value={cedis(totalVolume)} />
-        <StatTile
-          label="You earned from them"
-          value={cedis(earnedFromDownline)}
-          hint="Your margin on their sales"
-          tone="success"
-        />
+        <StatTile label="Their total volume" value={cedis(totalVolume)} hint="For your own visibility only — not tied to your earnings" />
       </div>
 
       {/* What inviting somebody does, and what it does not.
@@ -111,9 +104,9 @@ export default function Referrals() {
       <div className="mt-3">
         <Callout tone="info" title="What you get for inviting someone">
           They join under you and show up in your chain below. You are not paid anything from what
-          they sell — every agent earns from their own sales only. What inviting does is grow the
-          chain: when someone below you buys, they buy at your price, so your margin is already
-          inside their cost.
+          they sell, now or ever — every agent earns from their own sales only, at the same price
+          from James no matter who is above them. Inviting someone grows your chain for your own
+          visibility; it has no effect on anybody&apos;s price or earnings.
         </Callout>
       </div>
 
@@ -138,7 +131,6 @@ export default function Referrals() {
                 <Th>Joined via</Th>
                 <Th align="right">Orders</Th>
                 <Th align="right">Volume</Th>
-                <Th align="right">You earned</Th>
                 <Th>Status</Th>
               </tr>
             </thead>
@@ -171,9 +163,6 @@ export default function Referrals() {
                     <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                       {cedis(agent.volume)}
                     </Td>
-                    <Td align="right" className="tabular font-semibold text-brand-700 dark:text-brand-300">
-                      {cedis(agent.earnedForUpline)}
-                    </Td>
                     <Td>
                       <Badge tone={STATUS_TONE[agent.status]}>
                         {STATUS_LABEL[agent.status]}
@@ -197,16 +186,6 @@ export default function Referrals() {
           </p>
         )}
       </Card>
-
-      {/* FR-5.3 — say clearly that there is no commission to wait for. */}
-      <div className="mt-3">
-        <Callout tone="info" title="How you earn">
-          There is no commission to calculate or wait for. You pay your upline&apos;s price and charge
-          your own — the gap is yours. When an agent below you sells, they pay your price, so your
-          margin is already inside their cost. Everybody in the chain is paid at the same instant the
-          order completes.
-        </Callout>
-      </div>
     </div>
   )
 }

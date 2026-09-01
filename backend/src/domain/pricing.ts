@@ -24,30 +24,13 @@
  * an overpriced agent just loses the sale to a cheaper one — competition caps the
  * price more reliably than a number James has to maintain per product.
  *
- * **Referral is exactly one level, and the bonus comes out of James's margin.**
- * An agent either registered directly or was referred by one other agent; there
- * is no third level. When a referred agent sells, their referrer is paid an
- * admin-set percentage of *James's* margin on that sale.
- *
- * Funding it from James rather than from the seller is the part that matters
- * commercially. Take it from the seller and a referred agent earns less than a
- * directly-registered one on an identical sale — so nobody would ever use a
- * referral link, and the feature would suppress the growth it exists to create.
- * Paying it from the wholesale spread instead means:
- *
- *   · the seller keeps their whole margin, so joining via a referral costs the
- *     joiner nothing;
- *   · referring is pure upside for the referrer;
- *   · the customer price does not move, because nothing is added on top;
- *   · and it cannot overdraw. A share of James's own margin, at a rate capped at
- *     100%, is always payable — unlike a share of the seller's margin, which can
- *     exceed the spread James has to pay it from.
- *
- * James is buying distribution he did not have to recruit himself, out of the
- * spread he earns because of it.
- *
- * So one sale splits at most four ways: the supplier, James, the seller, and the
- * seller's referrer.
+ * **Referring earns nothing.** An agent can still record who referred them —
+ * `uplineCode` below — and see that chain on their own Referrals page, but it is
+ * purely informational now. A referrer used to be paid a share of James's
+ * margin on their recruit's sales; that was removed at the client's request
+ * (see `splitFor`), so a sale now splits exactly two ways: the seller and
+ * James. Nothing here, and nothing a downline agent pays, changes because of
+ * who is above them in the chain.
  */
 
 export type Pesewas = number
