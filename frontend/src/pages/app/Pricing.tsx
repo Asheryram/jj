@@ -89,7 +89,9 @@ export default function Pricing() {
         </Callout>
       </div>
 
-      <div className="mt-4 -mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
+      {/* -mx-3/px-3 cancels AppShell's own px-3 on mobile — not px-4, which
+          overshoots the viewport by the 4px difference. */}
+      <div className="mt-4 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
         <Segmented<Category>
           options={CATEGORY_ORDER.map((key) => ({ value: key, label: CATEGORY_META[key].short }))}
           value={category}

@@ -45,7 +45,7 @@ export function Logo({ compact }: { compact?: boolean }) {
   const home = sellerCode ? `/s/${sellerCode}` : '/'
 
   return (
-    <Link to={home} className="flex items-center gap-2.5">
+    <Link to={home} className="flex min-w-0 items-center gap-2.5">
       {/* An uploaded mark where there is one, and the shop's own initial where
           there is not — a hardcoded "J" on an agent's own shop reads as somebody
           else's brand. */}
@@ -61,11 +61,14 @@ export function Logo({ compact }: { compact?: boolean }) {
         </span>
       )}
       {!compact && (
-        <span className="leading-tight">
-          <span className="block font-bold tracking-tight text-slate-900 dark:text-slate-50">
+        // `min-w-0` lets this shrink below its text's natural width inside the
+        // header's flex row — without it a long shop name wraps to a second
+        // line instead of truncating, and the header's fixed height clips it.
+        <span className="min-w-0 leading-tight">
+          <span className="block truncate font-bold tracking-tight text-slate-900 dark:text-slate-50">
             {branding.shopName}
           </span>
-          <span className="block text-[11px] font-medium text-slate-500 dark:text-slate-400">
+          <span className="block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
             Data · Airtime · Checkers
           </span>
         </span>

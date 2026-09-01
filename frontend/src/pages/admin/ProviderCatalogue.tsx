@@ -214,7 +214,9 @@ export default function ProviderCatalogue() {
             )}
 
             {categories.length > 1 && (
-              <div className="-mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
+              // -mx-3/px-3 cancels AppShell's own px-3 on mobile — not px-4,
+              // which overshoots the viewport by the 4px difference.
+              <div className="-mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
                 <Segmented<Category>
                   options={categories.map((key) => ({
                     value: key,

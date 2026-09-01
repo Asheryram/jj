@@ -157,7 +157,12 @@ export function Card({
       aria-live={ariaLive}
       aria-label={ariaLabel}
       className={cn(
-        'rounded-2xl border shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
+        // `min-w-0`: a grid or flex item defaults to `min-width: auto`, so a
+        // card holding a wide table (TableWrap's own `min-w-[36rem]`) refused
+        // to shrink below that width even in a single mobile-width column,
+        // dragging the whole grid track — and the page — wider than the
+        // viewport. Harmless outside a grid/flex context.
+        'min-w-0 rounded-2xl border shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
         CARD_TONES[tone],
         className,
       )}
