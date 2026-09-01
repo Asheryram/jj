@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useStore } from '../../state/store'
 import { cedis, parseCedis } from '../../lib/format'
 import { validateResalePrice, type PriceBand } from '../../lib/pricing'
-import type { Category, Product } from '../../data/types'
+import { NETWORKS } from '../../lib/networks'
+import type { Category, Network, Product } from '../../data/types'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
 import {
   Badge,
@@ -38,10 +39,14 @@ import { AlertIcon, TagIcon, TrendUpIcon } from '../../components/icons'
 export default function Pricing() {
   const { products, myBand, myResalePrice, hasOwnPrice, setAgentPrice } = useStore()
   const [category, setCategory] = useState<Category>('data')
+  const [network, setNetwork] = useState<Network | null>(null)
   const [editing, setEditing] = useState<Product | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
 
-  const visible = products.filter((p) => p.category === category && p.active)
+  const isChecker = category === 'checker'
+  const inCategory = products.filter((p) => p.category === category && p.active)
+  const networksInCategory = NETWORKS.filter((n) => inCategory.some((p) => p.network === n))
+  const visible = inCategory.filter((p) => !network || isChecker || p.network === network)
   const priced = products.filter((p) => hasOwnPrice(p.id))
 
   const marginOf = (product: Product) => myResalePrice(product) - myBand(product).floor
@@ -98,6 +103,43 @@ export default function Pricing() {
           onChange={setCategory}
         />
       </div>
+
+      {/* Jump straight to one network instead of scrolling past the other two
+          to find it — the same filter the public shop uses for the same reason. */}
+      {networksInCategory.length > 1 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Network</span>
+          <button
+            type="button"
+            onClick={() => setNetwork(null)}
+            aria-pressed={!network}
+            className={cn(
+              'rounded-full border px-3 py-1 text-sm font-semibold',
+              !network
+                ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-600 dark:bg-slate-600'
+                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
+            )}
+          >
+            All
+          </button>
+          {networksInCategory.map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setNetwork(n)}
+              aria-pressed={network === n}
+              className={cn(
+                'rounded-full border px-3 py-1 text-sm font-semibold',
+                network === n
+                  ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-600 dark:bg-slate-600'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
+              )}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      )}
 
       <Card className="mt-3">
         <CardHead title={CATEGORY_META[category].label} subtitle={`${visible.length} products`} />
