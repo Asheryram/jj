@@ -456,7 +456,11 @@ export interface RefundRequest {
   status: 'pending' | 'approved' | 'rejected'
   /** Set only on a refusal: why it was refused. */
   note: string | null
-  /** Chosen at approval, for a Mobile Money refund. */
+  /**
+   * The Mobile Money network for this refund. Set already when Paystack
+   * reported it on the original payment; otherwise null until chosen at
+   * approval.
+   */
   momoNetwork: 'MTN' | 'Telecel' | 'AirtelTigo' | null
   /** Paystack's word: pending, success, failed, reversed, otp, manual. */
   transferStatus: string | null
@@ -838,9 +842,9 @@ export const api = {
   /**
    * Approve a refund and send it.
    *
-   * `momoNetwork` is required for a Mobile Money refund: the payer has no
-   * account, so the money goes back to their number, and which network carries
-   * that number cannot be told from its prefix.
+   * `momoNetwork` is needed for a Mobile Money refund whenever it is not
+   * already on file — the payer has no account, so the money goes back to
+   * their number, and a prefix cannot say which network carries it.
    */
   approveRefund: (id: string, momoNetwork?: 'MTN' | 'Telecel' | 'AirtelTigo') =>
     request<{ id: string; status: 'approved' }>(`/admin/refunds/${id}/approve`, {

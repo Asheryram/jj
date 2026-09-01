@@ -22,3 +22,30 @@ const MOMO_CODES: Record<Network, string> = {
 export function momoCodeFor(network: Network | null | undefined): string | null {
   return network ? (MOMO_CODES[network] ?? null) : null
 }
+
+/**
+ * The reverse direction: what Paystack calls the network on a completed
+ * charge — `authorization.bank` — read back into our own names.
+ *
+ * Money coming in uses different words than money going out: a mobile money
+ * charge's authorization has reported "MTN" and "Vodafone" on this account,
+ * not the transfer codes above. Matched case-insensitively against every
+ * spelling seen so far; anything else comes back null rather than a guess,
+ * the same rule `momoCodeFor` follows for money leaving.
+ */
+const BANK_NAMES: Record<string, Network> = {
+  mtn: 'MTN',
+  vodafone: 'Telecel',
+  vod: 'Telecel',
+  telecel: 'Telecel',
+  airteltigo: 'AirtelTigo',
+  'airtel tigo': 'AirtelTigo',
+  airtel: 'AirtelTigo',
+  tigo: 'AirtelTigo',
+  atl: 'AirtelTigo',
+}
+
+export function networkFromPaystackBank(bank: string | null | undefined): Network | null {
+  if (!bank) return null
+  return BANK_NAMES[bank.trim().toLowerCase()] ?? null
+}

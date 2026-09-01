@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
+import type { Network } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { FulfilmentService } from '../orders/fulfilment.service'
 import { ValidationError } from '../common/domain-errors'
@@ -222,6 +223,7 @@ export class PaymentsService {
         amount: result.amount,
         currency: result.currency,
         channel: result.channel,
+        network: result.network,
         fee: result.fee,
         providerId: result.providerId,
         raw: result.raw,
@@ -254,6 +256,7 @@ export class PaymentsService {
       amount: number
       currency: string
       channel: string | null
+      network: Network | null
       fee: number | null
       providerId: string | null
       raw: string
@@ -285,6 +288,7 @@ export class PaymentsService {
           status: 'paid',
           paidAt: new Date(),
           channel: detail.channel,
+          network: detail.network,
           fee: detail.fee,
           providerId: detail.providerId,
           providerResponse: detail.raw,

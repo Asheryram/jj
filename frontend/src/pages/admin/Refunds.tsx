@@ -347,10 +347,15 @@ function RefuseModal({
 /**
  * Which network to send a Mobile Money refund on.
  *
- * Asked rather than guessed. Ghana's number portability means a prefix cannot
- * tell you which network carries a line — the platform used to guess and turned
- * real customers away for it — so the person looking at the order picks the rail.
- * They can usually just ask the customer.
+ * Pre-filled when it is already known: Paystack reports which network carried
+ * the original payment, and that is read back here rather than asked again.
+ * When it is not on file — a guest whose payment predates this, or one
+ * Paystack did not report cleanly — this falls back to asking, because a
+ * prefix cannot be trusted to say which network carries a line: Ghana's
+ * number portability means a guess here once turned real customers away.
+ *
+ * Either way it stays a choice, not a fact stated at them: whoever is
+ * approving can see and change it before anything is sent.
  *
  * The number is shown large and unmissable, because it is the whole identity of
  * the person being paid: a guest has no account, and this is where the money
@@ -371,10 +376,12 @@ function SendRefundModal({
   const [lastKey, setLastKey] = useState(key)
   if (key !== lastKey) {
     setLastKey(key)
-    setNetwork('MTN')
+    setNetwork(request?.momoNetwork ?? 'MTN')
   }
 
   if (!request) return null
+
+  const known = request.momoNetwork !== null
 
   return (
     <Modal open onClose={onClose} title={`Send ${cedis(request.amount)} back`}>
@@ -400,10 +407,17 @@ function SendRefundModal({
           />
         </Field>
 
-        <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
-          We cannot tell the network from the number — a Ghanaian line keeps its number when it
-          moves. If you are not sure, ask them before sending.
-        </Callout>
+        {known ? (
+          <Callout tone="info" icon={<CheckIcon className="size-4" />}>
+            This is what they paid with, reported by Paystack — not a guess. Worth a glance before
+            sending, but you shouldn&apos;t need to change it.
+          </Callout>
+        ) : (
+          <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
+            We cannot tell the network from the number — a Ghanaian line keeps its number when it
+            moves. If you are not sure, ask them before sending.
+          </Callout>
+        )}
 
         <div className="flex gap-2">
           <Button block onClick={() => void onSend(request, network)}>

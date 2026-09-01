@@ -622,6 +622,12 @@ model Payment {
   /// Where the money came from once known: mobile_money, card, bank.
   channel String?
 
+  /// Which Mobile Money network actually carried this, read from Paystack's
+  /// own `authorization.bank` — not guessed from the number. Null for a card
+  /// payment, or when Paystack reported a name this platform does not
+  /// recognise (see `networkFromPaystackBank`).
+  network Network?
+
   /// What Paystack kept, in pesewas, as reported by them.
   ///
   /// Read from their verify response rather than computed from a rate we believe

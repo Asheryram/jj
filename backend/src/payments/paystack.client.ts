@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import type { Network } from '@prisma/client'
+import { networkFromPaystackBank } from './momo'
 
 /**
  * The Paystack HTTP client. Transport and signature checking only.
@@ -144,6 +146,10 @@ export class PaystackClient {
       amount: Number(body.data.amount ?? 0),
       currency: String(body.data.currency ?? ''),
       channel: body.data.channel ?? null,
+      // Which network actually carried a mobile money charge — theirs to
+      // know, since they are the one who charged it. Null for a card payment,
+      // or a bank name this platform does not recognise; see `momo.ts`.
+      network: networkFromPaystackBank(body.data.authorization?.bank),
       fee: body.data.fees ?? null,
       providerId: body.data.id != null ? String(body.data.id) : null,
       raw: `HTTP ${response.status} ${raw}`.slice(0, 2000),
@@ -391,6 +397,8 @@ interface PaystackTransaction {
   channel?: string | null
   /** What Paystack keeps, in pesewas. Their figure, not our arithmetic. */
   fees?: number | null
+  /** Present on a mobile money charge; `bank` carries the network. */
+  authorization?: { bank?: string | null } | null
 }
 
 export type TransferOutcome =
@@ -411,6 +419,8 @@ export type VerifyOutcome =
       amount: number
       currency: string
       channel: string | null
+      /** The Mobile Money network that carried this, when it can be told. */
+      network: Network | null
       /** Pesewas Paystack kept. Null when they did not say. */
       fee: number | null
       providerId: string | null

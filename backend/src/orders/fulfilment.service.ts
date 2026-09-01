@@ -299,12 +299,11 @@ export class FulfilmentService implements OnApplicationBootstrap {
        * were owed GHS 196 they had never paid, put that on the books as a
        * liability, and would have sent each of them a claim link for it.
        */
-      const collected =
-        order.paidWith === 'wallet' ||
-        (await tx.payment.findUnique({
-          where: { orderId: order.id },
-          select: { status: true },
-        }))?.status === 'paid'
+      const payment = await tx.payment.findUnique({
+        where: { orderId: order.id },
+        select: { status: true, network: true },
+      })
+      const collected = order.paidWith === 'wallet' || payment?.status === 'paid'
 
       await tx.order.update({
         where: { id: orderId },
@@ -341,6 +340,11 @@ export class FulfilmentService implements OnApplicationBootstrap {
              // money parked there could be listed and never collected.
             method: order.paidWith === 'wallet' && order.buyerUserId ? 'wallet' : 'transfer',
             reason: reason ?? 'The delivery partner could not complete this order.',
+            // Known already, when Paystack reported it on the way in — see
+            // `PaystackClient.verify`. Still shown to whoever approves, and
+            // still changeable there; this only saves asking when the answer
+            // is already on file.
+            momoNetwork: payment?.network ?? null,
           },
           // A second failure on the same order does not owe twice.
           update: {},

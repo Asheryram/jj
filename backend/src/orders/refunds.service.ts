@@ -91,10 +91,14 @@ export class RefundsService {
     /**
      * A Mobile Money refund needs to know which network to pay.
      *
-     * Asked for rather than derived. Ghana's number portability means a prefix
-     * cannot tell you which network carries a line — the platform used to guess
-     * and turned real customers away for it — so whoever has the order in front
-     * of them chooses the rail.
+     * Already known when the original payment reported it (see
+     * `FulfilmentService.settle`, which reads it off Paystack at that point) —
+     * this only blocks when it is not: a guest whose payment predates this, or
+     * one Paystack did not report cleanly. Never guessed from the phone number
+     * itself. Ghana's number portability means a prefix cannot tell you which
+     * network carries a line — the platform used to guess and turned real
+     * customers away for it — so an unknown case falls to whoever has the
+     * order in front of them.
      */
     if (request.method === 'transfer' && !momoNetwork && !request.momoNetwork) {
       throw new ValidationError(
