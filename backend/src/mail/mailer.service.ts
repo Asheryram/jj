@@ -11,18 +11,21 @@ export interface Mail {
 }
 
 /**
- * Sending email, through SMTP or Resend, whichever is configured.
+ * Sending email, through Resend or SMTP, whichever is configured.
  *
  * ── Why two transports ───────────────────────────────────────────────────────
  *
  * Resend refuses to send to anybody but the account owner until a domain is
- * verified, and verifying a domain means owning one. That is the right long-term
- * setup and it is a hard blocker on day one — so SMTP exists as the path that
- * works with a Gmail account and no domain at all.
+ * verified, and verifying a domain means owning one. That is a hard blocker on
+ * day one — so SMTP exists as the path that works with a Gmail account and no
+ * domain at all.
  *
- * SMTP wins when both are configured, because it is the one that can actually
- * reach an agent. Resend stays for the day a domain is verified: switch by
- * clearing the SMTP variables, no code change.
+ * Resend wins when both are configured: no daily send quota, and it is not tied
+ * to one person's Gmail mailbox the way SMTP is. SMTP is the fallback — worth
+ * having because container platforms routinely block outbound SMTP or Gmail
+ * occasionally rejects a login, and a working alternate path beats losing the
+ * message. Before a domain was verified this ran the other way around; nothing
+ * about the mailboxes changed, only which one is trusted first.
  *
  * ── Two rules, whichever transport is used ───────────────────────────────────
  *
@@ -52,7 +55,7 @@ export class MailerService {
     return this.config.get<string>('SMTP_PASS')?.replace(/\s+/g, '') || null
   }
 
-  /** SMTP is preferred: it is the transport that can reach anybody. */
+  /** Whether SMTP is configured at all — the fallback transport, tried after Resend. */
   private get useSmtp(): boolean {
     return Boolean(this.smtpUser && this.smtpPass)
   }
@@ -66,80 +69,85 @@ export class MailerService {
   }
 
   /**
-   * Who mail comes from.
-   *
-   * Over SMTP this must be the authenticated mailbox. Gmail rewrites or refuses
-   * anything else, so a mismatched MAIL_FROM would either be silently replaced or
-   * bounce — and both are worse than ignoring it. The display name is still ours,
-   * so mail arrives as "JamesDataConsult <the.account@gmail.com>".
+   * Who mail comes from over SMTP: must be the authenticated mailbox. Gmail
+   * rewrites or refuses anything else, so a mismatched MAIL_FROM would either
+   * be silently replaced or bounce — and both are worse than ignoring it. The
+   * display name is still ours, so mail arrives as
+   * "JamesDataConsult <the.account@gmail.com>".
    */
-  private get from(): string {
+  private get smtpFrom(): string {
     const configured = this.config.get<string>('MAIL_FROM')?.trim()
+    const mailbox = this.smtpUser as string
+    const name = configured?.match(/^([^<]+)</)?.[1]?.trim()
+    return name ? `${name} <${mailbox}>` : `JamesDataConsult <${mailbox}>`
+  }
 
-    if (this.useSmtp) {
-      const mailbox = this.smtpUser as string
-      const name = configured?.match(/^([^<]+)</)?.[1]?.trim()
-      return name ? `${name} <${mailbox}>` : `JamesDataConsult <${mailbox}>`
-    }
-
-    return configured || 'JamesDataConsult <onboarding@resend.dev>'
+  /**
+   * Who mail comes from over Resend: must be a domain verified there — never
+   * the SMTP mailbox, which Resend cannot possibly have verified since it
+   * belongs to a different provider (Gmail). Read independently of whether
+   * SMTP is configured, so a domain verified for Resend actually gets used
+   * the day SMTP happens to fail, rather than the fallback quietly trying to
+   * send from Gmail's address over Resend and being refused.
+   */
+  private get resendFrom(): string {
+    return this.config.get<string>('MAIL_FROM')?.trim() || 'JamesDataConsult <onboarding@resend.dev>'
   }
 
   /** True while sending from Resend's shared domain — delivery is limited. */
   get usingSharedSender(): boolean {
-    return !this.useSmtp && this.from.includes('onboarding@resend.dev')
+    return this.resendFrom.includes('onboarding@resend.dev')
   }
 
   async send(mail: Mail): Promise<{ sent: boolean; reason?: string }> {
-    if (this.useSmtp) {
-      const result = await this.sendOverSmtp(mail)
-      if (result.sent) return result
-
-      /**
-       * SMTP failed. Try Resend rather than give up.
-       *
-       * Container platforms routinely block outbound SMTP, and the failure is
-       * not a configuration mistake anybody can fix from here: the port simply
-       * does not answer. Where a Resend key exists it reaches the same inbox
-       * over HTTPS, which no host blocks. Nothing was delivered on the failed
-       * attempt, so this cannot duplicate a message.
-       */
-      if (this.resendKey) {
-        this.log.warn(`SMTP failed (${result.reason ?? 'no reason given'}) — trying Resend`)
-      } else {
-        this.logUnsent(mail, result.reason ?? 'SMTP refused it')
-        return result
-      }
-    }
-
-    if (!this.resendKey) {
-      this.logUnsent(mail, 'no SMTP_USER/SMTP_PASS and no RESEND_API_KEY configured')
+    if (!this.resendKey && !this.useSmtp) {
+      this.logUnsent(mail, 'no RESEND_API_KEY and no SMTP_USER/SMTP_PASS configured')
       return { sent: false, reason: 'Email is not configured on this server.' }
     }
 
-    const first = await this.sendOverResend(mail, this.from)
-    if (first.sent) return first
+    let lastReason: string | undefined
+    let unverifiedDomain = false
 
     /**
-     * One retry from Resend's shared sender, when the configured domain is not
-     * verified.
+     * Resend first, SMTP as the fallback — see the class doc for why the order
+     * flipped once a domain existed to verify.
+     */
+    if (this.resendKey) {
+      const result = await this.sendOverResend(mail, this.resendFrom)
+      if (result.sent) return result
+      lastReason = result.reason
+      unverifiedDomain = Boolean(result.unverifiedDomain)
+      if (this.useSmtp) this.log.warn(`Resend failed (${lastReason ?? 'no reason given'}) — trying SMTP`)
+    }
+
+    if (this.useSmtp) {
+      const result = await this.sendOverSmtp(mail)
+      if (result.sent) return result
+      lastReason = result.reason
+      if (this.resendKey) this.log.warn(`SMTP also failed (${lastReason ?? 'no reason given'})`)
+    }
+
+    /**
+     * Neither transport delivered it. One last try from Resend's shared
+     * sender, when the configured domain was what Resend refused.
      *
      * Narrow on purpose. Resend lets that sender reach only the address owning
-     * the account, so this rescues the operator's own setup and reset links on a
-     * platform whose domain is not set up — and cannot quietly deliver customer
-     * mail from the wrong address, because Resend refuses that too.
+     * the account, so this rescues the operator's own setup and reset links on
+     * a platform whose domain is not set up — and cannot quietly deliver
+     * customer mail from the wrong address, because Resend refuses that too.
      */
-    if (first.unverifiedDomain && !this.usingSharedSender) {
+    if (unverifiedDomain && !this.usingSharedSender) {
       this.log.warn(
-        `${this.from} is not a verified Resend domain. Retrying from onboarding@resend.dev, ` +
+        `${this.resendFrom} is not a verified Resend domain. Retrying from onboarding@resend.dev, ` +
           'which reaches only your own Resend account address.',
       )
       const retry = await this.sendOverResend(mail, 'JamesDataConsult <onboarding@resend.dev>')
       if (retry.sent) return retry
+      lastReason = retry.reason ?? lastReason
     }
 
-    this.logUnsent(mail, first.reason ?? 'refused')
-    return { sent: false, reason: first.reason }
+    this.logUnsent(mail, lastReason ?? 'refused')
+    return { sent: false, reason: lastReason }
   }
 
   /**
@@ -174,7 +182,7 @@ export class MailerService {
       })
 
       await this.transporter.sendMail({
-        from: this.from,
+        from: this.smtpFrom,
         to: mail.to,
         subject: mail.subject,
         text: mail.text,
