@@ -215,6 +215,113 @@ export class RefundsService {
   }
 
   /**
+   * Mark a Mobile Money refund as sent outside Paystack.
+   *
+   * Some Paystack accounts cannot initiate third-party payouts at all — a
+   * Starter Business tier refuses every transfer with a reason that has
+   * nothing to do with this platform's code, and there is no code fix for it.
+   * When that is the wall, whoever is looking at the queue can pay the
+   * customer directly instead — their own Mobile Money, cash, however — and
+   * record it here so the books and the customer's receipt agree with what
+   * actually happened.
+   *
+   * Held to the same standard as a refusal: a reason is required and kept
+   * against the person who gave it, because "I sent it" is a claim nobody
+   * else verifies the way Paystack's webhook verifies an automatic transfer —
+   * the record is what answers a dispute later.
+   */
+  async settleManually(id: string, adminId: string, note: string, momoNetwork?: Network) {
+    const reason = note.trim()
+    if (reason.length < 5) {
+      throw new ValidationError('Say how and where this was sent. It is kept on the record.')
+    }
+
+    const request = await this.prisma.refundRequest.findUnique({ where: { id } })
+    if (!request) throw new NotFoundError('We could not find that refund request.')
+    if (request.method !== 'transfer') {
+      throw new ValidationError('Only a Mobile Money refund can be marked as sent manually.')
+    }
+    if (request.method === 'transfer' && !momoNetwork && !request.momoNetwork) {
+      throw new ValidationError('Choose which Mobile Money network this was sent on.')
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const request = await tx.refundRequest.findUnique({ where: { id } })
+      if (!request) throw new NotFoundError('We could not find that refund request.')
+
+      // Guarded on the row's own state, same as `approve` and `reject` — a
+      // double-click, or this racing an automatic transfer that just landed,
+      // must not settle the same refund twice.
+      if (request.status !== 'pending') {
+        throw new ConflictError('ALREADY_DECIDED', `That refund was already ${request.status}.`)
+      }
+
+      const order = await tx.order.findUniqueOrThrow({
+        where: { id: request.orderId },
+        select: { buyerUserId: true },
+      })
+
+      await tx.refundRequest.update({
+        where: { id },
+        data: {
+          status: 'approved',
+          decidedAt: new Date(),
+          decidedBy: adminId,
+          momoNetwork: momoNetwork ?? request.momoNetwork,
+          transferStatus: 'success',
+          transferNote: `Sent manually — ${reason}`,
+          paidAt: new Date(),
+        },
+      })
+
+      // Same as a webhook-confirmed transfer: only now can the receipt say
+      // the money has gone back.
+      await tx.order.update({ where: { id: request.orderId }, data: { refunded: true } })
+
+      await this.ledger.record(
+        [
+          // The same cost as any other refund — money left to make the
+          // customer whole, whichever account it left from. Re-recorded here
+          // because a prior failed Paystack attempt removes this entry;
+          // `record` is idempotent on its key either way, so this cannot
+          // double-count.
+          {
+            idempotencyKey: LedgerService.key('order', request.orderRef, 'refund'),
+            kind: 'refund',
+            amount: -request.amount,
+            description: `Refund (sent manually) · ${request.productName}`,
+            orderRef: request.orderRef,
+            userId: order.buyerUserId,
+            occurredAt: new Date(),
+          },
+          /**
+           * The business did not pay this — a person did, out of their own
+           * pocket, because Paystack refused to. That is a debt to them, not
+           * a cost to the business twice over, so it is booked as capital
+           * coming in rather than a second refund line, and does not touch
+           * profit. `FloatMonitorService.outstandingManualRefunds` surfaces
+           * it, traced back to this exact order, until a matching
+           * `capital_out` on the same order says they took it back.
+           */
+          {
+            idempotencyKey: LedgerService.key('order', request.orderRef, 'capital_in'),
+            kind: 'capital_in',
+            amount: request.amount,
+            description: `Covered refund ${request.orderRef} personally — ${reason}`,
+            orderRef: request.orderRef,
+            occurredAt: new Date(),
+            affectsProfit: false,
+          },
+        ],
+        tx,
+      )
+
+      this.log.log(`refund ${request.orderRef} settled manually by ${adminId}: ${reason}`)
+      return { id, status: 'approved' as const }
+    })
+  }
+
+  /**
    * Pay a refund back to the number that paid.
    *
    * The mirror of an agent payout, and deliberately the same shape: one

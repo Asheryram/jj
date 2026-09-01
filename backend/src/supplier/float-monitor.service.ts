@@ -43,6 +43,14 @@ export interface FloatReconciliation {
 /** Where the balance sits relative to the two thresholds. */
 export type FloatLevel = 'ok' | 'watch' | 'risk'
 
+/** One manual refund still owed back to whoever paid it out of their own pocket. */
+export interface ManualRefundAdvance {
+  orderRef: string
+  amount: number
+  description: string
+  occurredAt: string
+}
+
 export interface FloatObservation {
   /** Pesewas left in the provider float. */
   balance: number
@@ -287,6 +295,71 @@ export class FloatMonitorService {
       net: totalIn - totalOut,
       since: first?.occurredAt.toISOString() ?? null,
     }
+  }
+
+  /**
+   * Manual refunds still owed back to whoever paid them.
+   *
+   * A `capital_in` entry with an order attached is not a deliberate top-up —
+   * it is `RefundsService.settleManually` recording that a Mobile Money
+   * refund was paid from someone's own pocket because Paystack refused the
+   * transfer outright. That money is owed back until a matching `capital_out`
+   * on the same order says it was taken back out; this lists every one that
+   * is not yet matched, so it is never just a bare "owed" total nobody can
+   * trace back to a specific refund.
+   */
+  async outstandingManualRefunds(): Promise<ManualRefundAdvance[]> {
+    const [advances, reimbursed] = await Promise.all([
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_in', orderRef: { not: null } },
+        orderBy: { occurredAt: 'asc' },
+      }),
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_out', orderRef: { not: null } },
+        select: { orderRef: true },
+      }),
+    ])
+
+    const settled = new Set(reimbursed.map((r) => r.orderRef))
+    return advances
+      .filter((a) => !settled.has(a.orderRef))
+      .map((a) => ({
+        orderRef: a.orderRef as string,
+        amount: a.amount,
+        description: a.description,
+        occurredAt: a.occurredAt.toISOString(),
+      }))
+  }
+
+  /**
+   * Settle one manual advance: whoever fronted it has taken the exact amount
+   * back out of the business.
+   *
+   * Locked to what was actually advanced rather than an amount typed in here —
+   * a partial or unrelated withdrawal belongs in `logCapital` instead, not
+   * this one. This is specifically for closing out a single traced refund.
+   */
+  async reimburseManualRefund(orderRef: string, adminId: string): Promise<void> {
+    const advance = await this.prisma.ledgerEntry.findFirst({
+      where: { kind: 'capital_in', orderRef },
+    })
+    if (!advance) {
+      throw new ValidationError('No outstanding manual refund found for that order.')
+    }
+
+    await this.ledger.record([
+      {
+        kind: 'capital_out',
+        amount: -advance.amount,
+        description: `Reimbursed — refund ${orderRef}`,
+        orderRef,
+        occurredAt: new Date(),
+        affectsProfit: false,
+        idempotencyKey: LedgerService.key('order', orderRef, 'capital_out'),
+      },
+    ])
+
+    this.log.log(`manual refund advance for ${orderRef} reimbursed by ${adminId}`)
   }
 
   /**

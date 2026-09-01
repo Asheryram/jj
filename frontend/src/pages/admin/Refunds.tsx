@@ -46,6 +46,7 @@ export default function Refunds() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [rejecting, setRejecting] = useState<RefundRequest | null>(null)
   const [sending, setSending] = useState<RefundRequest | null>(null)
+  const [settling, setSettling] = useState<RefundRequest | null>(null)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -203,21 +204,36 @@ export default function Refunds() {
                     </Td>
                     <Td align="right">
                       {row.status === 'pending' ? (
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            loading={busyId === row.id}
-                            onClick={() =>
-                              row.method === 'transfer'
-                                ? setSending(row)
-                                : void approve(row)
-                            }
-                          >
-                            Refund
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => setRejecting(row)}>
-                            Refuse
-                          </Button>
+                        <div className="flex flex-col items-end gap-1.5">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              size="sm"
+                              loading={busyId === row.id}
+                              onClick={() =>
+                                row.method === 'transfer'
+                                  ? setSending(row)
+                                  : void approve(row)
+                              }
+                            >
+                              Refund
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => setRejecting(row)}>
+                              Refuse
+                            </Button>
+                          </div>
+                          {/* Only offered once an automatic transfer has actually bounced —
+                              a Starter Business Paystack account refuses every third-party
+                              payout outright, and this is the way through that wall. Hidden
+                              otherwise so the normal path stays the obvious one. */}
+                          {row.method === 'transfer' && row.transferStatus === 'failed' && (
+                            <button
+                              type="button"
+                              onClick={() => setSettling(row)}
+                              className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
+                            >
+                              Paid another way?
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <Badge tone={row.status === 'approved' ? 'success' : 'danger'}>
@@ -246,6 +262,14 @@ export default function Refunds() {
         request={rejecting}
         onClose={() => setRejecting(null)}
         onRefused={async () => {
+          await load()
+        }}
+      />
+
+      <SettleManuallyModal
+        request={settling}
+        onClose={() => setSettling(null)}
+        onSettled={async () => {
           await load()
         }}
       />
@@ -424,6 +448,122 @@ function SendRefundModal({
             Send {cedis(request.amount)}
           </Button>
           <Button block variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * The fallback for a Paystack account that cannot send transfers at all.
+ *
+ * A Starter Business account refuses every third-party payout outright — not
+ * a retry-able failure, an account-level wall. This records that the money
+ * left some other way (the admin's own Mobile Money, cash) instead of
+ * pretending the platform sent it, and closes the refund the same way a
+ * confirmed transfer would: the order is marked refunded and the customer's
+ * receipt reflects it.
+ *
+ * The note is required for the same reason a refusal's reason is required —
+ * nothing else here confirms the claim, so the record is what answers a
+ * dispute later.
+ */
+function SettleManuallyModal({
+  request,
+  onClose,
+  onSettled,
+}: {
+  request: RefundRequest | null
+  onClose: () => void
+  onSettled: () => Promise<void>
+}) {
+  const { pushToast } = useStore()
+  const [network, setNetwork] = useState<Network>('MTN')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const key = request?.id ?? 'none'
+  const [lastKey, setLastKey] = useState(key)
+  if (key !== lastKey) {
+    setLastKey(key)
+    setNetwork(request?.momoNetwork ?? 'MTN')
+    setNote('')
+    setError('')
+  }
+
+  if (!request) return null
+
+  const submit = async () => {
+    if (note.trim().length < 5) {
+      setError('Say how and where this was sent. It is kept on the record.')
+      return
+    }
+    setBusy(true)
+    try {
+      await api.settleRefundManually(request.id, note.trim(), network)
+      await onSettled()
+      pushToast({
+        tone: 'success',
+        title: `${cedis(request.amount)} marked as sent`,
+        detail: `Recorded against ${prettyPhone(request.buyerPhone)} on ${network}.`,
+      })
+      onClose()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'We could not save that.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Mark ${cedis(request.amount)} as sent`}>
+      <div className="space-y-4">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
+          <p className="font-semibold text-slate-900 dark:text-slate-50">{request.buyerName}</p>
+          <p className="tabular mt-0.5 text-slate-600 dark:text-slate-300">
+            {prettyPhone(request.buyerPhone)}
+          </p>
+        </div>
+
+        <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
+          Only use this once the money has actually left your hands. This closes the refund and
+          tells the customer it has been sent — there is no automatic transfer behind it this time.
+        </Callout>
+
+        <Field label="Which Mobile Money network did you send it on?" htmlFor="settle-network">
+          <Segmented<Network>
+            className="w-full"
+            options={[
+              { value: 'MTN', label: 'MTN' },
+              { value: 'Telecel', label: 'Telecel' },
+              { value: 'AirtelTigo', label: 'AirtelTigo' },
+            ]}
+            value={network}
+            onChange={setNetwork}
+          />
+        </Field>
+
+        <Field label="How and where did you send it?" htmlFor="settle-note" error={error}>
+          <TextInput
+            id="settle-note"
+            placeholder="Sent from my personal MTN MoMo, ref 88578647868"
+            value={note}
+            invalid={Boolean(error)}
+            onChange={(event) => {
+              setNote(event.target.value)
+              setError('')
+            }}
+          />
+        </Field>
+
+        <div className="flex gap-2">
+          <Button block loading={busy} onClick={() => void submit()}>
+            Mark as sent
+          </Button>
+          <Button block variant="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
         </div>

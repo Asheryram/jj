@@ -113,6 +113,22 @@ export class RejectRefundDto {
   note!: string
 }
 
+export class SettleRefundManuallyDto {
+  /**
+   * How and where it was actually sent. Required: unlike an automatic
+   * transfer, nothing here confirms this on its own, so the claim is kept on
+   * the record the same way a refusal's reason is.
+   */
+  @IsString()
+  @MinLength(5, { message: 'Say how and where this was sent.' })
+  @MaxLength(500)
+  note!: string
+
+  @IsOptional()
+  @IsIn(['MTN', 'Telecel', 'AirtelTigo'])
+  momoNetwork?: 'MTN' | 'Telecel' | 'AirtelTigo'
+}
+
 /** Keys whose value is a number rather than a switch. */
 const NUMERIC_SETTING_KEYS = ['floatWatchAt', 'floatRiskAt', 'paystackFeeBp'] as const
 
@@ -224,11 +240,12 @@ export class AdminController {
    */
   @Get('supplier/float')
   async float_() {
-    const [observation, settings, capital, reconciliation] = await Promise.all([
+    const [observation, settings, capital, reconciliation, manualRefunds] = await Promise.all([
       this.float.latest(),
       this.platformSettings.all(),
       this.float.capitalSummary(),
       this.float.reconcile(),
+      this.float.outstandingManualRefunds(),
     ])
     return {
       observation,
@@ -236,7 +253,18 @@ export class AdminController {
       riskAt: settings.floatRiskAt,
       capital,
       reconciliation,
+      manualRefunds,
     }
+  }
+
+  /**
+   * Whoever fronted a manual refund has taken that exact amount back out of
+   * the business. Closes out one traced advance — see
+   * `FloatMonitorService.reimburseManualRefund`.
+   */
+  @Post('supplier/float/manual-refunds/:orderRef/reimburse')
+  reimburseManualRefund(@Param('orderRef') orderRef: string, @CurrentUser() user: AuthUser) {
+    return this.float.reimburseManualRefund(orderRef, user.id)
   }
 
   /**
@@ -370,6 +398,15 @@ export class AdminController {
     @Body() dto: RejectRefundDto,
   ) {
     return this.refunds.reject(id, user.id, dto.note)
+  }
+
+  @Post('refunds/:id/settle-manually')
+  settleRefundManually(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: SettleRefundManuallyDto,
+  ) {
+    return this.refunds.settleManually(id, user.id, dto.note, dto.momoNetwork)
   }
 
   @Get('finance/position')

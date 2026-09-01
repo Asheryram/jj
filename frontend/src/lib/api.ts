@@ -331,6 +331,18 @@ export interface SupplierFloat {
     /** The live reading predates the last logged move, so it can't confirm it yet — only the next order can. */
     pending: boolean
   } | null
+  /**
+   * Manual refunds — sent from someone's own pocket because Paystack refused
+   * the transfer — not yet taken back out of the business. Each is traced to
+   * the order it came from, not just a bare total.
+   */
+  manualRefunds: {
+    orderRef: string
+    /** Pesewas. */
+    amount: number
+    description: string
+    occurredAt: string
+  }[]
 }
 
 export interface PlatformSettings {
@@ -482,6 +494,10 @@ export interface ReservePosition {
     agentEarnings: number
     customerMoney: number
     undeliveredOrders: number
+    /** Requested, balance already debited, not yet actually sent. */
+    queuedPayouts: number
+    /** Owed to whoever personally covered a refund Paystack refused to send. */
+    manualRefundAdvances: number
     total: number
   }
   pendingPayouts: { count: number; amount: number }
@@ -859,6 +875,18 @@ export const api = {
       body: { note },
     }),
 
+  /**
+   * Mark a refund as paid outside Paystack — a Starter Business account
+   * cannot initiate third-party payouts at all, and this is the way through
+   * that wall. `note` says how and where it was sent, and is required for the
+   * same reason a refusal's reason is: nothing else confirms the claim.
+   */
+  settleRefundManually: (id: string, note: string, momoNetwork?: 'MTN' | 'Telecel' | 'AirtelTigo') =>
+    request<{ id: string; status: 'approved' }>(`/admin/refunds/${id}/settle-manually`, {
+      method: 'POST',
+      body: { note, momoNetwork },
+    }),
+
   /** Profit and loss from the ledger, over a window of days. */
   financeStatement: (days = 30) =>
     request<FinanceStatement>(`/admin/finance/statement?days=${days}`),
@@ -912,6 +940,12 @@ export const api = {
     request<void>('/admin/supplier/float/capital', {
       method: 'POST',
       body: { direction, amount, note, idempotencyKey: newIdempotencyKey() },
+    }),
+
+  /** Whoever fronted a manual refund has taken that exact amount back out. */
+  reimburseManualRefund: (orderRef: string) =>
+    request<void>(`/admin/supplier/float/manual-refunds/${encodeURIComponent(orderRef)}/reimburse`, {
+      method: 'POST',
     }),
 
   setProductActive: (productId: string, active: boolean) =>

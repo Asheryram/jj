@@ -198,12 +198,29 @@ async function paymentsAreAttributed() {
  * people. If they exceed the Paystack balance, a payout run cannot be honoured.
  */
 async function solvency() {
-  const [agents, credits, fees, paid] = await Promise.all([
-    prisma.user.aggregate({ where: { role: 'agent' }, _sum: { balance: true } }),
-    prisma.claimableCredit.aggregate({ where: { claimed: false }, _sum: { amount: true } }),
-    prisma.payment.aggregate({ where: { status: 'paid' }, _sum: { fee: true } }),
-    prisma.payment.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
-  ])
+  const [agents, credits, fees, paid, pendingPayouts, manualRefundAdvances, manualRefundReimbursements] =
+    await Promise.all([
+      prisma.user.aggregate({ where: { role: 'agent' }, _sum: { balance: true } }),
+      prisma.claimableCredit.aggregate({ where: { claimed: false }, _sum: { amount: true } }),
+      prisma.payment.aggregate({ where: { status: 'paid' }, _sum: { fee: true } }),
+      prisma.payment.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
+      // A withdrawal debits the agent's balance the moment it is requested (see
+      // WithdrawalsService.request), so it has already left `owedToAgents` below
+      // by the time it shows up here — left out entirely it would vanish from
+      // both sides rather than just changing which one it's counted under.
+      prisma.withdrawal.aggregate({ where: { status: 'pending' }, _sum: { amount: true } }),
+      // Same idea for a refund someone paid out of their own pocket because
+      // Paystack refused the transfer — see RefundsService.settleManually and
+      // FloatMonitorService.outstandingManualRefunds.
+      prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_in', orderRef: { not: null } },
+        select: { orderRef: true, amount: true },
+      }),
+      prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_out', orderRef: { not: null } },
+        select: { orderRef: true },
+      }),
+    ])
   const customerWallets = await prisma.user.aggregate({
     where: { role: 'customer' },
     _sum: { balance: true },
@@ -213,6 +230,12 @@ async function solvency() {
   const owedToCustomers = (credits._sum.amount ?? 0) + (customerWallets._sum.balance ?? 0)
   const collected = paid._sum.amount ?? 0
   const feesPaid = fees._sum.fee ?? 0
+  const owedForPayouts = pendingPayouts._sum.amount ?? 0
+  const reimbursedRefs = new Set(manualRefundReimbursements.map((r) => r.orderRef))
+  const owedForManualRefunds = manualRefundAdvances
+    .filter((advance) => !reimbursedRefs.has(advance.orderRef))
+    .reduce((sum, advance) => sum + advance.amount, 0)
+  const totalOwed = owedToAgents + owedToCustomers + owedForPayouts + owedForManualRefunds
 
   console.log('\n  Liabilities and inflows')
   console.log(`        collected through Paystack : ${ghs(collected)}`)
@@ -220,13 +243,15 @@ async function solvency() {
     (collected > 0 ? `  (${((feesPaid / collected) * 100).toFixed(2)}% of collections)` : ''))
   console.log(`        owed to agents             : ${ghs(owedToAgents)}`)
   console.log(`        owed to customers          : ${ghs(owedToCustomers)}`)
-  console.log(`        total owed to other people : ${ghs(owedToAgents + owedToCustomers)}`)
+  console.log(`        payouts requested, unsent  : ${ghs(owedForPayouts)}`)
+  console.log(`        owed for manual refunds    : ${ghs(owedForManualRefunds)}`)
+  console.log(`        total owed to other people : ${ghs(totalOwed)}`)
 
-  if (owedToAgents + owedToCustomers > 0) {
+  if (totalOwed > 0) {
     notes.push(
-      `${ghs(owedToAgents + owedToCustomers)} is owed to agents and customers. That money is not ` +
-        'segregated — it sits in the same Paystack balance as float and profit, so spending the ' +
-        'balance down can leave a payout unpayable.',
+      `${ghs(totalOwed)} is owed to agents, customers, and whoever fronted a manual refund. That ` +
+        'money is not segregated — it sits in the same Paystack balance as float and profit, so ' +
+        'spending the balance down can leave a payout unpayable.',
     )
   }
   if (feesPaid > 0 && collected > 0) {

@@ -437,6 +437,23 @@ export class FulfilmentService implements OnApplicationBootstrap {
     })
     if (already) return
 
+    /**
+     * There is nothing to reverse unless this agent was actually credited for
+     * THIS order. `creditAgent` only ever runs on the `delivered` branch of
+     * `settle`, and `settle`'s own guard means an order only ever takes one of
+     * `delivered`/`rejected` — so a normal rejection reaches here having never
+     * credited anyone. Without this check, every rejected order with an agent
+     * share silently debited that agent's balance for money earned on
+     * unrelated past sales, logged as a "reversal" of something that never
+     * happened. This only proceeds for the one legitimate case: an order that
+     * really was credited earlier and is now being unwound.
+     */
+    const credited = await tx.earning.findFirst({
+      where: { userId: share.userId, reference, type: { in: ['sale', 'downline'] } },
+      select: { id: true },
+    })
+    if (!credited) return
+
     const agent = await tx.user.findUnique({
       where: { id: share.userId },
       select: { balance: true },

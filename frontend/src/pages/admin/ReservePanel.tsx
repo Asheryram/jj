@@ -117,6 +117,22 @@ export default function ReservePanel() {
             negative
             hint="Either a bundle or a refund — not yours either way"
           />
+          {liabilities.queuedPayouts > 0 && (
+            <Row
+              label="Payouts requested, not yet sent"
+              value={liabilities.queuedPayouts}
+              negative
+              hint="Already off an agent's balance — still theirs until it actually lands"
+            />
+          )}
+          {liabilities.manualRefundAdvances > 0 && (
+            <Row
+              label="Owed for refunds paid out of pocket"
+              value={liabilities.manualRefundAdvances}
+              negative
+              hint="Someone covered these personally — settle them on the Float panel"
+            />
+          )}
           <Row label="Total owed to other people" value={liabilities.total} negative strong />
         </dl>
 

@@ -40,8 +40,16 @@ export class SolvencyService {
    * held — not a rounding matter, a shortfall somebody will eventually ask for.
    */
   async position() {
-    const [agents, customerWallets, credits, pendingPayouts, heldOrders, pendingRefunds] =
-      await Promise.all([
+    const [
+      agents,
+      customerWallets,
+      credits,
+      pendingPayouts,
+      heldOrders,
+      pendingRefunds,
+      manualRefundAdvances,
+      manualRefundReimbursements,
+    ] = await Promise.all([
       this.prisma.user.aggregate({ where: { role: 'agent' }, _sum: { balance: true } }),
       this.prisma.user.aggregate({ where: { role: 'customer' }, _sum: { balance: true } }),
       this.prisma.claimableCredit.aggregate({
@@ -71,6 +79,19 @@ export class SolvencyService {
         _sum: { amount: true },
         _count: { _all: true },
       }),
+      // A `capital_in` tied to an order is `RefundsService.settleManually`
+      // recording that someone personally covered a refund Paystack refused to
+      // send — see `FloatMonitorService.outstandingManualRefunds`. Owed back
+      // the same as any other debt from the moment it happened, not from
+      // whenever it gets reimbursed.
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_in', orderRef: { not: null } },
+        select: { orderRef: true, amount: true },
+      }),
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_out', orderRef: { not: null } },
+        select: { orderRef: true },
+      }),
     ])
 
     const owedToAgents = agents._sum.balance ?? 0
@@ -79,7 +100,20 @@ export class SolvencyService {
       (credits._sum.amount ?? 0) +
       (pendingRefunds._sum.amount ?? 0)
     const undelivered = heldOrders._sum.salePrice ?? 0
-    const liabilities = owedToAgents + owedToCustomers + undelivered
+    /**
+     * Requesting a withdrawal debits the agent's balance immediately (see
+     * `WithdrawalsService.request`), so by the time it is sitting here as
+     * "pending" it has already left `owedToAgents` above. Left out of the
+     * total it would vanish from both sides — same class of gap
+     * `pendingRefunds` above already exists to close, for the identical
+     * reason: a payout not yet sent is still owed, not yet freed up.
+     */
+    const queuedPayouts = pendingPayouts._sum.amount ?? 0
+    const reimbursedRefs = new Set(manualRefundReimbursements.map((r) => r.orderRef))
+    const owedForManualRefunds = manualRefundAdvances
+      .filter((advance) => !reimbursedRefs.has(advance.orderRef))
+      .reduce((sum, advance) => sum + advance.amount, 0)
+    const liabilities = owedToAgents + owedToCustomers + undelivered + queuedPayouts + owedForManualRefunds
 
     const [balanceResult, settlementResult] = await Promise.all([
       this.paystack.balance(),
@@ -109,6 +143,10 @@ export class SolvencyService {
         agentEarnings: owedToAgents,
         customerMoney: owedToCustomers,
         undeliveredOrders: undelivered,
+        /** Requested, balance already debited, not yet actually sent. */
+        queuedPayouts,
+        /** Owed to whoever personally covered a refund Paystack refused to send. */
+        manualRefundAdvances: owedForManualRefunds,
         total: liabilities,
       },
       pendingPayouts: {
