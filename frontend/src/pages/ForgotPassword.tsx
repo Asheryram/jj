@@ -55,6 +55,10 @@ export default function ForgotPassword() {
               reset link is on its way to it. The link works once and expires in an hour.
             </p>
             <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
+              Don't see it in a minute or two? Check your spam or junk folder — it sometimes lands
+              there the first time.
+            </p>
+            <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
               Nothing has changed yet — your current password keeps working until you use the link.
             </p>
             <Link to={shopPath('/login')} className="mt-5 block">
