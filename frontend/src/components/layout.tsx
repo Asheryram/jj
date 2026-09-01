@@ -166,6 +166,11 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 // ─── Shell ──────────────────────────────────────────────────────────────────
 
+/** Where a role lands when it needs somewhere to go — its own dashboard. */
+function homeFor(role: Role): string {
+  return isAdmin(role) ? '/admin' : '/app'
+}
+
 export function RequireAuth({ role }: { role?: Role }) {
   const { session } = useStore()
   const location = useLocation()
@@ -175,7 +180,10 @@ export function RequireAuth({ role }: { role?: Role }) {
   // A superadmin satisfies an `admin` gate, mirroring the server's guard. Without
   // this the operator could reach the API but not the screens that call it.
   const allowed = !role || session.role === role || (role === 'admin' && isAdmin(session.role))
-  if (!allowed) return <Navigate to="/app" replace />
+  // `homeFor`, not a hardcoded `/app`: an admin who lands here on a mismatched
+  // agent-only route (or mid-switch — see `swap` below) belongs at `/admin`,
+  // not at the agent dashboard.
+  if (!allowed) return <Navigate to={homeFor(session.role)} replace />
 
   /**
    * An agent who has not been approved sees one screen, whatever they navigate to.
@@ -208,13 +216,24 @@ export function AppShell() {
    * The destination matters: switching to an agent while standing on an admin
    * page would leave you on a route your new role cannot open, and the guard
    * would bounce you somewhere arbitrary. So the switch decides where you go.
+   *
+   * `switchProfile` commits the new session to the store as soon as its own
+   * request answers — before the catalogue/session data it also loads has
+   * finished — so `RequireAuth` above sees the new role while the URL is still
+   * the old page and, correctly, redirects on its own before this function
+   * ever gets to. Navigating again afterwards to that same page a second time
+   * left the screen blank instead of just doing nothing — some interruption in
+   * the middle of matching routes, not a crash anything here logs. Checking
+   * the real URL first avoids ever sending a second, redundant navigation to
+   * where the guard has already put us.
    */
   const swap = async (userId: string) => {
     if (!session || userId === session.id || switching) return
     setSwitching(true)
     try {
       const next = await switchProfile(userId)
-      navigate(isAdmin(next.role) ? '/admin' : '/app', { replace: true })
+      const destination = homeFor(next.role)
+      if (window.location.pathname !== destination) navigate(destination, { replace: true })
     } finally {
       setSwitching(false)
     }

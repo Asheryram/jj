@@ -485,16 +485,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * Switching without this would leave an agent holding admin data — or worse,
    * an admin holding the agent payload, which is exactly how the Prices page
    * came to render GHS NaN.
+   *
+   * `setSession` runs last, once the loads above have already settled — not
+   * first. Committing it first left a window where the rest of the app saw
+   * the new role while the URL was still the old page (the switch is still
+   * awaiting the data below), and `RequireAuth` redirected on its own,
+   * correctly but a step ahead of the caller — which then tried to navigate a
+   * second time to where the guard had already put it, and that raced into a
+   * blank screen instead of just doing nothing. Loading everything before
+   * announcing the new session means the one render that shows it also has
+   * everywhere it needs to go already resolved, so nothing upstream ever sees
+   * a role and a route that disagree.
    */
   const switchProfile = useCallback(
     async (userId: string): Promise<Session> => {
       const result = await api.switchProfile(userId)
       token.set(result.accessToken)
+      await Promise.all([loadCatalogue(), loadForSession(result.user)])
       setSession(result.user)
       setProfiles(result.profiles ?? [])
       if (result.user.role === 'customer') setCustomerBalance(result.balance)
       if (result.user.role === 'agent') setAgentBalance(result.balance)
-      await Promise.all([loadCatalogue(), loadForSession(result.user)])
       return result.user
     },
     [loadCatalogue, loadForSession],
