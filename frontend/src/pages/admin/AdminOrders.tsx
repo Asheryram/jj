@@ -105,6 +105,8 @@ export default function AdminOrders() {
       'Network',
       'Recipient',
       'Customer paid',
+      'Paystack fee',
+      'Catalogue price',
       'Supplier cost (actual)',
       'Catalogue diff',
       'Your margin (true)',
@@ -125,6 +127,8 @@ export default function AdminOrders() {
         o.network ?? 'All',
         o.recipient,
         (o.salePrice / 100).toFixed(2),
+        o.split.processingFee == null ? '' : (o.split.processingFee / 100).toFixed(2),
+        (o.split.supplierCost / 100).toFixed(2),
         (actualCostOf(o) / 100).toFixed(2),
         (catalogueDiffOf(o) / 100).toFixed(2),
         (trueMarginOf(o) / 100).toFixed(2),
@@ -223,7 +227,10 @@ export default function AdminOrders() {
                 <Th>Recipient</Th>
                 <Th>Status</Th>
                 <Th align="right">Customer paid</Th>
-                <Th align="right">Supplier</Th>
+                <Th align="right">Paystack fee</Th>
+                <Th align="right">Catalogue price</Th>
+                <Th align="right">Actual cost</Th>
+                <Th align="right">Catalogue P/L</Th>
                 <Th align="right">Your profit</Th>
                 <Th align="right">Agents</Th>
               </tr>
@@ -278,30 +285,40 @@ export default function AdminOrders() {
                       {cedis(order.salePrice)}
                     </Td>
                     <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
+                      {/* Null, not zero — a fee of exactly nothing never happens
+                          on a real sale, so a blank here means an order placed
+                          before this field existed, not a free transaction. */}
+                      {order.split.processingFee == null ? '—' : cedis(order.split.processingFee)}
+                    </Td>
+                    <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
+                      {cedis(order.split.supplierCost)}
+                    </Td>
+                    <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
                       {cedis(actualCostOf(order))}
-                      {/* Only shown when the supplier's real charge actually
-                          differs from the catalogue estimate this order was
-                          priced from — most orders never show this line. */}
-                      {catalogueDiffOf(order) !== 0 && (
-                        <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
-                          catalogue said {cedis(order.split.supplierCost)}
-                        </p>
+                    </Td>
+                    <Td
+                      align="right"
+                      className={cn(
+                        'tabular font-semibold',
+                        order.actualSupplierCost == null
+                          ? 'text-slate-400 dark:text-slate-500'
+                          : catalogueDiffOf(order) > 0
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : catalogueDiffOf(order) < 0
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-slate-500 dark:text-slate-400',
                       )}
+                    >
+                      {/* Null, not zero, until the supplier's real charge is
+                          actually known — a fresh order priced exactly at
+                          catalogue and one nobody has heard back on yet must
+                          not read the same. */}
+                      {order.actualSupplierCost == null
+                        ? '—'
+                        : cedis(catalogueDiffOf(order), { sign: true })}
                     </Td>
                     <Td align="right" className="tabular font-semibold text-brand-700 dark:text-brand-300">
                       {order.status === 'completed' ? cedis(trueMarginOf(order), { sign: true }) : '—'}
-                      {order.status === 'completed' && catalogueDiffOf(order) !== 0 && (
-                        <p
-                          className={cn(
-                            'mt-0.5 text-[11px] font-normal',
-                            catalogueDiffOf(order) > 0
-                              ? 'text-emerald-600 dark:text-emerald-400'
-                              : 'text-red-600 dark:text-red-400',
-                          )}
-                        >
-                          {cedis(catalogueDiffOf(order), { sign: true })} vs catalogue
-                        </p>
-                      )}
                     </Td>
                     <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                       {order.status === 'completed' && agentShares.length > 0
