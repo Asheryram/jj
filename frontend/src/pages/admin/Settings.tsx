@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../../state/store'
 import { api } from '../../lib/api'
 import { cedis } from '../../lib/format'
-import ProviderCatalogue from './ProviderCatalogue'
 import {
   Badge,
   Button,
@@ -227,7 +226,9 @@ export default function Settings() {
         </div>
       </Card>
 
-      <YourDetails />
+      <div id="your-details" className="scroll-mt-20">
+        <YourDetails />
+      </div>
 
       <AgentApproval />
 
@@ -236,8 +237,6 @@ export default function Settings() {
       <PaystackFeeSetting />
 
       <FloatThresholds />
-
-      <ProviderCatalogue />
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { cedis, parseCedis } from '../../lib/format'
 import type { Category, Network, Product } from '../../data/types'
 import { NETWORKS, NETWORK_STYLES } from '../../lib/networks'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
+import ProviderCatalogue from './ProviderCatalogue'
 import {
   Button,
   Callout,
@@ -403,6 +404,10 @@ export default function CostPrices() {
         </TableWrap>
       </Card>
 
+      <div id="supplier-catalogue" className="mt-3 scroll-mt-20">
+        <ProviderCatalogue />
+      </div>
+
       <MarkupModal
         open={marking}
         category={category}
@@ -514,10 +519,8 @@ function EditPricesModal({
             </p>
           </div>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Comes from the provider catalogue, so it always matches what you are actually invoiced.
-            Change it under{' '}
-            <strong className="font-semibold text-slate-700 dark:text-slate-200">Settings → Provider catalogue</strong>{' '}
-            and it flows down here.
+            Comes from the supplier catalogue further down this page, so it always matches what you
+            are actually invoiced — sync it there and it flows up here.
           </p>
         </div>
 

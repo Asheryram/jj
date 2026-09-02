@@ -1,4 +1,3 @@
-import { Link } from 'react-router-dom'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, ApiError, type SupplierSku } from '../../lib/api'
 import { useStore } from '../../state/store'
@@ -176,12 +175,9 @@ export default function ProviderCatalogue() {
                   <Button size="sm" onClick={() => setPublishing(true)}>
                     Set a markup and publish
                   </Button>
-                  <Link
-                    to="/admin/prices"
-                    className="text-sm font-semibold text-brand-700 dark:text-brand-300 hover:underline"
-                  >
-                    Or price them individually
-                  </Link>
+                  <span className="text-sm text-slate-500 dark:text-slate-400">
+                    or price them individually in the table above
+                  </span>
                 </div>
               </Callout>
             )}

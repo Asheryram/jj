@@ -22,10 +22,12 @@ import {
   TableWrap,
   Td,
   Th,
+  cn,
 } from '../../components/ui'
 import {
   AlertIcon,
   CashIcon,
+  CheckIcon,
   ChevronRightIcon,
   ReceiptIcon,
   TrendUpIcon,
@@ -161,6 +163,11 @@ export default function Overview() {
         subtitle="Everything happening across JamesDataConsult."
       />
 
+      {/* Before anything else — a shop that cannot fulfil an order or pay
+          itself out yet needs to know that before the rest of this page's
+          numbers mean anything. Disappears for good once every step is done. */}
+      <GettingStartedCard />
+
       {/* Things needing attention come before the vanity numbers. */}
       {(pendingWithdrawals.length > 0 || failedOrders.length > 0) && (
         <div className="mb-3 grid gap-3 sm:grid-cols-2">
@@ -223,8 +230,9 @@ export default function Overview() {
 
       {/* The other pot of money, and the one that stops the product working when
           it empties. Next to the reserve panel because the two are read together:
-          what is free to spend, and what the float still needs. */}
-      <div className="mt-3">
+          what is free to spend, and what the float still needs. `id` is the
+          "Get set up" checklist's jump target above. */}
+      <div className="mt-3 scroll-mt-20" id="float-panel">
         <FloatPanel />
       </div>
 
@@ -460,6 +468,114 @@ export default function Overview() {
         </div>
       </Card>
     </div>
+  )
+}
+
+/**
+ * What has to happen before selling actually works, checked off as it
+ * becomes true rather than asked once and forgotten.
+ *
+ * DataHub debits a prepaid float on every order, so a shop that has never
+ * logged a top-up can still take a customer's payment and then fail to
+ * deliver — the money and the mistake both land after the fact. A banner
+ * that only nags on day one would be missed the moment it is dismissed, so
+ * this reads the platform's own state instead: still incomplete, it stays
+ * here; complete, it renders nothing and never comes back.
+ *
+ * Deliberately not a hard gate on the rest of the app. This shop has one
+ * admin, not a stream of strangers onboarding themselves — a route guard
+ * would add a real maintenance burden (see `RequireAuth`'s pending-agent
+ * gate for what that costs) to solve a problem an unmissable checklist
+ * already solves just as well.
+ */
+function GettingStartedCard() {
+  const { products, session } = useStore()
+  const [floatLogged, setFloatLogged] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let live = true
+    api
+      .supplierFloat()
+      .then((float) => live && setFloatLogged(float.capital.since !== null))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // Nothing to say yet, and better silence than a guess at whether it's needed.
+  if (floatLogged === null) return null
+
+  const steps = [
+    {
+      done: floatLogged,
+      label: 'Add money to your DataHub float, then log it here',
+      detail:
+        'Every order spends from this prepaid balance — without it, a paid order can still fail to deliver.',
+      to: '#float-panel',
+      cta: 'Log it below',
+    },
+    {
+      done: products.some((p) => p.active),
+      label: 'Price your catalogue',
+      detail: 'Nothing is on sale until you set what agents and walk-up customers pay for it.',
+      to: '/admin/prices',
+      cta: 'Set your prices',
+    },
+    {
+      done: Boolean(session && session.phone !== '0000000000'),
+      label: 'Set your own payout Mobile Money number',
+      detail: 'This is where your own earnings and any manual payouts are sent.',
+      to: '/admin/settings#your-details',
+      cta: 'Set it in Settings',
+    },
+  ]
+
+  if (steps.every((step) => step.done)) return null
+
+  return (
+    <Card className="mb-3 border-brand-200 dark:border-brand-800">
+      <CardHead title="Get set up" subtitle="Worth doing before you start selling" />
+      <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+        {steps.map((step) => (
+          <li key={step.label} className="flex flex-wrap items-start gap-3 px-4 py-3 sm:px-5">
+            <span
+              className={cn(
+                'mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full',
+                step.done
+                  ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500',
+              )}
+            >
+              <CheckIcon className="size-3.5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p
+                className={cn(
+                  'text-sm font-semibold',
+                  step.done
+                    ? 'text-slate-400 line-through dark:text-slate-500'
+                    : 'text-slate-900 dark:text-slate-50',
+                )}
+              >
+                {step.label}
+              </p>
+              {!step.done && (
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{step.detail}</p>
+              )}
+            </div>
+            {!step.done && (
+              <Link
+                to={step.to}
+                className="shrink-0 text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
+              >
+                {step.cta}
+              </Link>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
   )
 }
 

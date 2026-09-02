@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useStore, type Toast } from '../state/store'
 import { useBranding } from '../state/branding'
@@ -8,7 +8,7 @@ import { isAdmin } from '../lib/roles'
 import { useTheme } from '../lib/theme'
 import type { Role } from '../data/types'
 import { Badge, Button, Modal, cn } from './ui'
-import { apiAsset } from '../lib/api'
+import { api, apiAsset } from '../lib/api'
 import {
   AlertIcon,
   CashIcon,
@@ -84,6 +84,8 @@ interface NavItem {
   label: string
   icon: (props: { className?: string }) => ReactNode
   end?: boolean
+  /** A small count shown on the nav item — currently only agent sign-ups waiting on Users. */
+  badge?: number
 }
 
 /**
@@ -104,17 +106,35 @@ const PROFILE_LABEL: Partial<Record<Role, string>> = {
   customer: 'Customer',
 }
 
-function navFor(role: Role, shopPath: (path: string) => string): NavItem[] {
+/**
+ * Ordered by how urgent it is, not alphabetically or by how the API groups it.
+ *
+ * The first four are what the mobile bottom bar shows before "More" — see
+ * `AppShell` below — so they carry the weight: Overview and All orders are
+ * the daily check, Refunds and Withdrawals are money someone else is waiting
+ * on. Number approvals and Users are real but rarely urgent in the same way,
+ * so they sit in the overflow rather than crowding out a thumb-reachable slot.
+ */
+function navFor(role: Role, shopPath: (path: string) => string, pendingApplications = 0): NavItem[] {
   if (isAdmin(role)) {
     return [
       { to: '/admin', label: 'Overview', icon: HomeIcon, end: true },
       { to: '/admin/orders', label: 'All orders', icon: ReceiptIcon },
-      { to: '/admin/approvals', label: 'Approvals', icon: ShieldIcon },
-      { to: '/admin/users', label: 'Users', icon: UsersIcon },
-      { to: '/admin/prices', label: 'Cost prices', icon: TagIcon },
       { to: '/admin/refunds', label: 'Refunds', icon: ReceiptIcon },
-      { to: '/admin/branding', label: 'Branding', icon: StoreIcon },
       { to: '/admin/withdrawals', label: 'Withdrawals', icon: CashIcon },
+      // Renamed from "Approvals": this is DataHub-blocked phone numbers, not
+      // agent sign-ups — those wait on Users instead (see the badge below),
+      // and sharing the word "approvals" between two unrelated queues was
+      // sending admins to the wrong screen.
+      { to: '/admin/approvals', label: 'Number approvals', icon: ShieldIcon },
+      {
+        to: '/admin/users',
+        label: 'Users',
+        icon: UsersIcon,
+        badge: pendingApplications > 0 ? pendingApplications : undefined,
+      },
+      { to: '/admin/prices', label: 'Cost prices', icon: TagIcon },
+      { to: '/admin/branding', label: 'Branding', icon: StoreIcon },
       { to: '/admin/settings', label: 'Settings', icon: SettingsIcon },
       // Platform access belongs to the operator, not the business owner. An
       // admin must not be shown a door they cannot open.
@@ -154,6 +174,20 @@ function navFor(role: Role, shopPath: (path: string) => string): NavItem[] {
     { to: '/app/orders', label: 'Orders', icon: ReceiptIcon },
     { to: '/app/reports', label: 'My spending', icon: ChartIcon },
   ]
+}
+
+/** A small waiting-count on a nav item — currently just agent sign-ups on Users. */
+function NavBadge({ count, className }: { count: number; className?: string }) {
+  return (
+    <span
+      className={cn(
+        'flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-bold text-white',
+        className,
+      )}
+    >
+      {count > 9 ? '9+' : count}
+    </span>
+  )
 }
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -209,6 +243,20 @@ export function AppShell() {
   const { session, balance, logout, profiles, switchProfile } = useStore()
   const [switching, setSwitching] = useState(false)
   const navigate = useNavigate()
+  const location = useLocation()
+
+  /**
+   * A route change driven by `history.push` (what every in-app `<Link>` does)
+   * does not get the browser's native jump-to-anchor behaviour that a real
+   * page load with a `#hash` in the URL gets — so a link like
+   * `/admin/settings#your-details` would land on the page without ever
+   * scrolling to it. Handled once here rather than per-page.
+   */
+  useEffect(() => {
+    if (!location.hash) return
+    const target = document.getElementById(location.hash.slice(1))
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [location.pathname, location.hash])
 
   /**
    * Move to another of this person's profiles, and land somewhere it makes sense.
@@ -240,9 +288,30 @@ export function AppShell() {
   }
   const shopPath = useShopPath()
   const [moreOpen, setMoreOpen] = useState(false)
+
+  /**
+   * A count on the Users nav item, so a waiting agent sign-up is visible from
+   * anywhere rather than only after opening Users itself. Fetched here, once
+   * per admin session, rather than lifted into the global store: nothing else
+   * in the app needs this number, and `Users`/`AgentApplications` already do
+   * their own fetch of the same cheap endpoint for the actual queue.
+   */
+  const [pendingApplications, setPendingApplications] = useState(0)
+  useEffect(() => {
+    if (!session || !isAdmin(session.role)) return
+    let live = true
+    api
+      .applicationQueue()
+      .then((rows) => live && setPendingApplications(rows.length))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [session?.id, session?.role])
+
   if (!session) return null
 
-  const items = navFor(session.role, shopPath)
+  const items = navFor(session.role, shopPath, pendingApplications)
   const primary = items.slice(0, 4)
   const overflow = items.slice(4)
 
@@ -320,6 +389,7 @@ export function AppShell() {
               <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
                 <item.icon className="size-5 shrink-0" />
                 {item.label}
+                {Boolean(item.badge) && <NavBadge count={item.badge as number} className="ml-auto" />}
               </NavLink>
             ))}
           </nav>
@@ -360,9 +430,14 @@ export function AppShell() {
             <button
               type="button"
               onClick={() => setMoreOpen(true)}
-              className="flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400"
+              className="relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400"
             >
-              <MenuIcon className="size-5.5" />
+              <span className="relative">
+                <MenuIcon className="size-5.5" />
+                {overflow.some((item) => item.badge) && (
+                  <span className="absolute -right-1 -top-1 size-2.5 rounded-full bg-brand-600" />
+                )}
+              </span>
               More
             </button>
           )}
@@ -380,6 +455,7 @@ export function AppShell() {
             >
               <item.icon className="size-5 shrink-0" />
               {item.label}
+              {Boolean(item.badge) && <NavBadge count={item.badge as number} className="ml-auto" />}
             </NavLink>
           ))}
         </nav>
