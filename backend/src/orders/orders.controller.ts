@@ -2,12 +2,16 @@ import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { OrdersService } from './orders.service'
-import { PlaceOrderDto, TrackOrderDto, VerifyRecipientDto } from './orders.dto'
+import { ReconcilerService } from '../supplier/reconciler.service'
+import { PlaceOrderDto, ResolveOrderDto, TrackOrderDto, VerifyRecipientDto } from './orders.dto'
 
 @ApiTags('orders')
 @Controller('orders')
 export class OrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly reconciler: ReconcilerService,
+  ) {}
 
   /**
    * Public on purpose. FR-4.8 — a guest arriving on an agent's sell link must be
@@ -63,5 +67,18 @@ export class OrdersController {
   @ApiBearerAuth()
   dispatches(@Param('id') id: string) {
     return this.orders.dispatchesFor(id)
+  }
+
+  /**
+   * Settle a stuck order by hand — see `ReconcilerService.resolveManually`.
+   * For the case nothing automatic ever resolves: the provider's own status
+   * never reaches a recognised terminal word, even though the real outcome
+   * (delivered or not) is already known to whoever is looking at it.
+   */
+  @Post(':id/resolve')
+  @Roles('admin')
+  @ApiBearerAuth()
+  resolve(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ResolveOrderDto) {
+    return this.reconciler.resolveManually(id, dto.outcome, user.id, dto.note)
   }
 }

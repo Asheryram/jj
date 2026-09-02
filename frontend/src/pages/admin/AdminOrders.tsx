@@ -9,6 +9,7 @@ import {
   Callout,
   Card,
   EmptyState,
+  Field,
   Modal,
   NetworkChip,
   PageHead,
@@ -388,13 +389,21 @@ function explain(attempt: DispatchAttempt): {
  * out — but it is not what he has to read first.
  */
 function DispatchModal({ order, onClose }: { order: Order | null; onClose: () => void }) {
+  const { pushToast, refresh } = useStore()
   const [attempts, setAttempts] = useState<DispatchAttempt[] | null>(null)
   const [error, setError] = useState('')
+  const [resolving, setResolving] = useState<'delivered' | 'rejected' | null>(null)
+  const [note, setNote] = useState('')
+  const [noteError, setNoteError] = useState('')
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     if (!order) {
       setAttempts(null)
       setError('')
+      setResolving(null)
+      setNote('')
+      setNoteError('')
       return
     }
     let live = true
@@ -411,6 +420,30 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
   }, [order])
 
   if (!order) return null
+
+  const stuck = order.status === 'pending' || order.status === 'processing'
+
+  const submitResolve = async () => {
+    if (!resolving) return
+    if (note.trim().length < 5) {
+      setNoteError('Say why you are resolving this by hand. It is kept on the record.')
+      return
+    }
+    setBusy(true)
+    try {
+      await api.resolveOrder(order.id, resolving, note.trim())
+      pushToast({
+        tone: 'success',
+        title: `${order.reference} marked ${resolving === 'delivered' ? 'delivered' : 'failed'}`,
+      })
+      await refresh()
+      onClose()
+    } catch (caught) {
+      setNoteError(caught instanceof ApiError ? caught.message : 'We could not save that.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <Modal open onClose={onClose} title={`Order ${order.reference}`}>
@@ -539,6 +572,76 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
             </div>
           )
         })}
+
+        {/* For the case nothing automatic ever resolves: the provider's own
+            status never reaches a word the reconciler recognises as final
+            (see mapProviderStatus), even though the real outcome is already
+            known to whoever is looking at this. */}
+        {stuck && (
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
+            {resolving === null ? (
+              <>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Know what actually happened?
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Only the delivery partner, the webhook, or the automatic check above normally
+                  settles an order. Use this only when you are certain — it is kept on the record.
+                </p>
+                <div className="mt-2.5 flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setResolving('delivered')}>
+                    Mark as delivered
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => setResolving('rejected')}>
+                    Mark as failed
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  {resolving === 'delivered'
+                    ? 'Mark this as delivered'
+                    : 'Mark this as failed — a refund will be queued'}
+                </p>
+                <Field
+                  label="How do you know?"
+                  htmlFor="resolve-note"
+                  className="mt-2"
+                  error={noteError}
+                >
+                  <TextInput
+                    id="resolve-note"
+                    placeholder="Customer confirmed by WhatsApp they received it"
+                    value={note}
+                    invalid={Boolean(noteError)}
+                    onChange={(event) => {
+                      setNote(event.target.value)
+                      setNoteError('')
+                    }}
+                  />
+                </Field>
+                <div className="mt-2.5 flex gap-2">
+                  <Button size="sm" loading={busy} onClick={() => void submitResolve()}>
+                    Confirm
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => {
+                      setResolving(null)
+                      setNote('')
+                      setNoteError('')
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </Modal>
   )

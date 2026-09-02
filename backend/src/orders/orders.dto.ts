@@ -66,3 +66,18 @@ export class VerifyRecipientDto {
   @Matches(GH_PHONE, { message: 'A Ghana number needs 10 digits.' })
   recipient!: string
 }
+
+export class ResolveOrderDto {
+  @IsIn(['delivered', 'rejected'])
+  outcome!: 'delivered' | 'rejected'
+
+  /**
+   * Why this is being decided by hand rather than by the provider's own
+   * answer. Required and kept on the record — same reason a refund refusal
+   * requires one: nothing else here confirms the claim.
+   */
+  @IsString()
+  @MinLength(5, { message: 'Say why you are resolving this by hand.' })
+  @MaxLength(500)
+  note!: string
+}

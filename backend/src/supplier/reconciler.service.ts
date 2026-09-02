@@ -4,6 +4,7 @@ import { FulfilmentService } from '../orders/fulfilment.service'
 import { PaymentsService } from '../payments/payments.service'
 import { SupplierService } from './supplier.service'
 import { DatahubClient, mapProviderStatus } from './datahub.client'
+import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 
 /**
  * Closes orders that DataHub GH accepted but never reported back on.
@@ -246,5 +247,44 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
         ? 'Accepted by DataHub but never reported back'
         : 'No reply from DataHub — may or may not have been placed',
     }))
+  }
+
+  /**
+   * Settle an order by hand, when nothing automatic ever will.
+   *
+   * `sweep()` only resolves an order once DataHub's own status reaches a
+   * recognised terminal word — `SUCCESSFUL`, `FAILED`, `CANCELLED`. Anything
+   * else, including a status they never change again, is deliberately left
+   * alone forever rather than guessed at (see `mapProviderStatus`) — the
+   * conservative failure mode is right for automation, but it means a
+   * genuinely-delivered order whose provider reply is permanently stuck (a
+   * `manual_` reference that needed a person at DataHub to close out, for
+   * one real case) has no path to resolution without this. Runs through the
+   * exact same `settleFromProvider` the webhook and the sweep use, so the
+   * ledger, agent crediting, and the split invariant are all still correct
+   * regardless of which of the three ever actually decides an order.
+   */
+  async resolveManually(
+    orderId: string,
+    outcome: 'delivered' | 'rejected',
+    adminId: string,
+    note: string,
+  ): Promise<void> {
+    const reason = note.trim()
+    if (reason.length < 5) {
+      throw new ValidationError('Say why you are resolving this by hand. It is kept on the record.')
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { status: true, reference: true },
+    })
+    if (!order) throw new NotFoundError('We could not find that order.')
+    if (order.status !== 'pending' && order.status !== 'processing') {
+      throw new ConflictError('ALREADY_SETTLED', `That order is already ${order.status}.`)
+    }
+
+    this.log.warn(`${order.reference}: resolved by hand as ${outcome} by ${adminId} — ${reason}`)
+    await this.fulfilment.settleFromProvider(orderId, outcome, `Marked ${outcome} by hand — ${reason}`)
   }
 }

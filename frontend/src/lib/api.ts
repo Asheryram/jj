@@ -670,6 +670,14 @@ export const api = {
    */
   orderDispatches: (id: string) => request<DispatchAttempt[]>(`/orders/${id}/dispatches`),
 
+  /**
+   * Settle a stuck order by hand — for the rare case the delivery partner's
+   * own status never reaches a word the reconciler recognises as final, even
+   * though the real outcome (delivered or not) is already known.
+   */
+  resolveOrder: (id: string, outcome: 'delivered' | 'rejected', note: string) =>
+    request<void>(`/orders/${id}/resolve`, { method: 'POST', body: { outcome, note } }),
+
   trackOrder: (reference: string, phone: string) =>
     request<Order>('/orders/track', { method: 'POST', body: { reference, phone }, auth: false }),
 
