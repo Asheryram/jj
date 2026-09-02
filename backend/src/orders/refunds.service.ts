@@ -383,8 +383,27 @@ export class RefundsService {
     })
 
     if (result.kind === 'sent') {
-      await this.prisma.refundRequest.update({
-        where: { id: refundId },
+      /**
+       * Guarded on the transfer not already being confirmed: `paystack.transfer()`
+       * can take up to 30 seconds, long enough for their webhook to arrive and
+       * resolve this refund first. An unconditional write here would then
+       * clobber a real `transferStatus: 'success'` back to whatever this stale
+       * reply says — a bookkeeping inconsistency, not a double-pay, but a
+       * needless one to leave in.
+       *
+       * Written as an explicit `OR` rather than `NOT: { transferStatus: 'success' }`
+       * — SQL's three-valued NULL logic means a plain negation SILENTLY EXCLUDES
+       * a null `transferStatus`, and this column is null on every refund the
+       * first time it is ever sent (nothing sets it before this point). The
+       * `NOT` form was verified against the local database to update zero rows
+       * on a completely normal, first-time send — it would have quietly stopped
+       * every refund from ever recording its transfer code.
+       */
+      await this.prisma.refundRequest.updateMany({
+        where: {
+          id: refundId,
+          OR: [{ transferStatus: null }, { transferStatus: { not: 'success' } }],
+        },
         data: { transferCode: result.transferCode, transferStatus: result.status },
       })
       this.log.log(

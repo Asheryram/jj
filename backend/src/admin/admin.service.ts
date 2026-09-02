@@ -348,34 +348,46 @@ export class AdminService {
       include: { products: true },
     })
 
-    let changed = 0
+    const toUpdate = suppliers.flatMap((supplier) =>
+      supplier.products
+        .filter((product) => product.supplierCost !== supplier.costPrice)
+        .map((product) => ({ product, cost: supplier.costPrice })),
+    )
 
-    for (const supplier of suppliers) {
-      for (const product of supplier.products) {
-        if (product.supplierCost === supplier.costPrice) continue
+    if (toUpdate.length === 0) return { updated: 0 }
 
-        const cost = supplier.costPrice
-        // This was `max(price, cost)`, which only guaranteed the sale was not
-        // loss-making: a cost rise past the price pinned the two together and the
-        // margin became exactly zero, on every affected product, with nothing on
-        // any screen to say so. Deriving from the markup keeps the margin.
-        //
-        // `standardPrice` is still not lifted to meet `adminPrice` — James is
-        // allowed to retail below what he charges agents.
-        await this.prisma.product.update({
+    /**
+     * One transaction for the whole sync, not one `update` per product.
+     *
+     * A thrown error partway through an update-in-loop left some products
+     * re-priced to the new cost and others stranded on the old one — a
+     * silently half-applied catalogue, with margins computed against two
+     * different cost bases until the next sync happened to finish the job.
+     * `applyMarkup` already batches its own updates in one transaction; this
+     * never matched it.
+     */
+    await this.prisma.$transaction(
+      toUpdate.map(({ product, cost }) =>
+        this.prisma.product.update({
           where: { id: product.id },
           data: {
             supplierCost: cost,
+            // This was `max(price, cost)`, which only guaranteed the sale was not
+            // loss-making: a cost rise past the price pinned the two together and the
+            // margin became exactly zero, on every affected product, with nothing on
+            // any screen to say so. Deriving from the markup keeps the margin.
+            //
+            // `standardPrice` is still not lifted to meet `adminPrice` — James is
+            // allowed to retail below what he charges agents.
             adminPrice: priceFromMarkup(cost, product.agentMarkupBp),
             standardPrice: priceFromMarkup(cost, product.walkupMarkupBp),
           },
-        })
-        changed++
-      }
-    }
+        }),
+      ),
+    )
 
-    this.log.log(`supplier cost sync updated ${changed} product(s)`)
-    return { updated: changed }
+    this.log.log(`supplier cost sync updated ${toUpdate.length} product(s)`)
+    return { updated: toUpdate.length }
   }
 
   // ── Settings ──────────────────────────────────────────────────────────────

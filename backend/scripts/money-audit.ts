@@ -93,6 +93,66 @@ async function balancesMatchLedgers() {
 }
 
 /**
+ * 2b — Every agent credit traces to a real, completed order that actually
+ * shares with them, and every such order produced exactly one.
+ *
+ * The check above can only ever say a balance matches its OWN ledger rows —
+ * `creditAgent`/`reverseAgent` always pair a balance change with its own
+ * Earning row in the same transaction, so a duplicated or fabricated event
+ * (two settlements racing the same order, or a reversal running against an
+ * order that was never credited) keeps a user's own books internally
+ * consistent and invisible to `balancesMatchLedgers`. This checks the other
+ * direction: against the order itself, not just against the agent's own
+ * ledger.
+ */
+async function agentCreditsMatchOrders() {
+  const credits = await prisma.earning.findMany({
+    where: { type: { in: ['sale', 'downline'] } },
+    select: { userId: true, reference: true },
+  })
+
+  const completed = await prisma.order.findMany({
+    where: { status: 'completed' },
+    select: { reference: true, split: true },
+  })
+
+  const expectedByOrder = new Map<string, Set<string>>()
+  for (const order of completed) {
+    const split = order.split as unknown as OrderSplit
+    const agentIds = new Set(
+      split.shares.filter((s) => s.role === 'agent' && s.margin > 0).map((s) => s.userId),
+    )
+    if (agentIds.size > 0) expectedByOrder.set(order.reference, agentIds)
+  }
+
+  const seenByOrder = new Map<string, Set<string>>()
+  const orphaned: string[] = []
+  for (const credit of credits) {
+    const expected = expectedByOrder.get(credit.reference)
+    if (!expected || !expected.has(credit.userId)) {
+      orphaned.push(`${credit.reference} credited ${credit.userId}, but no completed order shares with them`)
+      continue
+    }
+    if (!seenByOrder.has(credit.reference)) seenByOrder.set(credit.reference, new Set())
+    seenByOrder.get(credit.reference)!.add(credit.userId)
+  }
+
+  const missing: string[] = []
+  for (const [reference, agentIds] of expectedByOrder) {
+    const got = seenByOrder.get(reference) ?? new Set()
+    for (const userId of agentIds) {
+      if (!got.has(userId)) missing.push(`${reference} owes ${userId} a credit that was never written`)
+    }
+  }
+
+  report(
+    'every agent credit traces to a completed order that shares with them, one each',
+    orphaned.length === 0 && missing.length === 0,
+    [...orphaned, ...missing].join(' | '),
+  )
+}
+
+/**
  * 3 — Nothing was delivered without being paid for.
  *
  * The bug this exists for actually happened: unpaid orders were parked in
@@ -198,36 +258,91 @@ async function paymentsAreAttributed() {
  * people. If they exceed the Paystack balance, a payout run cannot be honoured.
  */
 async function solvency() {
-  const [agents, credits, fees, paid, pendingPayouts, manualRefundAdvances, manualRefundReimbursements] =
-    await Promise.all([
-      prisma.user.aggregate({ where: { role: 'agent' }, _sum: { balance: true } }),
-      prisma.claimableCredit.aggregate({ where: { claimed: false }, _sum: { amount: true } }),
-      prisma.payment.aggregate({ where: { status: 'paid' }, _sum: { fee: true } }),
-      prisma.payment.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
-      // A withdrawal debits the agent's balance the moment it is requested (see
-      // WithdrawalsService.request), so it has already left `owedToAgents` below
-      // by the time it shows up here — left out entirely it would vanish from
-      // both sides rather than just changing which one it's counted under.
-      prisma.withdrawal.aggregate({ where: { status: 'pending' }, _sum: { amount: true } }),
-      // Same idea for a refund someone paid out of their own pocket because
-      // Paystack refused the transfer — see RefundsService.settleManually and
-      // FloatMonitorService.outstandingManualRefunds.
-      prisma.ledgerEntry.findMany({
-        where: { kind: 'capital_in', orderRef: { not: null } },
-        select: { orderRef: true, amount: true },
-      }),
-      prisma.ledgerEntry.findMany({
-        where: { kind: 'capital_out', orderRef: { not: null } },
-        select: { orderRef: true },
-      }),
-    ])
+  const [
+    agents,
+    credits,
+    fees,
+    paid,
+    pendingPayouts,
+    heldOrders,
+    pendingRefunds,
+    manualRefundAdvances,
+    manualRefundReimbursements,
+  ] = await Promise.all([
+    prisma.user.aggregate({ where: { role: 'agent' }, _sum: { balance: true } }),
+    prisma.claimableCredit.aggregate({ where: { claimed: false }, _sum: { amount: true } }),
+    prisma.payment.aggregate({ where: { status: 'paid' }, _sum: { fee: true } }),
+    prisma.payment.aggregate({ where: { status: 'paid' }, _sum: { amount: true } }),
+    // A withdrawal debits the agent's balance the moment it is requested (see
+    // WithdrawalsService.request), so it has already left `owedToAgents` below
+    // by the time it shows up here. It stays owed for as long as the actual
+    // Paystack transfer hasn't landed — not just while `status` reads
+    // `pending`. Once approved, `status` moves on, but the transfer can still
+    // be stuck on `otp`, `unknown`, `manual`, or simply not attempted yet
+    // (`transferStatus` null) for a real stretch of time — matching
+    // `SolvencyService.position()`. The explicit `transferStatus: null` arm
+    // is deliberate: `NOT: { transferStatus: 'success' }` alone silently
+    // excludes null under SQL's three-valued logic — verified directly
+    // against the database — which would undercount every withdrawal not yet
+    // attempted.
+    prisma.withdrawal.aggregate({
+      where: {
+        OR: [
+          { status: 'pending' },
+          {
+            status: 'approved',
+            OR: [{ transferStatus: null }, { transferStatus: { not: 'success' } }],
+          },
+        ],
+      },
+      _sum: { amount: true },
+    }),
+    // Paid for and not yet delivered — either a bundle or a refund is still
+    // owed, either way it is not free to spend.
+    prisma.order.aggregate({
+      where: { status: { in: ['awaiting_approval', 'processing'] } },
+      _sum: { salePrice: true },
+    }),
+    // Same "still owed until the transfer actually lands" reasoning as
+    // withdrawals above, scoped to `method: 'transfer'` — a wallet or
+    // claimable refund already moved the money at approval. Same explicit
+    // null handling, for the same reason.
+    prisma.refundRequest.aggregate({
+      where: {
+        OR: [
+          { status: 'pending' },
+          {
+            status: 'approved',
+            method: 'transfer',
+            OR: [{ transferStatus: null }, { transferStatus: { not: 'success' } }],
+          },
+        ],
+      },
+      _sum: { amount: true },
+    }),
+    // A refund someone paid out of their own pocket because Paystack refused
+    // the transfer — see RefundsService.settleManually and
+    // FloatMonitorService.outstandingManualRefunds.
+    prisma.ledgerEntry.findMany({
+      where: { kind: 'capital_in', orderRef: { not: null } },
+      select: { orderRef: true, amount: true },
+    }),
+    prisma.ledgerEntry.findMany({
+      where: { kind: 'capital_out', orderRef: { not: null } },
+      select: { orderRef: true },
+    }),
+  ])
   const customerWallets = await prisma.user.aggregate({
     where: { role: 'customer' },
     _sum: { balance: true },
   })
 
   const owedToAgents = agents._sum.balance ?? 0
-  const owedToCustomers = (credits._sum.amount ?? 0) + (customerWallets._sum.balance ?? 0)
+  const owedToCustomers =
+    (credits._sum.amount ?? 0) +
+    (customerWallets._sum.balance ?? 0) +
+    (pendingRefunds._sum.amount ?? 0)
+  const undelivered = heldOrders._sum.salePrice ?? 0
   const collected = paid._sum.amount ?? 0
   const feesPaid = fees._sum.fee ?? 0
   const owedForPayouts = pendingPayouts._sum.amount ?? 0
@@ -235,7 +350,8 @@ async function solvency() {
   const owedForManualRefunds = manualRefundAdvances
     .filter((advance) => !reimbursedRefs.has(advance.orderRef))
     .reduce((sum, advance) => sum + advance.amount, 0)
-  const totalOwed = owedToAgents + owedToCustomers + owedForPayouts + owedForManualRefunds
+  const totalOwed =
+    owedToAgents + owedToCustomers + undelivered + owedForPayouts + owedForManualRefunds
 
   console.log('\n  Liabilities and inflows')
   console.log(`        collected through Paystack : ${ghs(collected)}`)
@@ -243,7 +359,8 @@ async function solvency() {
     (collected > 0 ? `  (${((feesPaid / collected) * 100).toFixed(2)}% of collections)` : ''))
   console.log(`        owed to agents             : ${ghs(owedToAgents)}`)
   console.log(`        owed to customers          : ${ghs(owedToCustomers)}`)
-  console.log(`        payouts requested, unsent  : ${ghs(owedForPayouts)}`)
+  console.log(`        paid for, not delivered    : ${ghs(undelivered)}`)
+  console.log(`        payouts requested/stuck    : ${ghs(owedForPayouts)}`)
   console.log(`        owed for manual refunds    : ${ghs(owedForManualRefunds)}`)
   console.log(`        total owed to other people : ${ghs(totalOwed)}`)
 
@@ -330,8 +447,10 @@ async function ledgerMatchesSources() {
   )
   report(
     'revenue lines match paid orders and wallet sales',
-    got('revenue') <= paidPayments + walletSales,
-    `${got('revenue')} revenue lines vs at most ${paidPayments + walletSales} paid sales — more means double-counting`,
+    got('revenue') === paidPayments + walletSales,
+    `${got('revenue')} revenue lines vs ${paidPayments + walletSales} paid sales — more means ` +
+      'double-counting, fewer means a sale with no revenue booked (a wallet order settling ' +
+      "without FulfilmentService.recordDelivered's wallet branch running is exactly this)",
   )
   report(
     'one payout line per approved withdrawal',
@@ -377,6 +496,7 @@ async function profitAndLoss() {
   console.log(`        agent margins              : ${ghs(of('agent_margin'))}`)
   console.log(`        referral bonuses           : ${ghs(of('referral_bonus'))}`)
   console.log(`        refunds                    : ${ghs(of('refund'))}`)
+  console.log(`        agent margin write-offs    : ${ghs(of('agent_margin_writeoff'))}`)
   console.log(`        ────`)
   console.log(`        profit                     : ${ghs(profit._sum.amount ?? 0)}` +
     (revenue > 0 ? `  (${(((profit._sum.amount ?? 0) / revenue) * 100).toFixed(1)}% of revenue)` : ''))
@@ -398,6 +518,7 @@ async function main() {
   console.log('  Invariants')
   await splitsBalance()
   await balancesMatchLedgers()
+  await agentCreditsMatchOrders()
   await nothingDeliveredUnpaid()
   await failedOrdersAccountedFor()
   await paymentsAreAttributed()

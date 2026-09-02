@@ -38,7 +38,23 @@ export class FulfilmentService implements OnApplicationBootstrap {
       //
       // `awaiting_payment` is deliberately absent: nobody has paid for those, and
       // sweeping them here is exactly how an unpaid order got delivered free.
-      where: { status: { in: ['pending', 'processing'] }, providerReference: null },
+      //
+      // `Order.providerReference` alone is not proof of anything: it is set by
+      // a *second*, later write (`run()` below) after the purchase already
+      // happened — see `SupplierService.dispatch`, which writes the
+      // `SupplierDispatch` row, `providerReference` and `providerCharged`
+      // included, in the very same call that makes the real purchase, before
+      // this order's own column is ever touched. A crash in that window
+      // leaves `providerReference` null despite the float already being
+      // spent, and this sweep would otherwise buy the bundle a second time.
+      // The dispatch row is the one write that actually survives that crash.
+      where: {
+        status: { in: ['pending', 'processing'] },
+        providerReference: null,
+        dispatches: {
+          none: { OR: [{ providerReference: { not: null } }, { providerCharged: { not: null } }] },
+        },
+      },
       select: { id: true, reference: true },
       take: 200,
     })
@@ -175,7 +191,14 @@ export class FulfilmentService implements OnApplicationBootstrap {
    */
   private async recordDelivered(
     tx: Prisma.TransactionClient,
-    order: { id: string; reference: string; productName: string },
+    order: {
+      id: string
+      reference: string
+      productName: string
+      paidWith: string
+      salePrice: number
+      buyerUserId: string | null
+    },
     split: OrderSplit,
     agentShares: OrderSplit['shares'],
   ): Promise<void> {
@@ -202,6 +225,28 @@ export class FulfilmentService implements OnApplicationBootstrap {
         occurredAt: new Date(),
       },
     ]
+
+    /**
+     * A Mobile Money order's revenue is booked when Paystack confirms the
+     * payment (`PaymentsService.applyPaid`) — this order's `Payment` row is
+     * what triggers that. A wallet order has no `Payment` row at all: the cash
+     * was already collected and recognised back when the wallet was topped
+     * up, so nothing ever books the *sale* itself. Without this, every wallet
+     * sale posts a real supplier cost and agent margin against zero revenue —
+     * permanently understating profit by the full sale price of every wallet
+     * purchase.
+     */
+    if (order.paidWith === 'wallet') {
+      entries.push({
+        idempotencyKey: LedgerService.key('order', order.reference, 'revenue'),
+        kind: 'revenue',
+        amount: order.salePrice,
+        description: `Sale · ${order.productName} (from wallet)`,
+        orderRef: order.reference,
+        userId: order.buyerUserId,
+        occurredAt: new Date(),
+      })
+    }
 
     for (const share of agentShares) {
       entries.push({
@@ -265,8 +310,22 @@ export class FulfilmentService implements OnApplicationBootstrap {
       const agentShares = split.shares.filter((s) => s.role === 'agent' && s.margin > 0)
 
       if (outcome === 'delivered') {
-        await tx.order.update({
-          where: { id: orderId },
+        /**
+         * Claimed atomically, not just read-then-branched.
+         *
+         * The `findUnique` above proves nothing about what is still true by the
+         * time this write runs — the DataHub webhook, the reconciler's regular
+         * sweep, and its stale-approval expiry can all call `settle` for the
+         * same order. Postgres locks the row this UPDATE matches, so a second
+         * settlement racing this one blocks until this commits, then re-checks
+         * its own WHERE clause against the now-current status and claims
+         * nothing. Only the transaction that actually wins this update may
+         * credit anyone or book anything below — the alternative let one order
+         * be completed AND rejected at once: agent paid, cost booked, and the
+         * customer queued for a refund on the same sale.
+         */
+        const claim = await tx.order.updateMany({
+          where: { id: orderId, status: { notIn: ['completed', 'failed'] } },
           data: {
             status: 'completed',
             completedAt: new Date(),
@@ -274,6 +333,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
             voucherPin: voucher?.pin ?? null,
           },
         })
+        if (claim.count === 0) return
 
         // Split-at-sale: the seller's margin and their referrer's bonus are both
         // credited the moment the order completes, so an agent sees a referral
@@ -305,12 +365,47 @@ export class FulfilmentService implements OnApplicationBootstrap {
       })
       const collected = order.paidWith === 'wallet' || payment?.status === 'paid'
 
-      await tx.order.update({
-        where: { id: orderId },
-        // `refunded` says on the receipt that money has gone back. It has not
-        // yet — it is owed, and a person has to authorise paying it.
+      // Same atomic claim as the delivered branch above — see that comment.
+      // `refunded` says on the receipt that money has gone back. It has not
+      // yet — it is owed, and a person has to authorise paying it.
+      const claim = await tx.order.updateMany({
+        where: { id: orderId, status: { notIn: ['completed', 'failed'] } },
         data: { status: 'failed', refunded: false },
       })
+      if (claim.count === 0) return
+
+      /**
+       * A rejection does not mean nothing was spent.
+       *
+       * DataHub deducts the float the moment it *accepts* a purchase — see
+       * `SupplierService.dispatchLive`, which records `providerCharged` and the
+       * new float balance right there, before the real outcome is known. If the
+       * final answer is still a rejection, that deduction already happened and
+       * is real money gone, not a cost avoided. Without booking it, the float
+       * genuinely drops by this amount and nothing on the ledger explains why —
+       * `FloatMonitorService.reconcile` then misdiagnoses the gap as an
+       * unlogged top-up or withdrawal instead of the order that actually caused it.
+       */
+      const dispatch = await tx.supplierDispatch.findFirst({
+        where: { orderId: order.id },
+        orderBy: { createdAt: 'desc' },
+        select: { providerCharged: true },
+      })
+      if (dispatch?.providerCharged) {
+        await this.ledger.record(
+          [
+            {
+              idempotencyKey: LedgerService.key('order', order.reference, 'supplier_cost'),
+              kind: 'supplier_cost',
+              amount: -dispatch.providerCharged,
+              description: `Bundle cost · ${order.productName} (charged before the order was rejected)`,
+              orderRef: order.reference,
+              occurredAt: new Date(),
+            },
+          ],
+          tx,
+        )
+      }
 
       /**
        * FR-2.7 — the debt is recorded here; paying it is a decision.
@@ -382,6 +477,12 @@ export class FulfilmentService implements OnApplicationBootstrap {
     productName: string,
     recipient: string,
   ): Promise<void> {
+    // `downline` never actually fires today: `splitFor` (domain/pricing.ts)
+    // only ever emits agent shares at depth 0 now that multi-level referral
+    // sharing has been removed, so this branch is kept only so a historical
+    // pre-removal row still reads correctly, not because a live sale can
+    // still produce one. `AgentsService.downline()`'s "earned for upline"
+    // figure is downstream of this and will correctly read zero forever.
     const type = share.depth === 0 ? 'sale' : 'downline'
 
     const already = await tx.earning.findUnique({
@@ -464,9 +565,32 @@ export class FulfilmentService implements OnApplicationBootstrap {
     // withdrawn. Clamp to what is actually there and log the shortfall rather
     // than letting CHECK (balance >= 0) abort the whole refund.
     const recoverable = Math.min(share.margin, agent.balance)
-    if (recoverable < share.margin) {
+    const shortfall = share.margin - recoverable
+    if (shortfall > 0) {
       this.log.warn(
         `partial reversal on ${reference}: wanted ${share.margin}p, recovered ${recoverable}p from ${share.userId}`,
+      )
+      /**
+       * The uncollected part is not merely logged — it is a real, permanent
+       * loss (the agent already spent it) that would otherwise have no trace
+       * anywhere on the business's own books. `balancesMatchLedgers` in
+       * `money-audit.ts` cannot catch this either way, since the agent's own
+       * balance and Earning rows stay internally consistent regardless — this
+       * is the only place the shortfall itself is recorded.
+       */
+      await this.ledger.record(
+        [
+          {
+            idempotencyKey: LedgerService.key('order', reference, 'agent_margin_writeoff', share.userId),
+            kind: 'agent_margin_writeoff',
+            amount: -shortfall,
+            description: `Uncollectable margin · ${productName} (agent had already withdrawn it)`,
+            orderRef: reference,
+            userId: share.userId,
+            occurredAt: new Date(),
+          },
+        ],
+        tx,
       )
     }
     if (recoverable === 0) return

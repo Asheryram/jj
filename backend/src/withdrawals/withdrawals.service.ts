@@ -316,8 +316,14 @@ export class WithdrawalsService {
     })
 
     if (result.kind === 'sent') {
-      await this.prisma.withdrawal.update({
-        where: { id: row.id },
+      // Guarded on still being `approved`: `paystack.transfer()` can take up to
+      // 30 seconds, long enough for their webhook to arrive and resolve this
+      // withdrawal first. An unconditional write here would then clobber a
+      // real `transferStatus: 'success'` back to whatever this stale reply
+      // says, purely a bookkeeping inconsistency — `status` itself is untouched
+      // either way — but a needless one to leave in.
+      await this.prisma.withdrawal.updateMany({
+        where: { id: row.id, status: 'approved' },
         data: { transferCode: result.transferCode, transferStatus: result.status },
       })
       this.log.log(

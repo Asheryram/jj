@@ -51,6 +51,20 @@ export class OrdersService {
    * commit, and the order sits in `processing` until it answers.
    */
   async place(dto: PlaceOrderDto, user: AuthUser | undefined) {
+    /**
+     * A wallet purchase debits the balance inside this same call — there is
+     * no Paystack step afterward to make it recoverable, unlike `momo`. An
+     * idempotency key is optional everywhere else because a `momo` retry just
+     * lands on the same `awaiting_payment` order, but a `wallet` retry with no
+     * key would debit twice for one intended purchase on a flaky connection.
+     * The frontend already always sends one; this is the backend not trusting
+     * that to remain true forever, for the one path an irreversible debit
+     * cannot depend on client cooperation.
+     */
+    if (dto.payWith === 'wallet' && !dto.idempotencyKey) {
+      throw new ValidationError('A wallet purchase needs an idempotency key.')
+    }
+
     const sellerCode = await this.effectiveSeller(dto.sellerCode ?? null, user)
 
     // Replaying a key returns the original rather than erroring: the client that

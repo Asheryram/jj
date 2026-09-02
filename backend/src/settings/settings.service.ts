@@ -101,6 +101,17 @@ export class SettingsService {
     }
   }
 
+  /**
+   * Read one setting by key, parsed the same way `all()` parses it.
+   *
+   * This used to only distinguish `NUMERIC_KEYS` (percent) from everything
+   * else (bool) — silently wrong for `MONEY_KEYS`/`FEE_BP_KEYS`, since a
+   * stored pesewa amount or basis-point rate is neither a percent nor a
+   * boolean, and `bool()` would fall back to the hardcoded default every
+   * time. Dormant only because nothing outside `all()` has called `get()` on
+   * one of those keys yet — a landmine, not a live bug, but exactly the kind
+   * of thing that fails silently the day something does.
+   */
   async get<K extends keyof PlatformSettings>(
     key: K,
     db: Db = this.prisma,
@@ -108,11 +119,16 @@ export class SettingsService {
     const row = await db.setting.findUnique({ where: { key } })
     if (!row) return DEFAULTS[key]
 
-    return (
-      (NUMERIC_KEYS as readonly string[]).includes(key)
-        ? percent(row.value, DEFAULTS[key] as number)
-        : bool(row.value, DEFAULTS[key] as boolean)
-    ) as PlatformSettings[K]
+    if ((MONEY_KEYS as readonly string[]).includes(key)) {
+      return money(row.value, DEFAULTS[key] as number) as PlatformSettings[K]
+    }
+    if ((FEE_BP_KEYS as readonly string[]).includes(key)) {
+      return feeBp(row.value, DEFAULTS[key] as number) as PlatformSettings[K]
+    }
+    if ((NUMERIC_KEYS as readonly string[]).includes(key)) {
+      return percent(row.value, DEFAULTS[key] as number) as PlatformSettings[K]
+    }
+    return bool(row.value, DEFAULTS[key] as boolean) as PlatformSettings[K]
   }
 
   async set(

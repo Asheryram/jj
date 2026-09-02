@@ -140,6 +140,7 @@ export class LedgerService {
         referralBonuses: -of('referral_bonus'),
         refunds: -of('refund'),
         payoutFees: -of('payout_fee'),
+        agentMarginWriteoffs: -of('agent_margin_writeoff'),
       },
       /** Revenue less every cost above. What the business earned. */
       profit: profitAgg._sum.amount ?? 0,

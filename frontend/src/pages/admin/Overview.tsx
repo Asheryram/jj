@@ -118,7 +118,8 @@ export default function Overview() {
   const otherCosts =
     (statement?.costs.referralBonuses ?? 0) +
     (statement?.costs.refunds ?? 0) +
-    (statement?.costs.payoutFees ?? 0)
+    (statement?.costs.payoutFees ?? 0) +
+    (statement?.costs.agentMarginWriteoffs ?? 0)
   const myMargin = statement?.profit ?? 0
 
   const byCategory = CATEGORY_ORDER.map((category) => ({

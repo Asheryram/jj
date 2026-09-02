@@ -483,8 +483,20 @@ export class PaymentsService {
       return { applied: false }
     }
 
-    // Paystack retries. Already settled means no-op, not a second anything.
-    if (row.transferStatus === 'success') return { applied: false }
+    /**
+     * Paystack retries, so an exact repeat of an already-applied event must be
+     * a no-op. But "already `success`" is not the same claim as "this exact
+     * event already happened" — Paystack can genuinely reverse a transfer
+     * *after* it succeeded (the recipient's Mobile Money account closing is a
+     * real case of this), and that `transfer.reversed` is a new event, not a
+     * duplicate. Treating every event as settled once `transferStatus` ever
+     * reads `success` silently dropped it: the customer's money came back to
+     * the business, but their refund stayed marked paid forever.
+     */
+    const alreadyApplied =
+      (event === 'transfer.success' && row.transferStatus === 'success') ||
+      (event !== 'transfer.success' && (row.transferStatus === 'reversed' || row.transferStatus === 'failed'))
+    if (alreadyApplied) return { applied: false }
 
     if (event === 'transfer.success') {
       await this.prisma.$transaction(async (tx) => {
@@ -500,8 +512,22 @@ export class PaymentsService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.refundRequest.update({
-        where: { id: refundId },
+      /**
+       * Claimed atomically, not read-then-branched — same reasoning as
+       * `applyTransfer`'s equivalent claim below, verified live the same way.
+       * `transferStatus` IS nullable here (never attempted yet), so unlike
+       * the withdrawal side this cannot be a plain `{ not: ... }` — that
+       * silently excludes null under SQL's three-valued logic, which was
+       * caught once already this session. Verified directly against the
+       * database that this explicit form correctly claims from every
+       * starting state (null, success, or any in-flight value) and correctly
+       * refuses to reclaim from `reversed`/`failed`.
+       */
+      const claim = await tx.refundRequest.updateMany({
+        where: {
+          id: refundId,
+          OR: [{ transferStatus: null }, { transferStatus: { notIn: ['reversed', 'failed'] } }],
+        },
         data: {
           status: 'pending',
           transferStatus: event === 'transfer.reversed' ? 'reversed' : 'failed',
@@ -511,6 +537,12 @@ export class PaymentsService {
               : 'The refund transfer did not go through. It is back in the queue to try again.',
         },
       })
+      if (claim.count === 0) return
+
+      // A reversal can arrive after the receipt already said the money was
+      // back — that claim is no longer true, so it is withdrawn here too.
+      // Harmless when it was never true in the first place (a plain failure).
+      await tx.order.update({ where: { id: row.orderId }, data: { refunded: false } })
       // Nothing left the business, so it must not sit on the books as a cost.
       await tx.ledgerEntry.deleteMany({
         where: { idempotencyKey: LedgerService.key('order', row.orderRef, 'refund') },
@@ -544,9 +576,20 @@ export class PaymentsService {
       return { applied: false }
     }
 
-    // Already settled. Paystack retries, so this must be a no-op rather than a
-    // second credit or a second reversal.
-    if (row.status === 'paid' || row.status === 'failed') {
+    /**
+     * Paystack retries, so a repeat of the exact same event must be a no-op —
+     * but `paid` is not permanent proof nothing more can happen. A transfer
+     * can be reversed *after* landing (the agent's Mobile Money account
+     * closing is a real case of this), and that is a new event, not a replay
+     * of the one that already made it `paid`. Blocking every event once
+     * `status` ever reached `paid` dropped that reversal silently: the money
+     * came back to the platform, but the agent's balance stayed debited for
+     * good.
+     */
+    const alreadyApplied =
+      (event === 'transfer.success' && row.status === 'paid') ||
+      (event !== 'transfer.success' && row.status === 'failed')
+    if (alreadyApplied) {
       return { applied: false }
     }
 
@@ -561,14 +604,22 @@ export class PaymentsService {
 
     // failed or reversed — the money is back with us, so it goes back to them.
     await this.prisma.$transaction(async (tx) => {
-      const after = await tx.user.update({
-        where: { id: row.userId },
-        data: { balance: { increment: row.amount } },
-        select: { balance: true },
-      })
-
-      await tx.withdrawal.update({
-        where: { id },
+      /**
+       * Claimed atomically, not read-then-branched — the same fix `settle()`
+       * needed for order settlement. The `alreadyApplied` check above reads
+       * outside any transaction, so two genuinely concurrent duplicate
+       * webhooks (Paystack redelivering the same event) can both pass it and
+       * both reach here. Verified live against the database: without this
+       * claim, both transactions credited the agent's balance, and the
+       * second one was stopped only by accident — it tripped the unrelated
+       * `Earning(userId, reference, type)` unique constraint and rolled back.
+       * That is not a real guard; a future change to that constraint would
+       * silently remove the only thing preventing a double-credit.
+       * `WithdrawalStatus` is a required, non-nullable enum, so a plain
+       * `{ not: 'failed' }` is safe here — no null-exclusion trap.
+       */
+      const claim = await tx.withdrawal.updateMany({
+        where: { id, status: { not: 'failed' } },
         data: {
           status: 'failed',
           transferStatus: event === 'transfer.reversed' ? 'reversed' : 'failed',
@@ -577,6 +628,13 @@ export class PaymentsService {
               ? 'The transfer was reversed after being sent. The amount is back in your balance.'
               : 'The transfer did not go through. The amount is back in your balance.',
         },
+      })
+      if (claim.count === 0) return
+
+      const after = await tx.user.update({
+        where: { id: row.userId },
+        data: { balance: { increment: row.amount } },
+        select: { balance: true },
       })
 
       await tx.earning.create({

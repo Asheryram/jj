@@ -519,6 +519,7 @@ export interface FinanceStatement {
     referralBonuses: number
     refunds: number
     payoutFees: number
+    agentMarginWriteoffs: number
   }
   profit: number
   cashMovement: number

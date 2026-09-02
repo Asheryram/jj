@@ -233,12 +233,29 @@ export class FloatMonitorService {
      * the baseline uncaptured here would only defer it to some later log,
      * which then double-counts whatever was logged in between.
      */
+    /**
+     * Captured atomically, not just read-then-write.
+     *
+     * Two first-ever `logCapital` calls landing close together would both see
+     * no baseline yet. `write()` is an `upsert`, which updates rather than
+     * skips on a conflict — so whichever call's write happened to land last
+     * would silently overwrite the other's baseline with a value observed at
+     * the wrong moment, permanently. `createMany` with `skipDuplicates` is a
+     * real `INSERT ... ON CONFLICT DO NOTHING` at the database level: only the
+     * genuinely first call's value can ever land, no matter how close behind
+     * it the second one runs.
+     */
     const hasBaseline = await this.prisma.setting.findUnique({ where: { key: CAPITAL_BASELINE_KEY } })
     if (!hasBaseline) {
       const observation = await this.latest()
-      await this.write(CAPITAL_BASELINE_KEY, {
-        balance: observation?.balance ?? 0,
-        capturedAt: new Date().toISOString(),
+      await this.prisma.setting.createMany({
+        data: [
+          {
+            key: CAPITAL_BASELINE_KEY,
+            value: { balance: observation?.balance ?? 0, capturedAt: new Date().toISOString() },
+          },
+        ],
+        skipDuplicates: true,
       })
     }
 

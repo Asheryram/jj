@@ -675,13 +675,19 @@ enum LedgerKind {
   supplier_cost
   /// An agent's margin on a sale, accrued the moment it completes.
   agent_margin
-  /// A referral bonus, funded out of James's margin.
+  /// Historical only — nothing writes this any more. A referrer used to be
+  /// paid a bonus out of James's margin on their recruit's sales; multi-level
+  /// referral sharing was removed at the client's request. Kept so old rows
+  /// still read correctly, not because a sale can produce one today.
   referral_bonus
   /// Money given back for an order that could not be delivered.
   refund
   /// Money sent to an agent. Settles an accrued margin — not a new cost.
   payout
-  /// What the processor kept on a payout.
+  /// Reserved, not yet live: nothing currently reads a transfer fee out of
+  /// Paystack's payout response, so this has never been written. If Paystack
+  /// ever charges one, it belongs here — until then, do not treat "always
+  /// zero" as proof no fee is being charged; it only proves none is captured.
   payout_fee
   /// A customer adding money to their wallet. Cash in, but theirs, not revenue.
   topup
@@ -689,6 +695,11 @@ enum LedgerKind {
   capital_in
   /// James taking his own money back out of the float, or correcting an entry.
   capital_out
+  /// A wrongly-credited agent margin that could not be fully clawed back
+  /// because the agent had already withdrawn it. A real, permanent cost to
+  /// the business — distinct from `agent_margin`, which is the cost of a
+  /// margin actually earned. See `FulfilmentService.reverseAgent`.
+  agent_margin_writeoff
 }
 
 /// Every movement of money, once.
