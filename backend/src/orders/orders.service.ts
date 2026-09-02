@@ -407,7 +407,38 @@ export class OrdersService {
       orderBy: { createdAt: 'desc' },
       take: Math.min(limit, 500),
     })
-    return rows.map(toOrder)
+
+    if (!isAdminRole(user.role)) return rows.map(toOrder)
+
+    /**
+     * Admin also gets what the supplier actually charged, alongside the
+     * estimate frozen into `split` at sale time — the two can disagree (see
+     * `SupplierService.dispatch`'s COST MISMATCH log), and only admin needs
+     * to see by how much. Not exposed to an agent or customer: it is the
+     * platform's real wholesale cost, not theirs to see.
+     *
+     * One dispatch row per attempt, so the latest one for an order is the
+     * one whose reply actually decided the outcome — same selection
+     * `FulfilmentService.recordDelivered` already uses when booking the
+     * real cost to the ledger, so this always agrees with what profit was
+     * actually booked for that order.
+     */
+    const dispatches = await this.prisma.supplierDispatch.findMany({
+      where: { orderId: { in: rows.map((r) => r.id) }, providerCharged: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      select: { orderId: true, providerCharged: true },
+    })
+    const actualCostByOrderId = new Map<string, number>()
+    for (const d of dispatches) {
+      if (!actualCostByOrderId.has(d.orderId)) {
+        actualCostByOrderId.set(d.orderId, d.providerCharged as number)
+      }
+    }
+
+    return rows.map((row) => ({
+      ...toOrder(row),
+      actualSupplierCost: actualCostByOrderId.get(row.id) ?? null,
+    }))
   }
 
   private async scopeFor(user: AuthUser): Promise<Prisma.OrderWhereInput> {

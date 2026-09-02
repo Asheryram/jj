@@ -100,6 +100,90 @@ export class AdminService {
     }
   }
 
+  /**
+   * Profit or loss from the gap between what the catalogue believed a
+   * bundle cost and what the supplier actually charged.
+   *
+   * `SupplierDispatch.costPrice` is the estimate `order.split` was priced
+   * from, frozen at sale time; `providerCharged` is what the supplier's own
+   * reply said it actually took, discovered only after dispatch. The two
+   * regularly disagree — `SupplierService.dispatch` already logs every
+   * mismatch as it happens (`COST MISMATCH`), but only to the server log,
+   * never anywhere an admin would see it.
+   *
+   * This is NOT a new cost or revenue line — `FulfilmentService.recordDelivered`
+   * already books `supplier_cost` from the real `providerCharged`, so the
+   * gap is already sitting inside the correct all-time profit total. This
+   * only decomposes that total to show where a slice of it came from, and
+   * specifically which catalogue entries are consistently off — a
+   * consistent negative gap on one product means its listed cost is stale
+   * and it is quietly losing money on every sale, not a one-off.
+   *
+   * Scoped to completed orders: a rejected order's real charge is a sunk
+   * cost already accounted for elsewhere (see `settle`'s rejected branch),
+   * not a pricing-accuracy question — nothing was actually sold to compare
+   * a catalogue price against.
+   */
+  async catalogueAccuracy() {
+    const dispatches = await this.prisma.supplierDispatch.findMany({
+      where: { providerCharged: { not: null }, order: { status: 'completed' } },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        orderRef: true,
+        supplierCode: true,
+        costPrice: true,
+        providerCharged: true,
+        createdAt: true,
+      },
+    })
+
+    if (dispatches.length === 0) return { totalDiff: 0, products: [] }
+
+    const codes = [...new Set(dispatches.map((d) => d.supplierCode))]
+    const products = await this.prisma.supplierProduct.findMany({
+      where: { code: { in: codes } },
+      select: { code: true, name: true, network: true },
+    })
+    const productByCode = new Map(products.map((p) => [p.code, p]))
+
+    const byCode = new Map<
+      string,
+      { diff: number; orders: { orderRef: string; believed: number; charged: number; diff: number; occurredAt: string }[] }
+    >()
+    for (const d of dispatches) {
+      const diff = d.costPrice - (d.providerCharged as number)
+      const entry = byCode.get(d.supplierCode) ?? { diff: 0, orders: [] }
+      entry.diff += diff
+      entry.orders.push({
+        orderRef: d.orderRef,
+        believed: d.costPrice,
+        charged: d.providerCharged as number,
+        diff,
+        occurredAt: d.createdAt.toISOString(),
+      })
+      byCode.set(d.supplierCode, entry)
+    }
+
+    const totalDiff = [...byCode.values()].reduce((sum, v) => sum + v.diff, 0)
+
+    const productsOut = [...byCode.entries()]
+      .map(([code, v]) => ({
+        supplierCode: code,
+        name: productByCode.get(code)?.name ?? code,
+        network: productByCode.get(code)?.network ?? null,
+        diff: v.diff,
+        orderCount: v.orders.length,
+        // Already newest-first from the query above.
+        orders: v.orders,
+      }))
+      // Biggest swings first, either direction — a large loss matters as
+      // much as a large unplanned gain, and neither should hide at the
+      // bottom of the list behind small positive ones.
+      .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
+
+    return { totalDiff, products: productsOut }
+  }
+
   /** FR-6.4 — suspend or restore an account. */
   async toggleUserStatus(id: string) {
     const row = await this.prisma.user.findUnique({ where: { id } })

@@ -16,6 +16,7 @@ import {
   EmptyState,
   NetworkChip,
   PageHead,
+  Segmented,
   StatTile,
   StatusBadge,
   TableWrap,
@@ -79,13 +80,11 @@ export default function Overview() {
 
   const [statement, setStatement] = useState<FinanceStatement | null>(null)
   const [health, setHealth] = useState<Awaited<ReturnType<typeof api.health>> | null>(null)
+  /** The window behind the "Where the money goes" breakdown further down — independent of the fixed 7-day header tiles above it. */
+  const [range, setRange] = useState<'7' | '30' | 'all'>('7')
 
   useEffect(() => {
     let live = true
-    api
-      .financeStatement(7)
-      .then((result) => live && setStatement(result))
-      .catch(() => undefined)
     api
       .health()
       .then((result) => live && setHealth(result))
@@ -94,6 +93,17 @@ export default function Overview() {
       live = false
     }
   }, [])
+
+  useEffect(() => {
+    let live = true
+    api
+      .financeStatement(range === 'all' ? 'all' : Number(range))
+      .then((result) => live && setStatement(result))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [range])
 
   const weekRevenue = revenueByDay.reduce((sum, day) => sum + day.revenue, 0)
   const weekOrders = revenueByDay.reduce((sum, day) => sum + day.orders, 0)
@@ -127,9 +137,10 @@ export default function Overview() {
   const supplierSpend = statement?.costs.supplier ?? 0
   const paystackFee = statement?.costs.paymentFees ?? 0
   const agentShare = statement?.costs.agentMargins ?? 0
+  const refunds = statement?.costs.refunds ?? 0
+  /** referralBonuses and payoutFees are both historical-only kinds — nothing live writes either; agentMarginWriteoffs is the rare uncollectable-clawback case. */
   const otherCosts =
     (statement?.costs.referralBonuses ?? 0) +
-    (statement?.costs.refunds ?? 0) +
     (statement?.costs.payoutFees ?? 0) +
     (statement?.costs.agentMarginWriteoffs ?? 0)
   const myMargin = statement?.profit ?? 0
@@ -331,9 +342,23 @@ export default function Overview() {
         </Card>
       </div>
 
-      {/* FR-6.6 — where every cedi that came in over the last 7 days actually went. */}
+      {/* FR-6.6 — where every cedi that came in actually went. */}
       <Card className="mt-3">
-        <CardHead title="Where the money goes" subtitle="Last 7 days, from the ledger" />
+        <CardHead
+          title="Where the money goes"
+          subtitle={`${range === '7' ? 'Last 7 days' : range === '30' ? 'Last 30 days' : 'All time'}, from the ledger`}
+          action={
+            <Segmented<'7' | '30' | 'all'>
+              options={[
+                { value: '7', label: '7 days' },
+                { value: '30', label: '30 days' },
+                { value: 'all', label: 'All time' },
+              ]}
+              value={range}
+              onChange={setRange}
+            />
+          }
+        />
         <div className="p-4 sm:p-5">
           <div className="flex h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
             {[
@@ -341,6 +366,9 @@ export default function Overview() {
               { label: 'Paystack fee', value: paystackFee, className: 'bg-amber-400' },
               { label: 'You', value: myMargin, className: 'bg-brand-600' },
               { label: 'Agents', value: agentShare, className: 'bg-brand-300' },
+              ...(refunds > 0
+                ? [{ label: 'Refunds', value: refunds, className: 'bg-red-400' }]
+                : []),
               ...(otherCosts > 0
                 ? [{ label: 'Other', value: otherCosts, className: 'bg-slate-300 dark:bg-slate-600' }]
                 : []),
@@ -362,6 +390,10 @@ export default function Overview() {
             <MoneyBand label="Paystack fee" value={cedis(paystackFee)} dot="bg-amber-400" />
             <MoneyBand label="Your margin" value={cedis(myMargin)} dot="bg-brand-600" strong />
             <MoneyBand label="To your agents" value={cedis(agentShare)} dot="bg-brand-300" />
+            {refunds > 0 && <MoneyBand label="Refunds" value={cedis(refunds)} dot="bg-red-400" />}
+            {otherCosts > 0 && (
+              <MoneyBand label="Other" value={cedis(otherCosts)} dot="bg-slate-300 dark:bg-slate-600" />
+            )}
           </dl>
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
             From the ledger, not the price you were quoted at sale time — so it reflects what
@@ -369,6 +401,8 @@ export default function Overview() {
           </p>
         </div>
       </Card>
+
+      <CatalogueAccuracyCard />
 
       {/* Provider health — NFR-3.1, NFR-3.2 made visible. Read from /health, not
           hardcoded: a badge that always says "Operational" answers nothing. */}
@@ -426,5 +460,138 @@ export default function Overview() {
         </div>
       </Card>
     </div>
+  )
+}
+
+/**
+ * Profit or loss from the gap between what the catalogue believes a bundle
+ * costs and what the supplier actually charges — see
+ * `AdminService.catalogueAccuracy`.
+ *
+ * Already inside "Your margin" above — this is not a second cost or revenue
+ * line, only a decomposition of where a slice of that all-time total came
+ * from. What it adds is attribution: a product with a consistent negative
+ * gap has a stale catalogue price quietly losing money on every sale, and
+ * nothing else on this page would ever say so.
+ */
+function CatalogueAccuracyCard() {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.catalogueAccuracy>> | null>(null)
+
+  useEffect(() => {
+    let live = true
+    api
+      .catalogueAccuracy()
+      .then((result) => live && setData(result))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+
+  if (data && data.products.length === 0) return null
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Catalogue accuracy"
+        subtitle="All-time — where the supplier's real charge differed from what the catalogue said"
+      />
+      <div className="p-4 sm:p-5">
+        {!data ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+        ) : (
+          <>
+            <div
+              className={`rounded-xl border p-3.5 text-sm ${
+                data.totalDiff >= 0
+                  ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40'
+                  : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40'
+              }`}
+            >
+              <span className="font-semibold text-slate-900 dark:text-slate-50">
+                {cedis(data.totalDiff, { sign: true })}
+              </span>{' '}
+              <span className="text-slate-600 dark:text-slate-300">
+                {data.totalDiff >= 0
+                  ? "extra profit, already counted in your margin above — the supplier has charged less than the catalogue said, net, across every sale."
+                  : "already eaten out of your margin above — the supplier has charged more than the catalogue said, net, across every sale."}
+              </span>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {data.products.map((product) => (
+                <details
+                  key={product.supplierCode}
+                  className="rounded-xl border border-slate-200 dark:border-slate-700 open:bg-slate-50 dark:open:bg-slate-800/60"
+                >
+                  <summary className="flex cursor-pointer items-center justify-between gap-3 px-3.5 py-3">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <NetworkChip network={product.network} />
+                      <span className="truncate font-medium text-slate-900 dark:text-slate-50">
+                        {product.name}
+                      </span>
+                      <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">
+                        {product.orderCount} sale{product.orderCount === 1 ? '' : 's'}
+                      </span>
+                    </span>
+                    <span
+                      className={`tabular shrink-0 font-semibold ${
+                        product.diff >= 0
+                          ? 'text-emerald-700 dark:text-emerald-400'
+                          : 'text-red-700 dark:text-red-400'
+                      }`}
+                    >
+                      {cedis(product.diff, { sign: true })}
+                    </span>
+                  </summary>
+                  <TableWrap caption={`Orders behind ${product.name}'s catalogue gap`}>
+                    <thead>
+                      <tr>
+                        <Th>Order</Th>
+                        <Th align="right">Catalogue said</Th>
+                        <Th align="right">Actually charged</Th>
+                        <Th align="right">Diff</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {product.orders.map((order) => (
+                        <tr key={order.orderRef}>
+                          <Td>
+                            <p className="tabular text-xs text-slate-500 dark:text-slate-400">{order.orderRef}</p>
+                            <p className="text-xs text-slate-400 dark:text-slate-500">{dateTime(order.occurredAt)}</p>
+                          </Td>
+                          <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
+                            {cedis(order.believed)}
+                          </Td>
+                          <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
+                            {cedis(order.charged)}
+                          </Td>
+                          <Td
+                            align="right"
+                            className={`tabular font-semibold ${
+                              order.diff >= 0
+                                ? 'text-emerald-700 dark:text-emerald-400'
+                                : 'text-red-700 dark:text-red-400'
+                            }`}
+                          >
+                            {cedis(order.diff, { sign: true })}
+                          </Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </TableWrap>
+                </details>
+              ))}
+            </div>
+
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+              A product sitting consistently in the red here has a catalogue price that no longer
+              matches what the supplier actually charges — worth updating it on the Cost prices page
+              before it loses money on every future sale.
+            </p>
+          </>
+        )}
+      </div>
+    </Card>
   )
 }

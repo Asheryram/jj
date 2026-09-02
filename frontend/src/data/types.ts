@@ -151,6 +151,13 @@ export interface Order {
   /** Display name of the buyer; 'Guest' for an account-less purchase. */
   buyer: string
   buyerPhone: string
+  /**
+   * Admin only: what the supplier actually charged, when known — can differ
+   * from `split.supplierCost`, the estimate frozen in at sale time. Null for
+   * anyone else, and for an order the supplier has not yet reported a real
+   * charge for.
+   */
+  actualSupplierCost?: number | null
 }
 
 /** Customer wallet ledger entry (FR-2.4). */

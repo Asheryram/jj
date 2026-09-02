@@ -352,9 +352,24 @@ export class AdminController {
    */
   @Get('finance/statement')
   statement(@Query('days') days?: string) {
+    // `all` bypasses the 365-day cap entirely — the epoch is a lower bound
+    // the ledger will never actually reach, so this reads every entry ever
+    // recorded rather than an arbitrarily large but still-bounded window.
+    if (days === 'all') return this.ledger.statement(new Date(0))
+
     const window = Math.min(365, Math.max(1, Number(days) || 30))
     const since = new Date(Date.now() - window * 86_400_000)
     return this.ledger.statement(since)
+  }
+
+  /**
+   * Profit or loss from the gap between what the catalogue believes a
+   * bundle costs and what the supplier actually charged — see
+   * `AdminService.catalogueAccuracy`.
+   */
+  @Get('catalogue/accuracy')
+  catalogueAccuracy() {
+    return this.admin.catalogueAccuracy()
   }
 
   /** The individual lines, newest first. */

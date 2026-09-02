@@ -204,15 +204,23 @@ export default function FloatPanel() {
             </p>
           ) : (
             <>
-              <p className="text-xs text-slate-600 dark:text-slate-300">
+              {reconciliation && (
+                <p className="tabular text-base font-semibold text-slate-900 dark:text-slate-50">
+                  Should hold {cedis(reconciliation.expected)}
+                  <span className="ml-1.5 font-normal text-xs text-slate-500 dark:text-slate-400">
+                    right now — what you've logged, minus every order since
+                  </span>
+                </p>
+              )}
+              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
                 You've put in <span className="font-semibold text-slate-900 dark:text-slate-50">{cedis(capital.totalIn)}</span>
-                , taken out <span className="font-semibold text-slate-900 dark:text-slate-50">{cedis(capital.totalOut)}</span> —{' '}
-                <span className="font-semibold text-slate-900 dark:text-slate-50">{cedis(capital.net)}</span> net, since{' '}
-                {dateTime(capital.since)}.
+                , taken out <span className="font-semibold text-slate-900 dark:text-slate-50">{cedis(capital.totalOut)}</span>,
+                since {dateTime(capital.since)}.
               </p>
               {reconciliation?.pending && (
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Logged — this will check against the float once the next order updates it.
+                  Logged — the figure above will confirm against the live float once the next order
+                  updates it.
                 </p>
               )}
             </>

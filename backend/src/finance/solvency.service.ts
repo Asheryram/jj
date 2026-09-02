@@ -26,6 +26,16 @@ import { escape, wrap } from '../mail/templates'
  * it worth an email: it means something registered here never reached
  * Paystack's balance, or the other way around — a missed webhook, a reversed
  * charge, or worse — not "you have not saved enough profit yet."
+ *
+ * That comparison is deliberately background-only. `position()` — what the
+ * Reserve panel reads — never calls Paystack's live balance at all; it only
+ * ever shows what this platform's own records say should be true. The live
+ * balance is fetched solely by `reconcile()` / `checkAndAlert()`, and a real
+ * mismatch goes to an admin's inbox, not this panel — an account that settles
+ * every sale out immediately reads GHS 0.00 between sales as a matter of
+ * course, and surfacing that next to "what we expect" on every page load
+ * would read as a standing false alarm rather than the rare thing worth an
+ * email.
  */
 const SHORTFALL_ALERTED_KEY = 'solvencyBalanceMismatchAlerted'
 /** Half an hour. This drifts slowly compared to the float, which is checked on every order. */
@@ -308,36 +318,36 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       .reduce((sum, advance) => sum + advance.amount, 0)
     const liabilities = owedToAgents + owedToCustomers + undelivered + queuedPayouts + owedForManualRefunds
 
-    const [balanceResult, settlementResult] = await Promise.all([
-      this.paystack.balance(),
-      this.paystack.lastSettlementAt(),
-    ])
-    const balance = balanceResult.ok ? balanceResult.balance : null
+    /**
+     * What should be sitting in Paystack's balance right now, entirely from
+     * this platform's own records — never from Paystack's live balance
+     * itself. Paystack's own figure is still checked, just not here: it is
+     * compared against this same expectation on a clock by `checkAndAlert`,
+     * and the result goes to an admin's inbox rather than this panel. A
+     * Starter account settles near-instantly, so its live balance reads
+     * GHS 0.00 between sales as a matter of course — showing it next to
+     * "what we expect" here would read as a permanent false alarm rather
+     * than the rare, real mismatch an email is for.
+     */
+    const settlementResult = await this.paystack.lastSettlementAt()
     const settledSince = settlementResult.ok ? settlementResult.at : null
-    const inTransit = await this.collectedSince(settledSince)
-    const reconciliation = await this.reconcileAgainst(balance, settledSince)
+    const [collected, transferred] = await Promise.all([
+      this.collectedSince(settledSince),
+      this.transfersSince(settledSince),
+    ])
+    const expectedAtPaystack = collected - transferred
 
     return {
-      /** What Paystack holds. Null when they could not be reached — not zero. */
-      balance,
-      balanceError: balanceResult.ok ? null : balanceResult.reason,
-      /**
-       * Whether the live balance agrees with what our own records say it
-       * should hold since the last settlement. Null when the balance
-       * couldn't be read, or settlement history is not yet known. Unlike
-       * `liabilities` below, this is unrelated to what is safe to spend — it
-       * is purely a data-integrity check.
-       */
-      reconciliation,
+      /** What our own records say should be at Paystack right now, net of transfers already sent. */
+      expectedAtPaystack,
       /**
        * Paystack is one reservoir: every sale flows in immediately, but nothing
-       * flows out to us until their next settlement. `balance` only ever answers
-       * "what can I spend right now" — a sale from ten minutes ago is real money,
-       * just not yet in that number. This is the difference: money already
-       * collected, net of their fee, since the last time they actually settled.
+       * flows out to us until their next settlement. This is money already
+       * collected, net of their fee, since the last time they actually settled
+       * — before subtracting anything already transferred back out.
        */
       inTransit: {
-        amount: inTransit,
+        amount: collected,
         settledSince,
         error: settlementResult.ok ? null : settlementResult.reason,
       },

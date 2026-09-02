@@ -58,11 +58,36 @@ export default function AdminOrders() {
   }, [filter, orders, query])
 
   const done = visible.filter((o) => o.status === 'completed')
+  /**
+   * `split.supplierCost` is frozen at whatever the catalogue believed at
+   * sale time. The supplier's own reply, once known, can say something
+   * different — `actualSupplierCost` — and that is what actually left the
+   * float, and what the ledger's all-time profit is already computed from.
+   * Falling back to the estimate keeps every figure below correct even
+   * before the supplier has reported back (still processing, or on a
+   * currency this admin cannot see the real cost for).
+   */
+  const actualCostOf = (order: (typeof visible)[number]) =>
+    order.actualSupplierCost ?? order.split.supplierCost
+  const catalogueDiffOf = (order: (typeof visible)[number]) =>
+    order.split.supplierCost - actualCostOf(order)
   const revenue = done.reduce((sum, o) => sum + o.salePrice, 0)
-  const supplierSpend = done.reduce((sum, o) => sum + o.split.supplierCost, 0)
+  const supplierSpend = done.reduce((sum, o) => sum + actualCostOf(o), 0)
   const adminMarginOf = (order: (typeof visible)[number]) =>
     order.split.shares.find((s) => s.role === 'admin')?.margin ?? 0
-  const myMargin = done.reduce((sum, o) => sum + adminMarginOf(o), 0)
+  /**
+   * What this order actually made, not what it was priced to make — the
+   * recorded split margin plus the catalogue gap. The two are only ever
+   * different amounts when the supplier's real charge differs from the
+   * estimate; otherwise this equals `adminMarginOf` exactly.
+   */
+  const trueMarginOf = (order: (typeof visible)[number]) =>
+    adminMarginOf(order) + catalogueDiffOf(order)
+  const myMargin = done.reduce((sum, o) => sum + trueMarginOf(o), 0)
+  const agentMarginOf = (order: (typeof visible)[number]) =>
+    order.split.shares.filter((s) => s.role === 'agent').reduce((sum, s) => sum + s.margin, 0)
+  const agentMargin = done.reduce((sum, o) => sum + agentMarginOf(o), 0)
+  const fees = done.reduce((sum, o) => sum + o.split.processingFee, 0)
 
   const exportCsv = () => {
     const header = [
@@ -74,8 +99,9 @@ export default function AdminOrders() {
       'Network',
       'Recipient',
       'Customer paid',
-      'Supplier cost',
-      'Your margin',
+      'Supplier cost (actual)',
+      'Catalogue diff',
+      'Your margin (true)',
       'Agent margins',
       'Chain',
       'Paid with',
@@ -93,8 +119,9 @@ export default function AdminOrders() {
         o.network ?? 'All',
         o.recipient,
         (o.salePrice / 100).toFixed(2),
-        (o.split.supplierCost / 100).toFixed(2),
-        (adminMarginOf(o) / 100).toFixed(2),
+        (actualCostOf(o) / 100).toFixed(2),
+        (catalogueDiffOf(o) / 100).toFixed(2),
+        (trueMarginOf(o) / 100).toFixed(2),
         (agentShares.reduce((n, s) => n + s.margin, 0) / 100).toFixed(2),
         agentShares.map((s) => s.name).join(' → ') || 'none',
         o.paidWith,
@@ -124,14 +151,24 @@ export default function AdminOrders() {
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatTile label="Orders shown" value={String(visible.length)} />
         <StatTile label="Customers paid" value={cedis(revenue)} tone="brand" />
-        <StatTile label="Paid to supplier" value={cedis(supplierSpend)} />
         <StatTile
-          label="Your margin"
+          label="Paid to supplier"
+          value={cedis(supplierSpend)}
+          hint="What they actually charged, not the catalogue estimate"
+        />
+        <StatTile label="Paystack fees" value={cedis(fees)} hint="Their cut, paid on every sale" />
+        <StatTile
+          label="Paid to agents"
+          value={cedis(agentMargin)}
+          hint="Their commission — never counted as your profit"
+        />
+        <StatTile
+          label="Your profit"
           value={cedis(myMargin)}
-          hint="Your share of these orders"
+          hint="What's actually yours — agent commissions already excluded, catalogue gap already included"
           tone="success"
         />
       </div>
@@ -181,7 +218,7 @@ export default function AdminOrders() {
                 <Th>Status</Th>
                 <Th align="right">Customer paid</Th>
                 <Th align="right">Supplier</Th>
-                <Th align="right">Your margin</Th>
+                <Th align="right">Your profit</Th>
                 <Th align="right">Agents</Th>
               </tr>
             </thead>
@@ -235,16 +272,34 @@ export default function AdminOrders() {
                       {cedis(order.salePrice)}
                     </Td>
                     <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
-                      {cedis(order.split.supplierCost)}
+                      {cedis(actualCostOf(order))}
+                      {/* Only shown when the supplier's real charge actually
+                          differs from the catalogue estimate this order was
+                          priced from — most orders never show this line. */}
+                      {catalogueDiffOf(order) !== 0 && (
+                        <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
+                          catalogue said {cedis(order.split.supplierCost)}
+                        </p>
+                      )}
                     </Td>
                     <Td align="right" className="tabular font-semibold text-brand-700 dark:text-brand-300">
-                      {order.status === 'completed'
-                        ? cedis(adminMarginOf(order), { sign: true })
-                        : '—'}
+                      {order.status === 'completed' ? cedis(trueMarginOf(order), { sign: true }) : '—'}
+                      {order.status === 'completed' && catalogueDiffOf(order) !== 0 && (
+                        <p
+                          className={cn(
+                            'mt-0.5 text-[11px] font-normal',
+                            catalogueDiffOf(order) > 0
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-red-600 dark:text-red-400',
+                          )}
+                        >
+                          {cedis(catalogueDiffOf(order), { sign: true })} vs catalogue
+                        </p>
+                      )}
                     </Td>
                     <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                       {order.status === 'completed' && agentShares.length > 0
-                        ? cedis(agentShares.reduce((n, s) => n + s.margin, 0))
+                        ? cedis(agentMarginOf(order))
                         : '—'}
                     </Td>
                   </tr>

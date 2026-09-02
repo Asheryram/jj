@@ -3,22 +3,18 @@ import { Link } from 'react-router-dom'
 import { api, ApiError, type ReservePosition } from '../../lib/api'
 import { cedis } from '../../lib/format'
 import { Callout, Card, CardHead, Spinner, cn } from '../../components/ui'
-import { AlertIcon, CashIcon, CheckIcon } from '../../components/icons'
+import { AlertIcon, CheckIcon } from '../../components/icons'
 
 /**
- * What is owed, against what Paystack is holding — and whether Paystack's own
- * figure agrees with our own records.
- *
- * Two different questions, both worth a place here. The liabilities list
- * below is entirely computed from this platform's own records — agent
- * earnings, refunds owed, customer wallets — and means the same thing
- * regardless of account tier or how Paystack happens to settle. The
- * reconciliation box is a different question: does Paystack's live balance
- * actually match what our own records say it should hold since it last
- * settled? That stays meaningful on any account, including one that settles
- * every sale out automatically and so never retains much of a balance at
- * all — because it never assumes a balance is being kept on purpose, only
- * that recent activity should already be reflected.
+ * What is owed, against what our own records say should be sitting at
+ * Paystack — entirely computed from this platform's own transactions, never
+ * from Paystack's live balance. That live figure is still checked, just not
+ * here: it is compared against this same expectation on a clock in the
+ * background, and a real mismatch goes to an admin's inbox rather than this
+ * panel — a Starter account settles every sale out almost immediately, so
+ * its live balance reads GHS 0.00 between sales as a matter of course, and
+ * showing that here would read as a standing false alarm rather than the
+ * rare, real thing worth an email.
  */
 export default function ReservePanel() {
   const [position, setPosition] = useState<ReservePosition | null>(null)
@@ -65,7 +61,7 @@ export default function ReservePanel() {
     )
   }
 
-  const { balance, liabilities, reconciliation, balanceError, inTransit } = position
+  const { expectedAtPaystack, liabilities, inTransit } = position
   const settledSince = inTransit.settledSince
     ? new Date(inTransit.settledSince).toLocaleDateString('en-GB', {
         day: 'numeric',
@@ -81,21 +77,22 @@ export default function ReservePanel() {
       />
 
       <div className="space-y-3 p-4 sm:p-5">
-        {balanceError && (
-          <Callout tone="warning" title="Could not read your Paystack balance" icon={<AlertIcon className="size-4" />}>
-            {balanceError} The amounts owed below are still correct — only the comparison is missing.
+        {inTransit.error && (
+          <Callout tone="warning" title="Could not read your last settlement date" icon={<AlertIcon className="size-4" />}>
+            {inTransit.error} The amounts below still cover everything ever collected — only "since your
+            last settlement" is missing.
           </Callout>
         )}
 
         <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200 dark:border-slate-700">
           <Row
-            label="Paystack is holding"
-            value={balance}
+            label="Should be at Paystack"
+            value={expectedAtPaystack}
             strong
             hint={
-              inTransit.amount > 0
-                ? `+ ${cedis(inTransit.amount)} already collected, still settling${settledSince ? ` (last settled ${settledSince})` : ''} — on its way, not lost`
-                : undefined
+              settledSince
+                ? `Collected since it last settled on ${settledSince}, net of transfers already sent — from your own records, not their live balance`
+                : 'From your own records, not their live balance'
             }
           />
           <Row label="Owed to agents" value={liabilities.agentEarnings} negative />
@@ -133,71 +130,6 @@ export default function ReservePanel() {
           )}
           <Row label="Total owed to other people" value={liabilities.total} negative strong />
         </dl>
-
-        <div
-          className={cn(
-            'flex items-start gap-3 rounded-xl border p-4',
-            reconciliation?.flagged
-              ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40'
-              : !reconciliation
-                ? 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60'
-                : 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40',
-          )}
-        >
-          <span
-            className={cn(
-              'mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full',
-              reconciliation?.flagged
-                ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400'
-                : !reconciliation
-                  ? 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                  : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400',
-            )}
-          >
-            {reconciliation?.flagged ? <AlertIcon className="size-5" /> : <CashIcon className="size-5" />}
-          </span>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-              Does the balance match your records?
-            </p>
-            <p
-              className={cn(
-                'tabular text-2xl font-bold',
-                reconciliation?.flagged
-                  ? 'text-red-700 dark:text-red-400'
-                  : !reconciliation
-                    ? 'text-slate-500 dark:text-slate-400'
-                    : 'text-emerald-800 dark:text-emerald-300',
-              )}
-            >
-              {!reconciliation
-                ? 'Not enough to check yet'
-                : reconciliation.flagged
-                  ? `${cedis(Math.abs(reconciliation.shortfall))} ${reconciliation.shortfall > 0 ? 'short' : 'over'}`
-                  : 'Matches'}
-            </p>
-            <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
-              {!reconciliation ? (
-                <>
-                  Either the balance couldn&apos;t be read, or there&apos;s no settlement history yet to
-                  compare against.
-                </>
-              ) : reconciliation.flagged ? (
-                <>
-                  Your own records say Paystack should hold {cedis(reconciliation.expected)} since it
-                  last settled, but it reports {cedis(reconciliation.observed)}. This usually means a
-                  payment or a transfer never actually reached their balance, or the other way
-                  around — worth checking against your Paystack dashboard.
-                </>
-              ) : (
-                <>
-                  Paystack reports {cedis(reconciliation.observed)}, which matches what your own
-                  records expect since it last settled — nothing looks missing on either side.
-                </>
-              )}
-            </p>
-          </div>
-        </div>
 
         {position.pendingRefunds.count > 0 && (
           <Callout

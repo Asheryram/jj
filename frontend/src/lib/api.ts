@@ -485,25 +485,13 @@ export interface RefundRequest {
 }
 
 export interface ReservePosition {
-  /** Pesewas Paystack holds. Null when they could not be reached — not zero. */
-  balance: number | null
-  balanceError: string | null
   /**
-   * Whether the live balance agrees with what our own records say it should
-   * hold since the last settlement — entirely separate from what's safe to
-   * spend below. Null when the balance couldn't be read, or settlement
-   * history isn't known yet.
+   * Pesewas our own records say should be sitting at Paystack right now,
+   * since the last settlement, net of transfers already sent back out.
+   * Never Paystack's own live balance — that comparison happens only in the
+   * background, and a real mismatch goes to an admin's inbox, not this panel.
    */
-  reconciliation: {
-    /** Pesewas our own records say should be there. */
-    expected: number
-    /** Pesewas Paystack actually reports. */
-    observed: number
-    /** expected - observed. Positive means Paystack holds less than expected. */
-    shortfall: number
-    /** `shortfall` exceeds rounding noise — worth telling someone about. */
-    flagged: boolean
-  } | null
+  expectedAtPaystack: number
   /** Collected since the last settlement, net of Paystack's fee — on its way, not lost. */
   inTransit: { amount: number; settledSince: string | null; error: string | null }
   liabilities: {
@@ -909,9 +897,38 @@ export const api = {
       body: { note, momoNetwork },
     }),
 
-  /** Profit and loss from the ledger, over a window of days. */
-  financeStatement: (days = 30) =>
+  /** Profit and loss from the ledger, over a window of days — or every entry ever recorded. */
+  financeStatement: (days: number | 'all' = 30) =>
     request<FinanceStatement>(`/admin/finance/statement?days=${days}`),
+
+  /**
+   * Profit or loss from the gap between what the catalogue believed a
+   * bundle cost and what the supplier actually charged, all-time — see
+   * `AdminService.catalogueAccuracy`. Already inside the profit total on
+   * `financeStatement`; this only shows where a slice of it came from.
+   */
+  catalogueAccuracy: () =>
+    request<{
+      /** Pesewas. Positive means the catalogue has overall overstated cost — net extra profit. */
+      totalDiff: number
+      products: {
+        supplierCode: string
+        name: string
+        network: Network | null
+        /** Pesewas, summed across every completed sale of this product. */
+        diff: number
+        orderCount: number
+        orders: {
+          orderRef: string
+          /** Pesewas the catalogue said this bundle cost, at sale time. */
+          believed: number
+          /** Pesewas the supplier actually charged. */
+          charged: number
+          diff: number
+          occurredAt: string
+        }[]
+      }[]
+    }>('/admin/catalogue/accuracy'),
 
   adminUsers: () => request<PlatformUser[]>('/admin/users'),
 
