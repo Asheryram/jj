@@ -30,8 +30,10 @@ export class AdminService {
       by: ['soldByCode'],
       where: { status: 'completed' },
       _count: { _all: true },
+      _sum: { salePrice: true },
     })
     const soldByCode = new Map(counts.map((c) => [c.soldByCode, c._count._all]))
+    const volumeByCode = new Map(counts.map((c) => [c.soldByCode, c._sum.salePrice ?? 0]))
 
     const boughtCounts = await this.prisma.order.groupBy({
       by: ['buyerUserId'],
@@ -39,6 +41,20 @@ export class AdminService {
       _count: { _all: true },
     })
     const boughtBy = new Map(boughtCounts.map((c) => [c.buyerUserId, c._count._all]))
+
+    /**
+     * Lifetime profit each agent has earned, not their current withdrawable
+     * balance — the two differ the moment anyone withdraws. `sale` is an
+     * agent's own margin; `downline` is historical only (see the note on
+     * `LedgerKind.referral_bonus`) but summed in too so a pre-removal agent's
+     * total still reads correctly.
+     */
+    const earnedByUser = await this.prisma.earning.groupBy({
+      by: ['userId'],
+      where: { type: { in: ['sale', 'downline'] } },
+      _sum: { amount: true },
+    })
+    const earnedByUserId = new Map(earnedByUser.map((e) => [e.userId, e._sum.amount ?? 0]))
 
     const byCode = new Map(rows.map((r) => [r.referralCode, r.name]))
 
@@ -52,9 +68,36 @@ export class AdminService {
       balance: row.balance,
       orders:
         row.role === 'agent' ? (soldByCode.get(row.referralCode) ?? 0) : (boughtBy.get(row.id) ?? 0),
+      salesVolume: row.role === 'agent' ? (volumeByCode.get(row.referralCode) ?? 0) : 0,
+      totalEarned: row.role === 'agent' ? (earnedByUserId.get(row.id) ?? 0) : 0,
       referredBy: row.uplineCode ? (byCode.get(row.uplineCode) ?? null) : null,
       joinedAt: row.joinedAt.toISOString(),
     }))
+  }
+
+  /**
+   * Profit earned by every agent combined, all-time — the number "To your
+   * agents" on the Overview page never gives you, since that one is fixed to
+   * a 7-day window and never broken out per agent.
+   */
+  async agentSummary() {
+    const [earned, volume, agentCount] = await Promise.all([
+      this.prisma.earning.aggregate({
+        where: { type: { in: ['sale', 'downline'] } },
+        _sum: { amount: true },
+      }),
+      this.prisma.order.aggregate({
+        where: { status: 'completed', soldByCode: { not: null } },
+        _sum: { salePrice: true },
+      }),
+      this.prisma.user.count({ where: { role: 'agent' } }),
+    ])
+
+    return {
+      totalEarned: earned._sum.amount ?? 0,
+      totalVolume: volume._sum.salePrice ?? 0,
+      agentCount,
+    }
   }
 
   /** FR-6.4 — suspend or restore an account. */

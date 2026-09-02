@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import AgentApplications from './AgentApplications'
 import { useStore } from '../../state/store'
-import { cedis, initials } from '../../lib/format'
-import type { PlatformUser, Role } from '../../data/types'
+import { api, ApiError } from '../../lib/api'
+import { cedis, dateTime, initials } from '../../lib/format'
+import type { Earning, PlatformUser, Role } from '../../data/types'
 import { STATUS_LABEL, STATUS_TONE } from '../../lib/userStatus'
 import {
   Badge,
@@ -14,13 +15,14 @@ import {
   Modal,
   PageHead,
   Segmented,
+  Spinner,
   StatTile,
   TableWrap,
   Td,
   TextInput,
   Th,
 } from '../../components/ui'
-import { BanIcon, CheckIcon, SearchIcon, ShieldIcon, UsersIcon } from '../../components/icons'
+import { BanIcon, CashIcon, CheckIcon, SearchIcon, ShieldIcon, UsersIcon } from '../../components/icons'
 import { isAdmin } from '../../lib/roles'
 
 
@@ -32,6 +34,23 @@ export default function Users() {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
   const [confirming, setConfirming] = useState<PlatformUser | null>(null)
+  const [viewing, setViewing] = useState<PlatformUser | null>(null)
+  const [agentSummary, setAgentSummary] = useState<{
+    totalEarned: number
+    totalVolume: number
+    agentCount: number
+  } | null>(null)
+
+  useEffect(() => {
+    let live = true
+    api
+      .agentSummary()
+      .then((result) => live && setAgentSummary(result))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -59,7 +78,7 @@ export default function Users() {
           the person who should notice that three of them cannot trade yet. */}
       <AgentApplications />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <StatTile label="Total users" value={String(users.length)} icon={<UsersIcon className="size-5" />} />
         <StatTile label="Agents" value={String(agents.length)} tone="brand" />
         <StatTile
@@ -71,6 +90,13 @@ export default function Users() {
           label="Wallet float held"
           value={cedis(walletFloat)}
           hint="Customer money you are holding"
+        />
+        <StatTile
+          label="Paid to agents, all-time"
+          value={agentSummary ? cedis(agentSummary.totalEarned) : '—'}
+          hint={agentSummary ? `across ${agentSummary.agentCount} agent${agentSummary.agentCount === 1 ? '' : 's'}` : undefined}
+          tone="success"
+          icon={<CashIcon className="size-5" />}
         />
       </div>
 
@@ -120,6 +146,8 @@ export default function Users() {
                 <Th>Role</Th>
                 <Th>Referred by</Th>
                 <Th align="right">Orders</Th>
+                <Th align="right">Volume</Th>
+                <Th align="right">Total earned</Th>
                 <Th align="right">Wallet</Th>
                 <Th>Status</Th>
                 <Th align="right" />
@@ -149,6 +177,22 @@ export default function Users() {
                   <Td className="text-slate-600 dark:text-slate-300">{user.referredBy ?? '—'}</Td>
                   <Td align="right" className="tabular">
                     {user.orders}
+                  </Td>
+                  <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
+                    {user.role === 'agent' ? cedis(user.salesVolume) : '—'}
+                  </Td>
+                  <Td align="right" className="tabular">
+                    {user.role === 'agent' ? (
+                      <button
+                        type="button"
+                        onClick={() => setViewing(user)}
+                        className="font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2 hover:text-brand-800"
+                      >
+                        {cedis(user.totalEarned)}
+                      </button>
+                    ) : (
+                      '—'
+                    )}
                   </Td>
                   <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                     {cedis(user.balance)}
@@ -261,6 +305,116 @@ export default function Users() {
           </div>
         )}
       </Modal>
+
+      <AgentEarningsModal agent={viewing} onClose={() => setViewing(null)} />
     </div>
+  )
+}
+
+/**
+ * One agent's own earnings ledger, for the "Total earned" drill-down.
+ *
+ * Reuses the exact same data an agent sees on their own Earnings page —
+ * `AgentsService.earnings`, called here from an admin-gated route instead of
+ * the agent's own — so there is nothing here that disagrees with what the
+ * agent themselves would see.
+ */
+function AgentEarningsModal({ agent, onClose }: { agent: PlatformUser | null; onClose: () => void }) {
+  const [data, setData] = useState<{ balance: number; earnings: Earning[] } | null>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!agent) {
+      setData(null)
+      setError('')
+      return
+    }
+    let live = true
+    api
+      .agentEarnings(agent.id)
+      .then((result) => live && setData(result))
+      .catch(
+        (caught) =>
+          live && setError(caught instanceof ApiError ? caught.message : 'We could not load this.'),
+      )
+    return () => {
+      live = false
+    }
+  }, [agent])
+
+  if (!agent) return null
+
+  return (
+    <Modal open onClose={onClose} title={`${agent.name}'s earnings`}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-3 gap-2.5 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-center">
+          <div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Sales volume</p>
+            <p className="tabular mt-0.5 font-bold text-slate-900 dark:text-slate-50">
+              {cedis(agent.salesVolume)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Earned, all-time</p>
+            <p className="tabular mt-0.5 font-bold text-emerald-700 dark:text-emerald-400">
+              {cedis(agent.totalEarned)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Wallet now</p>
+            <p className="tabular mt-0.5 font-bold text-slate-900 dark:text-slate-50">
+              {cedis(agent.balance)}
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <Callout tone="danger" icon={<ShieldIcon className="size-4" />}>
+            {error}
+          </Callout>
+        )}
+
+        {data === null && !error && (
+          <div className="py-8 text-center">
+            <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
+          </div>
+        )}
+
+        {data?.earnings.length === 0 && (
+          <EmptyState icon={<CashIcon className="size-6" />} title="No earnings yet" detail="Nothing has been credited to this agent." />
+        )}
+
+        {data && data.earnings.length > 0 && (
+          <TableWrap caption={`${agent.name}'s earnings`}>
+            <thead>
+              <tr>
+                <Th>Description</Th>
+                <Th align="right">Amount</Th>
+                <Th align="right">Balance after</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.earnings.map((entry) => (
+                <tr key={entry.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
+                  <Td>
+                    <p className="font-medium text-slate-900 dark:text-slate-50">{entry.description}</p>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{dateTime(entry.createdAt)}</p>
+                  </Td>
+                  <Td
+                    align="right"
+                    className={`tabular font-semibold ${entry.amount > 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-800 dark:text-slate-100'}`}
+                  >
+                    {cedis(entry.amount, { sign: true })}
+                  </Td>
+                  <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
+                    {cedis(entry.balanceAfter)}
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </TableWrap>
+        )}
+      </div>
+    </Modal>
   )
 }

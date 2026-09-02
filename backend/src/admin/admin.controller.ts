@@ -22,6 +22,7 @@ import { ApplicationsService } from './applications.service'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
 import { SettingsService } from '../settings/settings.service'
 import { SolvencyService } from '../finance/solvency.service'
+import { AgentsService } from '../agents/agents.service'
 
 const TIERS = ['supplierCost', 'adminPrice', 'standardPrice'] as const
 
@@ -190,6 +191,7 @@ export class AdminController {
     private readonly applications: ApplicationsService,
     private readonly float: FloatMonitorService,
     private readonly platformSettings: SettingsService,
+    private readonly agents: AgentsService,
   ) {}
 
   @Get('overview')
@@ -205,6 +207,23 @@ export class AdminController {
   @Patch('users/:id/status')
   toggleStatus(@Param('id') id: string) {
     return this.admin.toggleUserStatus(id)
+  }
+
+  /** Profit earned by every agent combined, all-time — see `AdminService.agentSummary`. */
+  @Get('agents/summary')
+  agentSummary() {
+    return this.admin.agentSummary()
+  }
+
+  /**
+   * One agent's own earnings ledger, for the drill-down on the Users page.
+   * Reuses `AgentsService.earnings`, the same data an agent sees for
+   * themselves at `/agents/me/earnings` — `/agents/me/*` stays self-scoped;
+   * this is the admin-facing way to look up someone else's.
+   */
+  @Get('agents/:id/earnings')
+  agentEarnings(@Param('id') id: string) {
+    return this.agents.earnings(id)
   }
 
   @Patch('products/:id/tier')

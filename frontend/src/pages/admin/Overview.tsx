@@ -63,7 +63,19 @@ function MoneyBand({
 
 /** FR-6.3 — all orders, all users, total revenue, system-wide statistics. */
 export default function Overview() {
-  const { orders, users, withdrawals, revenueByDay, subAgents } = useStore()
+  const { orders, users, withdrawals, revenueByDay } = useStore()
+
+  /**
+   * By volume sold, all-time — from the same per-user figures the Users page
+   * shows. This used to read from `subAgents`, which is only ever populated
+   * when *you* are signed in as an agent looking at your own downline — on
+   * an admin session it stays empty forever, so this card silently showed
+   * nothing no matter how much agents had actually sold.
+   */
+  const topAgents = [...users]
+    .filter((u) => u.role === 'agent')
+    .sort((a, b) => b.salesVolume - a.salesVolume)
+    .slice(0, 5)
 
   const [statement, setStatement] = useState<FinanceStatement | null>(null)
   const [health, setHealth] = useState<Awaited<ReturnType<typeof api.health>> | null>(null)
@@ -252,7 +264,7 @@ export default function Overview() {
               </Link>
             }
           />
-          {subAgents.length === 0 ? (
+          {topAgents.length === 0 ? (
             <EmptyState
               icon={<UsersIcon className="size-6" />}
               title="No agent sales yet"
@@ -260,10 +272,7 @@ export default function Overview() {
             />
           ) : (
           <ul className="divide-y divide-slate-100">
-            {[...subAgents]
-              .sort((a, b) => b.volume - a.volume)
-              .slice(0, 5)
-              .map((agent, index) => (
+            {topAgents.map((agent, index) => (
                 <li key={agent.id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400">
                     {index + 1}
@@ -275,7 +284,7 @@ export default function Overview() {
                     </p>
                   </div>
                   <p className="tabular shrink-0 font-semibold text-slate-900 dark:text-slate-50">
-                    {cedis(agent.volume)}
+                    {cedis(agent.salesVolume)}
                   </p>
                 </li>
               ))}

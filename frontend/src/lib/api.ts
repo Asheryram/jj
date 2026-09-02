@@ -920,6 +920,14 @@ export const api = {
       method: 'PATCH',
     }),
 
+  /** Profit earned by every agent combined, all-time. */
+  agentSummary: () =>
+    request<{ totalEarned: number; totalVolume: number; agentCount: number }>('/admin/agents/summary'),
+
+  /** One agent's own earnings ledger — the drill-down behind a row on the Users page. */
+  agentEarnings: (id: string) =>
+    request<{ balance: number; earnings: Earning[] }>(`/admin/agents/${id}/earnings`),
+
   setProductTier: (
     productId: string,
     tier: 'supplierCost' | 'adminPrice' | 'standardPrice',

@@ -207,6 +207,10 @@ export interface PlatformUser {
   /** Customers: spendable wallet. Agents: withdrawable earnings. */
   balance: Pesewas
   orders: number
+  /** Agents only: total GHS sold on completed orders, all-time. Zero for anyone else. */
+  salesVolume: Pesewas
+  /** Agents only: lifetime profit earned, before any withdrawal — not the same as `balance`. Zero for anyone else. */
+  totalEarned: Pesewas
   referredBy: string | null
   joinedAt: string
 }
