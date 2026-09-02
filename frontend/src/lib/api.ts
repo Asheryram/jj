@@ -488,6 +488,22 @@ export interface ReservePosition {
   /** Pesewas Paystack holds. Null when they could not be reached — not zero. */
   balance: number | null
   balanceError: string | null
+  /**
+   * Whether the live balance agrees with what our own records say it should
+   * hold since the last settlement — entirely separate from what's safe to
+   * spend below. Null when the balance couldn't be read, or settlement
+   * history isn't known yet.
+   */
+  reconciliation: {
+    /** Pesewas our own records say should be there. */
+    expected: number
+    /** Pesewas Paystack actually reports. */
+    observed: number
+    /** expected - observed. Positive means Paystack holds less than expected. */
+    shortfall: number
+    /** `shortfall` exceeds rounding noise — worth telling someone about. */
+    flagged: boolean
+  } | null
   /** Collected since the last settlement, net of Paystack's fee — on its way, not lost. */
   inTransit: { amount: number; settledSince: string | null; error: string | null }
   liabilities: {
@@ -504,9 +520,6 @@ export interface ReservePosition {
   unclaimedRefunds: { count: number; amount: number }
   /** Owed back and waiting on approval. Already counted in the liabilities. */
   pendingRefunds: { count: number; amount: number }
-  /** Balance less every obligation. Null when the balance is unknown. */
-  available: number | null
-  covered: boolean | null
 }
 
 export interface FinanceStatement {

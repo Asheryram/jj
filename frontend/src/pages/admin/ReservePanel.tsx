@@ -6,20 +6,19 @@ import { Callout, Card, CardHead, Spinner, cn } from '../../components/ui'
 import { AlertIcon, CashIcon, CheckIcon } from '../../components/icons'
 
 /**
- * What is owed, against what Paystack is holding.
+ * What is owed, against what Paystack is holding — and whether Paystack's own
+ * figure agrees with our own records.
  *
- * This exists because money from customers all lands in one Paystack balance and
- * four different claims are made on it — agent earnings, customer wallets,
- * refunds owed, and the float and profit that genuinely are James's. Only the
- * last is free to spend, and nothing showed him where the line was. Topping up
- * DataHub float could quietly consume an agent's earnings, and the shortfall
- * would only surface when that agent asked to be paid.
- *
- * It cannot be segregated at the provider: Paystack settles to one account, and
- * splitting at collection would pay agents for orders that later fail. So the
- * answer is to put the number where he cannot miss it.
- *
- * "Free to spend" is the whole point of the panel. Everything above it is working.
+ * Two different questions, both worth a place here. The liabilities list
+ * below is entirely computed from this platform's own records — agent
+ * earnings, refunds owed, customer wallets — and means the same thing
+ * regardless of account tier or how Paystack happens to settle. The
+ * reconciliation box is a different question: does Paystack's live balance
+ * actually match what our own records say it should hold since it last
+ * settled? That stays meaningful on any account, including one that settles
+ * every sale out automatically and so never retains much of a balance at
+ * all — because it never assumes a balance is being kept on purpose, only
+ * that recent activity should already be reflected.
  */
 export default function ReservePanel() {
   const [position, setPosition] = useState<ReservePosition | null>(null)
@@ -66,8 +65,7 @@ export default function ReservePanel() {
     )
   }
 
-  const { balance, liabilities, available, covered, balanceError, inTransit } = position
-  const short = available !== null && available < 0
+  const { balance, liabilities, reconciliation, balanceError, inTransit } = position
   const settledSince = inTransit.settledSince
     ? new Date(inTransit.settledSince).toLocaleDateString('en-GB', {
         day: 'numeric',
@@ -139,39 +137,62 @@ export default function ReservePanel() {
         <div
           className={cn(
             'flex items-start gap-3 rounded-xl border p-4',
-            short ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40' : 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40',
+            reconciliation?.flagged
+              ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40'
+              : !reconciliation
+                ? 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60'
+                : 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40',
           )}
         >
           <span
             className={cn(
               'mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full',
-              short ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400',
+              reconciliation?.flagged
+                ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400'
+                : !reconciliation
+                  ? 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                  : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400',
             )}
           >
-            {short ? <AlertIcon className="size-5" /> : <CashIcon className="size-5" />}
+            {reconciliation?.flagged ? <AlertIcon className="size-5" /> : <CashIcon className="size-5" />}
           </span>
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Free to spend</p>
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+              Does the balance match your records?
+            </p>
             <p
               className={cn(
                 'tabular text-2xl font-bold',
-                short ? 'text-red-700 dark:text-red-400' : 'text-emerald-800 dark:text-emerald-300',
+                reconciliation?.flagged
+                  ? 'text-red-700 dark:text-red-400'
+                  : !reconciliation
+                    ? 'text-slate-500 dark:text-slate-400'
+                    : 'text-emerald-800 dark:text-emerald-300',
               )}
             >
-              {available === null ? 'Unknown' : cedis(available)}
+              {!reconciliation
+                ? 'Not enough to check yet'
+                : reconciliation.flagged
+                  ? `${cedis(Math.abs(reconciliation.shortfall))} ${reconciliation.shortfall > 0 ? 'short' : 'over'}`
+                  : 'Matches'}
             </p>
             <p className="mt-1 text-sm text-slate-700 dark:text-slate-200">
-              {short ? (
+              {!reconciliation ? (
                 <>
-                  You owe more than you are holding. Do not top up supplier float or draw profit
-                  until this is positive — the shortfall will surface when someone asks to be paid.
+                  Either the balance couldn&apos;t be read, or there&apos;s no settlement history yet to
+                  compare against.
                 </>
-              ) : covered === null ? (
-                <>Read your Paystack balance to compare it against what you owe.</>
+              ) : reconciliation.flagged ? (
+                <>
+                  Your own records say Paystack should hold {cedis(reconciliation.expected)} since it
+                  last settled, but it reports {cedis(reconciliation.observed)}. This usually means a
+                  payment or a transfer never actually reached their balance, or the other way
+                  around — worth checking against your Paystack dashboard.
+                </>
               ) : (
                 <>
-                  Safe to use for supplier float or your own profit. Everything above this is
-                  somebody else's money.
+                  Paystack reports {cedis(reconciliation.observed)}, which matches what your own
+                  records expect since it last settled — nothing looks missing on either side.
                 </>
               )}
             </p>

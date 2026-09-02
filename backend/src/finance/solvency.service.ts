@@ -5,29 +5,44 @@ import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
 
 /**
- * What is owed, against what there is to pay it with.
+ * What is owed, against what there is to pay it with — plus whether Paystack's
+ * own live balance agrees with what our own records say it should.
  *
- * The problem this exists for is not a bug in any one place — it is that money
- * arriving from customers all lands in a single Paystack balance, and four
- * different claims are made on it:
+ * The "what is owed" half is not a bug in any one place — it is that money
+ * arriving from customers all lands in a single Paystack balance, and several
+ * different claims are made on it: agent earnings, refunds owed, customer
+ * wallets, money already committed to a payout. All of it is computed here
+ * entirely from this platform's own records — never from Paystack — so it
+ * means the same thing regardless of account tier or settlement behaviour.
  *
- *  · agent earnings, which are theirs and merely held by us,
- *  · refunds owed to customers whose orders failed,
- *  · customer wallet balances, which are theirs and not yet spent,
- *  · and the supplier float plus James's own profit, which genuinely are his.
- *
- * Only the last is free to spend. Nothing in the system enforced that, so topping
- * up DataHub float or drawing profit could quietly consume money that belongs to
- * an agent — and the shortfall only shows up when someone asks to be paid.
- *
- * There is no way to segregate it at the provider: Paystack settles to one
- * account, and splitting at collection would pay agents for orders that later
- * fail. So the fix is accounting rather than plumbing — compute the reserve, make
- * it unmissable, and check it before promising anybody money.
+ * The "does the live balance agree" half is a genuinely different question,
+ * and deliberately does not lean on retaining a balance at all: Paystack
+ * sweeps whatever is settleable to the linked bank or Mobile Money account at
+ * each settlement — fast and automatic on a Starter account, slower and more
+ * deliberate on a business one — so the *right* balance to expect right now
+ * is never "everything ever owed," it is "whatever our own records say should
+ * have piled up since the last time they actually settled." That number stays
+ * small and current on any tier, which is what makes a real disagreement with
+ * it worth an email: it means something registered here never reached
+ * Paystack's balance, or the other way around — a missed webhook, a reversed
+ * charge, or worse — not "you have not saved enough profit yet."
  */
-const SHORTFALL_ALERTED_KEY = 'solvencyShortfallAlerted'
+const SHORTFALL_ALERTED_KEY = 'solvencyBalanceMismatchAlerted'
 /** Half an hour. This drifts slowly compared to the float, which is checked on every order. */
 const CHECK_INTERVAL_MS = 30 * 60_000
+/** Pesewas of slack before a mismatch is worth mentioning — timing noise, not a real gap. */
+const DISCREPANCY_TOLERANCE = 100
+
+export interface BalanceReconciliation {
+  /** What our own records say Paystack's balance should hold right now, in pesewas. */
+  expected: number
+  /** What Paystack actually reports right now, in pesewas. */
+  observed: number
+  /** expected - observed. Positive means Paystack holds less than our records predict. */
+  shortfall: number
+  /** `shortfall` exceeds the rounding tolerance in either direction — worth telling someone about. */
+  flagged: boolean
+}
 
 @Injectable()
 export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy {
@@ -66,18 +81,19 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   private async checkAndAlert(): Promise<void> {
-    const snapshot = await this.position()
-    // Unknown is not a shortfall — Paystack being briefly unreachable must
-    // never itself trigger a "you are short" email.
-    if (snapshot.covered === null) return
+    const reconciliation = await this.reconcile()
+    // Null is not a mismatch — Paystack being briefly unreachable, or having
+    // never settled at all yet, must never itself trigger a "something is
+    // wrong" email.
+    if (!reconciliation) return
 
     const wasAlerted = await this.wasAlerted()
-    if (!snapshot.covered && !wasAlerted) {
+    if (reconciliation.flagged && !wasAlerted) {
       await this.setAlerted(true)
-      await this.alertShortfall(snapshot)
-    } else if (snapshot.covered && wasAlerted) {
+      await this.alertMismatch(reconciliation)
+    } else if (!reconciliation.flagged && wasAlerted) {
       await this.setAlerted(false)
-      this.log.log('solvency shortfall cleared')
+      this.log.log('balance mismatch cleared')
     }
   }
 
@@ -94,8 +110,8 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     })
   }
 
-  /** Tell whoever can act on it that money held cannot cover what is owed. */
-  private async alertShortfall(snapshot: Awaited<ReturnType<SolvencyService['position']>>): Promise<void> {
+  /** Tell whoever can act on it that Paystack's balance disagrees with our own records. */
+  private async alertMismatch(reconciliation: BalanceReconciliation): Promise<void> {
     const admins = await this.prisma.user.findMany({
       where: { role: 'admin', status: 'active' },
       select: { name: true, email: true },
@@ -109,32 +125,40 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
           })
 
     if (recipients.length === 0) {
-      this.log.warn('solvency shortfall — nobody to tell')
+      this.log.warn('balance mismatch — nobody to tell')
       return
     }
 
     const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
-    const held = snapshot.balance ?? 0
-    const shortfall = snapshot.liabilities.total - held
+    const short = reconciliation.shortfall > 0
     const shopName = await this.platformName()
 
-    const body =
-      `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">Paystack is holding ` +
-      `${escape(ghs(held))}, but ${escape(ghs(snapshot.liabilities.total))} is owed to agents, ` +
-      `customers, and pending obligations — ${escape(ghs(shortfall))} short.</p>` +
-      `<p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;color:#1e293b">Do not top up the ` +
-      `supplier float or draw profit until this clears. Check the Reserve panel for the breakdown — ` +
-      `this note will not repeat until the shortfall is resolved.</p>`
-    const text =
-      `Paystack is holding ${ghs(held)}, but ${ghs(snapshot.liabilities.total)} is owed to agents, ` +
-      `customers, and pending obligations — ${ghs(shortfall)} short.\n\n` +
-      'Do not top up the supplier float or draw profit until this clears. Check the Reserve panel ' +
-      'for the breakdown — this note will not repeat until the shortfall is resolved.'
+    const explanation = short
+      ? `Paystack reports ${escape(ghs(reconciliation.observed))}, but your own records say it ` +
+        `should hold ${escape(ghs(reconciliation.expected))} since it last settled — ` +
+        `${escape(ghs(reconciliation.shortfall))} short.`
+      : `Paystack reports ${escape(ghs(reconciliation.observed))}, which is ` +
+        `${escape(ghs(-reconciliation.shortfall))} more than your own records say it should hold ` +
+        `since it last settled.`
 
-    const subject = `Not enough held to cover what is owed — short by ${ghs(shortfall)}`
+    const body =
+      `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${explanation}</p>` +
+      `<p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;color:#1e293b">This usually means ` +
+      `a payment or a transfer registered here never actually reached Paystack's balance, or the ` +
+      `other way around. Check recent orders, refunds and payouts against your Paystack dashboard — ` +
+      `this note will not repeat until the mismatch clears.</p>`
+    const text =
+      `${explanation}\n\n` +
+      'This usually means a payment or a transfer registered here never actually reached ' +
+      "Paystack's balance, or the other way around. Check recent orders, refunds and payouts " +
+      'against your Paystack dashboard — this note will not repeat until the mismatch clears.'
+
+    const subject = short
+      ? `Paystack balance is short by ${ghs(reconciliation.shortfall)}`
+      : `Paystack balance is ${ghs(-reconciliation.shortfall)} more than expected`
     const html = wrap(
       shopName,
-      'Money held cannot cover what is owed',
+      'Your Paystack balance does not match your records',
       body,
       `You are getting this because you are an active admin on ${escape(shopName)}.`,
     )
@@ -143,12 +167,12 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       await this.mailer
         .send({ to: recipient.email, subject, html, text })
         .catch((error) =>
-          this.log.error(`could not tell ${recipient.email} about the shortfall: ${String(error)}`),
+          this.log.error(`could not tell ${recipient.email} about the mismatch: ${String(error)}`),
         )
     }
 
     this.log.warn(
-      `solvency shortfall ${ghs(shortfall)} — told ${recipients.map((r) => r.email).join(', ')}`,
+      `balance mismatch ${ghs(reconciliation.shortfall)} — told ${recipients.map((r) => r.email).join(', ')}`,
     )
   }
 
@@ -291,11 +315,20 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     const balance = balanceResult.ok ? balanceResult.balance : null
     const settledSince = settlementResult.ok ? settlementResult.at : null
     const inTransit = await this.collectedSince(settledSince)
+    const reconciliation = await this.reconcileAgainst(balance, settledSince)
 
     return {
       /** What Paystack holds. Null when they could not be reached — not zero. */
       balance,
       balanceError: balanceResult.ok ? null : balanceResult.reason,
+      /**
+       * Whether the live balance agrees with what our own records say it
+       * should hold since the last settlement. Null when the balance
+       * couldn't be read, or settlement history is not yet known. Unlike
+       * `liabilities` below, this is unrelated to what is safe to spend — it
+       * is purely a data-integrity check.
+       */
+      reconciliation,
       /**
        * Paystack is one reservoir: every sale flows in immediately, but nothing
        * flows out to us until their next settlement. `balance` only ever answers
@@ -331,10 +364,6 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         count: pendingRefunds._count._all,
         amount: pendingRefunds._sum.amount ?? 0,
       },
-      /** Balance less every obligation. What is genuinely free to spend. */
-      available: balance === null ? null : balance - liabilities,
-      /** Whether the money held covers what is owed. */
-      covered: balance === null ? null : balance >= liabilities,
     }
   }
 
@@ -374,5 +403,78 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       _sum: { amount: true, fee: true },
     })
     return (paid._sum.amount ?? 0) - (paid._sum.fee ?? 0)
+  }
+
+  /**
+   * Pesewas actually transferred out through Paystack since a given moment —
+   * agent payouts and Mobile Money refunds, the two ways money leaves this
+   * platform through them. Both draw from the same balance that settlement
+   * sweeps, so both reduce what's left the same way a settlement does.
+   *
+   * Keyed on `paidAt` — when Paystack itself confirmed the transfer, not when
+   * it was merely approved — because an approved-but-not-yet-sent transfer
+   * has not touched their balance yet.
+   */
+  private async transfersSince(at: Date | null): Promise<number> {
+    const [payouts, refunds] = await Promise.all([
+      this.prisma.withdrawal.aggregate({
+        where: { paidAt: at ? { gt: at } : { not: null } },
+        _sum: { amount: true },
+      }),
+      this.prisma.refundRequest.aggregate({
+        where: { method: 'transfer', paidAt: at ? { gt: at } : { not: null } },
+        _sum: { amount: true },
+      }),
+    ])
+    return (payouts._sum.amount ?? 0) + (refunds._sum.amount ?? 0)
+  }
+
+  /**
+   * Does Paystack's live balance agree with what our own records predict?
+   *
+   * Fetches its own balance and settlement date, for callers — like the
+   * background check — who have not already read them for another reason.
+   * `position()` computes the same thing via `reconcileAgainst` instead, to
+   * avoid asking Paystack for the balance twice in one request.
+   */
+  async reconcile(): Promise<BalanceReconciliation | null> {
+    const [balanceResult, settlementResult] = await Promise.all([
+      this.paystack.balance(),
+      this.paystack.lastSettlementAt(),
+    ])
+    if (!balanceResult.ok) return null
+    const settledSince = settlementResult.ok ? settlementResult.at : null
+    return this.reconcileAgainst(balanceResult.balance, settledSince)
+  }
+
+  /**
+   * The comparison itself, given a balance and settlement date already in
+   * hand. `expected` is entirely derived from this platform's own records —
+   * every Mobile Money payment confirmed paid since the last settlement,
+   * net of Paystack's fee, less every payout and refund transfer they have
+   * since confirmed sent. Right after a settlement this should read close to
+   * zero and grow from there until the next one resets it — the same shape
+   * `FloatMonitorService.expectedBalance` uses for the DataHub float, applied
+   * to Paystack's balance instead.
+   */
+  private async reconcileAgainst(
+    balance: number | null,
+    settledSince: Date | null,
+  ): Promise<BalanceReconciliation | null> {
+    if (balance === null) return null
+
+    const [collected, transferred] = await Promise.all([
+      this.collectedSince(settledSince),
+      this.transfersSince(settledSince),
+    ])
+    const expected = collected - transferred
+    const shortfall = expected - balance
+
+    return {
+      expected,
+      observed: balance,
+      shortfall,
+      flagged: Math.abs(shortfall) > DISCREPANCY_TOLERANCE,
+    }
   }
 }
