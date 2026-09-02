@@ -331,18 +331,20 @@ export interface SupplierFloat {
     /** The live reading predates the last logged move, so it can't confirm it yet — only the next order can. */
     pending: boolean
   } | null
-  /**
-   * Manual refunds — sent from someone's own pocket because Paystack refused
-   * the transfer — not yet taken back out of the business. Each is traced to
-   * the order it came from, not just a bare total.
-   */
-  manualRefunds: {
-    orderRef: string
-    /** Pesewas. */
-    amount: number
-    description: string
-    occurredAt: string
-  }[]
+}
+
+/**
+ * One manual refund sent from someone's own pocket because Paystack refused
+ * the transfer, not yet taken back out of the business. This is Paystack
+ * money, not the DataHub float — it lives with the refund queue that created
+ * it, on the Refunds page, not the Float panel.
+ */
+export interface ManualRefundAdvance {
+  orderRef: string
+  /** Pesewas. */
+  amount: number
+  description: string
+  occurredAt: string
 }
 
 export interface PlatformSettings {
@@ -989,9 +991,12 @@ export const api = {
       body: { direction, amount, note, idempotencyKey: newIdempotencyKey() },
     }),
 
+  /** Refunds sent from someone's own pocket, not yet taken back out — see the Refunds page. */
+  manualRefundAdvances: () => request<ManualRefundAdvance[]>('/admin/refunds/manual-advances'),
+
   /** Whoever fronted a manual refund has taken that exact amount back out. */
   reimburseManualRefund: (orderRef: string) =>
-    request<void>(`/admin/supplier/float/manual-refunds/${encodeURIComponent(orderRef)}/reimburse`, {
+    request<void>(`/admin/refunds/manual-advances/${encodeURIComponent(orderRef)}/reimburse`, {
       method: 'POST',
     }),
 

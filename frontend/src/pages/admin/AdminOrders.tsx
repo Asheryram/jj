@@ -87,7 +87,13 @@ export default function AdminOrders() {
   const agentMarginOf = (order: (typeof visible)[number]) =>
     order.split.shares.filter((s) => s.role === 'agent').reduce((sum, s) => sum + s.margin, 0)
   const agentMargin = done.reduce((sum, o) => sum + agentMarginOf(o), 0)
-  const fees = done.reduce((sum, o) => sum + o.split.processingFee, 0)
+  /**
+   * `?? 0` because orders placed before `processingFee` was added to the
+   * stored split have no such key — without the fallback, one such order
+   * turns this whole sum to `NaN`, showing "—" for every order in view, not
+   * just the one missing the field.
+   */
+  const fees = done.reduce((sum, o) => sum + (o.split.processingFee ?? 0), 0)
 
   const exportCsv = () => {
     const header = [

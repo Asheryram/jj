@@ -21,11 +21,9 @@ import { AlertIcon, CheckIcon } from '../../components/icons'
  * than showing nothing at all.
  */
 export default function FloatPanel() {
-  const { pushToast } = useStore()
   const [float, setFloat] = useState<SupplierFloat | null>(null)
   const [error, setError] = useState('')
   const [logging, setLogging] = useState<'in' | 'out' | null>(null)
-  const [reimbursing, setReimbursing] = useState<string | null>(null)
 
   const refresh = () =>
     api
@@ -37,22 +35,6 @@ export default function FloatPanel() {
             caught instanceof ApiError ? caught.message : 'We could not read the provider float.',
           ),
       )
-
-  const reimburse = async (orderRef: string) => {
-    setReimbursing(orderRef)
-    try {
-      await api.reimburseManualRefund(orderRef)
-      pushToast({ tone: 'success', title: `Marked ${orderRef} as reimbursed` })
-      await refresh()
-    } catch (caught) {
-      pushToast({
-        tone: 'error',
-        title: caught instanceof ApiError ? caught.message : 'We could not save that.',
-      })
-    } finally {
-      setReimbursing(null)
-    }
-  }
 
   useEffect(() => {
     let live = true
@@ -95,7 +77,7 @@ export default function FloatPanel() {
     )
   }
 
-  const { observation, watchAt, riskAt, capital, reconciliation, manualRefunds } = float
+  const { observation, watchAt, riskAt, capital, reconciliation } = float
 
   return (
     <Card>
@@ -235,41 +217,6 @@ export default function FloatPanel() {
           </div>
         </div>
 
-        {/* Manual refunds paid from someone's own pocket, not yet taken back
-            out. Traced to the order each one came from, not shown as a bare
-            total — see RefundsService.settleManually and
-            FloatMonitorService.outstandingManualRefunds. */}
-        {manualRefunds.length > 0 && (
-          <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3.5 py-3">
-            <p className="text-xs font-semibold text-amber-900 dark:text-amber-200">
-              Owed back — {cedis(manualRefunds.reduce((sum, r) => sum + r.amount, 0))} from refunds
-              paid out of pocket
-            </p>
-            <ul className="mt-2 space-y-2">
-              {manualRefunds.map((r) => (
-                <li key={r.orderRef} className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="tabular text-xs font-semibold text-slate-800 dark:text-slate-100">
-                      {r.orderRef} · {cedis(r.amount)}
-                    </p>
-                    <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                      {r.description}
-                    </p>
-                    <p className="text-xs text-slate-400 dark:text-slate-500">{dateTime(r.occurredAt)}</p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    loading={reimbursing === r.orderRef}
-                    onClick={() => void reimburse(r.orderRef)}
-                  >
-                    Reimbursed
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
 
       <CapitalModal

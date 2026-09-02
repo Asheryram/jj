@@ -259,12 +259,11 @@ export class AdminController {
    */
   @Get('supplier/float')
   async float_() {
-    const [observation, settings, capital, reconciliation, manualRefunds] = await Promise.all([
+    const [observation, settings, capital, reconciliation] = await Promise.all([
       this.float.latest(),
       this.platformSettings.all(),
       this.float.capitalSummary(),
       this.float.reconcile(),
-      this.float.outstandingManualRefunds(),
     ])
     return {
       observation,
@@ -272,18 +271,7 @@ export class AdminController {
       riskAt: settings.floatRiskAt,
       capital,
       reconciliation,
-      manualRefunds,
     }
-  }
-
-  /**
-   * Whoever fronted a manual refund has taken that exact amount back out of
-   * the business. Closes out one traced advance — see
-   * `FloatMonitorService.reimburseManualRefund`.
-   */
-  @Post('supplier/float/manual-refunds/:orderRef/reimburse')
-  reimburseManualRefund(@Param('orderRef') orderRef: string, @CurrentUser() user: AuthUser) {
-    return this.float.reimburseManualRefund(orderRef, user.id)
   }
 
   /**
@@ -441,6 +429,29 @@ export class AdminController {
     @Body() dto: SettleRefundManuallyDto,
   ) {
     return this.refunds.settleManually(id, user.id, dto.note, dto.momoNetwork)
+  }
+
+  /**
+   * Refunds still owed back to whoever personally covered them when Paystack
+   * could not send the transfer — see `SettleManuallyModal` on the Refunds
+   * page, which is where each one is created. This is Paystack money, not
+   * the DataHub float: it belongs with the refund queue that created it, not
+   * with the float panel, even though both draw on the same underlying
+   * capital ledger — see `FloatMonitorService.outstandingManualRefunds`.
+   */
+  @Get('refunds/manual-advances')
+  manualRefundAdvances() {
+    return this.float.outstandingManualRefunds()
+  }
+
+  /**
+   * Whoever fronted a manual refund has taken that exact amount back out of
+   * the business. Closes out one traced advance — see
+   * `FloatMonitorService.reimburseManualRefund`.
+   */
+  @Post('refunds/manual-advances/:orderRef/reimburse')
+  reimburseManualRefund(@Param('orderRef') orderRef: string, @CurrentUser() user: AuthUser) {
+    return this.float.reimburseManualRefund(orderRef, user.id)
   }
 
   @Get('finance/position')

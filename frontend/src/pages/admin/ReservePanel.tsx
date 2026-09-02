@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError, type ReservePosition } from '../../lib/api'
 import { cedis } from '../../lib/format'
@@ -125,7 +125,16 @@ export default function ReservePanel() {
               label="Owed for refunds paid out of pocket"
               value={liabilities.manualRefundAdvances}
               negative
-              hint="Someone covered these personally — settle them on the Float panel"
+              hint={
+                <>
+                  Someone covered these personally — money still sitting at Paystack, never the
+                  DataHub float. Settle them on the{' '}
+                  <Link to="/admin/refunds" className="font-semibold underline">
+                    Refunds
+                  </Link>{' '}
+                  page.
+                </>
+              }
             />
           )}
           <Row label="Total owed to other people" value={liabilities.total} negative strong />
@@ -173,7 +182,7 @@ function Row({
   value: number | null
   negative?: boolean
   strong?: boolean
-  hint?: string
+  hint?: ReactNode
 }) {
   return (
     <div className="flex items-start justify-between gap-3 px-4 py-2.5">
