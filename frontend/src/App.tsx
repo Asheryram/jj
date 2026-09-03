@@ -60,19 +60,33 @@ import Settings from './pages/admin/Settings'
  * the domain itself IS the shop, so the public storefront on it wears that
  * agent's brand.
  *
- * Still only the PUBLIC storefront, though — `/admin` and `/app` are excluded
- * from `forceCode` for exactly the reason the paragraph above exists: logging
- * into the platform's own admin or agent dashboard from inside someone's
- * custom domain (perfectly normal — `/login` is reachable from any shop) must
- * not leave the platform's own screens wearing that agent's colours for the
- * rest of the session. Confirmed live: without this, an admin who logged in
- * from an agent's domain saw that agent's name and colour on `/admin/branding`.
+ * Still only the PUBLIC storefront, though — `/admin` is excluded from
+ * `forceCode` for exactly the reason the paragraph above exists: logging into
+ * the platform's own admin screens from inside someone's custom domain
+ * (perfectly normal — `/login` is reachable from any shop) must not leave
+ * them wearing that agent's colours for the rest of the session. Confirmed
+ * live: without this, an admin who logged in from an agent's domain saw that
+ * agent's name and colour on `/admin/branding`.
+ *
+ * `/app` is different: it is a signed-in agent's OWN dashboard, so it wears
+ * THEIR OWN approved branding whenever they are one — never the domain
+ * they happen to be standing on. An agent logged into their own `/app` from
+ * a colleague's shop link should see their own shop name there, not the
+ * colleague's and not the platform's.
  */
 function ShopTheme({ children, forceCode = null }: { children: ReactNode; forceCode?: string | null }) {
   const { pathname } = useLocation()
+  const { session } = useStore()
   const pathCode = pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null
-  const inAccountArea = pathname.startsWith('/admin') || pathname.startsWith('/app')
-  const shopCode = pathCode ? decodeURIComponent(pathCode) : inAccountArea ? null : forceCode
+
+  const shopCode = pathCode
+    ? decodeURIComponent(pathCode)
+    : pathname.startsWith('/admin')
+      ? null
+      : pathname.startsWith('/app')
+        ? (session?.role === 'agent' ? session.referralCode : null)
+        : forceCode
+
   return <BrandingProvider sellerCode={shopCode}>{children}</BrandingProvider>
 }
 
