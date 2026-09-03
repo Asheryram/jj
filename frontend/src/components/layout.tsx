@@ -41,9 +41,8 @@ import {
  * way to make agents stop sharing their links.
  */
 export function Logo({ compact }: { compact?: boolean }) {
-  const { sellerCode } = useStore()
   const branding = useBranding()
-  const home = sellerCode ? `/s/${sellerCode}` : '/'
+  const home = useShopPath()('/')
 
   return (
     <Link to={home} className="flex min-w-0 items-center gap-2.5">

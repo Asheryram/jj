@@ -1,4 +1,5 @@
 import { useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useStore } from '../state/store'
 
 /**
@@ -17,19 +18,30 @@ import { useStore } from '../state/store'
  *
  * With no sell link in force the paths are returned untouched, so the platform's
  * own shop keeps clean URLs.
+ *
+ * Only actually prefixes while the current URL is itself under `/s/<code>`,
+ * not merely whenever `sellerCode` happens to be set. `sellerCode` is set the
+ * same way on an agent's own custom domain (see `CustomDomainSeller` in
+ * App.tsx) — but there, the domain itself is what carries the attribution
+ * both reasons above care about, and stamping `/s/<code>` back into every
+ * link would put the platform's own path scheme into a URL an agent paid to
+ * make look like their own. Same reasoning `ShopTheme` already applies to
+ * branding, just for navigation instead.
  */
 export function useShopPath(): (path: string) => string {
   const { sellerCode } = useStore()
+  const { pathname } = useLocation()
+  const onSellLinkPath = /^\/s\/[^/]+(\/|$)/.test(pathname)
 
   return useCallback(
     (path: string) => {
-      if (!sellerCode) return path
+      if (!sellerCode || !onSellLinkPath) return path
       // `/` is the shop's front door, which under a sell link is `/s/CODE` itself
       // — not `/s/CODE/`, which would render as a trailing-slash duplicate.
       if (path === '/') return `/s/${sellerCode}`
       return `/s/${sellerCode}${path.startsWith('/') ? path : `/${path}`}`
     },
-    [sellerCode],
+    [sellerCode, onSellLinkPath],
   )
 }
 
