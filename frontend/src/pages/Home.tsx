@@ -40,7 +40,7 @@ const AGENT_BENEFITS = [
  * to sell rather than buy will still find it.
  */
 export default function Home() {
-  const { products, retailPrice, sellerName, sellerCode } = useStore()
+  const { products, retailPrice } = useStore()
   const shopPath = useShopPath()
   const registerPath = useRegisterPath()
 
@@ -62,9 +62,7 @@ export default function Home() {
                 MTN · Telecel · AirtelTigo
               </Badge>
               <h1 className="mt-3 text-2xl leading-tight font-extrabold tracking-tight text-white sm:text-3xl">
-                {sellerName && sellerCode
-                  ? `Buy from ${sellerName}`
-                  : 'Data, airtime and result checkers in about ten seconds.'}
+                Data, airtime and result checkers in about ten seconds.
               </h1>
               <p className="mt-2 text-brand-50/90">
                 Pick a bundle, enter the number, pay with Mobile Money.{' '}
