@@ -42,22 +42,32 @@ export default function AdminOrders() {
   const [query, setQuery] = useState('')
 
   /**
-   * The real "Your profit" — all-time, from the ledger, the exact same
-   * figure the Reserve panel's "Actually free to spend" is built from.
+   * "Your profit" is deliberately the exact same number as the Reserve
+   * panel's "Actually free to spend" — not a separately computed figure that
+   * happens to agree with it.
+   *
+   * James's own definition: profit is only what he could take out today
+   * without touching money any pending order might still need — a refund
+   * that has not been decided yet, a bundle still processing, a customer's
+   * wallet balance. The ledger's all-time revenue-less-costs figure does not
+   * satisfy that: it counts a sale's revenue the moment payment is
+   * confirmed, before knowing whether the order will actually complete. So
+   * this reuses `freeToSpend` itself rather than reconciling two figures
+   * that answer different questions — see `SolvencyService.position`.
    *
    * Deliberately not derived from `visible`/`done` below: that per-order sum
    * only ever looks at completed orders, so it silently drops real, settled
    * costs — the Paystack fee lost on an order that got refunded is the one
-   * that actually surfaced this. Fetched once, all-time, unaffected by the
+   * that actually surfaced this. Fetched once, unaffected by the
    * filter/search above — a profit figure that changed depending on what you
    * searched for would not be "your profit" any more.
    */
-  const [allTimeProfit, setAllTimeProfit] = useState<number | null>(null)
+  const [takeableProfit, setTakeableProfit] = useState<number | null>(null)
   useEffect(() => {
     let live = true
     api
-      .financeStatement('all')
-      .then((statement) => live && setAllTimeProfit(statement.profit))
+      .reservePosition()
+      .then((position) => live && setTakeableProfit(position.freeToSpend))
       .catch(() => undefined)
     return () => {
       live = false
@@ -200,8 +210,8 @@ export default function AdminOrders() {
         />
         <StatTile
           label="Your profit"
-          value={allTimeProfit === null ? '—' : cedis(allTimeProfit)}
-          hint="All-time, from the ledger — the same figure as the Reserve panel's Actually free to spend, not affected by the filter or search above"
+          value={takeableProfit === null ? '—' : cedis(takeableProfit)}
+          hint="What you could take out today without touching money a pending order might still need — the same figure as the Reserve panel's Actually free to spend, not affected by the filter or search above"
           tone="success"
         />
       </div>
