@@ -210,12 +210,25 @@ export class FloatMonitorService {
    * James says so. Written as `capital_in`/`capital_out` with `affectsProfit:
    * false` — it is a balance-sheet movement, not income or cost, and must
    * never shift the P&L in `money-audit.ts`.
+   *
+   * `source` only matters for a top-up (`direction: 'in'`), and only changes
+   * the `LedgerKind` it is written under:
+   *
+   *  - `'external'` (the default) — fresh money from outside the business.
+   *  - `'reimbursement'` — money already collected from customers to cover
+   *    what DataHub charges for their bundles, sitting in Paystack rather
+   *    than the float, now moved across to where it was always meant to end
+   *    up. Written as `capital_in_reimbursement` instead of `capital_in` so
+   *    `SolvencyService` can tell the two apart — only this kind reduces
+   *    "already spent on bundles" there, because only this kind is actually
+   *    settling that specific amount, not adding new capital on top of it.
    */
   async logCapital(input: {
     direction: 'in' | 'out'
     amount: number
     note?: string
     idempotencyKey: string
+    source?: 'external' | 'reimbursement'
   }): Promise<void> {
     if (!Number.isInteger(input.amount) || input.amount <= 0) {
       throw new ValidationError('Enter an amount greater than zero.')
@@ -259,16 +272,19 @@ export class FloatMonitorService {
       })
     }
 
+    const reimbursement = input.direction === 'in' && input.source === 'reimbursement'
     const ghs = (input.amount / 100).toFixed(2)
     const description = input.note
       ? input.note
       : input.direction === 'in'
-        ? `Capital added: GHS ${ghs}`
+        ? reimbursement
+          ? `Moved to DataHub from Paystack: GHS ${ghs}`
+          : `Capital added: GHS ${ghs}`
         : `Capital withdrawn: GHS ${ghs}`
 
     await this.ledger.record([
       {
-        kind: input.direction === 'in' ? 'capital_in' : 'capital_out',
+        kind: input.direction === 'in' ? (reimbursement ? 'capital_in_reimbursement' : 'capital_in') : 'capital_out',
         amount: input.direction === 'in' ? input.amount : -input.amount,
         description,
         occurredAt: new Date(),
@@ -288,22 +304,44 @@ export class FloatMonitorService {
     if (observation) await this.checkFloat(observation.balance)
   }
 
-  /** Cumulative capital James has logged putting in and taking out, all time. */
+  /**
+   * Cumulative capital James has logged putting in and taking out, all time.
+   *
+   * `capital_in_reimbursement` counts as capital in here alongside plain
+   * `capital_in` — from the float's own point of view both are money landing
+   * in it, and the float does not care where a top-up's money came from.
+   * That distinction only matters one place: `SolvencyService.spentOnBundles`,
+   * which is the only reader that cares whether a top-up settled money
+   * already owed to DataHub rather than adding fresh capital on top of it.
+   *
+   * `orderRef: null` is deliberate, not incidental. `capital_in`/`capital_out`
+   * are also written by `RefundsService.settleManually` and
+   * `reimburseManualRefund` — a completely different thing that happens to
+   * share this kind: money someone personally sent a *customer* back,
+   * unrelated to the DataHub float. Those always carry an `orderRef`; a real
+   * top-up logged through `logCapital` never does. Without this filter, an
+   * outstanding manual refund advance was being counted as float capital,
+   * inflating "should hold" by exactly that amount — the float and a refund
+   * advance are different money and must never be added together.
+   */
   async capitalSummary(): Promise<CapitalSummary> {
+    const capitalInKinds = ['capital_in', 'capital_in_reimbursement'] as const
     const [totals, first] = await Promise.all([
       this.prisma.ledgerEntry.groupBy({
         by: ['kind'],
-        where: { kind: { in: ['capital_in', 'capital_out'] } },
+        where: { kind: { in: [...capitalInKinds, 'capital_out'] }, orderRef: null },
         _sum: { amount: true },
       }),
       this.prisma.ledgerEntry.findFirst({
-        where: { kind: { in: ['capital_in', 'capital_out'] } },
+        where: { kind: { in: [...capitalInKinds, 'capital_out'] }, orderRef: null },
         orderBy: { occurredAt: 'asc' },
         select: { occurredAt: true },
       }),
     ])
 
-    const totalIn = totals.find((t) => t.kind === 'capital_in')?._sum.amount ?? 0
+    const totalIn = totals
+      .filter((t) => (capitalInKinds as readonly string[]).includes(t.kind))
+      .reduce((sum, t) => sum + (t._sum.amount ?? 0), 0)
     const totalOut = -(totals.find((t) => t.kind === 'capital_out')?._sum.amount ?? 0)
 
     return {

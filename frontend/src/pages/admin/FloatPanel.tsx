@@ -3,8 +3,25 @@ import { Link } from 'react-router-dom'
 import { api, ApiError, type SupplierFloat } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { cedis, dateTime, parseCedis } from '../../lib/format'
-import { Button, Callout, Card, CardHead, Field, Modal, Spinner, TextInput, cn } from '../../components/ui'
+import { Button, Callout, Card, CardHead, Field, Modal, Segmented, Spinner, TextInput, cn } from '../../components/ui'
 import { AlertIcon, CheckIcon } from '../../components/icons'
+
+type FloatLevel = 'ok' | 'watch' | 'risk'
+
+/** Mirrors the backend's `levelFor` in float-monitor.service.ts, so a number colours the same way here as it does in an alert email. */
+function levelFor(balance: number, watchAt: number, riskAt: number): FloatLevel {
+  if (riskAt > 0 && balance <= riskAt) return 'risk'
+  if (watchAt > 0 && balance <= watchAt) return 'watch'
+  return 'ok'
+}
+
+function levelColor(level: FloatLevel): string {
+  return level === 'risk'
+    ? 'text-red-700 dark:text-red-400'
+    : level === 'watch'
+      ? 'text-amber-700 dark:text-amber-400'
+      : 'text-slate-900 dark:text-slate-50'
+}
 
 /**
  * What is left in the DataHub float.
@@ -94,60 +111,51 @@ export default function FloatPanel() {
           </Callout>
         ) : (
           <>
-            <div className="flex flex-wrap items-end justify-between gap-2">
-              <p
-                className={cn(
-                  'tabular text-3xl font-bold',
-                  observation.level === 'risk'
-                    ? 'text-red-700 dark:text-red-400'
-                    : observation.level === 'watch'
-                      ? 'text-amber-700 dark:text-amber-400'
-                      : 'text-slate-900 dark:text-slate-50',
+            {/* Side by side on purpose: two independent answers to "how much is
+                left," each coloured on its own merits — so if they ever
+                disagree, which one is actually the problem is visible at a
+                glance instead of hidden behind whichever the alert picked. */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
+                  Should hold
+                </p>
+                {reconciliation ? (
+                  <p className={cn('tabular text-2xl font-bold sm:text-3xl', levelColor(levelFor(reconciliation.expected, watchAt, riskAt)))}>
+                    {cedis(reconciliation.expected)}
+                  </p>
+                ) : (
+                  <p className="text-sm text-slate-400 dark:text-slate-500">Not tracked yet</p>
                 )}
-              >
-                {cedis(observation.balance)}
-              </p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                read {dateTime(observation.observedAt)}
-                {observation.orderRef ? ` · from ${observation.orderRef}` : ''}
-              </p>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  What you've logged, minus every order since
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
+                  Live reading
+                </p>
+                <p className={cn('tabular text-2xl font-bold sm:text-3xl', levelColor(levelFor(observation.balance, watchAt, riskAt)))}>
+                  {cedis(observation.balance)}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  read {dateTime(observation.observedAt)}
+                  {observation.orderRef ? ` · from ${observation.orderRef}` : ''}
+                </p>
+              </div>
             </div>
 
             {observation.level === 'risk' && (
-              <Callout
-                tone="danger"
-                title="Top up now"
-                icon={<AlertIcon className="size-4" />}
-              >
+              <Callout tone="danger" title="Top up now" icon={<AlertIcon className="size-4" />}>
                 Below the {cedis(riskAt)} you asked to be warned at. When this runs out, customers
                 are charged and get nothing, and every one of those has to be refunded by hand.
-                {observation.reference < observation.balance && (
-                  <>
-                    {' '}
-                    DataHub itself still reports {cedis(observation.balance)} — this is based on
-                    your tracked capital instead, which is lower and hasn't been confirmed by a
-                    fresh order yet.
-                  </>
-                )}
               </Callout>
             )}
 
             {observation.level === 'watch' && (
-              <Callout
-                tone="warning"
-                title="Getting low"
-                icon={<AlertIcon className="size-4" />}
-              >
+              <Callout tone="warning" title="Getting low" icon={<AlertIcon className="size-4" />}>
                 Below the {cedis(watchAt)} you asked to be warned at. Still time to top up before
                 anything fails.
-                {observation.reference < observation.balance && (
-                  <>
-                    {' '}
-                    DataHub itself still reports {cedis(observation.balance)} — this is based on
-                    your tracked capital instead, which is lower and hasn't been confirmed by a
-                    fresh order yet.
-                  </>
-                )}
               </Callout>
             )}
 
@@ -186,23 +194,15 @@ export default function FloatPanel() {
             </p>
           ) : (
             <>
-              {reconciliation && (
-                <p className="tabular text-base font-semibold text-slate-900 dark:text-slate-50">
-                  Should hold {cedis(reconciliation.expected)}
-                  <span className="ml-1.5 font-normal text-xs text-slate-500 dark:text-slate-400">
-                    right now — what you've logged, minus every order since
-                  </span>
-                </p>
-              )}
-              <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+              <p className="text-xs text-slate-600 dark:text-slate-300">
                 You've put in <span className="font-semibold text-slate-900 dark:text-slate-50">{cedis(capital.totalIn)}</span>
                 , taken out <span className="font-semibold text-slate-900 dark:text-slate-50">{cedis(capital.totalOut)}</span>,
                 since {dateTime(capital.since)}.
               </p>
               {reconciliation?.pending && (
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Logged — the figure above will confirm against the live float once the next order
-                  updates it.
+                  Logged — "Should hold" above will confirm against the live float once the next
+                  order updates it.
                 </p>
               )}
             </>
@@ -244,6 +244,7 @@ function CapitalModal({
   const { pushToast } = useStore()
   const [value, setValue] = useState('')
   const [note, setNote] = useState('')
+  const [source, setSource] = useState<'external' | 'reimbursement'>('external')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -252,6 +253,7 @@ function CapitalModal({
     setLastDirection(direction)
     setValue('')
     setNote('')
+    setSource('external')
     setError('')
   }
 
@@ -265,7 +267,7 @@ function CapitalModal({
     }
     setBusy(true)
     try {
-      await api.logFloatCapital(direction, amount, note.trim() || undefined)
+      await api.logFloatCapital(direction, amount, note.trim() || undefined, source)
       pushToast({
         tone: 'info',
         title: direction === 'in' ? `Logged ${cedis(amount)} in` : `Logged ${cedis(amount)} out`,
@@ -289,6 +291,25 @@ function CapitalModal({
           This tracks your own capital — it never counts as revenue or cost, and does not change
           the profit figures anywhere else.
         </Callout>
+
+        {direction === 'in' && (
+          <Field label="Where did this come from?" htmlFor="capital-source">
+            <Segmented<'external' | 'reimbursement'>
+              className="w-full"
+              options={[
+                { value: 'external', label: 'Outside the business' },
+                { value: 'reimbursement', label: 'Paystack, paying DataHub back' },
+              ]}
+              value={source}
+              onChange={setSource}
+            />
+            <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+              {source === 'reimbursement'
+                ? "Money already collected from customers for what DataHub charges — you're moving it from Paystack to where it was always meant to end up, not adding new capital. This is the only kind of top-up that clears \"Already spent on bundles\" on the Reserve panel."
+                : 'Fresh money, from somewhere other than what this business itself has collected.'}
+            </p>
+          </Field>
+        )}
 
         <Field label="Amount (GHS)" htmlFor="capital-amount" error={error}>
           <TextInput

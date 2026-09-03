@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { api, ApiError, type ReservePosition } from '../../lib/api'
 import { cedis } from '../../lib/format'
 import { Button, Callout, Card, CardHead, Spinner, cn } from '../../components/ui'
-import { AlertIcon, CheckIcon, RefreshIcon } from '../../components/icons'
+import { AlertIcon, CashIcon, CheckIcon, RefreshIcon } from '../../components/icons'
 
 /**
  * What is owed, against what our own records say should be sitting at
@@ -75,7 +75,7 @@ export default function ReservePanel() {
     )
   }
 
-  const { expectedAtPaystack, liabilities } = position
+  const { expectedAtPaystack, freeToSpend, spentOnBundles, liabilities, floatBalance } = position
 
   return (
     <Card className="mt-3">
@@ -137,6 +137,76 @@ export default function ReservePanel() {
           )}
           <Row label="Total owed to other people" value={liabilities.total} negative strong />
         </dl>
+
+        {spentOnBundles > 0 && (
+          <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                Already spent on bundles
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                Came out of the DataHub float, not Paystack — but the float doesn't refill itself, so
+                this much will need to move across from here sooner or later
+              </p>
+            </div>
+            <p className="tabular shrink-0 text-sm font-semibold text-slate-700 dark:text-slate-200">
+              −{cedis(spentOnBundles)}
+            </p>
+          </div>
+        )}
+
+        <div
+          className={cn(
+            'flex items-center justify-between gap-3 rounded-xl border px-4 py-3',
+            freeToSpend >= 0
+              ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40'
+              : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40',
+          )}
+        >
+          <div>
+            <p
+              className={cn(
+                'text-sm font-semibold',
+                freeToSpend >= 0
+                  ? 'text-emerald-900 dark:text-emerald-200'
+                  : 'text-red-900 dark:text-red-200',
+              )}
+            >
+              Actually free to spend
+            </p>
+            <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">
+              {freeToSpend >= 0
+                ? 'Should be at Paystack, less everything already owed to someone else and everything already spent on bundles'
+                : 'Already committed exceeds what should be at Paystack — nothing here is free yet'}
+            </p>
+          </div>
+          <p
+            className={cn(
+              'tabular shrink-0 text-lg font-bold',
+              freeToSpend >= 0
+                ? 'text-emerald-800 dark:text-emerald-300'
+                : 'text-red-700 dark:text-red-400',
+            )}
+          >
+            {cedis(freeToSpend, { sign: true })}
+          </p>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
+          <div className="flex items-center gap-2.5">
+            <CashIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
+            <div>
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Your other pot: the DataHub float</p>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                Not a claim on the money above — a separate prepaid balance you top up yourself. See
+                the Float panel below for the full picture.
+              </p>
+            </div>
+          </div>
+          <p className="tabular shrink-0 text-sm font-bold text-slate-800 dark:text-slate-100">
+            {floatBalance === null ? 'Not known yet' : cedis(floatBalance)}
+          </p>
+        </div>
 
         {position.pendingRefunds.count > 0 && (
           <Callout

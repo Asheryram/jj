@@ -53,6 +53,16 @@ export class LogCapitalDto {
   @MaxLength(280)
   note?: string
 
+  /**
+   * Only meaningful for `direction: 'in'`. 'reimbursement' means this top-up
+   * is specifically settling money already collected from customers for
+   * DataHub's charge, not adding fresh capital — see
+   * `FloatMonitorService.logCapital`.
+   */
+  @IsOptional()
+  @IsIn(['external', 'reimbursement'])
+  source?: 'external' | 'reimbursement'
+
   @IsString()
   idempotencyKey!: string
 }
@@ -458,9 +468,17 @@ export class AdminController {
     return this.float.reimburseManualRefund(orderRef, user.id)
   }
 
+  /**
+   * The Reserve panel's whole picture — Paystack's side from `SolvencyService`,
+   * plus the DataHub float's current reading alongside it. Not folded into
+   * `SolvencyService` itself: the two pots are genuinely separate money, and
+   * the float is not a claim on what should be at Paystack — see
+   * `ReservePanel`'s "your other pot" framing on the frontend.
+   */
   @Get('finance/position')
-  position() {
-    return this.solvency.position()
+  async position() {
+    const [position, float] = await Promise.all([this.solvency.position(), this.float.latest()])
+    return { ...position, floatBalance: float?.balance ?? null }
   }
 
   @Get('finance/entries')

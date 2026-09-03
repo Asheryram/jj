@@ -693,6 +693,13 @@ enum LedgerKind {
   topup
   /// James adding his own money to the DataHub float. Capital, not revenue.
   capital_in
+  /// A top-up that specifically moves money already collected from customers
+  /// for a bundle's cost — sitting in Paystack, not DataHub — across to where
+  /// it was always meant to end up. Not fresh capital and not profit: this is
+  /// completing a transfer that was already owed, which is exactly why it is
+  /// the one thing that reduces `SolvencyService`'s "already spent on
+  /// bundles" figure. A plain `capital_in` never does, however large.
+  capital_in_reimbursement
   /// James taking his own money back out of the float, or correcting an entry.
   capital_out
   /// A wrongly-credited agent margin that could not be fully clawed back

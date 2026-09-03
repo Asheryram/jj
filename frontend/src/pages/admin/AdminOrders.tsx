@@ -41,6 +41,29 @@ export default function AdminOrders() {
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
 
+  /**
+   * The real "Your profit" — all-time, from the ledger, the exact same
+   * figure the Reserve panel's "Actually free to spend" is built from.
+   *
+   * Deliberately not derived from `visible`/`done` below: that per-order sum
+   * only ever looks at completed orders, so it silently drops real, settled
+   * costs — the Paystack fee lost on an order that got refunded is the one
+   * that actually surfaced this. Fetched once, all-time, unaffected by the
+   * filter/search above — a profit figure that changed depending on what you
+   * searched for would not be "your profit" any more.
+   */
+  const [allTimeProfit, setAllTimeProfit] = useState<number | null>(null)
+  useEffect(() => {
+    let live = true
+    api
+      .financeStatement('all')
+      .then((statement) => live && setAllTimeProfit(statement.profit))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return orders.filter((order) => {
@@ -83,7 +106,6 @@ export default function AdminOrders() {
    */
   const trueMarginOf = (order: (typeof visible)[number]) =>
     adminMarginOf(order) + catalogueDiffOf(order)
-  const myMargin = done.reduce((sum, o) => sum + trueMarginOf(o), 0)
   const agentMarginOf = (order: (typeof visible)[number]) =>
     order.split.shares.filter((s) => s.role === 'agent').reduce((sum, s) => sum + s.margin, 0)
   const agentMargin = done.reduce((sum, o) => sum + agentMarginOf(o), 0)
@@ -178,8 +200,8 @@ export default function AdminOrders() {
         />
         <StatTile
           label="Your profit"
-          value={cedis(myMargin)}
-          hint="What's actually yours — agent commissions already excluded, catalogue gap already included"
+          value={allTimeProfit === null ? '—' : cedis(allTimeProfit)}
+          hint="All-time, from the ledger — the same figure as the Reserve panel's Actually free to spend, not affected by the filter or search above"
           tone="success"
         />
       </div>

@@ -213,6 +213,8 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       stuckRefunds,
       manualRefundAdvances,
       manualRefundReimbursements,
+      bundlesBought,
+      reimbursedToDataHub,
     ] = await Promise.all([
       this.prisma.user.aggregate({ where: { role: 'agent' }, _sum: { balance: true } }),
       this.prisma.user.aggregate({ where: { role: 'customer' }, _sum: { balance: true } }),
@@ -296,6 +298,31 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         where: { kind: 'capital_out', orderRef: { not: null } },
         select: { orderRef: true },
       }),
+      /**
+       * Every bundle ever bought, all-time. That money came out of the
+       * DataHub float, never out of Paystack directly — the matching customer
+       * payment for each one is still sitting in `expectedAtPaystack` in
+       * full, untouched. But the float does not refill itself: sooner or
+       * later, keeping it funded means moving some of that Paystack money
+       * across to replace what buying those bundles has already spent. So it
+       * is not free to spend on anything else, even though nothing has
+       * physically left Paystack for it yet.
+       */
+      this.prisma.ledgerEntry.aggregate({
+        where: { kind: 'supplier_cost' },
+        _sum: { amount: true },
+      }),
+      /**
+       * Money already moved from Paystack to DataHub specifically to settle
+       * that spending — see `FloatMonitorService.logCapital`'s `source:
+       * 'reimbursement'`. A plain `capital_in` top-up (fresh capital) never
+       * counts here: it funds the float further, it does not pay back what
+       * buying past bundles already cost.
+       */
+      this.prisma.ledgerEntry.aggregate({
+        where: { kind: 'capital_in_reimbursement' },
+        _sum: { amount: true },
+      }),
     ])
 
     const undelivered = heldOrders._sum.salePrice ?? 0
@@ -320,6 +347,14 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       .filter((advance) => !reimbursedRefs.has(advance.orderRef))
       .reduce((sum, advance) => sum + advance.amount, 0)
     const liabilities = owedToAgents + owedToCustomers + undelivered + queuedPayouts + owedForManualRefunds
+    // supplier_cost entries are stored negative (money leaving the float).
+    // Floored at zero: logging more reimbursement than has ever been spent
+    // should not turn "already spent on bundles" into a negative number that
+    // would add back onto `freeToSpend` instead of merely clearing it.
+    const spentOnBundles = Math.max(
+      0,
+      -(bundlesBought._sum.amount ?? 0) - (reimbursedToDataHub._sum.amount ?? 0),
+    )
 
     const expectedAtPaystack = await this.expectedBalance()
 
@@ -331,6 +366,24 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
        * balance — see the file header.
        */
       expectedAtPaystack,
+      /**
+       * Every bundle ever bought, all-time — see the query above for why
+       * this is subtracted from `freeToSpend` even though none of it ever
+       * physically left Paystack.
+       */
+      spentOnBundles,
+      /**
+       * What's actually free to spend: `expectedAtPaystack` less every claim
+       * already on it, and less everything already spent buying bundles —
+       * that money came out of the DataHub float, not Paystack, but keeping
+       * the float funded means moving Paystack money across to replace it
+       * sooner or later, so it is not free for anything else. Safe to show
+       * now in a way the old "Free to spend" figure was not — every part of
+       * this is this platform's own tracked records, never Paystack's live
+       * balance, so it cannot read GHS 0.00 just because a Starter account
+       * happens to hold nothing at the moment.
+       */
+      freeToSpend: expectedAtPaystack - liabilities - spentOnBundles,
       liabilities: {
         agentEarnings: owedToAgents,
         customerMoney: owedToCustomers,
@@ -403,6 +456,16 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
    * Keyed on `paidAt` (not null) rather than `status`, so a merely approved,
    * not-yet-sent transfer is correctly not counted as having left the
    * balance yet.
+   *
+   * The refund side also requires `transferCode: { not: null }` — a real
+   * Paystack transfer always gets one back; `RefundsService.settleManually`
+   * never sets one, because no Paystack transfer happens there at all. Without
+   * this, a manually-settled refund (someone's own pocket covering it because
+   * Paystack refused) looked identical to a real one and was subtracted here
+   * as if it had left Paystack's balance — on top of the same amount already
+   * being subtracted, correctly, as "owed for refunds paid out of pocket" in
+   * `liabilities`. That double-counted it, understating `freeToSpend` by
+   * every manually-settled refund on the books.
    */
   private async transfersSince(): Promise<number> {
     const [payouts, refunds] = await Promise.all([
@@ -411,7 +474,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         _sum: { amount: true },
       }),
       this.prisma.refundRequest.aggregate({
-        where: { method: 'transfer', paidAt: { not: null } },
+        where: { method: 'transfer', paidAt: { not: null }, transferCode: { not: null } },
         _sum: { amount: true },
       }),
     ])

@@ -507,6 +507,16 @@ export interface ReservePosition {
    * admin's inbox, not this panel.
    */
   expectedAtPaystack: number
+  /**
+   * Every bundle ever bought, all-time. That money came out of the DataHub
+   * float, not Paystack directly, but the float doesn't refill itself —
+   * keeping it funded means moving Paystack money across sooner or later, so
+   * this is subtracted from `freeToSpend` even though it never physically
+   * left Paystack.
+   */
+  spentOnBundles: number
+  /** `expectedAtPaystack` less every claim already on it and everything spent on bundles — what's actually free to spend. */
+  freeToSpend: number
   liabilities: {
     agentEarnings: number
     customerMoney: number
@@ -517,6 +527,14 @@ export interface ReservePosition {
     manualRefundAdvances: number
     total: number
   }
+  /**
+   * The DataHub float's current reading, alongside Paystack's side — not a
+   * claim on `expectedAtPaystack`, just the business's other pot of money,
+   * shown here so both are visible in one place. Null before any purchase
+   * has ever reported a balance — see `FloatPanel` for the full picture
+   * (thresholds, capital tracking, reconciliation).
+   */
+  floatBalance: number | null
   pendingPayouts: { count: number; amount: number }
   unclaimedRefunds: { count: number; amount: number }
   /** Owed back and waiting on approval. Already counted in the liabilities. */
@@ -995,11 +1013,22 @@ export const api = {
 
   supplierFloat: () => request<SupplierFloat>('/admin/supplier/float'),
 
-  /** James saying he moved his own money into or out of the DataHub float. */
-  logFloatCapital: (direction: 'in' | 'out', amount: number, note?: string) =>
+  /**
+   * James saying he moved his own money into or out of the DataHub float.
+   * `source` only matters for a top-up: 'reimbursement' means this is money
+   * already collected from customers for DataHub's charge, moved across from
+   * Paystack to settle it — not fresh capital. Only that kind reduces
+   * "already spent on bundles" on the Reserve panel.
+   */
+  logFloatCapital: (
+    direction: 'in' | 'out',
+    amount: number,
+    note?: string,
+    source?: 'external' | 'reimbursement',
+  ) =>
     request<void>('/admin/supplier/float/capital', {
       method: 'POST',
-      body: { direction, amount, note, idempotencyKey: newIdempotencyKey() },
+      body: { direction, amount, note, source, idempotencyKey: newIdempotencyKey() },
     }),
 
   /** Refunds sent from someone's own pocket, not yet taken back out — see the Refunds page. */
