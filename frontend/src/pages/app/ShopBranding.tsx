@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiAsset, api, ApiError, type MyBranding } from '../../lib/api'
+import { apiAsset, api, ApiError, type MyBranding, type MyDomainStatus } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { deriveBrand } from '../../lib/branding'
 import { dateTime } from '../../lib/format'
@@ -16,7 +16,7 @@ import {
   Toggle,
   cn,
 } from '../../components/ui'
-import { AlertIcon, CheckIcon, ClockIcon, StoreIcon } from '../../components/icons'
+import { AlertIcon, CheckIcon, ClockIcon, GlobeIcon, StoreIcon } from '../../components/icons'
 
 /**
  * An agent making their shop look like theirs.
@@ -422,8 +422,134 @@ export default function ShopBranding() {
               </div>
             </Card>
           )}
+
+          <CustomDomainCard />
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * An agent's own domain, pointed at their shop instead of a `/s/<code>` link.
+ *
+ * Separate from the branding form above and submitted on its own: a domain
+ * change is a different kind of review (verifying ownership, not taste), and
+ * the two have no reason to succeed or fail together.
+ */
+function CustomDomainCard() {
+  const { pushToast } = useStore()
+  const [status, setStatus] = useState<MyDomainStatus | null | undefined>(undefined)
+  const [domain, setDomain] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      const result = await api.myDomain()
+      setStatus(result)
+      setDomain(result?.domain ?? '')
+    } catch {
+      setStatus(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const submit = async () => {
+    if (!domain.trim()) {
+      setError('Enter a domain, like yourshop.com.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.requestDomain(domain.trim())
+      setStatus(result)
+      pushToast({
+        tone: 'success',
+        title: 'Sent for approval',
+        detail: 'It will not carry your shop until it is approved and pointed at us correctly.',
+      })
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'We could not send that.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const waiting = status && status.reviewedAt === null
+  const live = status && status.allowed && status.active
+  const approvedNotLive = status && status.allowed && !status.active
+  const refused = status && !status.allowed && status.reviewedAt !== null
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Your own domain"
+        subtitle="Point a domain you own at your shop instead of sharing your /s/ link."
+      />
+      <div className="space-y-4 p-4 sm:p-5">
+        {status === undefined ? (
+          <div className="py-6 text-center">
+            <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
+          </div>
+        ) : (
+          <>
+            {waiting && (
+              <Callout tone="info" title="Waiting to be checked" icon={<ClockIcon className="size-4" />}>
+                You asked for this on {dateTime(status.requestedAt)}. We check that you actually
+                control it before it goes anywhere near your shop.
+              </Callout>
+            )}
+            {approvedNotLive && (
+              <Callout tone="info" title="Approved — not live yet" icon={<ClockIcon className="size-4" />}>
+                Approved. It goes live once we can see it pointed at us — that can take a little
+                while after you update your domain's DNS settings.
+              </Callout>
+            )}
+            {live && (
+              <Callout tone="success" title="Live" icon={<CheckIcon className="size-4" />}>
+                {status.domain} carries your shop now, the same as your /s/ link.
+              </Callout>
+            )}
+            {refused && (
+              <Callout tone="warning" title="Not approved" icon={<AlertIcon className="size-4" />}>
+                {status.reason ?? 'No reason was given.'} Fix it and send it again.
+              </Callout>
+            )}
+
+            <Field
+              label="Domain"
+              htmlFor="shop-domain"
+              hint="Just the domain, like yourshop.com — no https:// or www."
+              error={error}
+            >
+              <TextInput
+                id="shop-domain"
+                value={domain}
+                placeholder="yourshop.com"
+                invalid={Boolean(error)}
+                onChange={(event) => {
+                  setDomain(event.target.value)
+                  setError('')
+                }}
+              />
+            </Field>
+
+            <Callout tone="info" icon={<GlobeIcon className="size-4" />}>
+              Asking for a different domain than the one above replaces it — only one can be live
+              for your shop at a time.
+            </Callout>
+
+            <Button block loading={busy} onClick={() => void submit()}>
+              {status ? 'Send again' : 'Send for approval'}
+            </Button>
+          </>
+        )}
+      </div>
+    </Card>
   )
 }

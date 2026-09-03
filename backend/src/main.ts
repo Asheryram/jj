@@ -6,6 +6,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import helmet from 'helmet'
 import { AppModule } from './app.module'
 import { DomainExceptionFilter } from './common/domain-exception.filter'
+import { DomainsService } from './domains/domains.service'
 
 async function bootstrap() {
   // rawBody is required, not optional: Paystack's webhook signature is an HMAC
@@ -61,10 +62,33 @@ async function bootstrap() {
   const tunnelHost =
     /^https:\/\/[a-z0-9-]+\.(ngrok-free\.(app|dev)|ngrok\.(app|io)|trycloudflare\.com|loca\.lt)$/
 
+  /**
+   * The static allowlist above never knows an agent's custom domain in
+   * advance — those are added by request, not by redeploying with a new
+   * env var. So anything that misses it falls through to asking whether the
+   * origin's host is an approved, live `CustomDomain` — cached briefly
+   * inside the service itself, since this runs on every preflight from
+   * every visitor to every custom domain.
+   */
+  const domains = app.get(DomainsService)
+
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
       if (!origin) return callback(null, true) // curl, same-origin, server-side
-      callback(null, origins.includes(origin) || (allowTunnels && tunnelHost.test(origin)))
+      if (origins.includes(origin) || (allowTunnels && tunnelHost.test(origin))) {
+        return callback(null, true)
+      }
+
+      let hostname: string
+      try {
+        hostname = new URL(origin).hostname
+      } catch {
+        return callback(null, false)
+      }
+      domains.isTrustedOrigin(hostname).then(
+        (allowed) => callback(null, allowed),
+        () => callback(null, false),
+      )
     },
     credentials: true,
   })

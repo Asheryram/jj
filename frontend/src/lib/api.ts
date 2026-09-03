@@ -460,6 +460,22 @@ export interface BrandingRequestRow {
   decidedAt: string | null
 }
 
+export interface MyDomainStatus {
+  domain: string
+  allowed: boolean
+  active: boolean
+  requestedAt: string
+  reviewedAt: string | null
+  reason: string | null
+}
+
+export interface AdminDomainRow extends MyDomainStatus {
+  id: string
+  userId: string
+  agentName: string
+  agentCode: string
+}
+
 export interface RefundRequest {
   id: string
   orderRef: string
@@ -651,6 +667,25 @@ export const api = {
       `/sellers/${encodeURIComponent(code)}`,
       { auth: false },
     ),
+
+  /** Maps a visitor's Host header to an agent's referral code, for a custom domain. */
+  resolveDomain: (host: string) =>
+    request<{ code: string | null }>(`/domains/resolve?host=${encodeURIComponent(host)}`, {
+      auth: false,
+    }),
+
+  // Custom domains — an agent's own request, and its status
+  myDomain: () => request<MyDomainStatus | null>('/domains/mine'),
+
+  requestDomain: (domain: string) =>
+    request<MyDomainStatus>('/domains/request', { method: 'POST', body: { domain } }),
+
+  // Custom domains — superadmin review queue
+  adminDomains: (pending: boolean) =>
+    request<AdminDomainRow[]>(`/admin/domains?pending=${pending}`),
+
+  reviewDomain: (id: string, body: { allowed?: boolean; active?: boolean; reason?: string }) =>
+    request<AdminDomainRow>(`/admin/domains/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
 
   // Orders
   /**

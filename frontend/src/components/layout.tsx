@@ -14,6 +14,7 @@ import {
   CashIcon,
   ChartIcon,
   CheckIcon,
+  GlobeIcon,
   HomeIcon,
   LogoutIcon,
   MenuIcon,
@@ -137,9 +138,14 @@ function navFor(role: Role, shopPath: (path: string) => string, pendingApplicati
       { to: '/admin/branding', label: 'Branding', icon: StoreIcon },
       { to: '/admin/settings', label: 'Settings', icon: SettingsIcon },
       // Platform access belongs to the operator, not the business owner. An
-      // admin must not be shown a door they cannot open.
+      // admin must not be shown a door they cannot open. Approving a custom
+      // domain is the same kind of trust decision — vouching that whoever
+      // asked for it actually controls it — so it sits here too.
       ...(role === 'superadmin'
-        ? [{ to: '/admin/team', label: 'Platform team', icon: ShieldIcon }]
+        ? [
+            { to: '/admin/team', label: 'Platform team', icon: ShieldIcon },
+            { to: '/admin/domains', label: 'Custom domains', icon: GlobeIcon },
+          ]
         : []),
     ]
   }

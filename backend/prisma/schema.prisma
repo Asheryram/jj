@@ -169,6 +169,7 @@ model User {
   branding         Branding?
   brandingRequests BrandingRequest[]
   setupTokens      SetupToken[]
+  customDomain     CustomDomain?
 
   /**
    * One profile per role per person.
@@ -950,6 +951,49 @@ model BrandingRequest {
   @@index([status])
   @@index([userId])
   @@map("branding_requests")
+}
+
+/// An agent's own domain, pointed at their `/s/<code>` shop.
+///
+/// One row per agent, like `Branding` — a second request for a different
+/// domain replaces this one rather than piling up a history, since only one
+/// domain can ever be live for a shop at a time. Two independent booleans
+/// rather than a single status: `allowed` is the superadmin's approval of
+/// this specific domain string (rarely revisited once granted), `active` is
+/// the day-to-day live switch (DNS confirmed, or a domain suspended without
+/// losing that approval record). Collapsing them into one status would lose
+/// the ability to suspend a domain — a support action that should not also
+/// erase the fact it was once vetted and approved.
+///
+/// The reason for the review at all is the same one `BrandingRequest`
+/// exists for: a shop takes card and Mobile Money details, so who gets to
+/// serve it from a domain of their own choosing is not something to wave
+/// through unseen.
+model CustomDomain {
+  id String @id @default(uuid())
+
+  userId String @unique @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  domain String @unique
+
+  /// Superadmin approval gate — is this agent permitted to use this domain
+  /// at all. Never true on creation; only a review can set it.
+  allowed Boolean @default(false)
+  /// Live switch — DNS confirmed and the domain currently serving traffic.
+  /// Meaningless without `allowed`; the public resolve endpoint requires
+  /// both.
+  active Boolean @default(false)
+
+  requestedAt DateTime  @default(now()) @map("requested_at")
+  /// Set whenever `allowed` is decided — approved or refused.
+  reviewedAt DateTime? @map("reviewed_at")
+  reviewedBy String?   @map("reviewed_by")
+  /// Kept on a refusal, the same pattern as `BrandingRequest.note` — the
+  /// agent is told why, and the record survives being asked about later.
+  reason String?
+
+  @@map("custom_domains")
 }
 
 enum SetupTokenPurpose {

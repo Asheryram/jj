@@ -62,7 +62,9 @@ export class DomainExceptionFilter implements ExceptionFilter {
             ? 'email address'
             : target.includes('referral')
               ? 'referral code'
-              : 'value'
+              : target.includes('domain')
+                ? 'domain'
+                : 'value'
         res.status(409).json({
           code: 'ALREADY_EXISTS',
           message: `That ${field} is already registered.`,

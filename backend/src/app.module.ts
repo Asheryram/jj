@@ -16,6 +16,7 @@ import { SettingsModule } from './settings/settings.module'
 import { PaymentsModule } from './payments/payments.module'
 import { FinanceModule } from './finance/finance.module'
 import { BrandingModule } from './branding/branding.module'
+import { DomainsModule } from './domains/domains.module'
 import { MailModule } from './mail/mail.module'
 import { AuthGuard } from './common/auth'
 
@@ -99,6 +100,7 @@ import { AuthGuard } from './common/auth'
     AdminModule,
     PaymentsModule,
     BrandingModule,
+    DomainsModule,
   ],
   controllers: [HealthController],
   providers: [

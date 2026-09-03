@@ -1,8 +1,10 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-dom'
 import { StoreProvider, useStore } from './state/store'
 import { BrandingProvider } from './state/branding'
 import { ThemeProvider } from './lib/theme'
+import { SITE_ORIGIN } from './lib/origin'
+import { api } from './lib/api'
 import { AppShell, PublicShell, RequireAuth } from './components/layout'
 import RouteMeta from './components/RouteMeta'
 import { Button, Card, EmptyState, Spinner } from './components/ui'
@@ -39,6 +41,7 @@ import ForgotPassword from './pages/ForgotPassword'
 import Refunds from './pages/admin/Refunds'
 import BrandingReview from './pages/admin/BrandingReview'
 import Team from './pages/admin/Team'
+import DomainRequests from './pages/admin/DomainRequests'
 import Settings from './pages/admin/Settings'
 
 /**
@@ -52,27 +55,134 @@ import Settings from './pages/admin/Settings'
  *
  * So: only `/s/<code>` paths wear an agent's brand. The admin screens, the agent
  * dashboard and the platform's own storefront are the platform's, whatever link
- * somebody arrived by.
+ * somebody arrived by. `forceCode` is the one exception: on an agent's own custom
+ * domain there is no `/s/<code>` in the URL at all — the domain itself IS the
+ * shop — so every page on it wears that agent's brand.
  */
-function ShopTheme({ children }: { children: ReactNode }) {
+function ShopTheme({ children, forceCode = null }: { children: ReactNode; forceCode?: string | null }) {
   const { pathname } = useLocation()
-  const shopCode = pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null
+  const pathCode = pathname.match(/^\/s\/([^/]+)/)?.[1] ?? null
+  const shopCode = forceCode ?? (pathCode ? decodeURIComponent(pathCode) : null)
+  return <BrandingProvider sellerCode={shopCode}>{children}</BrandingProvider>
+}
+
+/**
+ * Hosts that are this app itself, never an agent's custom domain — resolving
+ * against the API for one of these would be pure waste on every single load.
+ *
+ * Matched against `SITE_ORIGIN` (see `lib/origin.ts`) rather than a hardcoded
+ * production domain: with `VITE_SITE_ORIGIN` unset, `SITE_ORIGIN` falls back to
+ * `window.location.origin`, so this is trivially true and resolution stays off
+ * everywhere — dev, previews, anywhere the env var has not been deliberately
+ * set to the real domain. Custom-domain resolution is opt-in, not a default
+ * that a forgotten env var could silently switch on somewhere unexpected.
+ */
+const TUNNEL_HOST = /^[a-z0-9-]+\.(ngrok-free\.(app|dev)|ngrok\.(app|io)|trycloudflare\.com|loca\.lt|serveo\.net)$/i
+
+function isPlatformHost(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return true
+  if (hostname.endsWith('.vercel.app')) return true
+  if (TUNNEL_HOST.test(hostname)) return true
+  try {
+    return hostname === new URL(SITE_ORIGIN).hostname
+  } catch {
+    return false
+  }
+}
+
+type DomainState =
+  | { kind: 'platform' }
+  | { kind: 'loading' }
+  | { kind: 'resolved'; code: string }
+  | { kind: 'unresolved' }
+
+/**
+ * Is this page loading on an agent's own domain, and if so, whose shop is it?
+ *
+ * Deliberately its own hook, run before `StoreProvider` even mounts — the
+ * result decides whether the ordinary app renders at all, or a domain that
+ * resolved to nobody shows a plain "not set up" page instead.
+ */
+function useCustomDomain(): DomainState {
+  const [state, setState] = useState<DomainState>(() =>
+    isPlatformHost(window.location.hostname) ? { kind: 'platform' } : { kind: 'loading' },
+  )
+
+  useEffect(() => {
+    if (state.kind !== 'loading') return
+    let live = true
+    api
+      .resolveDomain(window.location.hostname)
+      .then(({ code }) => live && setState(code ? { kind: 'resolved', code } : { kind: 'unresolved' }))
+      .catch(() => live && setState({ kind: 'unresolved' }))
+    return () => {
+      live = false
+    }
+  }, [state.kind])
+
+  return state
+}
+
+/**
+ * Puts a custom domain's agent into the store, the same way `Storefront` does
+ * for a `/s/<code>` visit — everything downstream (pricing, the referral
+ * chain) already reads `sellerCode` from there, not from the URL, so nothing
+ * else needs to know this page was reached by domain rather than by path.
+ */
+function CustomDomainSeller({ code }: { code: string }) {
+  const { sellerCode, setSellerCode } = useStore()
+  useEffect(() => {
+    if (sellerCode !== code) setSellerCode(code)
+  }, [code, sellerCode, setSellerCode])
+  return null
+}
+
+function DomainNotConfigured() {
   return (
-    <BrandingProvider sellerCode={shopCode ? decodeURIComponent(shopCode) : null}>
-      {children}
-    </BrandingProvider>
+    <div className="flex min-h-dvh items-center justify-center px-4">
+      <Card className="max-w-md text-center">
+        <EmptyState
+          icon={<AlertIcon className="size-6" />}
+          title="This domain is not set up yet"
+          detail="It is not currently pointed at an active shop. If this is your domain, check its status where you requested it."
+        />
+      </Card>
+    </div>
   )
 }
 
 export default function App() {
+  const domain = useCustomDomain()
+
+  if (domain.kind === 'loading') {
+    return (
+      <ThemeProvider>
+        <div className="flex min-h-dvh items-center justify-center px-4" role="status" aria-live="polite">
+          <Spinner className="size-8 text-brand-600" />
+        </div>
+      </ThemeProvider>
+    )
+  }
+
+  if (domain.kind === 'unresolved') {
+    return (
+      <ThemeProvider>
+        <DomainNotConfigured />
+      </ThemeProvider>
+    )
+  }
+
+  const customDomainCode = domain.kind === 'resolved' ? domain.code : null
+
   return (
     <ThemeProvider>
     <StoreProvider>
       <Boot>
+        {customDomainCode && <CustomDomainSeller code={customDomainCode} />}
         <BrowserRouter>
         {/* Inside the router because it themes from the /s/<code> route, and
             inside the store because that is what resolves the code. */}
-        <ShopTheme>
+        <ShopTheme forceCode={customDomainCode}>
         <RouteMeta />
         <Routes>
           {/* Public storefront — buyable without an account (FR-4.8) */}
@@ -166,6 +276,7 @@ export default function App() {
               <Route path="/admin/refunds" element={<Refunds />} />
               <Route path="/admin/branding" element={<BrandingReview />} />
               <Route path="/admin/team" element={<Team />} />
+              <Route path="/admin/domains" element={<DomainRequests />} />
               <Route path="/admin/settings" element={<Settings />} />
             </Route>
           </Route>
