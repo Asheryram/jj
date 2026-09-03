@@ -158,6 +158,13 @@ export interface Order {
    * charge for.
    */
   actualSupplierCost?: number | null
+  /**
+   * What Paystack actually kept, from their own reply — admin only, and null
+   * for a wallet-paid order (the fee was already paid once at top-up time).
+   * Not the same as `split.processingFee`, which is only the estimate shown
+   * to the buyer at checkout.
+   */
+  paystackFee?: number | null
 }
 
 /** Customer wallet ledger entry (FR-2.4). */

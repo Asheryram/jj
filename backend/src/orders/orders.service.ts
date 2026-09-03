@@ -435,9 +435,30 @@ export class OrdersService {
       }
     }
 
+    /**
+     * What Paystack actually kept, per `Payment.fee` — not `split.processingFee`,
+     * which is only the estimate charged to the buyer at checkout to cover it.
+     * The two are usually close but are never guaranteed equal, and this is the
+     * same figure the ledger's `payment_fee` entries and the Overview page's
+     * cost breakdown already use — reading the estimate here would show a
+     * number that quietly disagreed with the rest of the platform.
+     *
+     * Null for a wallet-paid order on purpose: the fee was already paid once,
+     * at top-up time, not again on every spend from that balance.
+     */
+    const payments = await this.prisma.payment.findMany({
+      where: { orderId: { in: rows.map((r) => r.id) } },
+      select: { orderId: true, fee: true },
+    })
+    const feeByOrderId = new Map<string, number | null>()
+    for (const p of payments) {
+      if (p.orderId) feeByOrderId.set(p.orderId, p.fee)
+    }
+
     return rows.map((row) => ({
       ...toOrder(row),
       actualSupplierCost: actualCostByOrderId.get(row.id) ?? null,
+      paystackFee: feeByOrderId.get(row.id) ?? null,
     }))
   }
 

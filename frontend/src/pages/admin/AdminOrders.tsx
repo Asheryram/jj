@@ -88,12 +88,13 @@ export default function AdminOrders() {
     order.split.shares.filter((s) => s.role === 'agent').reduce((sum, s) => sum + s.margin, 0)
   const agentMargin = done.reduce((sum, o) => sum + agentMarginOf(o), 0)
   /**
-   * `?? 0` because orders placed before `processingFee` was added to the
-   * stored split have no such key — without the fallback, one such order
-   * turns this whole sum to `NaN`, showing "—" for every order in view, not
-   * just the one missing the field.
+   * `paystackFee` — what they actually kept, per `Payment.fee` — not
+   * `split.processingFee`, which is only the estimate shown to the buyer at
+   * checkout. Null for a wallet-paid order (the fee was already paid once at
+   * top-up time) or one Paystack didn't report a fee for; `?? 0` so one such
+   * order doesn't turn this whole sum to `NaN`.
    */
-  const fees = done.reduce((sum, o) => sum + (o.split.processingFee ?? 0), 0)
+  const fees = done.reduce((sum, o) => sum + (o.paystackFee ?? 0), 0)
 
   const exportCsv = () => {
     const header = [
@@ -127,7 +128,7 @@ export default function AdminOrders() {
         o.network ?? 'All',
         o.recipient,
         (o.salePrice / 100).toFixed(2),
-        o.split.processingFee == null ? '' : (o.split.processingFee / 100).toFixed(2),
+        o.paystackFee == null ? '' : (o.paystackFee / 100).toFixed(2),
         (o.split.supplierCost / 100).toFixed(2),
         (actualCostOf(o) / 100).toFixed(2),
         (catalogueDiffOf(o) / 100).toFixed(2),
@@ -285,10 +286,10 @@ export default function AdminOrders() {
                       {cedis(order.salePrice)}
                     </Td>
                     <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
-                      {/* Null, not zero — a fee of exactly nothing never happens
-                          on a real sale, so a blank here means an order placed
-                          before this field existed, not a free transaction. */}
-                      {order.split.processingFee == null ? '—' : cedis(order.split.processingFee)}
+                      {/* Null, not zero — either a wallet-paid order (no fresh
+                          fee — it was already paid once at top-up time) or one
+                          Paystack didn't report a fee for, never a free sale. */}
+                      {order.paystackFee == null ? '—' : cedis(order.paystackFee)}
                     </Td>
                     <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
                       {cedis(order.split.supplierCost)}

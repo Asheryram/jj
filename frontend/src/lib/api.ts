@@ -357,6 +357,16 @@ export interface PlatformSettings {
   floatRiskAt: number
   /** What Paystack keeps on a Mobile Money payment, in basis points. */
   paystackFeeBp: number
+  /**
+   * Whether Paystack's live balance is actually being watched for a real
+   * shortfall. Off by default — does not change what "Should be at Paystack"
+   * means on the Reserve panel (always all-time, from this platform's own
+   * records); it only decides whether the background check ever calls
+   * Paystack's live balance at all, and so whether an email can ever fire.
+   */
+  paystackBusinessAccount: boolean
+  /** The smallest amount worth a manual MoMo transfer, in pesewas (FR-2.6). */
+  minWithdrawal: number
 }
 
 /** One SKU in the provider's catalogue. */
@@ -488,14 +498,15 @@ export interface RefundRequest {
 
 export interface ReservePosition {
   /**
-   * Pesewas our own records say should be sitting at Paystack right now,
-   * since the last settlement, net of transfers already sent back out.
-   * Never Paystack's own live balance — that comparison happens only in the
-   * background, and a real mismatch goes to an admin's inbox, not this panel.
+   * Pesewas our own records say should be sitting at Paystack right now:
+   * everything ever collected, net of Paystack's fee, less every payout and
+   * refund transfer this platform has actually sent. Always all-time, and
+   * always from this platform's own records — never Paystack's own live
+   * balance; that comparison happens only in the background (when
+   * `paystackBusinessAccount` is on), and a real shortfall goes to an
+   * admin's inbox, not this panel.
    */
   expectedAtPaystack: number
-  /** Collected since the last settlement, net of Paystack's fee — on its way, not lost. */
-  inTransit: { amount: number; settledSince: string | null; error: string | null }
   liabilities: {
     agentEarnings: number
     customerMoney: number

@@ -1,46 +1,60 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError, type ReservePosition } from '../../lib/api'
 import { cedis } from '../../lib/format'
-import { Callout, Card, CardHead, Spinner, cn } from '../../components/ui'
-import { AlertIcon, CheckIcon } from '../../components/icons'
+import { Button, Callout, Card, CardHead, Spinner, cn } from '../../components/ui'
+import { AlertIcon, CheckIcon, RefreshIcon } from '../../components/icons'
 
 /**
  * What is owed, against what our own records say should be sitting at
  * Paystack — entirely computed from this platform's own transactions, never
- * from Paystack's live balance. That live figure is still checked, just not
- * here: it is compared against this same expectation on a clock in the
- * background, and a real mismatch goes to an admin's inbox rather than this
- * panel — a Starter account settles every sale out almost immediately, so
- * its live balance reads GHS 0.00 between sales as a matter of course, and
- * showing that here would read as a standing false alarm rather than the
- * rare, real thing worth an email.
+ * from Paystack's live balance, and always all-time: everything ever
+ * collected, less every payout and refund transfer this platform has
+ * actually sent. That live figure is still checked, just not here — only in
+ * the background, and only when `paystackBusinessAccount` is on (see
+ * Settings) — and a real shortfall goes to an admin's inbox rather than this
+ * panel.
  */
 export default function ReservePanel() {
   const [position, setPosition] = useState<ReservePosition | null>(null)
   const [error, setError] = useState('')
+  const [refreshing, setRefreshing] = useState(false)
 
-  useEffect(() => {
-    let live = true
-    api
-      .reservePosition()
-      .then((result) => live && setPosition(result))
-      .catch(
-        (caught) =>
-          live &&
-          setError(
-            caught instanceof ApiError ? caught.message : 'We could not read your balance.',
-          ),
-      )
-    return () => {
-      live = false
+  /**
+   * `position()` on the server recomputes every figure here fresh from the
+   * database on every call — nothing is cached — so calling it again is
+   * genuinely "recheck everything," not a cosmetic spin.
+   */
+  const load = useCallback(async () => {
+    try {
+      const result = await api.reservePosition()
+      setPosition(result)
+      setError('')
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'We could not read your balance.')
     }
   }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const refresh = async () => {
+    setRefreshing(true)
+    await load()
+    setRefreshing(false)
+  }
+
+  const refreshButton = (
+    <Button size="sm" variant="outline" loading={refreshing} onClick={() => void refresh()}>
+      <RefreshIcon className="size-4" /> Refresh
+    </Button>
+  )
 
   if (error) {
     return (
       <Card className="mt-3">
-        <CardHead title="Money held and money owed" />
+        <CardHead title="Money held and money owed" action={refreshButton} />
         <div className="p-4 sm:p-5">
           <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
             {error}
@@ -61,39 +75,23 @@ export default function ReservePanel() {
     )
   }
 
-  const { expectedAtPaystack, liabilities, inTransit } = position
-  const settledSince = inTransit.settledSince
-    ? new Date(inTransit.settledSince).toLocaleDateString('en-GB', {
-        day: 'numeric',
-        month: 'short',
-      })
-    : null
+  const { expectedAtPaystack, liabilities } = position
 
   return (
     <Card className="mt-3">
       <CardHead
         title="Money held and money owed"
         subtitle="Everything customers pay lands in one Paystack balance. Only part of it is yours."
+        action={refreshButton}
       />
 
       <div className="space-y-3 p-4 sm:p-5">
-        {inTransit.error && (
-          <Callout tone="warning" title="Could not read your last settlement date" icon={<AlertIcon className="size-4" />}>
-            {inTransit.error} The amounts below still cover everything ever collected — only "since your
-            last settlement" is missing.
-          </Callout>
-        )}
-
         <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200 dark:border-slate-700">
           <Row
             label="Should be at Paystack"
             value={expectedAtPaystack}
             strong
-            hint={
-              settledSince
-                ? `Collected since it last settled on ${settledSince}, net of transfers already sent — from your own records, not their live balance`
-                : 'From your own records, not their live balance'
-            }
+            hint="Everything ever collected, less every payout and refund actually sent — from your own records, not their live balance"
           />
           <Row label="Owed to agents" value={liabilities.agentEarnings} negative />
           <Row

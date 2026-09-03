@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { PaystackClient } from '../payments/paystack.client'
+import { SettingsService } from '../settings/settings.service'
 import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
 
@@ -16,26 +17,29 @@ import { escape, wrap } from '../mail/templates'
  * means the same thing regardless of account tier or settlement behaviour.
  *
  * The "does the live balance agree" half is a genuinely different question,
- * and deliberately does not lean on retaining a balance at all: Paystack
- * sweeps whatever is settleable to the linked bank or Mobile Money account at
- * each settlement — fast and automatic on a Starter account, slower and more
- * deliberate on a business one — so the *right* balance to expect right now
- * is never "everything ever owed," it is "whatever our own records say should
- * have piled up since the last time they actually settled." That number stays
- * small and current on any tier, which is what makes a real disagreement with
- * it worth an email: it means something registered here never reached
- * Paystack's balance, or the other way around — a missed webhook, a reversed
- * charge, or worse — not "you have not saved enough profit yet."
+ * and it always asks it the same way: everything ever collected, net of
+ * Paystack's fee, less every payout and refund transfer this platform has
+ * actually sent — all-time, always, regardless of account tier. No live call
+ * is needed to compute it; it is entirely this platform's own arithmetic,
+ * and it is what the Reserve panel shows.
  *
- * That comparison is deliberately background-only. `position()` — what the
- * Reserve panel reads — never calls Paystack's live balance at all; it only
- * ever shows what this platform's own records say should be true. The live
- * balance is fetched solely by `reconcile()` / `checkAndAlert()`, and a real
- * mismatch goes to an admin's inbox, not this panel — an account that settles
- * every sale out immediately reads GHS 0.00 between sales as a matter of
- * course, and surfacing that next to "what we expect" on every page load
- * would read as a standing false alarm rather than the rare thing worth an
- * email.
+ * What `paystackBusinessAccount` (a setting, off by default) decides is not
+ * that arithmetic — it decides whether anyone is actually watching Paystack's
+ * live balance for a real mismatch at all:
+ *
+ *  - **Off** — nobody has confirmed this account is being watched in a way
+ *    worth trusting, so `checkAndAlert` never calls Paystack at all. No live
+ *    request, no email, ever, from this service.
+ *  - **On** — the background check (`checkAndAlert`, every 30 minutes) fetches
+ *    the live balance and compares it against the same all-time figure the
+ *    Reserve panel shows. If the live balance reads meaningfully *lower* than
+ *    that — money that should be there is not — an admin gets an email. It
+ *    only ever fires on a shortfall, not a surplus: Paystack holding *more*
+ *    than expected is not the kind of problem this exists to catch.
+ *
+ * Either way, `position()` — what the Reserve panel reads — never calls
+ * Paystack at all. The live balance is fetched solely by `reconcile()` /
+ * `checkAndAlert()`, and only when the setting is on.
  */
 const SHORTFALL_ALERTED_KEY = 'solvencyBalanceMismatchAlerted'
 /** Half an hour. This drifts slowly compared to the float, which is checked on every order. */
@@ -50,7 +54,7 @@ export interface BalanceReconciliation {
   observed: number
   /** expected - observed. Positive means Paystack holds less than our records predict. */
   shortfall: number
-  /** `shortfall` exceeds the rounding tolerance in either direction — worth telling someone about. */
+  /** `shortfall` exceeds the rounding tolerance — a real shortage worth an email. Never fires on a surplus. */
   flagged: boolean
 }
 
@@ -62,6 +66,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
   constructor(
     private readonly prisma: PrismaService,
     private readonly paystack: PaystackClient,
+    private readonly settings: SettingsService,
     private readonly mailer: MailerService,
   ) {}
 
@@ -140,35 +145,33 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     }
 
     const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
-    const short = reconciliation.shortfall > 0
     const shopName = await this.platformName()
 
-    const explanation = short
-      ? `Paystack reports ${escape(ghs(reconciliation.observed))}, but your own records say it ` +
-        `should hold ${escape(ghs(reconciliation.expected))} since it last settled — ` +
-        `${escape(ghs(reconciliation.shortfall))} short.`
-      : `Paystack reports ${escape(ghs(reconciliation.observed))}, which is ` +
-        `${escape(ghs(-reconciliation.shortfall))} more than your own records say it should hold ` +
-        `since it last settled.`
+    // Only ever a shortfall — `reconcile()` never flags a surplus, so there is
+    // no "which direction" branch to phrase here.
+    const explanation =
+      `Paystack reports ${escape(ghs(reconciliation.observed))}, but your own records say it ` +
+      `should hold ${escape(ghs(reconciliation.expected))}, all-time, net of every payout and ` +
+      `refund you have sent — ${escape(ghs(reconciliation.shortfall))} short.`
 
     const body =
       `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${explanation}</p>` +
       `<p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;color:#1e293b">This usually means ` +
-      `a payment or a transfer registered here never actually reached Paystack's balance, or the ` +
-      `other way around. Check recent orders, refunds and payouts against your Paystack dashboard — ` +
-      `this note will not repeat until the mismatch clears.</p>`
+      `a payment or a transfer registered here never actually reached Paystack's balance — or ` +
+      `Paystack paid out to your bank/Mobile Money account without it being logged here. Check ` +
+      `recent orders, refunds and payouts against your Paystack dashboard — this note will not ` +
+      `repeat until the shortfall clears.</p>`
     const text =
       `${explanation}\n\n` +
       'This usually means a payment or a transfer registered here never actually reached ' +
-      "Paystack's balance, or the other way around. Check recent orders, refunds and payouts " +
-      'against your Paystack dashboard — this note will not repeat until the mismatch clears.'
+      "Paystack's balance — or Paystack paid out to your bank/Mobile Money account without it " +
+      'being logged here. Check recent orders, refunds and payouts against your Paystack dashboard ' +
+      '— this note will not repeat until the shortfall clears.'
 
-    const subject = short
-      ? `Paystack balance is short by ${ghs(reconciliation.shortfall)}`
-      : `Paystack balance is ${ghs(-reconciliation.shortfall)} more than expected`
+    const subject = `Paystack balance is short by ${ghs(reconciliation.shortfall)}`
     const html = wrap(
       shopName,
-      'Your Paystack balance does not match your records',
+      'Your Paystack balance is short',
       body,
       `You are getting this because you are an active admin on ${escape(shopName)}.`,
     )
@@ -318,39 +321,16 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       .reduce((sum, advance) => sum + advance.amount, 0)
     const liabilities = owedToAgents + owedToCustomers + undelivered + queuedPayouts + owedForManualRefunds
 
-    /**
-     * What should be sitting in Paystack's balance right now, entirely from
-     * this platform's own records — never from Paystack's live balance
-     * itself. Paystack's own figure is still checked, just not here: it is
-     * compared against this same expectation on a clock by `checkAndAlert`,
-     * and the result goes to an admin's inbox rather than this panel. A
-     * Starter account settles near-instantly, so its live balance reads
-     * GHS 0.00 between sales as a matter of course — showing it next to
-     * "what we expect" here would read as a permanent false alarm rather
-     * than the rare, real mismatch an email is for.
-     */
-    const settlementResult = await this.paystack.lastSettlementAt()
-    const settledSince = settlementResult.ok ? settlementResult.at : null
-    const [collected, transferred] = await Promise.all([
-      this.collectedSince(settledSince),
-      this.transfersSince(settledSince),
-    ])
-    const expectedAtPaystack = collected - transferred
+    const expectedAtPaystack = await this.expectedBalance()
 
     return {
-      /** What our own records say should be at Paystack right now, net of transfers already sent. */
-      expectedAtPaystack,
       /**
-       * Paystack is one reservoir: every sale flows in immediately, but nothing
-       * flows out to us until their next settlement. This is money already
-       * collected, net of their fee, since the last time they actually settled
-       * — before subtracting anything already transferred back out.
+       * What our own records say should be at Paystack right now: everything
+       * ever collected, net of Paystack's fee, less every payout and refund
+       * transfer this platform has actually sent. Never Paystack's own live
+       * balance — see the file header.
        */
-      inTransit: {
-        amount: collected,
-        settledSince,
-        error: settlementResult.ok ? null : settlementResult.reason,
-      },
+      expectedAtPaystack,
       liabilities: {
         agentEarnings: owedToAgents,
         customerMoney: owedToCustomers,
@@ -406,33 +386,32 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     return { ok: true, reason: null }
   }
 
-  /** Net of Paystack's own fee — what will actually land once this settles. */
-  private async collectedSince(at: Date | null): Promise<number> {
+  /** All-time, net of Paystack's own fee — every Mobile Money payment ever confirmed paid. */
+  private async collectedSince(): Promise<number> {
     const paid = await this.prisma.payment.aggregate({
-      where: { status: 'paid', ...(at ? { paidAt: { gt: at } } : {}) },
+      where: { status: 'paid' },
       _sum: { amount: true, fee: true },
     })
     return (paid._sum.amount ?? 0) - (paid._sum.fee ?? 0)
   }
 
   /**
-   * Pesewas actually transferred out through Paystack since a given moment —
-   * agent payouts and Mobile Money refunds, the two ways money leaves this
-   * platform through them. Both draw from the same balance that settlement
-   * sweeps, so both reduce what's left the same way a settlement does.
+   * All-time pesewas actually transferred out through Paystack — agent
+   * payouts and Mobile Money refunds, the two ways money leaves this
+   * platform through them.
    *
-   * Keyed on `paidAt` — when Paystack itself confirmed the transfer, not when
-   * it was merely approved — because an approved-but-not-yet-sent transfer
-   * has not touched their balance yet.
+   * Keyed on `paidAt` (not null) rather than `status`, so a merely approved,
+   * not-yet-sent transfer is correctly not counted as having left the
+   * balance yet.
    */
-  private async transfersSince(at: Date | null): Promise<number> {
+  private async transfersSince(): Promise<number> {
     const [payouts, refunds] = await Promise.all([
       this.prisma.withdrawal.aggregate({
-        where: { paidAt: at ? { gt: at } : { not: null } },
+        where: { paidAt: { not: null } },
         _sum: { amount: true },
       }),
       this.prisma.refundRequest.aggregate({
-        where: { method: 'transfer', paidAt: at ? { gt: at } : { not: null } },
+        where: { method: 'transfer', paidAt: { not: null } },
         _sum: { amount: true },
       }),
     ])
@@ -442,49 +421,44 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
   /**
    * Does Paystack's live balance agree with what our own records predict?
    *
-   * Fetches its own balance and settlement date, for callers — like the
-   * background check — who have not already read them for another reason.
-   * `position()` computes the same thing via `reconcileAgainst` instead, to
-   * avoid asking Paystack for the balance twice in one request.
+   * The only place in this service that calls Paystack's live balance —
+   * `position()` never does. Returns null, without calling Paystack at all,
+   * unless `paystackBusinessAccount` is on — nobody has asked this account to
+   * be watched, so nothing here spends a request or has an opinion.
    */
   async reconcile(): Promise<BalanceReconciliation | null> {
-    const [balanceResult, settlementResult] = await Promise.all([
+    const watching = await this.settings.get('paystackBusinessAccount')
+    if (!watching) return null
+
+    const [balanceResult, expected] = await Promise.all([
       this.paystack.balance(),
-      this.paystack.lastSettlementAt(),
+      this.expectedBalance(),
     ])
     if (!balanceResult.ok) return null
-    const settledSince = settlementResult.ok ? settlementResult.at : null
-    return this.reconcileAgainst(balanceResult.balance, settledSince)
+
+    const shortfall = expected - balanceResult.balance
+    return {
+      expected,
+      observed: balanceResult.balance,
+      shortfall,
+      // Only a real shortage is worth an email — Paystack holding more than
+      // expected is not the kind of problem this exists to catch.
+      flagged: shortfall > DISCREPANCY_TOLERANCE,
+    }
   }
 
   /**
-   * The comparison itself, given a balance and settlement date already in
-   * hand. `expected` is entirely derived from this platform's own records —
-   * every Mobile Money payment confirmed paid since the last settlement,
-   * net of Paystack's fee, less every payout and refund transfer they have
-   * since confirmed sent. Right after a settlement this should read close to
-   * zero and grow from there until the next one resets it — the same shape
-   * `FloatMonitorService.expectedBalance` uses for the DataHub float, applied
-   * to Paystack's balance instead.
+   * What should be sitting in Paystack's balance right now, entirely from
+   * this platform's own records: everything ever collected, net of
+   * Paystack's fee, less every payout and refund transfer this platform has
+   * actually sent. Always all-time, regardless of account tier or settings —
+   * no live call, ever, to compute this.
    */
-  private async reconcileAgainst(
-    balance: number | null,
-    settledSince: Date | null,
-  ): Promise<BalanceReconciliation | null> {
-    if (balance === null) return null
-
+  private async expectedBalance(): Promise<number> {
     const [collected, transferred] = await Promise.all([
-      this.collectedSince(settledSince),
-      this.transfersSince(settledSince),
+      this.collectedSince(),
+      this.transfersSince(),
     ])
-    const expected = collected - transferred
-    const shortfall = expected - balance
-
-    return {
-      expected,
-      observed: balance,
-      shortfall,
-      flagged: Math.abs(shortfall) > DISCREPANCY_TOLERANCE,
-    }
+    return collected - transferred
   }
 }

@@ -10,7 +10,6 @@ import {
   CardHead,
   Field,
   PageHead,
-  Select,
   TextInput,
   Toggle,
 } from '../../components/ui'
@@ -18,11 +17,6 @@ import { AlertIcon, ShieldIcon } from '../../components/icons'
 
 /** FR-5.5, FR-6.4, NFR-2.4, NFR-5.1, NFR-5.2 */
 export default function Settings() {
-  const { pushToast } = useStore()
-
-  const [retryAttempts, setRetryAttempts] = useState('1')
-  const [minTopUp, setMinTopUp] = useState('1.00')
-
   // Which providers are actually wired up. Read once on mount; it only changes
   // when the server is redeployed with different secrets.
   const [health, setHealth] = useState<Awaited<ReturnType<typeof api.health>> | null>(null)
@@ -56,52 +50,6 @@ export default function Settings() {
           nothing from the sales of people they invited. Who invited whom is still
           recorded and still shown to agents — it just no longer moves money, so
           there is no rate to set and no switch to explain. */}
-
-      {/* ── Ordering behaviour (FR-4.6, NFR-3.2) ── */}
-      <Card className="mt-3">
-        <CardHead title="Order handling" subtitle="How the platform behaves when things go wrong." />
-        <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
-          <Field
-            label="Automatic retries before failing"
-            htmlFor="retries"
-            hint="Applied when DataHub GH rejects or times out."
-          >
-            <Select
-              id="retries"
-              value={retryAttempts}
-              onChange={(event) => setRetryAttempts(event.target.value)}
-            >
-              <option value="0">No retry — fail immediately</option>
-              <option value="1">Retry once (recommended)</option>
-              <option value="2">Retry twice</option>
-            </Select>
-          </Field>
-
-          <Field
-            label="Minimum wallet top-up"
-            htmlFor="min-topup"
-            hint="Stops tiny top-ups that cost more in fees than they are worth."
-          >
-            <div className="relative">
-              <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500 dark:text-slate-400">
-                GHS
-              </span>
-              <TextInput
-                id="min-topup"
-                inputMode="decimal"
-                className="pl-13"
-                value={minTopUp}
-                onChange={(event) => setMinTopUp(event.target.value)}
-              />
-            </div>
-          </Field>
-        </div>
-        <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-3.5 sm:px-5">
-          <Button onClick={() => pushToast({ tone: 'success', title: 'Order settings saved' })}>
-            Save order settings
-          </Button>
-        </div>
-      </Card>
 
       {/* ── NFR-2.4 — credentials live in the environment, and the UI says so ── */}
       <Card className="mt-3">
@@ -236,7 +184,11 @@ export default function Settings() {
 
       <PaystackFeeSetting />
 
+      <PaystackPayoutSetting />
+
       <FloatThresholds />
+
+      <MinWithdrawalSetting />
     </div>
   )
 }
@@ -430,6 +382,80 @@ function FloatThresholds() {
           You get one email each time the balance falls past a level, not one per order. If it
           climbs back above and falls again, you are told again.
         </p>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * The smallest amount worth a manual MoMo transfer (FR-2.6).
+ *
+ * There is no customer wallet or top-up any more — a buyer pays per order and
+ * needs no account — so the only place a small amount is ever worth guarding
+ * against is an agent's own withdrawal request, where a tiny payout can cost
+ * more in transfer fees than it is worth sending.
+ */
+function MinWithdrawalSetting() {
+  const { pushToast } = useStore()
+  const [draft, setDraft] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api
+      .adminSettings()
+      .then((settings) => {
+        if (!live) return
+        setDraft((settings.minWithdrawal / 100).toFixed(2))
+        setLoaded(true)
+      })
+      .catch(() => live && setLoaded(true))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const save = async () => {
+    const cedisValue = draft.trim() === '' ? 0 : Number(draft)
+    if (!Number.isFinite(cedisValue) || cedisValue < 0) {
+      pushToast({ tone: 'error', title: 'Enter an amount like 10 or 10.00.' })
+      return
+    }
+    try {
+      await api.setSetting('minWithdrawal', Math.round(cedisValue * 100))
+      pushToast({
+        tone: 'success',
+        title:
+          cedisValue === 0
+            ? 'No minimum withdrawal any more'
+            : `Smallest withdrawal set to ${cedis(Math.round(cedisValue * 100))}`,
+      })
+    } catch (error) {
+      pushToast({
+        tone: 'error',
+        title: error instanceof Error ? error.message : 'We could not save that.',
+      })
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead title="Smallest withdrawal" subtitle="Stops an agent requesting an amount not worth a transfer" />
+      <div className="space-y-3 px-4 pb-4">
+        <Field
+          label="Minimum withdrawal (GHS)"
+          htmlFor="min-withdrawal"
+          hint="Blank or 0 lets an agent withdraw any amount."
+        >
+          <TextInput
+            id="min-withdrawal"
+            inputMode="decimal"
+            disabled={!loaded}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value.replace(/[^0-9.]/g, ''))}
+            onBlur={() => void save()}
+          />
+        </Field>
       </div>
     </Card>
   )
@@ -655,6 +681,80 @@ function AgentApproval() {
           id="auto-approve"
           label="Approve new agents automatically"
           checked={auto ?? true}
+          onChange={(next) => void change(next)}
+        />
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * Whether Paystack's live balance is actually being watched for a real
+ * shortfall.
+ *
+ * Off by default — and off does not mean "less accurate." "Should be at
+ * Paystack" on the Reserve panel is always the same all-time figure —
+ * everything ever collected, less every payout and refund actually sent —
+ * computed entirely from this platform's own records, whatever this is set
+ * to. All this decides is whether the background check ever asks Paystack
+ * for its live balance at all: off, and it never does, so no email can ever
+ * fire; on, and every 30 minutes the live balance is compared against that
+ * same figure, and a real shortfall — the live balance reading lower than
+ * expected — reaches an admin's inbox. See `SolvencyService.reconcile`.
+ */
+function PaystackPayoutSetting() {
+  const { pushToast } = useStore()
+  const [watching, setWatching] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    let live = true
+    api
+      .adminSettings()
+      .then((s) => live && setWatching(s.paystackBusinessAccount))
+      .catch(() => live && setWatching(null))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const change = async (next: boolean) => {
+    setWatching(next)
+    try {
+      await api.setSetting('paystackBusinessAccount', next)
+      pushToast({
+        tone: 'success',
+        title: next ? 'Now watching your live Paystack balance' : 'No longer checking Paystack live',
+        detail: next
+          ? "You'll get an email if it ever reads lower than your own records expect."
+          : 'Nothing here calls Paystack in the background any more.',
+      })
+    } catch {
+      setWatching(!next)
+      pushToast({ tone: 'error', title: 'We could not change that.' })
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead title="Watch your live Paystack balance?" subtitle="Only changes background alerting — never what 'Should be at Paystack' shows" />
+      <div className="flex items-start justify-between gap-4 px-4 pb-4">
+        <div>
+          <label htmlFor="paystack-watch" className="block font-semibold text-slate-900 dark:text-slate-50">
+            Email me if Paystack's live balance is lower than my records expect
+          </label>
+          <p className="mt-1 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+            "Should be at Paystack" on the Reserve panel is always everything ever collected, less
+            every payout and refund you have actually sent — this switch never changes that. Off,
+            nothing here ever calls Paystack in the background. On, that figure is checked every 30
+            minutes against Paystack's actual live balance, and you're emailed only if it comes back
+            genuinely lower — never for reading higher, which usually just means a payout landed
+            without being logged here.
+          </p>
+        </div>
+        <Toggle
+          id="paystack-watch"
+          label="Email me if Paystack's live balance is lower than my records expect"
+          checked={watching ?? false}
           onChange={(next) => void change(next)}
         />
       </div>

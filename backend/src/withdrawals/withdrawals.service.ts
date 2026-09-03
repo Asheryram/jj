@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { LedgerService } from '../finance/ledger.service'
 import { SolvencyService } from '../finance/solvency.service'
 import { PaystackClient } from '../payments/paystack.client'
+import { SettingsService } from '../settings/settings.service'
 import { momoCodeFor } from '../payments/momo'
 
 import { toWithdrawal } from '../common/mappers'
@@ -17,9 +18,6 @@ import type { AuthUser } from '../common/auth'
 import { momoLabel } from '../wallet/wallet.service'
 import { isAdminRole } from '../common/auth'
 
-/** FR-2.6 — the smallest amount worth a manual MoMo transfer. */
-const MIN_WITHDRAWAL = 1000 // GHS 10.00
-
 @Injectable()
 export class WithdrawalsService {
   private readonly log = new Logger(WithdrawalsService.name)
@@ -29,6 +27,7 @@ export class WithdrawalsService {
     private readonly ledger: LedgerService,
     private readonly solvency: SolvencyService,
     private readonly paystack: PaystackClient,
+    private readonly settings: SettingsService,
   ) {}
 
   async list(user: AuthUser) {
@@ -49,9 +48,10 @@ export class WithdrawalsService {
    * were approved, be paid twice for money they only earned once.
    */
   async request(user: AuthUser, amount: number, momoNetwork: Network, momoNumber: string) {
-    if (!Number.isInteger(amount) || amount < MIN_WITHDRAWAL) {
+    const minWithdrawal = await this.settings.get('minWithdrawal')
+    if (!Number.isInteger(amount) || amount < minWithdrawal) {
       throw new ValidationError(
-        `The smallest withdrawal is GHS ${(MIN_WITHDRAWAL / 100).toFixed(2)}.`,
+        `The smallest withdrawal is GHS ${(minWithdrawal / 100).toFixed(2)}.`,
       )
     }
 

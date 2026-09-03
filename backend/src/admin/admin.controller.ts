@@ -131,7 +131,7 @@ export class SettleRefundManuallyDto {
 }
 
 /** Keys whose value is a number rather than a switch. */
-const NUMERIC_SETTING_KEYS = ['floatWatchAt', 'floatRiskAt', 'paystackFeeBp'] as const
+const NUMERIC_SETTING_KEYS = ['floatWatchAt', 'floatRiskAt', 'paystackFeeBp', 'minWithdrawal'] as const
 
 export class SetSettingDto {
   @IsIn([
@@ -141,6 +141,8 @@ export class SetSettingDto {
     'floatWatchAt',
     'floatRiskAt',
     'paystackFeeBp',
+    'paystackBusinessAccount',
+    'minWithdrawal',
   ])
   key!:
     | 'simulateFailure'
@@ -149,6 +151,8 @@ export class SetSettingDto {
     | 'floatWatchAt'
     | 'floatRiskAt'
     | 'paystackFeeBp'
+    | 'paystackBusinessAccount'
+    | 'minWithdrawal'
 
   /**
    * A whole number for the numeric keys, a boolean for the switches.

@@ -171,10 +171,10 @@ function RequestModal({
       setError('Enter an amount like 50 or 50.00.')
       return
     }
-    if (parsed < 1000) {
-      setError('The smallest withdrawal is GHS 10.00.')
-      return
-    }
+    // The minimum itself is admin-configurable (Settings → Smallest
+    // withdrawal), so it is not guessed here — the server's own rejection
+    // carries the real, current amount rather than a number that could drift
+    // from it.
     if (parsed > balance) {
       setError(`You only have ${cedis(balance)} available.`)
       return

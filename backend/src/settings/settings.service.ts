@@ -59,6 +59,28 @@ export interface PlatformSettings {
    * match, rather than trusting the default forever.
    */
   paystackFeeBp: number
+  /**
+   * Whether Paystack's live balance is actually being watched for a real
+   * shortfall.
+   *
+   * Off by default. This does not change what "should be at Paystack" means
+   * anywhere — that is always all-time, from this platform's own records,
+   * everywhere, regardless of this setting (see `SolvencyService`). All this
+   * decides is whether the background check ever calls Paystack's live
+   * balance at all: off, and it never does, and no email can ever fire. On,
+   * and every 30 minutes the live balance is compared against that same
+   * all-time figure, and a real shortfall — the live balance reading lower
+   * than expected — reaches an admin's inbox.
+   */
+  paystackBusinessAccount: boolean
+  /**
+   * The smallest amount worth a manual MoMo transfer, in pesewas (FR-2.6).
+   *
+   * Was a hardcoded constant on `WithdrawalsService` — moved here so it is
+   * actually the admin's to set, rather than a number nobody but a developer
+   * could change.
+   */
+  minWithdrawal: number
 }
 
 const DEFAULTS: PlatformSettings = {
@@ -68,6 +90,8 @@ const DEFAULTS: PlatformSettings = {
   floatWatchAt: 0,
   floatRiskAt: 0,
   paystackFeeBp: 200,
+  paystackBusinessAccount: false,
+  minWithdrawal: 1000,
 }
 
 /**
@@ -79,7 +103,7 @@ const DEFAULTS: PlatformSettings = {
 const NUMERIC_KEYS = [] as readonly string[]
 
 /** Keys holding an amount of money in pesewas, which has no upper bound. */
-const MONEY_KEYS = ['floatWatchAt', 'floatRiskAt'] as const
+const MONEY_KEYS = ['floatWatchAt', 'floatRiskAt', 'minWithdrawal'] as const
 
 /** Keys holding a fee rate in basis points — bounded, unlike a plain amount. */
 const FEE_BP_KEYS = ['paystackFeeBp'] as const
@@ -98,6 +122,8 @@ export class SettingsService {
       floatWatchAt: money(stored.floatWatchAt, DEFAULTS.floatWatchAt),
       floatRiskAt: money(stored.floatRiskAt, DEFAULTS.floatRiskAt),
       paystackFeeBp: feeBp(stored.paystackFeeBp, DEFAULTS.paystackFeeBp),
+      paystackBusinessAccount: bool(stored.paystackBusinessAccount, DEFAULTS.paystackBusinessAccount),
+      minWithdrawal: money(stored.minWithdrawal, DEFAULTS.minWithdrawal),
     }
   }
 
@@ -147,15 +173,20 @@ export class SettingsService {
        * The two describe a falling balance passing two marks, so a risk level
        * above the watch level would fire the severe alert first and the mild one
        * never. Checked against whichever value is already stored, because they
-       * are set one at a time.
+       * are set one at a time. Scoped to these two keys specifically — folding
+       * every `MONEY_KEYS` write through this check would make setting, say,
+       * `minWithdrawal` fail on a stale float-threshold combination that has
+       * nothing to do with it.
        */
-      const current = await this.all()
-      const watch = key === 'floatWatchAt' ? amount : current.floatWatchAt
-      const risk = key === 'floatRiskAt' ? amount : current.floatRiskAt
-      if (watch > 0 && risk > 0 && risk > watch) {
-        throw new ValidationError(
-          'The at-risk amount has to be lower than the watch amount — it is the more urgent of the two.',
-        )
+      if (key === 'floatWatchAt' || key === 'floatRiskAt') {
+        const current = await this.all()
+        const watch = key === 'floatWatchAt' ? amount : current.floatWatchAt
+        const risk = key === 'floatRiskAt' ? amount : current.floatRiskAt
+        if (watch > 0 && risk > 0 && risk > watch) {
+          throw new ValidationError(
+            'The at-risk amount has to be lower than the watch amount — it is the more urgent of the two.',
+          )
+        }
       }
 
       await this.prisma.setting.upsert({
