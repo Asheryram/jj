@@ -53,6 +53,11 @@ services:
         sync: false
       - key: DATAHUB_WEBHOOK_SECRET
         sync: false
+      # Mail goes through Resend first, SMTP as the fallback if Resend fails or
+      # is not configured — see MailerService for why both exist. Set whichever
+      # you actually have; `configured` only requires one of them.
+      - key: RESEND_API_KEY
+        sync: false
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
