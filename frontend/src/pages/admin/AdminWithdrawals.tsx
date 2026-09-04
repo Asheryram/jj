@@ -45,7 +45,14 @@ export default function AdminWithdrawals() {
 
   const pending = withdrawals.filter((w) => w.status === 'pending')
   const visible = filter === 'pending' ? pending : withdrawals
-  const approved = withdrawals.filter((w) => w.status === 'approved')
+  /**
+   * `approved` is not delivered — it's a decision made, waiting on Paystack
+   * (or a manual send) to actually confirm it. In steady state a request
+   * spends only seconds to minutes there before moving on to `paid` or
+   * `failed`, so a tile built on `approved` alone reads close to GHS 0.00
+   * forever and never reflects real cumulative payout volume.
+   */
+  const paidOut = withdrawals.filter((w) => w.status === 'paid')
 
   /**
    * Whether the agent behind a request is currently suspended — a request
@@ -72,9 +79,9 @@ export default function AdminWithdrawals() {
           icon={<ClockIcon className="size-5" />}
         />
         <StatTile
-          label="Approved to date"
-          value={cedis(approved.reduce((s, w) => s + w.amount, 0))}
-          hint={`${approved.length} payouts`}
+          label="Paid to date"
+          value={cedis(paidOut.reduce((s, w) => s + w.amount, 0))}
+          hint={`${paidOut.length} payouts`}
           icon={<CashIcon className="size-5" />}
         />
         <StatTile

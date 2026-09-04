@@ -150,7 +150,6 @@ export default function Pricing() {
               <Th align="right">You pay</Th>
               <Th align="right">Your price</Th>
               <Th align="right">Your margin</Th>
-              <Th align="right">Cap</Th>
               <Th align="right" />
             </tr>
           </thead>
@@ -351,9 +350,8 @@ function BulkMarkupModal({
     <Modal open={open} onClose={onClose} title="Apply a markup to every product">
       <div className="space-y-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Sets each of your prices to your own cost plus this percentage. Anything that would go
-          over James&apos;s retail cap is set to the cap instead. You can still edit individual
-          products afterwards.
+          Sets each of your prices to your own cost plus this percentage. There is no ceiling — the
+          only floor is what you pay. You can still edit individual products afterwards.
         </p>
 
         <div className="flex flex-wrap gap-2">

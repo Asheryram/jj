@@ -37,10 +37,18 @@ export default function Withdrawals() {
   const [open, setOpen] = useState(false)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
 
-  const mine = withdrawals.filter((w) => w.agentPhone === session?.phone)
+  /**
+   * Not `agentPhone === session.phone` — the payout number is whatever was
+   * typed on the request (see RequestModal below: "does not have to be the
+   * number you sign in with"), so matching on it silently dropped an agent's
+   * own request the moment they withdrew to a different Mobile Money number
+   * than their login phone. `userId` is unambiguous and always theirs.
+   */
+  const mine = withdrawals.filter((w) => w.userId === session?.id)
   const pending = mine.filter((w) => w.status === 'pending')
+  /** Only `paid` — `approved` is a decision made, not yet confirmed sent. */
   const paidOut = mine
-    .filter((w) => w.status === 'approved')
+    .filter((w) => w.status === 'paid')
     .reduce((sum, w) => sum + w.amount, 0)
 
   return (

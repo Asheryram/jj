@@ -41,7 +41,7 @@ const TYPE_META: Record<
  * top-up on this page by design.
  */
 export default function Earnings() {
-  const { agentBalance, earnings, agentEarningsByDay } = useStore()
+  const { agentBalance, earnings, agentEarningsByDay, withdrawals } = useStore()
   const [filter, setFilter] = useState<'all' | EarningType>('all')
 
   const visible = filter === 'all' ? earnings : earnings.filter((e) => e.type === filter)
@@ -50,9 +50,19 @@ export default function Earnings() {
   const reversed = earnings
     .filter((e) => e.type === 'reversal')
     .reduce((s, e) => s + Math.abs(e.amount), 0)
-  const withdrawn = earnings
-    .filter((e) => e.type === 'withdrawal')
-    .reduce((s, e) => s + Math.abs(e.amount), 0)
+  /**
+   * Only `paid` — Paystack (or a manual send) has actually confirmed the
+   * money arrived. Not derived from the Earning ledger: a request holds the
+   * balance with a negative row the moment it's made, and a rejection,
+   * cancellation or failed transfer reverses it with a *second*, positive
+   * `withdrawal`-type row — `Math.abs()`-ing and summing both used to add
+   * them instead of letting them net to zero, so a withdrawal that was
+   * requested and then fully reversed still counted as money paid out that
+   * never actually left the platform.
+   */
+  const withdrawn = withdrawals
+    .filter((w) => w.status === 'paid')
+    .reduce((s, w) => s + w.amount, 0)
 
   return (
     <div>

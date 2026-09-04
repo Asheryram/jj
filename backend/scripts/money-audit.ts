@@ -441,17 +441,33 @@ async function pricesCoverCost() {
  * The ledger is the reporting surface, so a gap in it misstates profit while
  * every underlying record looks fine. This checks it against the sources rather
  * than trusting it: one revenue line per paid order, one supplier cost per
- * completed order, one payout per approved withdrawal.
+ * completed order (plus one per rejected order DataHub had already charged
+ * before the rejection), one payout per withdrawal that's approved or paid.
  *
  * Deliberately checks for BOTH missing and duplicated lines. A missing one
  * understates; a duplicate overstates, which is worse, because nothing about the
  * number looks wrong.
  */
 async function ledgerMatchesSources() {
-  const [completedOrders, paidPayments, approvedPayouts] = await Promise.all([
+  const [completedOrders, paidPayments, approvedOrPaidPayouts, rejectedWithCharge] = await Promise.all([
     prisma.order.count({ where: { status: 'completed' } }),
     prisma.payment.count({ where: { status: 'paid', purpose: 'order' } }),
-    prisma.withdrawal.count({ where: { status: 'approved' } }),
+    // Not `status: 'approved'` alone — a payout that's since confirmed `paid`
+    // still carries its `payout` ledger line (booked once, at approval, and
+    // never touched again unless the transfer later fails and is reversed,
+    // which deletes it). Counting only `approved` undercounts the moment any
+    // payout actually completes — dormant while nothing had reached `paid`,
+    // real the moment one does. See `WithdrawalsService.decide`/`failPayout`.
+    prisma.withdrawal.count({ where: { status: { in: ['approved', 'paid'] } } }),
+    // `FulfilmentService.settle`'s rejected branch books a supplier_cost line
+    // too, whenever DataHub had already accepted the purchase and deducted
+    // the float before the final answer turned out to be a rejection — real
+    // money spent on an order that did not complete. One line per *order*
+    // (the ledger key is `order:<ref>:supplier_cost`, not per dispatch
+    // attempt), so this counts orders, not SupplierDispatch rows.
+    prisma.order.count({
+      where: { status: 'failed', dispatches: { some: { providerCharged: { not: null } } } },
+    }),
   ])
 
   const counts = await prisma.ledgerEntry.groupBy({
@@ -467,9 +483,10 @@ async function ledgerMatchesSources() {
   })
 
   report(
-    'one supplier-cost line per completed order',
-    got('supplier_cost') === completedOrders,
-    `${got('supplier_cost')} lines for ${completedOrders} completed orders`,
+    'one supplier-cost line per completed (or rejected-but-charged) order',
+    got('supplier_cost') === completedOrders + rejectedWithCharge,
+    `${got('supplier_cost')} lines for ${completedOrders} completed + ${rejectedWithCharge} ` +
+      'rejected-but-charged orders',
   )
   report(
     'revenue lines match paid orders and wallet sales',
@@ -479,9 +496,9 @@ async function ledgerMatchesSources() {
       "without FulfilmentService.recordDelivered's wallet branch running is exactly this)",
   )
   report(
-    'one payout line per approved withdrawal',
-    got('payout') === approvedPayouts,
-    `${got('payout')} lines for ${approvedPayouts} approved withdrawals`,
+    'one payout line per approved-or-paid withdrawal',
+    got('payout') === approvedOrPaidPayouts,
+    `${got('payout')} lines for ${approvedOrPaidPayouts} approved/paid withdrawals`,
   )
 
   // Duplicate keys are impossible by index, but a wrongly *derived* key would let
