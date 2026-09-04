@@ -479,8 +479,18 @@ export class FloatMonitorService {
     const observation = await this.latest()
     if (!observation) return null
 
+    /**
+     * All three kinds `logCapital` can write — matching `capitalSummary`'s
+     * own `capitalInKinds` two methods up. `capital_in_reimbursement` was
+     * missing here: without it, logging a reimbursement raises `expected`
+     * (via `expectedBalance` → `capitalSummary`, which already counts it)
+     * immediately, but this query never noticed a movement happened at all —
+     * so `pending` stayed false and the stale pre-reimbursement `observed`
+     * reading was compared as if it were current, firing a false "Float is
+     * short" email at the exact moment an admin did the right thing.
+     */
     const lastMovement = await this.prisma.ledgerEntry.findFirst({
-      where: { kind: { in: ['capital_in', 'capital_out'] } },
+      where: { kind: { in: ['capital_in', 'capital_in_reimbursement', 'capital_out'] } },
       orderBy: { occurredAt: 'desc' },
       select: { occurredAt: true },
     })
