@@ -5,8 +5,17 @@ import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { WithdrawalsService } from './withdrawals.service'
 
 export class RequestWithdrawalDto {
+  /**
+   * Only sanity-checked here — a positive whole number of pesewas. The real
+   * floor is `SettingsService`'s `minWithdrawal`, admin-configurable and
+   * enforced in `WithdrawalsService.request()`. A `@Min` here used to hardcode
+   * GHS 10.00 regardless of what the admin set — since NestJS's validation
+   * pipe runs before the controller method body, that fired *first* and with
+   * the wrong, frozen message whenever the admin configured anything else,
+   * silently overriding a lower minimum and misreporting a higher one.
+   */
   @IsInt({ message: 'Enter an amount like 50.00.' })
-  @Min(1000, { message: 'The smallest withdrawal is GHS 10.00.' })
+  @Min(1, { message: 'Enter an amount greater than zero.' })
   amount!: number
 
   @IsIn(['MTN', 'Telecel', 'AirtelTigo'], { message: 'Choose the network to be paid on.' })
