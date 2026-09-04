@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import type { Order, OrderStatus } from '../../data/types'
-import { api, ApiError, type DispatchAttempt } from '../../lib/api'
+import { api, ApiError, type DispatchAttempt, type FinanceStatement } from '../../lib/api'
 import {
   Badge,
   Button,
@@ -74,6 +74,28 @@ export default function AdminOrders() {
     }
   }, [])
 
+  /**
+   * All-time totals for the top row, from the ledger — not summed from
+   * `orders` below for the same reason `takeableProfit` isn't: that list is
+   * both capped and, worse, whatever the filter and search box currently
+   * show. A customer's payment is real the moment Paystack confirms it,
+   * whatever later happens to the order — "Customers paid" summing only
+   * `status === 'completed'` orders was silently dropping every failed or
+   * refunded sale's money, which is exactly why it read lower than the
+   * Reserve panel's "Should be at Paystack" instead of higher.
+   */
+  const [allTime, setAllTime] = useState<FinanceStatement | null>(null)
+  useEffect(() => {
+    let live = true
+    api
+      .financeStatement('all')
+      .then((statement) => live && setAllTime(statement))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return orders.filter((order) => {
@@ -90,7 +112,6 @@ export default function AdminOrders() {
     })
   }, [filter, orders, query])
 
-  const done = visible.filter((o) => o.status === 'completed')
   /**
    * `split.supplierCost` is frozen at whatever the catalogue believed at
    * sale time. The supplier's own reply, once known, can say something
@@ -104,8 +125,6 @@ export default function AdminOrders() {
     order.actualSupplierCost ?? order.split.supplierCost
   const catalogueDiffOf = (order: (typeof visible)[number]) =>
     order.split.supplierCost - actualCostOf(order)
-  const revenue = done.reduce((sum, o) => sum + o.salePrice, 0)
-  const supplierSpend = done.reduce((sum, o) => sum + actualCostOf(o), 0)
   const adminMarginOf = (order: (typeof visible)[number]) =>
     order.split.shares.find((s) => s.role === 'admin')?.margin ?? 0
   /**
@@ -118,15 +137,6 @@ export default function AdminOrders() {
     adminMarginOf(order) + catalogueDiffOf(order)
   const agentMarginOf = (order: (typeof visible)[number]) =>
     order.split.shares.filter((s) => s.role === 'agent').reduce((sum, s) => sum + s.margin, 0)
-  const agentMargin = done.reduce((sum, o) => sum + agentMarginOf(o), 0)
-  /**
-   * `paystackFee` — what they actually kept, per `Payment.fee` — not
-   * `split.processingFee`, which is only the estimate shown to the buyer at
-   * checkout. Null for a wallet-paid order (the fee was already paid once at
-   * top-up time) or one Paystack didn't report a fee for; `?? 0` so one such
-   * order doesn't turn this whole sum to `NaN`.
-   */
-  const fees = done.reduce((sum, o) => sum + (o.paystackFee ?? 0), 0)
 
   const exportCsv = () => {
     const header = [
@@ -195,23 +205,36 @@ export default function AdminOrders() {
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <StatTile label="Orders shown" value={String(visible.length)} />
-        <StatTile label="Customers paid" value={cedis(revenue)} tone="brand" />
+        <StatTile
+          label="Orders shown"
+          value={String(visible.length)}
+          hint="Only this tile follows the filter and search below"
+        />
+        <StatTile
+          label="Customers paid"
+          value={allTime === null ? '—' : cedis(allTime.revenue)}
+          hint="All-time, every payment ever collected — not affected by the filter or search below"
+          tone="brand"
+        />
         <StatTile
           label="Paid to supplier"
-          value={cedis(supplierSpend)}
-          hint="What they actually charged, not the catalogue estimate"
+          value={allTime === null ? '—' : cedis(allTime.costs.supplier)}
+          hint="All-time. What they actually charged, not the catalogue estimate"
         />
-        <StatTile label="Paystack fees" value={cedis(fees)} hint="Their cut, paid on every sale" />
+        <StatTile
+          label="Paystack fees"
+          value={allTime === null ? '—' : cedis(allTime.costs.paymentFees)}
+          hint="All-time. Their cut, paid on every sale"
+        />
         <StatTile
           label="Paid to agents"
-          value={cedis(agentMargin)}
-          hint="Their commission — never counted as your profit"
+          value={allTime === null ? '—' : cedis(allTime.costs.agentMargins)}
+          hint="All-time. Their commission — never counted as your profit"
         />
         <StatTile
           label="Your profit"
           value={takeableProfit === null ? '—' : cedis(takeableProfit)}
-          hint="What you could take out today without touching money a pending order might still need — the same figure as the Reserve panel's Actually free to spend, not affected by the filter or search above"
+          hint="What you could take out today without touching money a pending order might still need — the same figure as the Reserve panel's Actually free to spend, not affected by the filter or search below"
           tone="success"
         />
       </div>
