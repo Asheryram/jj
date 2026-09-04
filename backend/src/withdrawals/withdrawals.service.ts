@@ -295,6 +295,18 @@ export class WithdrawalsService {
         // by giving the money back; this only catches the unexpected.
         this.log.error(`payout for ${id} threw: ${String(error)}`)
       })
+
+      /**
+       * `decided` is what the transaction above returned, frozen before
+       * `sendPayout` ever ran — it still reads `transferStatus: null` and
+       * `status: 'approved'` even when `sendPayout` just marked this `manual`
+       * (nothing to send to yet), `failed` (and returned the agent's
+       * balance), or actually sent it. The caller waited for the real
+       * attempt to finish; the row it gets back should say what happened,
+       * not what was true a moment before.
+       */
+      const current = await this.prisma.withdrawal.findUnique({ where: { id } })
+      if (current) return toWithdrawal(current)
     }
 
     return decided
@@ -445,6 +457,130 @@ export class WithdrawalsService {
       },
     })
     this.log.error(`payout ${row.id} unresolved and NOT retried: ${result.reason}`)
+  }
+
+  /**
+   * Confirm a payout was sent by hand.
+   *
+   * The fallback for exactly the same wall `RefundsService.settleManually`
+   * exists for — some Paystack accounts refuse every third-party transfer
+   * outright until upgraded, and until then, or until this server even has
+   * live Paystack credentials configured at all, a payout genuinely has to
+   * leave through the admin's own Mobile Money or bank transfer instead. This
+   * records that it did, without ever pretending Paystack sent it.
+   *
+   * The agent's balance was already debited at request time and the ledger's
+   * `payout` cost was already booked at approval — neither happens again
+   * here. What IS booked is a `capital_in`, because it was not the tracked
+   * Paystack balance that paid this out, a person did, from their own
+   * pocket. See `SolvencyService.transfersSince` for why this must never
+   * carry a `transferCode` — that is the only thing telling a real transfer
+   * apart from this one, so `expectedAtPaystack` is not quietly overstated as
+   * if the money had left Paystack when nothing here can actually confirm it did.
+   */
+  async settleManually(id: string, adminId: string, note: string) {
+    const reason = note.trim()
+    if (reason.length < 5) {
+      throw new ValidationError('Say how and where this was sent. It is kept on the record.')
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const row = await tx.withdrawal.findUnique({ where: { id } })
+      if (!row) throw new NotFoundError('We could not find that withdrawal request.')
+      if (row.status !== 'approved') {
+        throw new ConflictError(
+          'NOT_APPROVED',
+          `Only an approved, not-yet-paid request can be marked sent by hand. This one is ${row.status}.`,
+        )
+      }
+      if (row.transferCode) {
+        throw new ConflictError(
+          'ALREADY_SENT',
+          'Paystack already has a real transfer recorded for this one.',
+        )
+      }
+
+      const updated = await tx.withdrawal.update({
+        where: { id },
+        data: {
+          status: 'paid',
+          transferStatus: 'success',
+          transferNote: `Sent manually — ${reason}`,
+          paidAt: new Date(),
+        },
+      })
+
+      await this.ledger.record(
+        [
+          {
+            idempotencyKey: LedgerService.key('withdrawal', id, 'capital_in'),
+            kind: 'capital_in',
+            amount: row.amount,
+            description: `Covered ${row.agentName}'s payout personally — ${reason}`,
+            withdrawalId: id,
+            occurredAt: new Date(),
+            affectsProfit: false,
+          },
+        ],
+        tx,
+      )
+
+      this.log.log(`payout ${id} settled manually by ${adminId}: ${reason}`)
+      return toWithdrawal(updated)
+    })
+  }
+
+  /**
+   * Manual payout advances still owed back to whoever paid them — the exact
+   * mirror of `FloatMonitorService.outstandingManualRefunds`, one column
+   * over. See `settleManually` above for why these are booked as capital in
+   * the first place.
+   */
+  async outstandingManualAdvances() {
+    const [advances, reimbursed] = await Promise.all([
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_in', withdrawalId: { not: null } },
+        orderBy: { occurredAt: 'asc' },
+      }),
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_out', withdrawalId: { not: null } },
+        select: { withdrawalId: true },
+      }),
+    ])
+
+    const settled = new Set(reimbursed.map((r) => r.withdrawalId))
+    return advances
+      .filter((a) => !settled.has(a.withdrawalId))
+      .map((a) => ({
+        withdrawalId: a.withdrawalId as string,
+        amount: a.amount,
+        description: a.description,
+        occurredAt: a.occurredAt.toISOString(),
+      }))
+  }
+
+  /** Settle one manual advance: whoever fronted it has taken the exact amount back out. */
+  async reimburseManualAdvance(withdrawalId: string, adminId: string): Promise<void> {
+    const advance = await this.prisma.ledgerEntry.findFirst({
+      where: { kind: 'capital_in', withdrawalId },
+    })
+    if (!advance) {
+      throw new ValidationError('No outstanding manual payout advance found for that request.')
+    }
+
+    await this.ledger.record([
+      {
+        idempotencyKey: LedgerService.key('withdrawal', withdrawalId, 'capital_out'),
+        kind: 'capital_out',
+        amount: -advance.amount,
+        description: `Reimbursed — payout ${withdrawalId}`,
+        withdrawalId,
+        occurredAt: new Date(),
+        affectsProfit: false,
+      },
+    ])
+
+    this.log.log(`manual payout advance for ${withdrawalId} reimbursed by ${adminId}`)
   }
 
   /**

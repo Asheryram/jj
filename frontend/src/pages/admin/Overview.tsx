@@ -29,6 +29,7 @@ import {
   CashIcon,
   CheckIcon,
   ChevronRightIcon,
+  HelpIcon,
   ReceiptIcon,
   TrendUpIcon,
   UsersIcon,
@@ -161,6 +162,13 @@ export default function Overview() {
       <PageHead
         title="Platform overview"
         subtitle="Everything happening across JamesDataConsult."
+        action={
+          <Link to="/info">
+            <Button variant="outline" size="sm">
+              <HelpIcon className="size-4" /> What you can do
+            </Button>
+          </Link>
+        }
       />
 
       {/* Before anything else — a shop that cannot fulfil an order or pay

@@ -42,7 +42,14 @@ export type TxType = 'topup' | 'purchase' | 'refund'
 /** Movements against an agent's earnings account. */
 export type EarningType = 'sale' | 'downline' | 'reversal' | 'withdrawal'
 
-export type WithdrawalStatus = 'pending' | 'approved' | 'rejected'
+/**
+ * `approved` is not delivered — Paystack (or a manual send) still has to
+ * confirm it, landing on `paid` or `failed`. Was missing those two entirely
+ * until the frontend had any way to reach them: `paid` only ever came from a
+ * live Paystack transfer webhook before `WithdrawalsService.settleManually`
+ * existed, and `failed` only from a refused/reversed transfer.
+ */
+export type WithdrawalStatus = 'pending' | 'approved' | 'paid' | 'failed' | 'rejected'
 
 /**
  * Mirrors `UserStatus` in the Prisma schema — all four states, not two.
@@ -239,6 +246,11 @@ export interface WithdrawalRequest {
   momoNetwork: Network
   status: WithdrawalStatus
   requestedAt: string
+  /** Paystack's word on the transfer: pending, success, failed, otp, manual, unknown. */
+  transferStatus: string | null
+  /** Why it hasn't gone, or how it was sent by hand, when either is known. */
+  transferNote: string | null
+  paidAt: string | null
 }
 
 export interface Session {

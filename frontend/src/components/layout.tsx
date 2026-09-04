@@ -223,15 +223,22 @@ function homeFor(role: Role): string {
   return isAdmin(role) ? '/admin' : '/app'
 }
 
-export function RequireAuth({ role }: { role?: Role }) {
+export function RequireAuth({ role, roles }: { role?: Role; roles?: Role[] }) {
   const { session } = useStore()
   const location = useLocation()
 
   if (!session) return <Navigate to="/login" replace state={{ from: location.pathname }} />
 
+  // `roles` generalises the single-`role` gate below to "any of these" — used
+  // where a route belongs to more than one role (e.g. /info, staff-only but
+  // open to both admin and agent) without loosening it to every signed-in
+  // session the way omitting both props does.
+  const allowedRoles = roles ?? (role ? [role] : null)
   // A superadmin satisfies an `admin` gate, mirroring the server's guard. Without
   // this the operator could reach the API but not the screens that call it.
-  const allowed = !role || session.role === role || (role === 'admin' && isAdmin(session.role))
+  const allowed =
+    !allowedRoles ||
+    allowedRoles.some((r) => session.role === r || (r === 'admin' && isAdmin(session.role)))
   // `homeFor`, not a hardcoded `/app`: an admin who lands here on a mismatched
   // agent-only route (or mid-switch — see `swap` below) belongs at `/admin`,
   // not at the agent dashboard.

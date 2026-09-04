@@ -374,6 +374,14 @@ export interface ManualRefundAdvance {
   occurredAt: string
 }
 
+export interface ManualPayoutAdvance {
+  withdrawalId: string
+  /** Pesewas. */
+  amount: number
+  description: string
+  occurredAt: string
+}
+
 export interface PlatformSettings {
   simulateFailure: boolean
   registrationOpen: boolean
@@ -568,6 +576,8 @@ export interface ReservePosition {
     queuedPayouts: number
     /** Owed to whoever personally covered a refund Paystack refused to send. */
     manualRefundAdvances: number
+    /** Owed to whoever personally covered a payout with nowhere automatic to send it from. */
+    manualPayoutAdvances: number
     total: number
   }
   /**
@@ -837,6 +847,24 @@ export const api = {
 
   decideWithdrawal: (id: string, status: WithdrawalStatus) =>
     request<WithdrawalRequest>(`/withdrawals/${id}`, { method: 'PATCH', body: { status } }),
+
+  /**
+   * Confirm a payout was sent by hand — for an account that cannot send
+   * Paystack transfers yet, or at all. See WithdrawalsService.settleManually.
+   */
+  settleWithdrawalManually: (id: string, note: string) =>
+    request<WithdrawalRequest>(`/withdrawals/${id}/settle-manually`, {
+      method: 'POST',
+      body: { note },
+    }),
+
+  manualPayoutAdvances: () => request<ManualPayoutAdvance[]>('/withdrawals/manual-advances'),
+
+  /** Whoever fronted a manual payout has taken that exact amount back out. */
+  reimburseManualPayout: (withdrawalId: string) =>
+    request<void>(`/withdrawals/manual-advances/${encodeURIComponent(withdrawalId)}/reimburse`, {
+      method: 'POST',
+    }),
 
   // Admin
   adminOverview: () => request<AdminOverview>('/admin/overview'),

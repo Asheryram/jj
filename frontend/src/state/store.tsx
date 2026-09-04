@@ -168,6 +168,7 @@ interface Store {
   cancelWithdrawal: (id: string) => Promise<void>
   updatePhone: (phone: string) => Promise<void>
   decideWithdrawal: (id: string, status: WithdrawalStatus) => Promise<void>
+  settleWithdrawalManually: (id: string, note: string) => Promise<void>
 
   users: PlatformUser[]
   toggleUserStatus: (id: string) => Promise<void>
@@ -979,6 +980,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [loadForSession, pushToast, reportError, session],
   )
 
+  const settleWithdrawalManually = useCallback(
+    async (id: string, note: string) => {
+      try {
+        const updated = await api.settleWithdrawalManually(id, note)
+        setWithdrawals((current) => current.map((w) => (w.id === id ? updated : w)))
+        pushToast({ tone: 'success', title: 'Payout marked as sent' })
+      } catch (error) {
+        reportError(error, 'We could not save that.')
+      }
+    },
+    [pushToast, reportError],
+  )
+
   const toggleUserStatus = useCallback(
     async (id: string) => {
       try {
@@ -1036,6 +1050,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cancelWithdrawal,
       updatePhone,
       decideWithdrawal,
+      settleWithdrawalManually,
       users,
       toggleUserStatus,
       claimableCredits,
@@ -1058,6 +1073,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       claimableCredits,
       customerBalance,
       decideWithdrawal,
+      settleWithdrawalManually,
       dismissToast,
       earnings,
       findOrder,

@@ -268,6 +268,8 @@ async function solvency() {
     pendingRefunds,
     manualRefundAdvances,
     manualRefundReimbursements,
+    manualPayoutAdvances,
+    manualPayoutReimbursements,
   ] = await Promise.all([
     prisma.user.aggregate({ where: { role: 'agent' }, _sum: { balance: true } }),
     prisma.claimableCredit.aggregate({ where: { claimed: false }, _sum: { amount: true } }),
@@ -331,6 +333,20 @@ async function solvency() {
       where: { kind: 'capital_out', orderRef: { not: null } },
       select: { orderRef: true },
     }),
+    // The identical pattern, one column over — see WithdrawalsService.settleManually
+    // and WithdrawalsService.outstandingManualAdvances. A payout settled this
+    // way moves to `status: 'paid'` and so drops out of the "stuck payouts"
+    // query above; what's still owed is to whoever personally covered it,
+    // not to the agent (already paid) or the business (already booked the
+    // cost at approval).
+    prisma.ledgerEntry.findMany({
+      where: { kind: 'capital_in', withdrawalId: { not: null } },
+      select: { withdrawalId: true, amount: true },
+    }),
+    prisma.ledgerEntry.findMany({
+      where: { kind: 'capital_out', withdrawalId: { not: null } },
+      select: { withdrawalId: true },
+    }),
   ])
   const customerWallets = await prisma.user.aggregate({
     where: { role: 'customer' },
@@ -350,8 +366,17 @@ async function solvency() {
   const owedForManualRefunds = manualRefundAdvances
     .filter((advance) => !reimbursedRefs.has(advance.orderRef))
     .reduce((sum, advance) => sum + advance.amount, 0)
+  const reimbursedWithdrawalIds = new Set(manualPayoutReimbursements.map((r) => r.withdrawalId))
+  const owedForManualPayouts = manualPayoutAdvances
+    .filter((advance) => !reimbursedWithdrawalIds.has(advance.withdrawalId))
+    .reduce((sum, advance) => sum + advance.amount, 0)
   const totalOwed =
-    owedToAgents + owedToCustomers + undelivered + owedForPayouts + owedForManualRefunds
+    owedToAgents +
+    owedToCustomers +
+    undelivered +
+    owedForPayouts +
+    owedForManualRefunds +
+    owedForManualPayouts
 
   console.log('\n  Liabilities and inflows')
   console.log(`        collected through Paystack : ${ghs(collected)}`)
@@ -362,6 +387,7 @@ async function solvency() {
   console.log(`        paid for, not delivered    : ${ghs(undelivered)}`)
   console.log(`        payouts requested/stuck    : ${ghs(owedForPayouts)}`)
   console.log(`        owed for manual refunds    : ${ghs(owedForManualRefunds)}`)
+  console.log(`        owed for manual payouts    : ${ghs(owedForManualPayouts)}`)
   console.log(`        total owed to other people : ${ghs(totalOwed)}`)
 
   if (totalOwed > 0) {

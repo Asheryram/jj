@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useStore } from '../../state/store'
+import { api, ApiError, type ManualPayoutAdvance } from '../../lib/api'
 import { cedis, dateTime } from '../../lib/format'
 import type { WithdrawalRequest } from '../../data/types'
 import {
@@ -10,12 +11,14 @@ import {
   CardHead,
   CopyField,
   EmptyState,
+  Field,
   Modal,
   PageHead,
   Segmented,
   StatTile,
   TableWrap,
   Td,
+  TextInput,
   Th,
 } from '../../components/ui'
 import { AlertIcon, CashIcon, CheckIcon, ClockIcon, XIcon } from '../../components/icons'
@@ -25,14 +28,20 @@ type Filter = 'pending' | 'all'
 /**
  * FR-2.6, FR-6.4, FR-7.3 — the payout queue.
  *
- * Approving debits the agent and records the payout; the MoMo transfer is still
- * made by hand on Paystack. The balance is checked first, so an agent is never
- * told they have been paid out of money that is not there.
+ * Approving sends the transfer through Paystack automatically once this
+ * server has real, transfer-capable credentials configured — the balance is
+ * checked first, so an agent is never told they have been paid out of money
+ * that is not there. Until then, or if Paystack itself refuses every
+ * third-party payout outright (a Starter Business account does this by
+ * design, not as a bug), the row stays "Decided" with a "Paid another way?"
+ * link — see `SettleManuallyModal` below — so a request never has no way
+ * forward at all.
  */
 export default function AdminWithdrawals() {
   const { withdrawals, decideWithdrawal, users } = useStore()
   const [filter, setFilter] = useState<Filter>('pending')
   const [reviewing, setReviewing] = useState<WithdrawalRequest | null>(null)
+  const [settling, setSettling] = useState<WithdrawalRequest | null>(null)
 
   const pending = withdrawals.filter((w) => w.status === 'pending')
   const visible = filter === 'pending' ? pending : withdrawals
@@ -140,25 +149,59 @@ export default function AdminWithdrawals() {
                   <Td>
                     <Badge
                       tone={
-                        request.status === 'approved'
+                        request.status === 'paid'
                           ? 'success'
-                          : request.status === 'rejected'
-                            ? 'danger'
-                            : 'warning'
+                          : request.status === 'approved'
+                            ? 'success'
+                            : request.status === 'rejected' || request.status === 'failed'
+                              ? 'danger'
+                              : 'warning'
                       }
                     >
-                      {request.status === 'approved'
-                        ? 'Approved'
-                        : request.status === 'rejected'
-                          ? 'Rejected'
-                          : 'Pending'}
+                      {request.status === 'paid'
+                        ? 'Paid'
+                        : request.status === 'approved'
+                          ? 'Approved'
+                          : request.status === 'rejected'
+                            ? 'Rejected'
+                            : request.status === 'failed'
+                              ? 'Failed'
+                              : 'Pending'}
                     </Badge>
+                    {/* A transfer that hasn't gone says so here, rather than
+                        looking like an approval that quietly achieved nothing. */}
+                    {request.transferNote && (
+                      <p className="mt-1 max-w-xs text-xs text-amber-700 dark:text-amber-400">
+                        {request.transferNote}
+                      </p>
+                    )}
+                    {request.transferStatus === 'success' && request.paidAt && (
+                      <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-400">
+                        Confirmed sent · {dateTime(request.paidAt)}
+                      </p>
+                    )}
                   </Td>
                   <Td align="right">
                     {request.status === 'pending' ? (
                       <Button size="sm" onClick={() => setReviewing(request)}>
                         Review
                       </Button>
+                    ) : request.status === 'approved' && request.transferStatus !== 'success' ? (
+                      /* Automatic sending either had nowhere to go yet (no
+                         live Paystack key configured) or hit a wall it can't
+                         get past on its own (an account that refuses every
+                         transfer, an OTP it can't answer) — offered here so
+                         it never has no way forward at all. */
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="text-xs text-slate-500 dark:text-slate-400">Decided</span>
+                        <button
+                          type="button"
+                          onClick={() => setSettling(request)}
+                          className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
+                        >
+                          Paid another way?
+                        </button>
+                      </div>
                     ) : (
                       <span className="text-xs text-slate-500 dark:text-slate-400">Decided</span>
                     )}
@@ -228,6 +271,171 @@ export default function AdminWithdrawals() {
           </div>
         )}
       </Modal>
+
+      <ManualAdvancesCard />
+
+      <SettleManuallyModal request={settling} onClose={() => setSettling(null)} />
     </div>
+  )
+}
+
+/**
+ * Payouts sent from someone's own pocket, not yet taken back out.
+ *
+ * The mirror of Refunds.tsx's own version, one column over: created by
+ * `SettleManuallyModal` below the moment a payout gets marked as sent by
+ * hand instead of through Paystack. This is Paystack's money, not the
+ * DataHub float — the agent's earnings were already debited when they
+ * requested it, and the ledger cost was already booked at approval; only
+ * who actually paid it out is unresolved here.
+ */
+function ManualAdvancesCard() {
+  const { pushToast } = useStore()
+  const [rows, setRows] = useState<ManualPayoutAdvance[] | null>(null)
+  const [reimbursing, setReimbursing] = useState<string | null>(null)
+
+  const refresh = useCallback(() => api.manualPayoutAdvances().then(setRows).catch(() => undefined), [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const reimburse = async (withdrawalId: string) => {
+    setReimbursing(withdrawalId)
+    try {
+      await api.reimburseManualPayout(withdrawalId)
+      pushToast({ tone: 'success', title: `Marked payout ${withdrawalId.slice(0, 8)} as reimbursed` })
+      await refresh()
+    } catch (caught) {
+      pushToast({
+        tone: 'error',
+        title: caught instanceof ApiError ? caught.message : 'We could not save that.',
+      })
+    } finally {
+      setReimbursing(null)
+    }
+  }
+
+  if (!rows || rows.length === 0) return null
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Paid out of pocket, not yet reimbursed"
+        subtitle="Money owed back to whoever personally covered one of these when there was nowhere automatic to send it from"
+      />
+      <div className="p-4 sm:p-5">
+        <Callout tone="warning" icon={<CashIcon className="size-4" />}>
+          The agent's earnings for each of these are already debited and the payout is already
+          booked as a real cost — it was never sent back out through Paystack. Take the amount
+          back for yourself first, then mark it reimbursed below.
+        </Callout>
+
+        <ul className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+          {rows.map((r) => (
+            <li key={r.withdrawalId} className="flex items-start justify-between gap-3 py-2.5">
+              <div className="min-w-0">
+                <p className="tabular text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  {r.withdrawalId.slice(0, 8)} · {cedis(r.amount)}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{r.description}</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500">{dateTime(r.occurredAt)}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                loading={reimbursing === r.withdrawalId}
+                onClick={() => void reimburse(r.withdrawalId)}
+              >
+                Reimbursed
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * The fallback for an account that cannot send Paystack transfers yet, or at
+ * all — the mirror of Refunds.tsx's own version. No network picker here: the
+ * agent already chose it when they asked to be paid, so there is nothing
+ * left to confirm beyond how and where it actually went.
+ */
+function SettleManuallyModal({
+  request,
+  onClose,
+}: {
+  request: WithdrawalRequest | null
+  onClose: () => void
+}) {
+  const { settleWithdrawalManually } = useStore()
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const key = request?.id ?? 'none'
+  const [lastKey, setLastKey] = useState(key)
+  if (key !== lastKey) {
+    setLastKey(key)
+    setNote('')
+    setError('')
+  }
+
+  if (!request) return null
+
+  const submit = async () => {
+    if (note.trim().length < 5) {
+      setError('Say how and where this was sent. It is kept on the record.')
+      return
+    }
+    setBusy(true)
+    try {
+      await settleWithdrawalManually(request.id, note.trim())
+      onClose()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Mark ${cedis(request.amount)} as sent`}>
+      <div className="space-y-4">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
+          <p className="font-semibold text-slate-900 dark:text-slate-50">{request.agentName}</p>
+          <p className="tabular mt-0.5 text-slate-600 dark:text-slate-300">
+            {request.agentPhone} · {request.momoNetwork}
+          </p>
+        </div>
+
+        <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
+          Only use this once the money has actually left your hands. This closes the request and
+          tells the agent it has been sent — there is no automatic transfer behind it this time.
+        </Callout>
+
+        <Field label="How and where did you send it?" htmlFor="wd-settle-note" error={error}>
+          <TextInput
+            id="wd-settle-note"
+            placeholder="Sent from my personal MTN MoMo, ref 88578647868"
+            value={note}
+            invalid={Boolean(error)}
+            onChange={(event) => {
+              setNote(event.target.value)
+              setError('')
+            }}
+          />
+        </Field>
+
+        <div className="flex gap-2">
+          <Button block loading={busy} onClick={() => void submit()}>
+            Mark as sent
+          </Button>
+          <Button block variant="outline" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </Modal>
   )
 }

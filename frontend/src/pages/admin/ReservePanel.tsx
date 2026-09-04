@@ -135,6 +135,23 @@ export default function ReservePanel() {
               }
             />
           )}
+          {liabilities.manualPayoutAdvances > 0 && (
+            <Row
+              label="Owed for payouts paid out of pocket"
+              value={liabilities.manualPayoutAdvances}
+              negative
+              hint={
+                <>
+                  Someone covered these personally — money still sitting at Paystack, never the
+                  DataHub float. Settle them on the{' '}
+                  <Link to="/admin/withdrawals" className="font-semibold underline">
+                    Withdrawals
+                  </Link>{' '}
+                  page.
+                </>
+              }
+            />
+          )}
           <Row label="Total owed to other people" value={liabilities.total} negative strong />
         </dl>
 

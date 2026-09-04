@@ -213,6 +213,8 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       stuckRefunds,
       manualRefundAdvances,
       manualRefundReimbursements,
+      manualPayoutAdvances,
+      manualPayoutReimbursements,
       bundlesBought,
       reimbursedToDataHub,
     ] = await Promise.all([
@@ -298,6 +300,20 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         where: { kind: 'capital_out', orderRef: { not: null } },
         select: { orderRef: true },
       }),
+      // The identical pattern, one column over: `WithdrawalsService.settleManually`
+      // recording that someone personally covered a payout because there was
+      // nowhere automatic to send it from yet (no Paystack key configured, or
+      // an account that cannot send transfers at all) — see
+      // `transfersSince()` below for why this must never also look like a
+      // real Paystack transfer.
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_in', withdrawalId: { not: null } },
+        select: { withdrawalId: true, amount: true },
+      }),
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_out', withdrawalId: { not: null } },
+        select: { withdrawalId: true },
+      }),
       /**
        * Every bundle ever bought, all-time. That money came out of the
        * DataHub float, never out of Paystack directly — the matching customer
@@ -346,7 +362,12 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     const owedForManualRefunds = manualRefundAdvances
       .filter((advance) => !reimbursedRefs.has(advance.orderRef))
       .reduce((sum, advance) => sum + advance.amount, 0)
-    const liabilities = owedToAgents + owedToCustomers + undelivered + queuedPayouts + owedForManualRefunds
+    const reimbursedWithdrawalIds = new Set(manualPayoutReimbursements.map((r) => r.withdrawalId))
+    const owedForManualPayouts = manualPayoutAdvances
+      .filter((advance) => !reimbursedWithdrawalIds.has(advance.withdrawalId))
+      .reduce((sum, advance) => sum + advance.amount, 0)
+    const liabilities =
+      owedToAgents + owedToCustomers + undelivered + queuedPayouts + owedForManualRefunds + owedForManualPayouts
     // supplier_cost entries are stored negative (money leaving the float).
     // Floored at zero: logging more reimbursement than has ever been spent
     // should not turn "already spent on bundles" into a negative number that
@@ -392,6 +413,8 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         queuedPayouts,
         /** Owed to whoever personally covered a refund Paystack refused to send. */
         manualRefundAdvances: owedForManualRefunds,
+        /** Owed to whoever personally covered a payout with nowhere automatic to send it from. */
+        manualPayoutAdvances: owedForManualPayouts,
         total: liabilities,
       },
       pendingPayouts: {
@@ -457,20 +480,21 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
    * not-yet-sent transfer is correctly not counted as having left the
    * balance yet.
    *
-   * The refund side also requires `transferCode: { not: null }` — a real
-   * Paystack transfer always gets one back; `RefundsService.settleManually`
-   * never sets one, because no Paystack transfer happens there at all. Without
-   * this, a manually-settled refund (someone's own pocket covering it because
-   * Paystack refused) looked identical to a real one and was subtracted here
-   * as if it had left Paystack's balance — on top of the same amount already
-   * being subtracted, correctly, as "owed for refunds paid out of pocket" in
-   * `liabilities`. That double-counted it, understating `freeToSpend` by
-   * every manually-settled refund on the books.
+   * Both sides also require `transferCode: { not: null }` — a real Paystack
+   * transfer always gets one back; neither `RefundsService.settleManually`
+   * nor `WithdrawalsService.settleManually` ever sets one, because no
+   * Paystack transfer happens there at all. Without this, a manually-settled
+   * payout or refund (someone's own pocket covering it because there was
+   * nowhere automatic to send it from) looked identical to a real one and
+   * was subtracted here as if it had left Paystack's balance — on top of the
+   * same amount already being subtracted, correctly, as "owed for a manual
+   * advance" in `liabilities`. That double-counted it, understating
+   * `freeToSpend` by every manually-settled payout or refund on the books.
    */
   private async transfersSince(): Promise<number> {
     const [payouts, refunds] = await Promise.all([
       this.prisma.withdrawal.aggregate({
-        where: { paidAt: { not: null } },
+        where: { paidAt: { not: null }, transferCode: { not: null } },
         _sum: { amount: true },
       }),
       this.prisma.refundRequest.aggregate({

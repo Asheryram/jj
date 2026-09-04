@@ -107,18 +107,24 @@ export default function Withdrawals() {
                   <Td>
                     <Badge
                       tone={
-                        request.status === 'approved'
+                        request.status === 'paid'
                           ? 'success'
-                          : request.status === 'rejected'
-                            ? 'danger'
-                            : 'warning'
+                          : request.status === 'approved'
+                            ? 'info'
+                            : request.status === 'rejected' || request.status === 'failed'
+                              ? 'danger'
+                              : 'warning'
                       }
                     >
-                      {request.status === 'approved'
+                      {request.status === 'paid'
                         ? 'Paid'
-                        : request.status === 'rejected'
-                          ? 'Rejected'
-                          : 'Awaiting review'}
+                        : request.status === 'approved'
+                          ? 'On its way'
+                          : request.status === 'rejected'
+                            ? 'Rejected'
+                            : request.status === 'failed'
+                              ? 'Could not be sent — returned to you'
+                              : 'Awaiting review'}
                     </Badge>
                   </Td>
                   <Td align="right">

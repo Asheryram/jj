@@ -11,6 +11,7 @@ import { Button, Card, EmptyState, Spinner } from './components/ui'
 import { AlertIcon, SearchIcon } from './components/icons'
 
 import Home from './pages/Home'
+import Info from './pages/Info'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Shop from './pages/Shop'
@@ -287,6 +288,15 @@ export default function App() {
                 <Route path="/app/referrals" element={<Referrals />} />
                 <Route path="/app/withdrawals" element={<Withdrawals />} />
               </Route>
+            </Route>
+          </Route>
+
+          {/* Staff only — the "what can I do" guide. Not for customers: they
+              never navigate anything more complex than a checkout, and a
+              guest reaching it would see a page with nothing they can act on. */}
+          <Route element={<RequireAuth roles={['admin', 'agent']} />}>
+            <Route element={<AppShell />}>
+              <Route path="/info" element={<Info />} />
             </Route>
           </Route>
 

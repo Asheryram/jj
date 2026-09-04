@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
-import { IsIn, IsInt, Matches, Min } from 'class-validator'
+import { IsIn, IsInt, IsString, Matches, Min, MinLength } from 'class-validator'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { WithdrawalsService } from './withdrawals.service'
 
@@ -29,6 +29,13 @@ export class RequestWithdrawalDto {
 export class DecideWithdrawalDto {
   @IsIn(['approved', 'rejected'])
   status!: 'approved' | 'rejected'
+}
+
+export class SettleWithdrawalManuallyDto {
+  /** How and where it was sent by hand. Required and kept on the record. */
+  @IsString()
+  @MinLength(5, { message: 'Say how and where this was sent.' })
+  note!: string
 }
 
 @ApiTags('withdrawals')
@@ -61,5 +68,33 @@ export class WithdrawalsController {
   @Roles('admin')
   decide(@Param('id') id: string, @Body() dto: DecideWithdrawalDto) {
     return this.withdrawals.decide(id, dto.status)
+  }
+
+  /**
+   * Confirm a payout was sent by hand — see `WithdrawalsService.settleManually`.
+   * For an account that cannot send Paystack transfers yet, or at all.
+   */
+  @Post(':id/settle-manually')
+  @Roles('admin')
+  settleManually(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: SettleWithdrawalManuallyDto,
+  ) {
+    return this.withdrawals.settleManually(id, user.id, dto.note)
+  }
+
+  /** Payouts sent from someone's own pocket, not yet taken back out. */
+  @Get('manual-advances')
+  @Roles('admin')
+  manualAdvances() {
+    return this.withdrawals.outstandingManualAdvances()
+  }
+
+  /** Whoever fronted a manual payout has taken that exact amount back out. */
+  @Post('manual-advances/:withdrawalId/reimburse')
+  @Roles('admin')
+  reimburseManualAdvance(@Param('withdrawalId') withdrawalId: string, @CurrentUser() user: AuthUser) {
+    return this.withdrawals.reimburseManualAdvance(withdrawalId, user.id)
   }
 }

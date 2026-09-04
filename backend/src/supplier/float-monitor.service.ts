@@ -314,26 +314,29 @@ export class FloatMonitorService {
    * which is the only reader that cares whether a top-up settled money
    * already owed to DataHub rather than adding fresh capital on top of it.
    *
-   * `orderRef: null` is deliberate, not incidental. `capital_in`/`capital_out`
-   * are also written by `RefundsService.settleManually` and
-   * `reimburseManualRefund` — a completely different thing that happens to
-   * share this kind: money someone personally sent a *customer* back,
-   * unrelated to the DataHub float. Those always carry an `orderRef`; a real
-   * top-up logged through `logCapital` never does. Without this filter, an
-   * outstanding manual refund advance was being counted as float capital,
-   * inflating "should hold" by exactly that amount — the float and a refund
-   * advance are different money and must never be added together.
+   * `orderRef: null` (and, identically, `withdrawalId: null`) is deliberate,
+   * not incidental. `capital_in`/`capital_out` are also written by
+   * `RefundsService.settleManually`/`reimburseManualRefund` (keyed by
+   * `orderRef`) and `WithdrawalsService.settleManually`/`reimburseManualAdvance`
+   * (keyed by `withdrawalId`) — a completely different thing that happens to
+   * share this kind: money someone personally sent a *customer* or an *agent*
+   * back, unrelated to the DataHub float. Those always carry one of the two;
+   * a real top-up logged through `logCapital` never carries either. Without
+   * this filter, an outstanding manual refund or payout advance was being
+   * counted as float capital, inflating "should hold" by exactly that amount
+   * — the float and a refund or payout advance are different money and must
+   * never be added together.
    */
   async capitalSummary(): Promise<CapitalSummary> {
     const capitalInKinds = ['capital_in', 'capital_in_reimbursement'] as const
     const [totals, first] = await Promise.all([
       this.prisma.ledgerEntry.groupBy({
         by: ['kind'],
-        where: { kind: { in: [...capitalInKinds, 'capital_out'] }, orderRef: null },
+        where: { kind: { in: [...capitalInKinds, 'capital_out'] }, orderRef: null, withdrawalId: null },
         _sum: { amount: true },
       }),
       this.prisma.ledgerEntry.findFirst({
-        where: { kind: { in: [...capitalInKinds, 'capital_out'] }, orderRef: null },
+        where: { kind: { in: [...capitalInKinds, 'capital_out'] }, orderRef: null, withdrawalId: null },
         orderBy: { occurredAt: 'asc' },
         select: { occurredAt: true },
       }),

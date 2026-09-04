@@ -59,6 +59,14 @@ const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
     },
   },
   {
+    match: (p) => p === '/info',
+    meta: {
+      title: `What Can I Do Here? | ${SITE}`,
+      description: 'A searchable, step-by-step guide to using JamesDataConsult — different for admins, agents and customers.',
+      noindex: true,
+    },
+  },
+  {
     match: (p) => p === '/register',
     meta: {
       title: `Become a Data Reseller Agent in Ghana | ${SITE}`,

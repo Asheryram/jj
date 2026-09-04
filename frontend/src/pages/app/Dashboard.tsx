@@ -25,6 +25,7 @@ import {
   ClockIcon,
   DataIcon,
   GlobeIcon,
+  HelpIcon,
   ReceiptIcon,
   StoreIcon,
   TrendUpIcon,
@@ -427,7 +428,9 @@ function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
       {
         to: '/app/referrals',
         label: 'Invite an agent',
-        hint: 'Earn on their sales too',
+        // Not "earn on their sales" — every agent earns from their own sales
+        // only, at the same price no matter who is above them. See Referrals.tsx.
+        hint: 'Grow your chain — no cut of their sales',
         icon: UsersIcon,
         accent: 'bg-violet-50 text-violet-700',
       },
@@ -437,6 +440,13 @@ function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
         hint: 'Paid to your MoMo',
         icon: CashIcon,
         accent: 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400',
+      },
+      {
+        to: '/info',
+        label: 'What can I do here?',
+        hint: 'A searchable guide, step by step',
+        icon: HelpIcon,
+        accent: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300',
       },
     ]
   }
