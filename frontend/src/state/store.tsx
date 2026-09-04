@@ -165,6 +165,7 @@ interface Store {
 
   withdrawals: WithdrawalRequest[]
   requestWithdrawal: (amount: number, momoNetwork: Network, momoNumber: string) => Promise<void>
+  cancelWithdrawal: (id: string) => Promise<void>
   updatePhone: (phone: string) => Promise<void>
   decideWithdrawal: (id: string, status: WithdrawalStatus) => Promise<void>
 
@@ -962,6 +963,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [pushToast, reportError],
   )
 
+  const cancelWithdrawal = useCallback(
+    async (id: string) => {
+      try {
+        const updated = await api.cancelWithdrawal(id)
+        setWithdrawals((current) => current.map((w) => (w.id === id ? updated : w)))
+        // The held balance is only actually usable again once the account
+        // re-reads it — same reasoning as `requestWithdrawal` re-reading below.
+        await loadForSession(session)
+        pushToast({ tone: 'info', title: 'Withdrawal request cancelled' })
+      } catch (error) {
+        reportError(error, 'We could not cancel that request.')
+      }
+    },
+    [loadForSession, pushToast, reportError, session],
+  )
+
   const toggleUserStatus = useCallback(
     async (id: string) => {
       try {
@@ -1016,6 +1033,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       myShareOf,
       withdrawals,
       requestWithdrawal,
+      cancelWithdrawal,
       updatePhone,
       decideWithdrawal,
       users,
@@ -1036,6 +1054,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       agentEarningsByDay,
       balance,
       bootstrap,
+      cancelWithdrawal,
       claimableCredits,
       customerBalance,
       decideWithdrawal,

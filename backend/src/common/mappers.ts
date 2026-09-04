@@ -143,6 +143,10 @@ export function toEarning(row: Earning) {
 export function toWithdrawal(row: Withdrawal) {
   return {
     id: row.id,
+    // So the admin queue can cross-reference the requesting agent's current
+    // account status — a suspended agent's already-queued payout otherwise
+    // looks identical to any other request.
+    userId: row.userId,
     agentName: row.agentName,
     agentPhone: row.agentPhone,
     amount: row.amount,

@@ -6,6 +6,25 @@ import { LedgerService, type LedgerDraft } from '../finance/ledger.service'
 import type { OrderSplit, SplitShare } from '../domain/pricing'
 
 /**
+ * What actually happened when something tried to settle an order.
+ *
+ * `applied: false` covers two very different situations, which is why
+ * `conflict` exists to tell them apart. A plain duplicate — the exact outcome
+ * this order was already settled with, arriving again — is expected and
+ * boring (Paystack and DataHub both warn that their callbacks repeat). A
+ * `conflict` is not: it means the outcome being reported now disagrees with
+ * the one already settled, which is exactly the shape of a customer ending up
+ * with both a bundle and a refund, or an agent credited for a sale that was
+ * actually rejected. See `FulfilmentService.settle`.
+ */
+export interface SettleResult {
+  applied: boolean
+  conflict: boolean
+  /** The outcome this order actually carries right now, when `applied` is false. */
+  actualOutcome?: 'delivered' | 'rejected'
+}
+
+/**
  * Moves an order out of `processing` once the provider answers, and settles all
  * the money that depends on that answer.
  *
@@ -286,8 +305,41 @@ export class FulfilmentService implements OnApplicationBootstrap {
     outcome: 'delivered' | 'rejected',
     reason?: string,
     voucher?: { serial: string; pin: string },
+  ): Promise<SettleResult> {
+    return this.settle(orderId, outcome, reason, voucher)
+  }
+
+  /**
+   * An already-terminal order was just told a *different* outcome than the
+   * one it was settled with. Flag it once — a repeat of the same conflict
+   * (a retried webhook, say) must not keep overwriting the first note — and
+   * log loudly. This is the one place all three settlement sources (webhook,
+   * reconciler sweep, manual resolution) funnel through, so it is the one
+   * place capable of ever noticing this at all.
+   *
+   * Deliberately does not attempt to undo anything. The money may already be
+   * wrong in a way nothing here can safely guess how to fix — see the file
+   * header on `SettleResult` — so this only makes sure a human finds out,
+   * via the Needs Attention page (`ReconcilerService.needsAttention`).
+   */
+  private async flagConflict(
+    tx: Prisma.TransactionClient,
+    order: { id: string; reference: string; conflictNote: string | null },
+    actualOutcome: 'delivered' | 'rejected',
+    reportedOutcome: 'delivered' | 'rejected',
+    reason?: string,
   ): Promise<void> {
-    await this.settle(orderId, outcome, reason, voucher)
+    if (order.conflictNote) return // already flagged; do not clobber the original note
+
+    const note =
+      `Already settled as ${actualOutcome}, but a later signal reported ${reportedOutcome}` +
+      (reason ? ` (${reason})` : '') +
+      '. Check this order was not paid out and refunded, or delivered and rejected, at once.'
+
+    await tx.order.update({ where: { id: order.id }, data: { conflictNote: note } })
+    this.log.error(
+      `CONFLICTING SETTLEMENT ${order.reference}: already ${actualOutcome}, now told ${reportedOutcome} — flagged for review`,
+    )
   }
 
   /**
@@ -300,11 +352,21 @@ export class FulfilmentService implements OnApplicationBootstrap {
     outcome: 'delivered' | 'rejected',
     reason?: string,
     voucher?: { serial: string; pin: string },
-  ): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+  ): Promise<SettleResult> {
+    return this.prisma.$transaction(async (tx) => {
       // Re-read inside the transaction; the status may have moved since dispatch.
       const order = await tx.order.findUnique({ where: { id: orderId } })
-      if (!order || order.status === 'completed' || order.status === 'failed') return
+      if (!order) return { applied: false, conflict: false }
+
+      if (order.status === 'completed' || order.status === 'failed') {
+        const actualOutcome = order.status === 'completed' ? 'delivered' : 'rejected'
+        if (actualOutcome !== outcome) {
+          await this.flagConflict(tx, order, actualOutcome, outcome, reason)
+          return { applied: false, conflict: true, actualOutcome }
+        }
+        // The exact same outcome, told again — a boring, expected replay.
+        return { applied: false, conflict: false, actualOutcome }
+      }
 
       const split = order.split as unknown as OrderSplit
       const agentShares = split.shares.filter((s) => s.role === 'agent' && s.margin > 0)
@@ -333,7 +395,20 @@ export class FulfilmentService implements OnApplicationBootstrap {
             voucherPin: voucher?.pin ?? null,
           },
         })
-        if (claim.count === 0) return
+        if (claim.count === 0) {
+          // Lost the race — something else settled this order first, in the
+          // moment between the read above and this write. Read-committed
+          // isolation means the winner's write is now visible here.
+          const now = await tx.order.findUniqueOrThrow({
+            where: { id: orderId },
+            select: { status: true, conflictNote: true },
+          })
+          const actualOutcome = now.status === 'completed' ? 'delivered' : 'rejected'
+          if (actualOutcome !== outcome) {
+            await this.flagConflict(tx, { ...order, conflictNote: now.conflictNote }, actualOutcome, outcome, reason)
+          }
+          return { applied: false, conflict: actualOutcome !== outcome, actualOutcome }
+        }
 
         // Split-at-sale: the seller's margin and their referrer's bonus are both
         // credited the moment the order completes, so an agent sees a referral
@@ -343,7 +418,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
         }
 
         await this.recordDelivered(tx, order, split, agentShares)
-        return
+        return { applied: true, conflict: false }
       }
 
       /**
@@ -372,7 +447,18 @@ export class FulfilmentService implements OnApplicationBootstrap {
         where: { id: orderId, status: { notIn: ['completed', 'failed'] } },
         data: { status: 'failed', refunded: false },
       })
-      if (claim.count === 0) return
+      if (claim.count === 0) {
+        // Same race as the delivered branch above — see that comment.
+        const now = await tx.order.findUniqueOrThrow({
+          where: { id: orderId },
+          select: { status: true, conflictNote: true },
+        })
+        const actualOutcome = now.status === 'completed' ? 'delivered' : 'rejected'
+        if (actualOutcome !== outcome) {
+          await this.flagConflict(tx, { ...order, conflictNote: now.conflictNote }, actualOutcome, outcome, reason)
+        }
+        return { applied: false, conflict: actualOutcome !== outcome, actualOutcome }
+      }
 
       /**
        * A rejection does not mean nothing was spent.
@@ -460,6 +546,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
       // refund is actually paid.
 
       this.log.warn(`failed ${order.reference}: ${reason ?? 'provider rejected'}`)
+      return { applied: true, conflict: false }
     })
   }
 

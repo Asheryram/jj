@@ -414,6 +414,15 @@ model Order {
   createdAt   DateTime  @default(now()) @map("created_at")
   completedAt DateTime? @map("completed_at")
 
+  /// Set when a settlement source (webhook, reconciler sweep, or a manual
+  /// resolution) disagrees with an outcome this order was already settled
+  /// with — see `FulfilmentService.settle`'s conflict detection. Null the
+  /// rest of the time; surfaced on the Needs Attention page until an admin
+  /// has checked it and cleared it via `ReconcilerService.acknowledgeConflict`.
+  /// This is never auto-resolved — the money may already be wrong in a way
+  /// nothing here can safely guess how to fix.
+  conflictNote String? @map("conflict_note")
+
   product    Product            @relation(fields: [productId], references: [id])
   buyerUser  User?              @relation(fields: [buyerUserId], references: [id])
   dispatches SupplierDispatch[]

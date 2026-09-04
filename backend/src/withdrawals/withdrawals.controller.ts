@@ -50,6 +50,13 @@ export class WithdrawalsController {
     return this.withdrawals.request(user, dto.amount, dto.momoNetwork, dto.momoNumber)
   }
 
+  /** Take back a request only its own agent made, while it is still pending. */
+  @Post(':id/cancel')
+  @Roles('agent')
+  cancel(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.withdrawals.cancel(user, id)
+  }
+
   @Patch(':id')
   @Roles('admin')
   decide(@Param('id') id: string, @Body() dto: DecideWithdrawalDto) {

@@ -91,22 +91,42 @@ export class DatahubWebhookController {
       data: { providerStatus: status },
     })
 
-    if (order.status === 'completed' || order.status === 'failed') {
-      // Expected, not exceptional — they warn that duplicates happen.
-      return { received: true, applied: false, reason: 'already settled' }
-    }
-
     const mapped = mapProviderStatus(status)
     if (mapped === null) {
       // Still in flight on their side. Nothing to do but wait.
       return { received: true, applied: false, reason: `not terminal (${status})` }
     }
 
-    await this.fulfilment.settleFromProvider(
+    /**
+     * Deliberately not short-circuited on `order.status` here any more.
+     *
+     * A terminal order used to return early right above this comment, before
+     * ever calling `settleFromProvider` — "expected, not exceptional, they
+     * warn that duplicates happen" was true for a genuine replay, but the
+     * same early return also silently swallowed the one case that matters: a
+     * webhook reporting SUCCESSFUL for an order this platform had already
+     * closed out as rejected (a stuck `manual_` reference resolved by hand,
+     * say). That customer would then hold both a refund and a delivered
+     * bundle, with literally nothing in the logs to ever find out from.
+     *
+     * `settle()` is the single funnel every settlement source goes through,
+     * and it already tells a boring exact-replay apart from a genuine
+     * conflict — see `FulfilmentService.flagConflict`. So the right amount of
+     * short-circuiting here is none: let it decide, every time.
+     */
+    const result = await this.fulfilment.settleFromProvider(
       order.id,
       mapped === 'completed' ? 'delivered' : 'rejected',
       `DataHub GH reported ${status}`,
     )
+
+    if (!result.applied) {
+      return {
+        received: true,
+        applied: false,
+        reason: result.conflict ? 'conflicts with an earlier settlement — flagged for review' : 'already settled',
+      }
+    }
 
     this.log.log(`${order.reference} → ${mapped} (DataHub said ${status})`)
     // 2xx within 10 seconds, as their requirements demand, or they retry.

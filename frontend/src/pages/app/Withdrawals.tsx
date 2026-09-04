@@ -33,8 +33,9 @@ import { AlertIcon, CashIcon, ClockIcon } from '../../components/icons'
 const PLACEHOLDER_PHONE = '0000000000'
 
 export default function Withdrawals() {
-  const { agentBalance: balance, withdrawals, requestWithdrawal, session } = useStore()
+  const { agentBalance: balance, withdrawals, requestWithdrawal, cancelWithdrawal, session } = useStore()
   const [open, setOpen] = useState(false)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   const mine = withdrawals.filter((w) => w.agentPhone === session?.phone)
   const pending = mine.filter((w) => w.status === 'pending')
@@ -89,6 +90,7 @@ export default function Withdrawals() {
                 <Th>To</Th>
                 <Th align="right">Amount</Th>
                 <Th>Status</Th>
+                <Th align="right" />
               </tr>
             </thead>
             <tbody>
@@ -118,6 +120,22 @@ export default function Withdrawals() {
                           ? 'Rejected'
                           : 'Awaiting review'}
                     </Badge>
+                  </Td>
+                  <Td align="right">
+                    {request.status === 'pending' && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        loading={cancellingId === request.id}
+                        onClick={async () => {
+                          setCancellingId(request.id)
+                          await cancelWithdrawal(request.id)
+                          setCancellingId(null)
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    )}
                   </Td>
                 </tr>
               ))}

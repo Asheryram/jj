@@ -308,6 +308,12 @@ export interface NeedsAttentionOrder {
   paidWith: string
   createdAt: string
   reason: string
+  /**
+   * True when this order is already settled but flagged — a later signal
+   * disagreed with the outcome it was already given. False for the ordinary
+   * "still stuck, needs a delivered/rejected decision" case.
+   */
+  conflict: boolean
 }
 
 /** Where the provider float sits against the thresholds. */
@@ -766,6 +772,14 @@ export const api = {
   resolveOrder: (id: string, outcome: 'delivered' | 'rejected', note: string) =>
     request<void>(`/orders/${id}/resolve`, { method: 'POST', body: { outcome, note } }),
 
+  /**
+   * Clear a flagged conflict once a human has actually checked what happened
+   * — see ReconcilerService.acknowledgeConflict. Never resolves any money by
+   * itself; it only closes out the flag.
+   */
+  acknowledgeOrderConflict: (id: string, note: string) =>
+    request<void>(`/orders/${id}/acknowledge-conflict`, { method: 'POST', body: { note } }),
+
   /** Orders nobody can resolve automatically — see ReconcilerService.needsAttention. */
   needsAttentionOrders: () => request<NeedsAttentionOrder[]>('/admin/orders/needs-attention'),
 
@@ -816,6 +830,10 @@ export const api = {
       method: 'POST',
       body: { amount, momoNetwork, momoNumber },
     }),
+
+  /** Take back a request of your own while it is still pending. */
+  cancelWithdrawal: (id: string) =>
+    request<WithdrawalRequest>(`/withdrawals/${id}/cancel`, { method: 'POST' }),
 
   decideWithdrawal: (id: string, status: WithdrawalStatus) =>
     request<WithdrawalRequest>(`/withdrawals/${id}`, { method: 'PATCH', body: { status } }),

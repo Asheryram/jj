@@ -30,13 +30,22 @@ type Filter = 'pending' | 'all'
  * told they have been paid out of money that is not there.
  */
 export default function AdminWithdrawals() {
-  const { withdrawals, decideWithdrawal } = useStore()
+  const { withdrawals, decideWithdrawal, users } = useStore()
   const [filter, setFilter] = useState<Filter>('pending')
   const [reviewing, setReviewing] = useState<WithdrawalRequest | null>(null)
 
   const pending = withdrawals.filter((w) => w.status === 'pending')
   const visible = filter === 'pending' ? pending : withdrawals
   const approved = withdrawals.filter((w) => w.status === 'approved')
+
+  /**
+   * Whether the agent behind a request is currently suspended — a request
+   * queued before a suspension otherwise looks identical to any other, and
+   * approving it still sends real money out. The server refuses it either
+   * way; this is so the admin sees it before opening the review modal, not
+   * only after the approval bounces.
+   */
+  const isSuspended = (userId: string) => users.find((u) => u.id === userId)?.status === 'suspended'
 
   return (
     <div>
@@ -114,7 +123,10 @@ export default function AdminWithdrawals() {
               {visible.map((request) => (
                 <tr key={request.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                   <Td>
-                    <p className="font-medium text-slate-900 dark:text-slate-50">{request.agentName}</p>
+                    <span className="flex items-center gap-1.5">
+                      <p className="font-medium text-slate-900 dark:text-slate-50">{request.agentName}</p>
+                      {isSuspended(request.userId) && <Badge tone="danger">Suspended</Badge>}
+                    </span>
                     <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">{request.id}</p>
                   </Td>
                   <Td className="text-slate-600 dark:text-slate-300">{dateTime(request.requestedAt)}</Td>
@@ -179,14 +191,22 @@ export default function AdminWithdrawals() {
             <CopyField label="Send to number" value={reviewing.agentPhone} mono />
             <CopyField label="Amount" value={(reviewing.amount / 100).toFixed(2)} mono />
 
-            <Callout tone="info">
-              Send the Mobile Money first, then approve here so the ledger matches what actually
-              happened.
-            </Callout>
+            {isSuspended(reviewing.userId) ? (
+              <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
+                {reviewing.agentName} is currently suspended. Reactivate them on the Users page
+                first if you still want to pay this out, or reject the request instead.
+              </Callout>
+            ) : (
+              <Callout tone="info">
+                Send the Mobile Money first, then approve here so the ledger matches what actually
+                happened.
+              </Callout>
+            )}
 
             <div className="flex gap-2">
               <Button
                 block
+                disabled={isSuspended(reviewing.userId)}
                 onClick={() => {
                   decideWithdrawal(reviewing.id, 'approved')
                   setReviewing(null)

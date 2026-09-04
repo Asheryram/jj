@@ -231,6 +231,8 @@ export interface PlatformUser {
 
 export interface WithdrawalRequest {
   id: string
+  /** So the admin queue can cross-reference the requesting agent's current account status. */
+  userId: string
   agentName: string
   agentPhone: string
   amount: Pesewas

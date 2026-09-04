@@ -120,6 +120,57 @@ export class WithdrawalsService {
   }
 
   /**
+   * Let the agent who asked for it take the request back.
+   *
+   * The balance was held the moment they requested it, so a typo'd amount or
+   * the wrong Mobile Money number otherwise leaves that balance stuck until
+   * James happens to work through the queue and reject it. This is the same
+   * reversal as a rejection — the held amount simply goes back — restricted
+   * to the one person who should not need an admin's permission to undo their
+   * own request.
+   */
+  async cancel(user: AuthUser, id: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const row = await tx.withdrawal.findUnique({ where: { id } })
+      if (!row || row.userId !== user.id) {
+        // Same message either way — an agent probing another agent's request
+        // id learns nothing from the difference between "not yours" and
+        // "does not exist".
+        throw new NotFoundError('We could not find that withdrawal request.')
+      }
+      if (row.status !== 'pending') {
+        throw new ConflictError('ALREADY_DECIDED', `That request was already ${row.status}.`)
+      }
+
+      const updated = await tx.withdrawal.update({
+        where: { id },
+        data: { status: 'rejected', decidedAt: new Date() },
+      })
+
+      const after = await tx.user.update({
+        where: { id: row.userId },
+        data: { balance: { increment: row.amount } },
+        select: { balance: true },
+      })
+
+      await tx.earning.create({
+        data: {
+          userId: row.userId,
+          type: 'withdrawal',
+          amount: row.amount,
+          balanceAfter: after.balance,
+          description: 'Withdrawal request cancelled — amount returned to your balance',
+          reference: `WDR-${row.id.slice(0, 8).toUpperCase()}-C`,
+          depth: 0,
+        },
+      })
+
+      this.log.log(`withdrawal ${id} cancelled by ${user.id}`)
+      return toWithdrawal(updated)
+    })
+  }
+
+  /**
    * FR-6.5 — James approves or rejects.
    *
    * Approval is a bookkeeping act: the money was already deducted at request
@@ -155,6 +206,27 @@ export class WithdrawalsService {
           'ALREADY_DECIDED',
           `That request was already ${row.status}.`,
         )
+      }
+
+      /**
+       * A suspension is a decision to stop, not a decision about this specific
+       * payout — but approving one still sends real money out, and nothing
+       * before this checked the agent's current status at all. Without this,
+       * a request queued before a suspension for suspected fraud would sail
+       * through approval exactly like any other, with nobody warned that the
+       * agent receiving it is currently under review.
+       *
+       * Only guards approval — a rejection returns the held balance and moves
+       * nothing external, so it is always safe regardless of status.
+       */
+      if (status === 'approved') {
+        const agent = await tx.user.findUnique({ where: { id: row.userId }, select: { status: true } })
+        if (agent?.status === 'suspended') {
+          throw new ConflictError(
+            'AGENT_SUSPENDED',
+            `${row.agentName} is currently suspended. Reactivate them first if you still want to pay this out, or reject the request instead.`,
+          )
+        }
       }
 
       const updated = await tx.withdrawal.update({

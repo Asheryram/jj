@@ -110,6 +110,40 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
+   * Rescue a wallet top-up whose webhook never arrived and whose customer
+   * never came back to confirm it.
+   *
+   * `resolveAbandonedPayments` above only ever looks at the `Order` table, so
+   * it never sees a top-up: a `Payment` with `purpose: 'topup'` has no order
+   * attached at all. Without this, a top-up's only two paths to being
+   * credited are Paystack's webhook and the customer manually returning to
+   * `/pay/return` — and Mobile Money in Ghana routinely means leaving the
+   * browser entirely to approve a PIN prompt and never coming back to it. If
+   * the webhook is also lost, that money sits confirmed at Paystack and
+   * uncredited in the wallet forever, with nothing ever checking again and no
+   * admin screen that would even show it as stuck.
+   */
+  private async resolveStaleTopUps(): Promise<number> {
+    const cutoff = new Date(Date.now() - 15 * 60_000)
+    const stale = await this.prisma.payment.findMany({
+      where: { purpose: 'topup', status: 'pending', createdAt: { lt: cutoff } },
+      select: { reference: true },
+      take: 25,
+      orderBy: { createdAt: 'asc' },
+    })
+
+    let resolved = 0
+    for (const payment of stale) {
+      const result = await this.payments.confirm(payment.reference).catch(() => null)
+      if (!result || result.status === 'pending') continue
+      this.log.log(`top-up ${payment.reference}: resolved as ${result.status}`)
+      resolved++
+    }
+
+    return resolved
+  }
+
+  /**
    * Give up on approvals that never came, and record what is owed.
    *
    * The customer paid for a bundle we could not deliver. Whatever the reason sits
@@ -154,6 +188,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     // owing whether or not DataHub is simulated — so these run before the guard
     // below rather than being switched off with it.
     let settled = await this.resolveAbandonedPayments()
+    settled += await this.resolveStaleTopUps()
     settled += await this.expireStaleApprovals()
 
     if (!this.supplier.isLive) return { checked: 0, settled }
@@ -215,14 +250,27 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
-   * Orders nobody can resolve automatically: dispatched but never given a
-   * provider reference, or long past any plausible delivery. Surfaced to admin
-   * because each one is money that has moved with no confirmed outcome.
+   * Orders nobody can resolve automatically.
+   *
+   * Two different shapes of "nobody can resolve this", both surfaced here
+   * because each one is money that has moved with no confirmed outcome:
+   *
+   *  · Still open and stuck: dispatched but never given a provider reference,
+   *    or long past any plausible delivery.
+   *  · Already closed, but disputed: `FulfilmentService.settle` flagged
+   *    `conflictNote` because a settlement source reported an outcome that
+   *    disagreed with one this order was already settled with — regardless
+   *    of age, since a conflict does not get less real by waiting.
    */
   async needsAttention(olderThanMinutes = 15) {
     const cutoff = new Date(Date.now() - olderThanMinutes * 60_000)
     const rows = await this.prisma.order.findMany({
-      where: { status: { in: ['pending', 'processing'] }, createdAt: { lt: cutoff } },
+      where: {
+        OR: [
+          { status: { in: ['pending', 'processing'] }, createdAt: { lt: cutoff } },
+          { conflictNote: { not: null } },
+        ],
+      },
       orderBy: { createdAt: 'asc' },
       take: 100,
       select: {
@@ -234,19 +282,57 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
         salePrice: true,
         paidWith: true,
         createdAt: true,
+        conflictNote: true,
       },
     })
 
     return rows.map((r) => ({
-      ...r,
+      id: r.id,
+      reference: r.reference,
+      providerReference: r.providerReference,
+      productName: r.productName,
+      recipient: r.recipient,
+      salePrice: r.salePrice,
+      paidWith: r.paidWith,
       createdAt: r.createdAt.toISOString(),
+      conflict: r.conflictNote !== null,
       // Without a provider reference we never got a usable reply, so there is
       // nothing to ask them about — this one needs a human looking at their
       // dashboard.
-      reason: r.providerReference
-        ? 'Accepted by DataHub but never reported back'
-        : 'No reply from DataHub — may or may not have been placed',
+      reason:
+        r.conflictNote ??
+        (r.providerReference
+          ? 'Accepted by DataHub but never reported back'
+          : 'No reply from DataHub — may or may not have been placed'),
     }))
+  }
+
+  /**
+   * A human has checked a flagged conflict and is closing it out.
+   *
+   * Deliberately does not touch the order's money or status at all — see
+   * `SettleResult`'s doc comment on why nothing here ever auto-resolves one
+   * of these. This only clears the flag, once whoever looked has confirmed
+   * (against Paystack's or DataHub's own dashboard, or the customer directly)
+   * whether anything needs fixing by hand and done it separately.
+   */
+  async acknowledgeConflict(orderId: string, adminId: string, note: string): Promise<void> {
+    const reason = note.trim()
+    if (reason.length < 5) {
+      throw new ValidationError('Say what you checked. It is kept on the record.')
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { reference: true, conflictNote: true },
+    })
+    if (!order) throw new NotFoundError('We could not find that order.')
+    if (!order.conflictNote) {
+      throw new ConflictError('NO_CONFLICT', 'That order has no flagged conflict to acknowledge.')
+    }
+
+    await this.prisma.order.update({ where: { id: orderId }, data: { conflictNote: null } })
+    this.log.log(`${order.reference}: conflict acknowledged by ${adminId} — ${reason}`)
   }
 
   /**
@@ -284,7 +370,28 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       throw new ConflictError('ALREADY_SETTLED', `That order is already ${order.status}.`)
     }
 
-    this.log.warn(`${order.reference}: resolved by hand as ${outcome} by ${adminId} — ${reason}`)
-    await this.fulfilment.settleFromProvider(orderId, outcome, `Marked ${outcome} by hand — ${reason}`)
+    this.log.warn(`${order.reference}: resolving by hand as ${outcome} by ${adminId} — ${reason}`)
+    const result = await this.fulfilment.settleFromProvider(orderId, outcome, `Marked ${outcome} by hand — ${reason}`)
+
+    /**
+     * This pre-check and the atomic claim inside `settle` are not the same
+     * guard — the read above proves nothing about what is still true by the
+     * time `settle`'s own write runs a moment later. The provider's webhook,
+     * the reconciler's own sweep, or a second admin can all settle the same
+     * order in between. Without checking `result`, the caller here was told
+     * "done" even when their click was silently discarded because something
+     * else won that race a moment earlier — which is worse than an error,
+     * because it hides that the order was NOT settled the way they just
+     * asked for.
+     */
+    if (!result.applied) {
+      throw new ConflictError(
+        'ALREADY_SETTLED',
+        result.conflict
+          ? `Something else — the provider's own report, or another admin — already settled this order as ` +
+            `${result.actualOutcome} just now. Nothing was changed. Check the order before doing anything else.`
+          : `That order was already settled as ${result.actualOutcome}.`,
+      )
+    }
   }
 }

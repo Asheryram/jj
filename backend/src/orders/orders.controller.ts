@@ -3,7 +3,13 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { OrdersService } from './orders.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
-import { PlaceOrderDto, ResolveOrderDto, TrackOrderDto, VerifyRecipientDto } from './orders.dto'
+import {
+  AcknowledgeConflictDto,
+  PlaceOrderDto,
+  ResolveOrderDto,
+  TrackOrderDto,
+  VerifyRecipientDto,
+} from './orders.dto'
 
 @ApiTags('orders')
 @Controller('orders')
@@ -80,5 +86,21 @@ export class OrdersController {
   @ApiBearerAuth()
   resolve(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ResolveOrderDto) {
     return this.reconciler.resolveManually(id, dto.outcome, user.id, dto.note)
+  }
+
+  /**
+   * Clear a flagged conflict — see `ReconcilerService.acknowledgeConflict`.
+   * For an order a settlement source disagreed with itself on, after a human
+   * has actually checked what really happened.
+   */
+  @Post(':id/acknowledge-conflict')
+  @Roles('admin')
+  @ApiBearerAuth()
+  acknowledgeConflict(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: AcknowledgeConflictDto,
+  ) {
+    return this.reconciler.acknowledgeConflict(id, user.id, dto.note)
   }
 }
