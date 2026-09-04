@@ -25,6 +25,7 @@ import {
   StoreIcon,
   SunIcon,
   TagIcon,
+  TrendUpIcon,
   UsersIcon,
   WalletIcon,
   XIcon,
@@ -115,13 +116,24 @@ const PROFILE_LABEL: Partial<Record<Role, string>> = {
  * on. Number approvals and Users are real but rarely urgent in the same way,
  * so they sit in the overflow rather than crowding out a thumb-reachable slot.
  */
-function navFor(role: Role, shopPath: (path: string) => string, pendingApplications = 0): NavItem[] {
+function navFor(
+  role: Role,
+  shopPath: (path: string) => string,
+  pendingApplications = 0,
+  needsAttentionCount = 0,
+): NavItem[] {
   if (isAdmin(role)) {
     return [
       { to: '/admin', label: 'Overview', icon: HomeIcon, end: true },
       { to: '/admin/orders', label: 'All orders', icon: ReceiptIcon },
       { to: '/admin/refunds', label: 'Refunds', icon: ReceiptIcon },
       { to: '/admin/withdrawals', label: 'Withdrawals', icon: CashIcon },
+      {
+        to: '/admin/needs-attention',
+        label: 'Needs attention',
+        icon: AlertIcon,
+        badge: needsAttentionCount > 0 ? needsAttentionCount : undefined,
+      },
       // Renamed from "Approvals": this is DataHub-blocked phone numbers, not
       // agent sign-ups — those wait on Users instead (see the badge below),
       // and sharing the word "approvals" between two unrelated queues was
@@ -134,6 +146,7 @@ function navFor(role: Role, shopPath: (path: string) => string, pendingApplicati
         badge: pendingApplications > 0 ? pendingApplications : undefined,
       },
       { to: '/admin/prices', label: 'Cost prices', icon: TagIcon },
+      { to: '/admin/catalogue-accuracy', label: 'Catalogue accuracy', icon: TrendUpIcon },
       { to: '/admin/branding', label: 'Branding', icon: StoreIcon },
       { to: '/admin/settings', label: 'Settings', icon: SettingsIcon },
       // Platform access belongs to the operator, not the business owner. An
@@ -314,9 +327,23 @@ export function AppShell() {
     }
   }, [session?.id, session?.role])
 
+  /** Same reasoning as `pendingApplications` above, for the Needs attention badge. */
+  const [needsAttentionCount, setNeedsAttentionCount] = useState(0)
+  useEffect(() => {
+    if (!session || !isAdmin(session.role)) return
+    let live = true
+    api
+      .needsAttentionOrders()
+      .then((rows) => live && setNeedsAttentionCount(rows.length))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [session?.id, session?.role])
+
   if (!session) return null
 
-  const items = navFor(session.role, shopPath, pendingApplications)
+  const items = navFor(session.role, shopPath, pendingApplications, needsAttentionCount)
   const primary = items.slice(0, 4)
   const overflow = items.slice(4)
 

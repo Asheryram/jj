@@ -260,6 +260,8 @@ export interface AdminOverview {
   windowDays: number
   orders: number
   revenue: number
+  /** Pesewas Paystack kept over the window. */
+  paymentFees: number
   failedOrders: number
   successRate: number
   averageOrderValue: number
@@ -267,6 +269,11 @@ export interface AdminOverview {
   customers: number
   pendingWithdrawals: { count: number; amount: number }
   unclaimedCredits: { count: number; amount: number }
+  revenueTrend: { thisWeek: number; lastWeek: number }
+  /** All-time — see AdminService.overview for why. */
+  refundRate: number
+  checkoutFunnel: { started: number; completed: number; failed: number }
+  goingQuietAgents: { name: string; referralCode: string; lastSaleAt: string }[]
 }
 
 /**
@@ -287,6 +294,20 @@ export interface MySummary {
   ordersCompleted: number
   ordersTotal: number
   activeSubAgents: number
+  /** Agents only — this 7-day window vs the one before it. */
+  earnedTrend?: { thisWeek: number; lastWeek: number }
+}
+
+export interface NeedsAttentionOrder {
+  id: string
+  reference: string
+  providerReference: string | null
+  productName: string
+  recipient: string
+  salePrice: number
+  paidWith: string
+  createdAt: string
+  reason: string
 }
 
 /** Where the provider float sits against the thresholds. */
@@ -745,6 +766,9 @@ export const api = {
   resolveOrder: (id: string, outcome: 'delivered' | 'rejected', note: string) =>
     request<void>(`/orders/${id}/resolve`, { method: 'POST', body: { outcome, note } }),
 
+  /** Orders nobody can resolve automatically — see ReconcilerService.needsAttention. */
+  needsAttentionOrders: () => request<NeedsAttentionOrder[]>('/admin/orders/needs-attention'),
+
   trackOrder: (reference: string, phone: string) =>
     request<Order>('/orders/track', { method: 'POST', body: { reference, phone }, auth: false }),
 
@@ -968,33 +992,28 @@ export const api = {
     request<FinanceStatement>(`/admin/finance/statement?days=${days}`),
 
   /**
-   * Profit or loss from the gap between what the catalogue believed a
-   * bundle cost and what the supplier actually charged, all-time — see
-   * `AdminService.catalogueAccuracy`. Already inside the profit total on
-   * `financeStatement`; this only shows where a slice of it came from.
+   * Whether the catalogue's believed cost still matches what the supplier
+   * actually charges, per product, going only by each product's most recent
+   * sale — see `AdminService.catalogueAccuracy`. Already inside the profit
+   * total on `financeStatement`; this only shows where a slice of it came
+   * from, and which catalogue entries need a price update right now.
    */
   catalogueAccuracy: () =>
-    request<{
-      /** Pesewas. Positive means the catalogue has overall overstated cost — net extra profit. */
-      totalDiff: number
-      products: {
+    request<
+      {
         supplierCode: string
         name: string
         network: Network | null
-        /** Pesewas, summed across every completed sale of this product. */
+        lastOrderRef: string
+        /** Pesewas the catalogue said this bundle cost, at sale time. */
+        believed: number
+        /** Pesewas the supplier actually charged. */
+        charged: number
+        /** Pesewas. Positive means the catalogue overstated cost — net extra profit. Negative means a loss. */
         diff: number
-        orderCount: number
-        orders: {
-          orderRef: string
-          /** Pesewas the catalogue said this bundle cost, at sale time. */
-          believed: number
-          /** Pesewas the supplier actually charged. */
-          charged: number
-          diff: number
-          occurredAt: string
-        }[]
+        lastSoldAt: string
       }[]
-    }>('/admin/catalogue/accuracy'),
+    >('/admin/catalogue/accuracy'),
 
   adminUsers: () => request<PlatformUser[]>('/admin/users'),
 

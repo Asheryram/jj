@@ -1,11 +1,14 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { sellLinkFor } from '../../lib/origin'
 import { useShopPath } from '../../lib/shopPath'
-import { cedis, dateTime } from '../../lib/format'
+import { cedis, dateTime, trendText } from '../../lib/format'
+import { api, type MyDomainStatus } from '../../lib/api'
 import { Sparkline } from '../../components/charts'
 import {
   Button,
+  Callout,
   Card,
   CardHead,
   CopyField,
@@ -17,8 +20,11 @@ import {
 } from '../../components/ui'
 import {
   CashIcon,
+  CheckIcon,
   ChevronRightIcon,
+  ClockIcon,
   DataIcon,
+  GlobeIcon,
   ReceiptIcon,
   StoreIcon,
   TrendUpIcon,
@@ -37,10 +43,25 @@ export default function Dashboard() {
     subAgents,
     agentEarningsByDay,
     mySummary,
+    withdrawals,
   } = useStore()
-  if (!session) return null
 
-  const isAgent = session.role === 'agent'
+  const isAgent = session?.role === 'agent'
+
+  const [domain, setDomain] = useState<MyDomainStatus | null>(null)
+  useEffect(() => {
+    if (!isAgent) return
+    let live = true
+    api
+      .myDomain()
+      .then((result) => live && setDomain(result))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [isAgent])
+
+  if (!session) return null
 
   // NFR-2.5 — only what belongs to this user. Used for the recent-activity list,
   // which is genuinely a "latest few" view.
@@ -139,6 +160,53 @@ export default function Dashboard() {
         </Card>
       )}
 
+      {/* ── A pending withdrawal, so "where's my money" is answered here rather
+          than only on the Withdrawals page. ── */}
+      {isAgent && withdrawals.some((w) => w.status === 'pending') && (
+        <Callout tone="info" className="mt-3" title="Withdrawal waiting on approval" icon={<ClockIcon className="size-4" />}>
+          {cedis(withdrawals.filter((w) => w.status === 'pending').reduce((sum, w) => sum + w.amount, 0))}{' '}
+          requested, not yet sent.{' '}
+          <Link to="/app/withdrawals" className="font-semibold underline">
+            View status
+          </Link>
+        </Callout>
+      )}
+
+      {/* ── Your own domain, once you have one — the payoff moment for setting it up. ── */}
+      {isAgent && domain && (
+        <Callout
+          tone={domain.allowed && domain.active ? 'success' : 'info'}
+          className="mt-3"
+          title={domain.allowed && domain.active ? 'Your shop is live' : 'Your domain'}
+          icon={
+            domain.allowed && domain.active ? (
+              <CheckIcon className="size-4" />
+            ) : (
+              <GlobeIcon className="size-4" />
+            )
+          }
+        >
+          {domain.allowed && domain.active ? (
+            <>
+              <strong className="font-semibold">{domain.domain}</strong> carries your shop now.
+            </>
+          ) : domain.reviewedAt === null ? (
+            <>
+              <strong className="font-semibold">{domain.domain}</strong> is waiting to be checked.
+            </>
+          ) : !domain.allowed ? (
+            <>{domain.reason ?? 'Not approved.'} </>
+          ) : (
+            <>
+              <strong className="font-semibold">{domain.domain}</strong> is approved, waiting on DNS.
+            </>
+          )}{' '}
+          <Link to="/app/shop-look" className="font-semibold underline">
+            Manage it
+          </Link>
+        </Callout>
+      )}
+
       {/* ── Stat tiles ── */}
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {isAgent ? (
@@ -153,7 +221,11 @@ export default function Dashboard() {
             <StatTile
               label="Earned all time"
               value={cedis(earnedAllTime)}
-              hint="Your price minus your cost"
+              hint={
+                (mySummary?.earnedTrend
+                  ? trendText(mySummary.earnedTrend.thisWeek, mySummary.earnedTrend.lastWeek, 'last week')
+                  : null) ?? 'Your price minus your cost'
+              }
               icon={<CashIcon className="size-5" />}
             />
             <StatTile

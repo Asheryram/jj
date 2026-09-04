@@ -23,6 +23,7 @@ import { FloatMonitorService } from '../supplier/float-monitor.service'
 import { SettingsService } from '../settings/settings.service'
 import { SolvencyService } from '../finance/solvency.service'
 import { AgentsService } from '../agents/agents.service'
+import { ReconcilerService } from '../supplier/reconciler.service'
 
 const TIERS = ['supplierCost', 'adminPrice', 'standardPrice'] as const
 
@@ -206,11 +207,18 @@ export class AdminController {
     private readonly float: FloatMonitorService,
     private readonly platformSettings: SettingsService,
     private readonly agents: AgentsService,
+    private readonly reconciler: ReconcilerService,
   ) {}
 
   @Get('overview')
   overview() {
     return this.admin.overview()
+  }
+
+  /** Orders nobody can resolve automatically — see `ReconcilerService.needsAttention`. */
+  @Get('orders/needs-attention')
+  needsAttention() {
+    return this.reconciler.needsAttention()
   }
 
   @Get('users')
@@ -365,8 +373,8 @@ export class AdminController {
   }
 
   /**
-   * Profit or loss from the gap between what the catalogue believes a
-   * bundle costs and what the supplier actually charged — see
+   * Per product, whether the catalogue's believed cost still matches what
+   * the supplier charged on that product's most recent sale — see
    * `AdminService.catalogueAccuracy`.
    */
   @Get('catalogue/accuracy')

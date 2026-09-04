@@ -33,12 +33,14 @@ import Overview from './pages/admin/Overview'
 import AdminOrders from './pages/admin/AdminOrders'
 import Users from './pages/admin/Users'
 import CostPrices from './pages/admin/CostPrices'
+import CatalogueAccuracy from './pages/admin/CatalogueAccuracy'
 import AdminWithdrawals from './pages/admin/AdminWithdrawals'
 import NumberApprovals from './pages/admin/NumberApprovals'
 import PaymentReturn from './pages/PaymentReturn'
 import SetPassword from './pages/SetPassword'
 import ForgotPassword from './pages/ForgotPassword'
 import Refunds from './pages/admin/Refunds'
+import NeedsAttention from './pages/admin/NeedsAttention'
 import BrandingReview from './pages/admin/BrandingReview'
 import Team from './pages/admin/Team'
 import DomainRequests from './pages/admin/DomainRequests'
@@ -295,9 +297,11 @@ export default function App() {
               <Route path="/admin/orders" element={<AdminOrders />} />
               <Route path="/admin/users" element={<Users />} />
               <Route path="/admin/prices" element={<CostPrices />} />
+              <Route path="/admin/catalogue-accuracy" element={<CatalogueAccuracy />} />
               <Route path="/admin/withdrawals" element={<AdminWithdrawals />} />
               <Route path="/admin/approvals" element={<NumberApprovals />} />
               <Route path="/admin/refunds" element={<Refunds />} />
+              <Route path="/admin/needs-attention" element={<NeedsAttention />} />
               <Route path="/admin/branding" element={<BrandingReview />} />
               <Route path="/admin/team" element={<Team />} />
               <Route path="/admin/domains" element={<DomainRequests />} />

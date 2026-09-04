@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import type { Order, OrderStatus } from '../../data/types'
@@ -37,9 +38,18 @@ type Filter = 'all' | OrderStatus
 /** FR-6.3 (all orders) + FR-8.3 (export for record-keeping). */
 export default function AdminOrders() {
   const { orders } = useStore()
+  const [searchParams] = useSearchParams()
   const [inspecting, setInspecting] = useState<Order | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
-  const [query, setQuery] = useState('')
+  /**
+   * `?ref=` links here from elsewhere (the Overview page's "Needs your
+   * attention" card, for one) — the same search box, just pre-filled, so
+   * landing here shows exactly the one order that was clicked through for.
+   */
+  const [query, setQuery] = useState(() => searchParams.get('ref') ?? '')
+  /** Table and CSV export only — the summary tiles above stay all-time, on purpose. */
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
 
   /**
    * "Your profit" is deliberately the exact same number as the Reserve
@@ -98,8 +108,16 @@ export default function AdminOrders() {
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
+    // `toDate` is inclusive of the whole day, not just its midnight instant —
+    // picking "3 Sep" as the end and finding nothing from that day is the
+    // classic off-by-one a date-range filter earns if this is left out.
+    const from = fromDate ? new Date(fromDate) : null
+    const to = toDate ? new Date(`${toDate}T23:59:59.999`) : null
     return orders.filter((order) => {
       if (filter !== 'all' && order.status !== filter) return false
+      const createdAt = new Date(order.createdAt)
+      if (from && createdAt < from) return false
+      if (to && createdAt > to) return false
       if (!needle) return true
       return (
         order.recipient.includes(needle) ||
@@ -110,7 +128,16 @@ export default function AdminOrders() {
         order.productName.toLowerCase().includes(needle)
       )
     })
-  }, [filter, orders, query])
+  }, [filter, orders, query, fromDate, toDate])
+
+  // Landed here via `?ref=` naming exactly one order — open it straight away
+  // rather than making the click that brought you here do only half the job.
+  const refParam = searchParams.get('ref')
+  useEffect(() => {
+    if (!refParam) return
+    const match = orders.find((o) => o.reference === refParam)
+    if (match) setInspecting(match)
+  }, [orders, refParam])
 
   /**
    * `split.supplierCost` is frozen at whatever the catalogue believed at
@@ -208,12 +235,12 @@ export default function AdminOrders() {
         <StatTile
           label="Orders shown"
           value={String(visible.length)}
-          hint="Only this tile follows the filter and search below"
+          hint="Only this tile follows the filter, dates and search below"
         />
         <StatTile
           label="Customers paid"
           value={allTime === null ? '—' : cedis(allTime.revenue)}
-          hint="All-time, every payment ever collected — not affected by the filter or search below"
+          hint="All-time, every payment ever collected — not affected by the filter, dates or search below"
           tone="brand"
         />
         <StatTile
@@ -234,12 +261,12 @@ export default function AdminOrders() {
         <StatTile
           label="Your profit"
           value={takeableProfit === null ? '—' : cedis(takeableProfit)}
-          hint="What you could take out today without touching money a pending order might still need — the same figure as the Reserve panel's Actually free to spend, not affected by the filter or search below"
+          hint="What you could take out today without touching money a pending order might still need — the same figure as the Reserve panel's Actually free to spend, not affected by the filter, dates or search below"
           tone="success"
         />
       </div>
 
-      <div className="mt-3 mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mt-3 mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <Segmented<Filter>
           options={[
             { value: 'all', label: 'All' },
@@ -250,6 +277,37 @@ export default function AdminOrders() {
           value={filter}
           onChange={setFilter}
         />
+        <div className="flex items-center gap-2">
+          <TextInput
+            type="date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={(event) => setFromDate(event.target.value)}
+            aria-label="From date"
+            className="w-40"
+          />
+          <span className="text-sm text-slate-500 dark:text-slate-400">to</span>
+          <TextInput
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={(event) => setToDate(event.target.value)}
+            aria-label="To date"
+            className="w-40"
+          />
+          {(fromDate || toDate) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setFromDate('')
+                setToDate('')
+              }}
+            >
+              Clear dates
+            </Button>
+          )}
+        </div>
         <div className="relative sm:w-72">
           <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-500 dark:text-slate-400" />
           <TextInput

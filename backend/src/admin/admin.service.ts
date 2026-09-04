@@ -101,8 +101,10 @@ export class AdminService {
   }
 
   /**
-   * Profit or loss from the gap between what the catalogue believed a
-   * bundle cost and what the supplier actually charged.
+   * Whether the catalogue's believed cost for each product still matches
+   * what the supplier is actually charging — going only by the most recent
+   * sale of each, not a running total across every sale that product has
+   * ever had.
    *
    * `SupplierDispatch.costPrice` is the estimate `order.split` was priced
    * from, frozen at sale time; `providerCharged` is what the supplier's own
@@ -111,13 +113,19 @@ export class AdminService {
    * mismatch as it happens (`COST MISMATCH`), but only to the server log,
    * never anywhere an admin would see it.
    *
-   * This is NOT a new cost or revenue line — `FulfilmentService.recordDelivered`
-   * already books `supplier_cost` from the real `providerCharged`, so the
-   * gap is already sitting inside the correct all-time profit total. This
-   * only decomposes that total to show where a slice of it came from, and
-   * specifically which catalogue entries are consistently off — a
-   * consistent negative gap on one product means its listed cost is stale
-   * and it is quietly losing money on every sale, not a one-off.
+   * Deliberately the LAST sale, not an all-time sum: an all-time total mixes
+   * a supplier's cost from a year ago with today's, so a product that was
+   * expensive once and has been fine for months still shows as a loss
+   * forever. The question that actually matters is "is the catalogue price
+   * right *now*" — which the most recent sale answers directly, and stops
+   * answering the moment the catalogue is corrected.
+   *
+   * Bounded by how many distinct products have ever sold, not by order
+   * volume — a `groupBy` finds the latest sale timestamp per product, then
+   * one lookup per product fetches that exact row. A catalogue accuracy
+   * report that queried every order ever placed would only get slower as
+   * the business grows, for a number that only ever needs its most recent
+   * data point.
    *
    * Scoped to completed orders: a rejected order's real charge is a sunk
    * cost already accounted for elsewhere (see `settle`'s rejected branch),
@@ -125,63 +133,39 @@ export class AdminService {
    * a catalogue price against.
    */
   async catalogueAccuracy() {
-    const dispatches = await this.prisma.supplierDispatch.findMany({
+    const latestPerProduct = await this.prisma.supplierDispatch.groupBy({
+      by: ['supplierCode'],
       where: { providerCharged: { not: null }, order: { status: 'completed' } },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        orderRef: true,
-        supplierCode: true,
-        costPrice: true,
-        providerCharged: true,
-        createdAt: true,
-      },
+      _max: { createdAt: true },
     })
+    if (latestPerProduct.length === 0) return []
 
-    if (dispatches.length === 0) return { totalDiff: 0, products: [] }
+    const latest = await Promise.all(
+      latestPerProduct.map(({ supplierCode, _max }) =>
+        this.prisma.supplierDispatch.findFirst({
+          where: { supplierCode, createdAt: _max.createdAt as Date, providerCharged: { not: null } },
+          select: { orderRef: true, supplierCode: true, costPrice: true, providerCharged: true, createdAt: true },
+        }),
+      ),
+    )
+    const rows = latest.filter((d): d is NonNullable<typeof d> => d !== null)
 
-    const codes = [...new Set(dispatches.map((d) => d.supplierCode))]
     const products = await this.prisma.supplierProduct.findMany({
-      where: { code: { in: codes } },
+      where: { code: { in: rows.map((d) => d.supplierCode) } },
       select: { code: true, name: true, network: true },
     })
     const productByCode = new Map(products.map((p) => [p.code, p]))
 
-    const byCode = new Map<
-      string,
-      { diff: number; orders: { orderRef: string; believed: number; charged: number; diff: number; occurredAt: string }[] }
-    >()
-    for (const d of dispatches) {
-      const diff = d.costPrice - (d.providerCharged as number)
-      const entry = byCode.get(d.supplierCode) ?? { diff: 0, orders: [] }
-      entry.diff += diff
-      entry.orders.push({
-        orderRef: d.orderRef,
-        believed: d.costPrice,
-        charged: d.providerCharged as number,
-        diff,
-        occurredAt: d.createdAt.toISOString(),
-      })
-      byCode.set(d.supplierCode, entry)
-    }
-
-    const totalDiff = [...byCode.values()].reduce((sum, v) => sum + v.diff, 0)
-
-    const productsOut = [...byCode.entries()]
-      .map(([code, v]) => ({
-        supplierCode: code,
-        name: productByCode.get(code)?.name ?? code,
-        network: productByCode.get(code)?.network ?? null,
-        diff: v.diff,
-        orderCount: v.orders.length,
-        // Already newest-first from the query above.
-        orders: v.orders,
-      }))
-      // Biggest swings first, either direction — a large loss matters as
-      // much as a large unplanned gain, and neither should hide at the
-      // bottom of the list behind small positive ones.
-      .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
-
-    return { totalDiff, products: productsOut }
+    return rows.map((d) => ({
+      supplierCode: d.supplierCode,
+      name: productByCode.get(d.supplierCode)?.name ?? d.supplierCode,
+      network: productByCode.get(d.supplierCode)?.network ?? null,
+      lastOrderRef: d.orderRef,
+      believed: d.costPrice,
+      charged: d.providerCharged as number,
+      diff: d.costPrice - (d.providerCharged as number),
+      lastSoldAt: d.createdAt.toISOString(),
+    }))
   }
 
   /** FR-6.4 — suspend or restore an account. */
@@ -612,11 +596,13 @@ export class AdminService {
    */
   async mySummary(user: { id: string; role: Role; referralCode: string; phone: string }) {
     const startOfToday = startOfDayUtc(new Date(), 0)
+    const startOfThisWeek = startOfDayUtc(new Date(), 6)
+    const startOfLastWeek = startOfDayUtc(new Date(), 13)
 
     if (user.role === 'agent') {
       const codes = await this.downlineCodes(user.referralCode)
 
-      const [today, allTime, completed, total, activeDownline] = await Promise.all([
+      const [today, allTime, completed, total, activeDownline, thisWeek, lastWeek] = await Promise.all([
         this.prisma.earning.aggregate({
           where: { userId: user.id, type: { in: ['sale', 'downline'] }, createdAt: { gte: startOfToday } },
           _sum: { amount: true },
@@ -630,6 +616,20 @@ export class AdminService {
         this.prisma.order.count({ where: { soldByCode: { in: codes } } }),
         this.prisma.user.count({
           where: { uplineCode: user.referralCode, role: 'agent', status: 'active' },
+        }),
+        // This week vs last week — a bare "earned today" says nothing about
+        // whether things are picking up or trailing off.
+        this.prisma.earning.aggregate({
+          where: { userId: user.id, type: { in: ['sale', 'downline'] }, createdAt: { gte: startOfThisWeek } },
+          _sum: { amount: true },
+        }),
+        this.prisma.earning.aggregate({
+          where: {
+            userId: user.id,
+            type: { in: ['sale', 'downline'] },
+            createdAt: { gte: startOfLastWeek, lt: startOfThisWeek },
+          },
+          _sum: { amount: true },
         }),
       ])
 
@@ -652,6 +652,10 @@ export class AdminService {
         ordersCompleted: completed,
         ordersTotal: total,
         activeSubAgents: activeDownline,
+        earnedTrend: {
+          thisWeek: thisWeek._sum.amount ?? 0,
+          lastWeek: lastWeek._sum.amount ?? 0,
+        },
       }
     }
 
@@ -704,8 +708,24 @@ export class AdminService {
   /** Headline numbers for the admin overview. */
   async overview() {
     const since = startOfDayUtc(new Date(), 29)
+    const startOfThisWeek = startOfDayUtc(new Date(), 6)
+    const startOfLastWeek = startOfDayUtc(new Date(), 13)
 
-    const [completed, failed, agents, customers, pendingWithdrawals, credits] = await Promise.all([
+    const [
+      completed,
+      failed,
+      agents,
+      customers,
+      pendingWithdrawals,
+      credits,
+      revenueThisWeek,
+      revenueLastWeek,
+      refundedOrders,
+      resolvedOrders,
+      startedThisWeek,
+      completedThisWeek,
+      failedThisWeek,
+    ] = await Promise.all([
       this.prisma.order.aggregate({
         where: { status: 'completed', createdAt: { gte: since } },
         _count: { _all: true },
@@ -724,7 +744,48 @@ export class AdminService {
         _count: { _all: true },
         _sum: { amount: true },
       }),
+      // This week vs last week, for a trend arrow rather than a bare number.
+      this.prisma.order.aggregate({
+        where: { status: 'completed', createdAt: { gte: startOfThisWeek } },
+        _sum: { salePrice: true },
+      }),
+      this.prisma.order.aggregate({
+        where: { status: 'completed', createdAt: { gte: startOfLastWeek, lt: startOfThisWeek } },
+        _sum: { salePrice: true },
+      }),
+      // All-time, deliberately: with only a handful of orders some weeks, a
+      // 7-day refund rate swings on one order and means nothing.
+      this.prisma.order.count({ where: { refunded: true } }),
+      this.prisma.order.count({ where: { status: { in: ['completed', 'failed'] } } }),
+      // The funnel: every checkout started this week, whatever it became.
+      this.prisma.order.count({ where: { createdAt: { gte: startOfThisWeek } } }),
+      this.prisma.order.count({ where: { status: 'completed', createdAt: { gte: startOfThisWeek } } }),
+      this.prisma.order.count({ where: { status: 'failed', createdAt: { gte: startOfThisWeek } } }),
     ])
+
+    /**
+     * Active agents who have sold before but gone quiet — not agents still in
+     * their first two weeks, who have not had a fair chance to make a sale
+     * yet. `soldByCode` on the order is the agent's referral code, not their
+     * id, so this joins back through that.
+     */
+    const quietSince = startOfDayUtc(new Date(), 13)
+    const agentRows = await this.prisma.user.findMany({
+      where: { role: 'agent', status: 'active', joinedAt: { lt: quietSince } },
+      select: { name: true, referralCode: true },
+    })
+    const lastSales = await this.prisma.order.groupBy({
+      by: ['soldByCode'],
+      where: { soldByCode: { in: agentRows.map((a) => a.referralCode) }, status: 'completed' },
+      _max: { createdAt: true },
+    })
+    const lastSaleByCode = new Map(lastSales.map((r) => [r.soldByCode, r._max.createdAt]))
+    const goingQuietAgents = agentRows
+      .filter((a) => {
+        const last = lastSaleByCode.get(a.referralCode)
+        return last ? last < quietSince : false // has sold before, just not recently
+      })
+      .map((a) => ({ name: a.name, referralCode: a.referralCode, lastSaleAt: lastSaleByCode.get(a.referralCode)! }))
 
     const orders = completed._count._all
     const revenue = completed._sum.salePrice ?? 0
@@ -764,6 +825,21 @@ export class AdminService {
         count: credits._count._all,
         amount: credits._sum.amount ?? 0,
       },
+      revenueTrend: {
+        thisWeek: revenueThisWeek._sum.salePrice ?? 0,
+        lastWeek: revenueLastWeek._sum.salePrice ?? 0,
+      },
+      /** All-time, on purpose — see the query above. */
+      refundRate: resolvedOrders > 0 ? refundedOrders / resolvedOrders : 0,
+      checkoutFunnel: {
+        started: startedThisWeek,
+        completed: completedThisWeek,
+        failed: failedThisWeek,
+      },
+      goingQuietAgents: goingQuietAgents
+        .sort((a, b) => a.lastSaleAt.getTime() - b.lastSaleAt.getTime())
+        .slice(0, 10)
+        .map((a) => ({ ...a, lastSaleAt: a.lastSaleAt.toISOString() })),
     }
   }
 }

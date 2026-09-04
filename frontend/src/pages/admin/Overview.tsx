@@ -4,7 +4,7 @@ import ReservePanel from './ReservePanel'
 import FloatPanel from './FloatPanel'
 import { useStore } from '../../state/store'
 import { api, type FinanceStatement } from '../../lib/api'
-import { cedis, cedisCompact, dateTime } from '../../lib/format'
+import { cedis, cedisCompact, dateTime, trendText } from '../../lib/format'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
 import { BarChart, Donut } from '../../components/charts'
 import {
@@ -66,7 +66,7 @@ function MoneyBand({
 
 /** FR-6.3 — all orders, all users, total revenue, system-wide statistics. */
 export default function Overview() {
-  const { orders, users, withdrawals, revenueByDay } = useStore()
+  const { orders, users, withdrawals, revenueByDay, adminOverview: overview } = useStore()
 
   /**
    * By volume sold, all-time — from the same per-user figures the Users page
@@ -168,36 +168,41 @@ export default function Overview() {
           numbers mean anything. Disappears for good once every step is done. */}
       <GettingStartedCard />
 
-      {/* Things needing attention come before the vanity numbers. */}
-      {(pendingWithdrawals.length > 0 || failedOrders.length > 0) && (
-        <div className="mb-3 grid gap-3 sm:grid-cols-2">
-          {pendingWithdrawals.length > 0 && (
-            <Callout tone="warning" title="Withdrawals waiting on you" icon={<CashIcon className="size-4" />}>
-              {pendingWithdrawals.length} request
-              {pendingWithdrawals.length === 1 ? '' : 's'} totalling{' '}
-              <strong className="font-bold">
-                {cedis(pendingWithdrawals.reduce((s, w) => s + w.amount, 0))}
-              </strong>
-              .{' '}
-              <Link to="/admin/withdrawals" className="font-semibold underline">
-                Review now
-              </Link>
-            </Callout>
-          )}
-          {failedOrders.length > 0 && (
-            <Callout tone="info" title="Failed orders, all refunded" icon={<AlertIcon className="size-4" />}>
-              {failedOrders.length} order{failedOrders.length === 1 ? '' : 's'} failed at the
-              provider. Wallets were credited back automatically — no action needed.
-            </Callout>
-          )}
-        </div>
-      )}
+      {/* Things needing attention come before the vanity numbers — informational
+          only, though: each one links to the dedicated page that actually acts
+          on it, rather than doing the work here. */}
+      <div className="mb-3 grid gap-3 sm:grid-cols-2">
+        <NeedsAttentionCallout />
+        {pendingWithdrawals.length > 0 && (
+          <Callout tone="warning" title="Withdrawals waiting on you" icon={<CashIcon className="size-4" />}>
+            {pendingWithdrawals.length} request
+            {pendingWithdrawals.length === 1 ? '' : 's'} totalling{' '}
+            <strong className="font-bold">
+              {cedis(pendingWithdrawals.reduce((s, w) => s + w.amount, 0))}
+            </strong>
+            .{' '}
+            <Link to="/admin/withdrawals" className="font-semibold underline">
+              Review now
+            </Link>
+          </Callout>
+        )}
+        {failedOrders.length > 0 && (
+          <Callout tone="info" title="Failed orders, all refunded" icon={<AlertIcon className="size-4" />}>
+            {failedOrders.length} order{failedOrders.length === 1 ? '' : 's'} failed at the
+            provider. Wallets were credited back automatically — no action needed.
+          </Callout>
+        )}
+      </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
           label="Revenue, last 7 days"
           value={cedisCompact(weekRevenue)}
-          hint={`${weekOrders.toLocaleString()} orders`}
+          hint={
+            (overview
+              ? trendText(overview.revenueTrend.thisWeek, overview.revenueTrend.lastWeek, 'last week')
+              : null) ?? `${weekOrders.toLocaleString()} orders`
+          }
           tone="brand"
           icon={<TrendUpIcon className="size-5" />}
         />
@@ -224,7 +229,28 @@ export default function Overview() {
           tone={inFlight.length > 0 ? 'warning' : 'neutral'}
           icon={<ReceiptIcon className="size-5" />}
         />
+        {overview && (
+          <>
+            <StatTile
+              label="Refund rate"
+              value={`${(overview.refundRate * 100).toFixed(1)}%`}
+              hint="All-time — of every order that ever finished, one way or the other"
+              tone={overview.refundRate > 0.1 ? 'warning' : 'neutral'}
+              icon={<AlertIcon className="size-5" />}
+            />
+            <StatTile
+              label="Checkout funnel, this week"
+              value={`${overview.checkoutFunnel.completed}/${overview.checkoutFunnel.started}`}
+              hint={`${overview.checkoutFunnel.failed} failed at the provider, ${
+                overview.checkoutFunnel.started - overview.checkoutFunnel.completed - overview.checkoutFunnel.failed
+              } still in flight or abandoned`}
+              icon={<ReceiptIcon className="size-5" />}
+            />
+          </>
+        )}
       </div>
+
+      {overview && overview.goingQuietAgents.length > 0 && <GoingQuietCard agents={overview.goingQuietAgents} />}
 
       <ReservePanel />
 
@@ -410,7 +436,7 @@ export default function Overview() {
         </div>
       </Card>
 
-      <CatalogueAccuracyCard />
+      <CatalogueAccuracyCallout />
 
       {/* Provider health — NFR-3.1, NFR-3.2 made visible. Read from /health, not
           hardcoded: a badge that always says "Operational" answers nothing. */}
@@ -488,6 +514,60 @@ export default function Overview() {
  * gate for what that costs) to solve a problem an unmissable checklist
  * already solves just as well.
  */
+
+/**
+ * Orders nobody can resolve automatically — see `ReconcilerService.needsAttention`.
+ *
+ * Informational only, on purpose: Overview says how many, and links to the
+ * dedicated page that actually resolves them — the same split every other
+ * queue on this page already uses (Withdrawals, Refunds), rather than one
+ * card being the odd one out with an action embedded in it.
+ */
+function NeedsAttentionCallout() {
+  const [count, setCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    api
+      .needsAttentionOrders()
+      .then((rows) => setCount(rows.length))
+      .catch(() => setCount(0))
+  }, [])
+
+  if (!count) return null
+
+  return (
+    <Callout tone="warning" title="Needs your attention" icon={<AlertIcon className="size-4" />}>
+      {count} order{count === 1 ? '' : 's'} stuck at the provider — the reconciler will not guess at these.{' '}
+      <Link to="/admin/needs-attention" className="font-semibold underline">
+        Review now
+      </Link>
+    </Callout>
+  )
+}
+
+/** Active agents who have sold before and gone quiet — not brand-new ones still finding their feet. */
+function GoingQuietCard({
+  agents,
+}: {
+  agents: { name: string; referralCode: string; lastSaleAt: string }[]
+}) {
+  return (
+    <Card className="mt-3">
+      <CardHead title="Agents going quiet" subtitle="Sold before, nothing in the last two weeks" />
+      <div className="space-y-2 p-4 sm:p-5">
+        {agents.map((agent) => (
+          <div key={agent.referralCode} className="flex items-center justify-between gap-3 text-sm">
+            <span className="font-medium text-slate-900 dark:text-slate-50">
+              {agent.name} <span className="text-slate-400">· {agent.referralCode}</span>
+            </span>
+            <span className="text-slate-500 dark:text-slate-400">Last sale {dateTime(agent.lastSaleAt)}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
 function GettingStartedCard() {
   const { products, session } = useStore()
   const [floatLogged, setFloatLogged] = useState<boolean | null>(null)
@@ -580,17 +660,16 @@ function GettingStartedCard() {
 }
 
 /**
- * Profit or loss from the gap between what the catalogue believes a bundle
- * costs and what the supplier actually charges — see
- * `AdminService.catalogueAccuracy`.
+ * The worst catalogue-vs-actual gaps, going only by each product's most
+ * recent sale — see `AdminService.catalogueAccuracy`.
  *
- * Already inside "Your margin" above — this is not a second cost or revenue
- * line, only a decomposition of where a slice of that all-time total came
- * from. What it adds is attribution: a product with a consistent negative
- * gap has a stale catalogue price quietly losing money on every sale, and
- * nothing else on this page would ever say so.
+ * Informational only, same as the rest of Overview: this says how many
+ * catalogue prices are currently wrong and by how much, nothing more. The
+ * full list, and the ability to act on it, lives on the dedicated Catalogue
+ * accuracy page — this only ever shows the losses worth worrying about,
+ * biggest first, with a link out.
  */
-function CatalogueAccuracyCard() {
+function CatalogueAccuracyCallout() {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.catalogueAccuracy>> | null>(null)
 
   useEffect(() => {
@@ -604,109 +683,34 @@ function CatalogueAccuracyCard() {
     }
   }, [])
 
-  if (data && data.products.length === 0) return null
+  const losses = (data ?? []).filter((p) => p.diff < 0).sort((a, b) => a.diff - b.diff)
+
+  if (losses.length === 0) return null
 
   return (
     <Card className="mt-3">
       <CardHead
         title="Catalogue accuracy"
-        subtitle="All-time — where the supplier's real charge differed from what the catalogue said"
+        subtitle="Worst gaps between what the catalogue says and what the supplier last charged"
       />
-      <div className="p-4 sm:p-5">
-        {!data ? (
-          <p className="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
-        ) : (
-          <>
-            <div
-              className={`rounded-xl border p-3.5 text-sm ${
-                data.totalDiff >= 0
-                  ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40'
-                  : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40'
-              }`}
-            >
-              <span className="font-semibold text-slate-900 dark:text-slate-50">
-                {cedis(data.totalDiff, { sign: true })}
-              </span>{' '}
-              <span className="text-slate-600 dark:text-slate-300">
-                {data.totalDiff >= 0
-                  ? "extra profit, already counted in your margin above — the supplier has charged less than the catalogue said, net, across every sale."
-                  : "already eaten out of your margin above — the supplier has charged more than the catalogue said, net, across every sale."}
-              </span>
-            </div>
-
-            <div className="mt-4 space-y-2">
-              {data.products.map((product) => (
-                <details
-                  key={product.supplierCode}
-                  className="rounded-xl border border-slate-200 dark:border-slate-700 open:bg-slate-50 dark:open:bg-slate-800/60"
-                >
-                  <summary className="flex cursor-pointer items-center justify-between gap-3 px-3.5 py-3">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <NetworkChip network={product.network} />
-                      <span className="truncate font-medium text-slate-900 dark:text-slate-50">
-                        {product.name}
-                      </span>
-                      <span className="shrink-0 text-xs text-slate-500 dark:text-slate-400">
-                        {product.orderCount} sale{product.orderCount === 1 ? '' : 's'}
-                      </span>
-                    </span>
-                    <span
-                      className={`tabular shrink-0 font-semibold ${
-                        product.diff >= 0
-                          ? 'text-emerald-700 dark:text-emerald-400'
-                          : 'text-red-700 dark:text-red-400'
-                      }`}
-                    >
-                      {cedis(product.diff, { sign: true })}
-                    </span>
-                  </summary>
-                  <TableWrap caption={`Orders behind ${product.name}'s catalogue gap`}>
-                    <thead>
-                      <tr>
-                        <Th>Order</Th>
-                        <Th align="right">Catalogue said</Th>
-                        <Th align="right">Actually charged</Th>
-                        <Th align="right">Diff</Th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {product.orders.map((order) => (
-                        <tr key={order.orderRef}>
-                          <Td>
-                            <p className="tabular text-xs text-slate-500 dark:text-slate-400">{order.orderRef}</p>
-                            <p className="text-xs text-slate-400 dark:text-slate-500">{dateTime(order.occurredAt)}</p>
-                          </Td>
-                          <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
-                            {cedis(order.believed)}
-                          </Td>
-                          <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
-                            {cedis(order.charged)}
-                          </Td>
-                          <Td
-                            align="right"
-                            className={`tabular font-semibold ${
-                              order.diff >= 0
-                                ? 'text-emerald-700 dark:text-emerald-400'
-                                : 'text-red-700 dark:text-red-400'
-                            }`}
-                          >
-                            {cedis(order.diff, { sign: true })}
-                          </Td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </TableWrap>
-                </details>
-              ))}
-            </div>
-
-            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-              A product sitting consistently in the red here has a catalogue price that no longer
-              matches what the supplier actually charges — worth updating it on the Cost prices page
-              before it loses money on every future sale.
-            </p>
-          </>
-        )}
+      <div className="space-y-2 p-4 sm:p-5">
+        {losses.slice(0, 5).map((product) => (
+          <div key={product.supplierCode} className="flex items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2">
+              <NetworkChip network={product.network} />
+              <span className="truncate font-medium text-slate-900 dark:text-slate-50">{product.name}</span>
+            </span>
+            <span className="tabular shrink-0 font-semibold text-red-700 dark:text-red-400">
+              {cedis(product.diff, { sign: true })}
+            </span>
+          </div>
+        ))}
+        <Link
+          to="/admin/catalogue-accuracy"
+          className="mt-1 inline-block text-sm font-semibold text-brand-700 underline dark:text-brand-300"
+        >
+          Review catalogue accuracy
+        </Link>
       </div>
     </Card>
   )

@@ -109,6 +109,20 @@ export function longDate(iso: string): string {
   return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
 }
 
+/**
+ * A trend fragment for a stat tile's hint — "+18% vs last period" or similar.
+ *
+ * Silent (returns null) when the prior period was zero: a jump from GHS 0 to
+ * anything is not a percentage, it is the first sale of the period, and
+ * "+∞%"/"—" both read as a bug rather than good news.
+ */
+export function trendText(thisPeriod: number, lastPeriod: number, label: string): string | null {
+  if (lastPeriod === 0) return null
+  const change = ((thisPeriod - lastPeriod) / lastPeriod) * 100
+  const sign = change >= 0 ? '+' : ''
+  return `${sign}${change.toFixed(0)}% vs ${label}`
+}
+
 /** Mask the middle of a phone number for display in shared/admin contexts. */
 export function maskPhone(phone: string): string {
   if (phone.length < 7) return phone
