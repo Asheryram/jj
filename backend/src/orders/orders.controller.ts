@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common'
+import { Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { OrdersService } from './orders.service'
@@ -25,8 +25,16 @@ export class OrdersController {
    * caller is still recognised, because the token is decoded on every route.
    */
   @Post()
-  place(@Body() dto: PlaceOrderDto, @CurrentUser() user: AuthUser | undefined) {
-    return this.orders.place(dto, user)
+  place(
+    @Body() dto: PlaceOrderDto,
+    @CurrentUser() user: AuthUser | undefined,
+    // Where Paystack should send this buyer back to, if it's their own agent's
+    // custom domain — see `PaymentsService.callbackUrl`. Never trusted blindly:
+    // only used if it resolves to the domain that specific agent actually has
+    // live and approved.
+    @Headers('origin') origin?: string,
+  ) {
+    return this.orders.place(dto, user, origin)
   }
 
   /**

@@ -50,7 +50,7 @@ export class OrdersService {
    * outbound HTTP call (skills-breakdown.md §4.4.3). It is dispatched after
    * commit, and the order sits in `processing` until it answers.
    */
-  async place(dto: PlaceOrderDto, user: AuthUser | undefined) {
+  async place(dto: PlaceOrderDto, user: AuthUser | undefined, origin?: string) {
     /**
      * A wallet purchase debits the balance inside this same call — there is
      * no Paystack step afterward to make it recoverable, unlike `momo`. An
@@ -177,6 +177,7 @@ export class OrdersService {
         recipient: order.recipient,
         buyerUserId: order.buyerUserId,
         sellerCode: order.soldByCode,
+        origin,
       })
       return { ...toOrder(order), paymentUrl }
     }

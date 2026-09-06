@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
@@ -132,11 +132,25 @@ export default function AdminOrders() {
 
   // Landed here via `?ref=` naming exactly one order — open it straight away
   // rather than making the click that brought you here do only half the job.
+  //
+  // Guarded on having already opened for this exact `refParam`: `orders` is
+  // in the dependency list so this can retry while the list is still
+  // loading, but it also gets a brand-new array reference on every
+  // `watchOrder` poll tick (any order being tracked anywhere re-sets the
+  // whole list every 1.5-5s) even when nothing about *this* order changed.
+  // Without the guard, every one of those re-fired `setInspecting` with a
+  // fresh-but-equal object, which `DispatchModal`'s own reset effect below
+  // reads as a genuinely different order and wipes its note field — an
+  // admin typing "why" mid-resolve would watch their own keystrokes vanish.
   const refParam = searchParams.get('ref')
+  const autoOpenedFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!refParam) return
+    if (!refParam || autoOpenedFor.current === refParam) return
     const match = orders.find((o) => o.reference === refParam)
-    if (match) setInspecting(match)
+    if (match) {
+      setInspecting(match)
+      autoOpenedFor.current = refParam
+    }
   }, [orders, refParam])
 
   /**
@@ -589,6 +603,13 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
   const [noteError, setNoteError] = useState('')
   const [busy, setBusy] = useState(false)
 
+  /**
+   * Keyed on `order?.id`, not `order` itself — a parent re-render can (and
+   * does, via `watchOrder`'s polling refreshing the whole orders list) hand
+   * this the *same* order as a fresh object every few seconds. Depending on
+   * the object reference reset the note field being typed into below on
+   * every one of those, not just on an actual navigation to a different order.
+   */
   useEffect(() => {
     if (!order) {
       setAttempts(null)
@@ -609,7 +630,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
     return () => {
       live = false
     }
-  }, [order])
+  }, [order?.id])
 
   if (!order) return null
 

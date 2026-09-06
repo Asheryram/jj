@@ -6,6 +6,7 @@ import { FulfilmentService } from '../orders/fulfilment.service'
 import { ValidationError } from '../common/domain-errors'
 import { PaystackClient } from './paystack.client'
 import { LedgerService } from '../finance/ledger.service'
+import { DomainsService } from '../domains/domains.service'
 
 /**
  * Collecting money, and what happens once it arrives.
@@ -36,6 +37,7 @@ export class PaymentsService {
     private readonly paystack: PaystackClient,
     private readonly fulfilment: FulfilmentService,
     private readonly ledger: LedgerService,
+    private readonly domains: DomainsService,
   ) {}
 
   get live(): boolean {
@@ -50,14 +52,51 @@ export class PaymentsService {
    * paid from inside an agent's shop lands back inside it — same reasoning,
    * and same rule of only ever using a code the order already carries, as
    * `SetupTokensService.link`.
+   *
+   * That was still wrong for an agent's own custom domain: a buyer checking
+   * out on `agentshop.com` got sent back to `PUBLIC_APP_URL/s/<code>/pay/return`
+   * — bounced clean off the agent's own domain onto the platform's, the exact
+   * white-labelling the custom-domain feature exists to avoid breaking.
+   *
+   * `checkoutOrigin` is the browser's own `Origin` header from the checkout
+   * request — never trusted on its own, since a client can send any value
+   * there. It only ever wins here when `DomainsService.resolve` — the same
+   * check CORS itself uses to decide whether to trust an origin at all —
+   * says that exact hostname is *this specific* agent's own live, approved
+   * domain. Anything else (no origin, a mismatch, a domain that resolves to
+   * a different agent) falls through to the existing platform-path behaviour
+   * unchanged.
    */
-  private callbackUrl(reference: string, agentCode?: string | null): string {
+  private async callbackUrl(
+    reference: string,
+    agentCode?: string | null,
+    checkoutOrigin?: string | null,
+  ): Promise<string> {
+    if (agentCode && checkoutOrigin) {
+      const hostname = this.hostnameOf(checkoutOrigin)
+      if (hostname) {
+        const resolvedCode = await this.domains.resolve(hostname).catch(() => null)
+        if (resolvedCode === agentCode) {
+          return `https://${hostname}/pay/return?reference=${encodeURIComponent(reference)}`
+        }
+      }
+    }
+
     const base = (this.config.get<string>('PUBLIC_APP_URL')?.trim() || 'http://localhost:5173').replace(
       /\/$/,
       '',
     )
     const path = agentCode ? `/s/${agentCode}/pay/return` : '/pay/return'
     return `${base}${path}?reference=${encodeURIComponent(reference)}`
+  }
+
+  /** A bare hostname from an `Origin` header, or null if it isn't one. */
+  private hostnameOf(origin: string): string | null {
+    try {
+      return new URL(origin).hostname
+    } catch {
+      return null
+    }
   }
 
   /**
@@ -87,6 +126,8 @@ export class PaymentsService {
     recipient: string
     buyerUserId: string | null
     sellerCode: string | null
+    /** The checkout request's own `Origin` header — see `callbackUrl`. */
+    origin?: string
   }): Promise<{ paymentUrl: string }> {
     const email = await this.prisma.user
       .findUnique({
@@ -110,7 +151,7 @@ export class PaymentsService {
       reference: order.reference,
       amount: order.salePrice,
       email: this.emailFor(order.buyerPhone, email),
-      callbackUrl: this.callbackUrl(order.reference, order.sellerCode),
+      callbackUrl: await this.callbackUrl(order.reference, order.sellerCode, order.origin),
       metadata: {
         purpose: 'order',
         product: order.productName,
@@ -171,7 +212,7 @@ export class PaymentsService {
       reference,
       amount,
       email: this.emailFor(user.phone, user.email),
-      callbackUrl: this.callbackUrl(reference),
+      callbackUrl: await this.callbackUrl(reference),
       metadata: { purpose: 'topup' },
     })
 
