@@ -28,7 +28,19 @@ services:
       # The Neon connection string. A secret, and deliberately not wired to a
       # Render-managed database: the database is its own service at another
       # provider, so the only thing shared between them is this string.
+      #
+      # This is Neon's POOLED connection string (the one with `-pooler` in
+      # the hostname) — what the running app uses for everyday queries.
       - key: DATABASE_URL
+        sync: false
+      # Neon's DIRECT (un-pooled) connection string — same host, minus
+      # `-pooler`, from the same "Connection details" panel in Neon. Used
+      # only by `prisma migrate deploy` in the release command: a pooled
+      # PgBouncer connection cannot reliably hold the advisory lock Migrate
+      # takes to stop two deploys racing, and running deploy through it
+      # times out waiting to acquire a lock it can never actually see itself
+      # holding — see the comment on `datasource db` in schema.prisma.
+      - key: DIRECT_URL
         sync: false
 
       # ── Set these in the dashboard; they are secrets or they are per-deploy ──

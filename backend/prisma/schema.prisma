@@ -16,6 +16,16 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  // Neon's pooled endpoint (the `-pooler` hostname) multiplexes connections
+  // through PgBouncer, which does not preserve session state — `migrate
+  // deploy` takes a `pg_advisory_lock` to stop two deploys racing each
+  // other, and through the pooler that lock can be granted on one physical
+  // backend connection while a later query in the same "session" lands on
+  // another, so it never sees itself as already holding it and just times
+  // out waiting. `directUrl` is Neon's un-pooled connection string instead,
+  // used only by Migrate (`deploy`/`dev`/`db push`) — the running app still
+  // connects through `url` above, where pooling is exactly what you want.
+  directUrl = env("DIRECT_URL")
 }
 
 enum Role {
