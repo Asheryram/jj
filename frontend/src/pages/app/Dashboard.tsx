@@ -13,6 +13,7 @@ import {
   CardHead,
   CopyField,
   EmptyState,
+  Modal,
   NetworkChip,
   StatTile,
   StatusBadge,
@@ -31,6 +32,7 @@ import {
   TrendUpIcon,
   UsersIcon,
   WalletIcon,
+  WhatsAppIcon,
 } from '../../components/icons'
 
 /** FR-6.1 — order history, balance and referred agents in one place. */
@@ -45,9 +47,30 @@ export default function Dashboard() {
     agentEarningsByDay,
     mySummary,
     withdrawals,
+    whatsappChannelUrl,
+    markWhatsappChannelSeen,
   } = useStore()
 
   const isAgent = session?.role === 'agent'
+
+  /**
+   * Shown once per link, not once ever: compared against the specific URL
+   * already seen (see `Session.whatsappChannelSeenUrl`), so replacing the
+   * channel later surfaces the popup again instead of leaving it dismissed
+   * for a link that no longer exists.
+   *
+   * `dismissed` closes it immediately on click, without waiting on the
+   * network call that records it — the request can only make this stay
+   * closed on a later visit, never how it behaves on this one.
+   */
+  const [dismissed, setDismissed] = useState(false)
+  const showWhatsappPopup =
+    isAgent && Boolean(whatsappChannelUrl) && session?.whatsappChannelSeenUrl !== whatsappChannelUrl && !dismissed
+
+  const closeWhatsappPopup = () => {
+    setDismissed(true)
+    void markWhatsappChannelSeen()
+  }
 
   const [domain, setDomain] = useState<MyDomainStatus | null>(null)
   useEffect(() => {
@@ -158,6 +181,23 @@ export default function Dashboard() {
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
             Customers who buy here pay your prices, and your margin is credited automatically.
           </p>
+        </Card>
+      )}
+
+      {/* ── The admin's WhatsApp channel, always one tap away ── */}
+      {isAgent && whatsappChannelUrl && (
+        <Card className="mt-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+              <WhatsAppIcon className="size-4 text-emerald-600 dark:text-emerald-400" /> Join the
+              WhatsApp channel
+            </p>
+            <a href={whatsappChannelUrl} target="_blank" rel="noreferrer">
+              <Button size="sm" variant="whatsapp" onClick={() => void markWhatsappChannelSeen()}>
+                <WhatsAppIcon className="size-4" /> Join channel
+              </Button>
+            </a>
+          </div>
         </Card>
       )}
 
@@ -390,6 +430,29 @@ export default function Dashboard() {
           </Card>
         </div>
       </div>
+
+      {/* ── First time this agent has seen this particular channel link ── */}
+      {showWhatsappPopup && whatsappChannelUrl && (
+        <Modal open title="Join our WhatsApp channel" onClose={closeWhatsappPopup}>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Get announcements, catalogue changes and payout updates straight from James.
+            </p>
+            <a href={whatsappChannelUrl} target="_blank" rel="noreferrer" className="block">
+              <Button block size="lg" variant="whatsapp" onClick={closeWhatsappPopup}>
+                <WhatsAppIcon className="size-5" /> Join channel
+              </Button>
+            </a>
+            <button
+              type="button"
+              onClick={closeWhatsappPopup}
+              className="block w-full text-center text-sm font-semibold text-slate-500 hover:underline dark:text-slate-400"
+            >
+              Maybe later
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
