@@ -245,6 +245,12 @@ export interface CatalogueSnapshot {
      * mistaking that for "sent, but empty."
      */
     whatsappChannelUrl?: string | null
+    /**
+     * A warning banner for the whole site. Sent to every role, guests
+     * included — unlike the WhatsApp link above, this is exactly the
+     * audience it's for. Null means nothing is set, so no banner shows.
+     */
+    siteNotice: string | null
   }
 }
 
@@ -412,6 +418,8 @@ export interface PlatformSettings {
   minWithdrawal: number
   /** The admin's WhatsApp channel invite link, shown to agents. Null = not set. */
   whatsappChannelUrl: string | null
+  /** A warning banner shown site-wide, agents and guests alike. Null = not set. */
+  siteNotice: string | null
 }
 
 /** One SKU in the provider's catalogue. */

@@ -191,6 +191,8 @@ export default function Settings() {
       <MinWithdrawalSetting />
 
       <WhatsAppChannelSetting />
+
+      <SiteNoticeSetting />
     </div>
   )
 }
@@ -846,6 +848,101 @@ function WhatsAppChannelSetting() {
             onBlur={() => void save()}
           />
         </Field>
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * A site-wide warning banner — agents, customers and guests all see the same
+ * one, on every page including an agent's own storefront. Not a popup on
+ * purpose: it's meant to sit in view for as long as the situation lasts, so a
+ * visitor who returns partway through still sees it, rather than only the
+ * first person to load the page after it was set.
+ *
+ * Stays up until cleared here — nothing expires it automatically, since only
+ * James knows when the actual problem is over.
+ */
+function SiteNoticeSetting() {
+  const { pushToast } = useStore()
+  const [draft, setDraft] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api
+      .adminSettings()
+      .then((settings) => {
+        if (!live) return
+        setDraft(settings.siteNotice ?? '')
+        setLoaded(true)
+      })
+      .catch(() => live && setLoaded(true))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const save = async () => {
+    const text = draft.trim()
+    try {
+      await api.setSetting('siteNotice', text)
+      pushToast({
+        tone: 'success',
+        title: text === '' ? 'Banner cleared' : 'Banner is live',
+        detail:
+          text === ''
+            ? 'The site is back to normal for everyone.'
+            : 'Every visitor sees it now — agents, customers and guests, on every page.',
+      })
+    } catch (error) {
+      pushToast({
+        tone: 'error',
+        title: error instanceof Error ? error.message : 'We could not save that.',
+      })
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Site-wide notice"
+        subtitle="A warning banner shown to everyone, everywhere on the site"
+        action={<AlertIcon className="size-5 text-amber-600 dark:text-amber-400" />}
+      />
+      <div className="space-y-3 px-4 pb-4">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          For something like a network running slow. It's not a popup — it sits at the top of every
+          page for as long as it's set, agents and public visitors alike, including anyone on an
+          agent's own shop. Clear it the moment things are back to normal; nothing here expires on its
+          own.
+        </p>
+
+        <Field
+          label="Banner message"
+          htmlFor="site-notice"
+          hint="Leave blank to remove the banner entirely."
+        >
+          <TextInput
+            id="site-notice"
+            placeholder="MTN is running slow right now — orders are still going through, just taking longer than usual."
+            maxLength={300}
+            disabled={!loaded}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={() => void save()}
+          />
+        </Field>
+
+        {draft.trim() && (
+          <div>
+            <p className="mb-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">Preview</p>
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm font-medium text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200">
+              <AlertIcon className="mt-0.5 size-4.5 shrink-0" />
+              <p>{draft.trim()}</p>
+            </div>
+          </div>
+        )}
       </div>
     </Card>
   )

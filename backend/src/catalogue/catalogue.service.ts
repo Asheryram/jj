@@ -72,6 +72,14 @@ export class CatalogueService {
          * more widely than the audience it is actually for.
          */
         ...(role === 'agent' || isAdminRole(role) ? { whatsappChannelUrl: settings.whatsappChannelUrl } : {}),
+        /**
+         * A warning banner for the whole site — unlike the WhatsApp link
+         * above, sent to every role, guests included: this is exactly the
+         * audience James wants it seen by, right down to a customer landing
+         * on an agent's own storefront (this same snapshot is what renders
+         * there too, so no separate plumbing is needed to reach it).
+         */
+        siteNotice: settings.siteNotice,
       },
     }
   }

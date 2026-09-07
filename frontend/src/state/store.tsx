@@ -159,6 +159,8 @@ interface Store {
   whatsappChannelUrl: string | null
   /** Call once the popup has been acted on or dismissed, so it does not return. */
   markWhatsappChannelSeen: () => Promise<void>
+  /** A warning banner for the whole site — agents and guests alike. Null = not set. */
+  siteNotice: string | null
   retailPrice: (product: Product, sellerCode?: string | null) => number
   myBand: (product: Product) => PriceBand
   myResalePrice: (product: Product) => number
@@ -259,6 +261,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    */
   const [whatsappChannelUrl, setWhatsappChannelUrl] = useState<string | null>(null)
 
+  /** A warning banner for the whole site, sent to every role including guests. */
+  const [siteNotice, setSiteNotice] = useState<string | null>(null)
+
   const [admin, setAdmin] = useState<{ userId: string; name: string }>({
     userId: '',
     name: 'JamesDataConsult',
@@ -306,6 +311,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (snapshot.admin) setAdmin(snapshot.admin)
     setPaystackFeeBp(snapshot.settings.paystackFeeBp)
     setWhatsappChannelUrl(snapshot.settings.whatsappChannelUrl ?? null)
+    setSiteNotice(snapshot.settings.siteNotice)
   }, [])
 
   /**
@@ -1070,6 +1076,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       paystackFeeBp,
       whatsappChannelUrl,
       markWhatsappChannelSeen,
+      siteNotice,
       retailPrice,
       myBand,
       myResalePrice,
@@ -1124,6 +1131,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       paystackFeeBp,
       whatsappChannelUrl,
       markWhatsappChannelSeen,
+      siteNotice,
       products,
       pushToast,
       ready,

@@ -264,6 +264,31 @@ export function RequireAuth({ role, roles }: { role?: Role; roles?: Role[] }) {
   return <Outlet />
 }
 
+/**
+ * A site-wide warning banner, set by James for something like a network
+ * running slow — not something to interrupt anyone with, so it never pops
+ * up or asks to be dismissed; it just sits in view for as long as the
+ * situation lasts, the same for a guest, an agent or an admin. Renders
+ * nothing when there's nothing set.
+ *
+ * Shown in both shells (below), never inside a single page — a page-level
+ * placement would mean it comes and goes as someone navigates, when the
+ * whole point is that it stays put regardless of where they are.
+ */
+function SiteNotice() {
+  const { siteNotice } = useStore()
+  if (!siteNotice) return null
+
+  return (
+    <div className="border-b border-amber-200 bg-amber-50 px-4 py-2.5 dark:border-amber-900 dark:bg-amber-950/60">
+      <div className="mx-auto flex max-w-7xl items-start gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
+        <AlertIcon className="mt-0.5 size-4.5 shrink-0" />
+        <p>{siteNotice}</p>
+      </div>
+    </div>
+  )
+}
+
 export function AppShell() {
   const branding = useBranding()
   const { session, balance, logout, profiles, switchProfile } = useStore()
@@ -421,6 +446,8 @@ export function AppShell() {
           </div>
         </div>
       </header>
+
+      <SiteNotice />
 
       <div className="mx-auto flex max-w-7xl gap-6 px-3 sm:px-4">
         <aside className="sticky top-15 hidden h-fit w-56 shrink-0 py-5 lg:block">
@@ -586,6 +613,7 @@ export function PublicShell() {
           </nav>
         </div>
       </header>
+      <SiteNotice />
       <main id="main">
         <Outlet />
       </main>

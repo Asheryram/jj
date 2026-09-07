@@ -145,7 +145,7 @@ export class SettleRefundManuallyDto {
 const NUMERIC_SETTING_KEYS = ['floatWatchAt', 'floatRiskAt', 'paystackFeeBp', 'minWithdrawal'] as const
 
 /** Keys whose value is free text rather than a number or a switch. */
-const STRING_SETTING_KEYS = ['whatsappChannelUrl'] as const
+const STRING_SETTING_KEYS = ['whatsappChannelUrl', 'siteNotice'] as const
 
 export class SetSettingDto {
   @IsIn([
@@ -158,6 +158,7 @@ export class SetSettingDto {
     'paystackBusinessAccount',
     'minWithdrawal',
     'whatsappChannelUrl',
+    'siteNotice',
   ])
   key!:
     | 'simulateFailure'
@@ -169,10 +170,11 @@ export class SetSettingDto {
     | 'paystackBusinessAccount'
     | 'minWithdrawal'
     | 'whatsappChannelUrl'
+    | 'siteNotice'
 
   /**
-   * A whole number for the numeric keys, free text for `whatsappChannelUrl`,
-   * a boolean for every other switch.
+   * A whole number for the numeric keys, free text for `whatsappChannelUrl`
+   * and `siteNotice`, a boolean for every other switch.
    *
    * Only the shape is checked here. The ranges (and, for the link, that it looks
    * like one) belong to SettingsService, which also knows that at-risk has to

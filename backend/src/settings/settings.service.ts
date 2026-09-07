@@ -89,6 +89,18 @@ export interface PlatformSettings {
    * merely a dead link, never a place money or a password could go.
    */
   whatsappChannelUrl: string | null
+  /**
+   * A warning banner shown across the whole site — agents, customers and
+   * guests alike — for something like "MTN is running slow, orders are still
+   * going through." Null means nothing is set, so no banner shows at all.
+   *
+   * Deliberately not a popup: this is meant to sit passively in view for as
+   * long as the situation lasts, not interrupt anyone once and be dismissed
+   * — a visitor who comes back an hour into an ongoing issue should still
+   * see it. It stays until James clears it himself; nothing here expires it
+   * on its own.
+   */
+  siteNotice: string | null
 }
 
 const DEFAULTS: PlatformSettings = {
@@ -101,6 +113,7 @@ const DEFAULTS: PlatformSettings = {
   paystackBusinessAccount: false,
   minWithdrawal: 1000,
   whatsappChannelUrl: null,
+  siteNotice: null,
 }
 
 /**
@@ -118,7 +131,10 @@ const MONEY_KEYS = ['floatWatchAt', 'floatRiskAt', 'minWithdrawal'] as const
 const FEE_BP_KEYS = ['paystackFeeBp'] as const
 
 /** Keys holding free text rather than a number or a switch. */
-const STRING_KEYS = ['whatsappChannelUrl'] as const
+const STRING_KEYS = ['whatsappChannelUrl', 'siteNotice'] as const
+
+/** Of the string keys, which ones must actually look like a link. */
+const URL_KEYS = ['whatsappChannelUrl'] as const
 
 @Injectable()
 export class SettingsService {
@@ -137,6 +153,7 @@ export class SettingsService {
       paystackBusinessAccount: bool(stored.paystackBusinessAccount, DEFAULTS.paystackBusinessAccount),
       minWithdrawal: money(stored.minWithdrawal, DEFAULTS.minWithdrawal),
       whatsappChannelUrl: str(stored.whatsappChannelUrl, DEFAULTS.whatsappChannelUrl),
+      siteNotice: str(stored.siteNotice, DEFAULTS.siteNotice),
     }
   }
 
@@ -179,11 +196,13 @@ export class SettingsService {
   ): Promise<PlatformSettings> {
     if ((STRING_KEYS as readonly string[]).includes(key)) {
       const text = String(value ?? '').trim()
-      if (text !== '' && !/^https?:\/\//i.test(text)) {
+      if ((URL_KEYS as readonly string[]).includes(key) && text !== '' && !/^https?:\/\//i.test(text)) {
         throw new ValidationError('That needs to be a full link, starting with https://.')
       }
       if (text.length > 300) {
-        throw new ValidationError('That link is too long.')
+        throw new ValidationError(
+          `That's too long — keep it to 300 characters or fewer${text.length ? ` (currently ${text.length})` : ''}.`,
+        )
       }
       // An empty string clears it — stored as such rather than deleting the row,
       // matching how every other setting here is always upserted, never removed.
