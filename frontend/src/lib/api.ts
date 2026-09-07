@@ -1071,6 +1071,26 @@ export const api = {
       }[]
     >('/admin/catalogue/accuracy'),
 
+  /**
+   * Active products priced above what the float can currently cover, plus
+   * everything inactive for context — see `AdminService.floatRisk`. Purely
+   * informational: nothing here changes a product's `active` flag itself,
+   * that's still `setProductActive`.
+   */
+  floatRisk: () =>
+    request<{
+      /** Pesewas — what tracked capital says the float should hold right
+       *  now, deliberately not the live reading (which only refreshes on an
+       *  order and can sit stale for days). Null until a capital move has
+       *  ever been logged. */
+      floatReference: number | null
+      /** When capital tracking itself began, not how fresh this figure is —
+       *  `floatReference` is recomputed from every logged move up to now. */
+      trackedSince: string | null
+      atRisk: Product[]
+      inactive: Product[]
+    }>('/admin/catalogue/float-risk'),
+
   adminUsers: () => request<PlatformUser[]>('/admin/users'),
 
   toggleUserStatus: (id: string) =>

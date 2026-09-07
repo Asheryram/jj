@@ -6,6 +6,7 @@ import { toProduct, PRODUCT_INCLUDE } from '../common/mappers'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import { markupFromPrice, priceFromMarkup, type OrderSplit } from '../domain/pricing'
 import { CatalogueImportService } from '../supplier/catalogue-import.service'
+import { FloatMonitorService } from '../supplier/float-monitor.service'
 import type { Category, Role } from '@prisma/client'
 
 export type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice'
@@ -18,6 +19,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly settings: SettingsService,
     private readonly catalogueImport: CatalogueImportService,
+    private readonly float: FloatMonitorService,
   ) {}
 
   // ── Users (FR-6.4) ────────────────────────────────────────────────────────
@@ -166,6 +168,58 @@ export class AdminService {
       diff: d.costPrice - (d.providerCharged as number),
       lastSoldAt: d.createdAt.toISOString(),
     }))
+  }
+
+  /**
+   * Which products the float can no longer cover, and what's currently off
+   * that might be worth a second look now that it can.
+   *
+   * A suggestion, not an action — nothing here ever flips `active` itself;
+   * see `setProductActive` for the actual toggle, which this page just links
+   * a decision to.
+   *
+   * Judged against `expectedBalance` — what tracked capital says the float
+   * should hold — deliberately rather than the live reading or the blended
+   * `reference` the low-float alert uses. The live balance only refreshes on
+   * an order, so it can sit stale for days; `expectedBalance` moves the
+   * moment James logs a top-up or a cost is booked, so this list reacts
+   * immediately rather than waiting on the next order to confirm it.
+   *
+   * Deliberately does not try to guess *why* an inactive product is off —
+   * nothing today records that, and a discontinued or mismapped product
+   * doesn't become sellable again just because it happens to be cheap. The
+   * inactive list is context to look at alongside the float, not a claim
+   * that any particular row is safe to turn back on.
+   *
+   * Null `floatReference` (nothing logged yet — no capital move has ever been
+   * recorded) means there is nothing to judge a cost against, so nothing is
+   * flagged rather than everything.
+   */
+  async floatRisk() {
+    const expected = await this.float.expectedBalance()
+    if (!expected) {
+      return { floatReference: null, trackedSince: null, atRisk: [], inactive: [] }
+    }
+
+    const [atRisk, inactive] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { active: true, supplierCost: { gt: expected.balance } },
+        include: PRODUCT_INCLUDE,
+        orderBy: { supplierCost: 'desc' },
+      }),
+      this.prisma.product.findMany({
+        where: { active: false },
+        include: PRODUCT_INCLUDE,
+        orderBy: { supplierCost: 'desc' },
+      }),
+    ])
+
+    return {
+      floatReference: expected.balance,
+      trackedSince: expected.capturedAt.toISOString(),
+      atRisk: atRisk.map(toProduct),
+      inactive: inactive.map(toProduct),
+    }
   }
 
   /** FR-6.4 — suspend or restore an account. */

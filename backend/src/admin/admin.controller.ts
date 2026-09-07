@@ -395,6 +395,16 @@ export class AdminController {
     return this.admin.catalogueAccuracy()
   }
 
+  /**
+   * Active products priced above what the float can currently cover, plus
+   * everything that's inactive for context — see `AdminService.floatRisk`.
+   * Purely informational: nothing here changes `active` on its own.
+   */
+  @Get('catalogue/float-risk')
+  floatRisk() {
+    return this.admin.floatRisk()
+  }
+
   /** The individual lines, newest first. */
   /**
    * What is owed against what Paystack is holding.

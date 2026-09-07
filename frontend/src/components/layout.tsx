@@ -147,6 +147,7 @@ function navFor(
       },
       { to: '/admin/prices', label: 'Cost prices', icon: TagIcon },
       { to: '/admin/catalogue-accuracy', label: 'Catalogue accuracy', icon: TrendUpIcon },
+      { to: '/admin/float-risk', label: 'Float risk', icon: AlertIcon },
       { to: '/admin/branding', label: 'Branding', icon: StoreIcon },
       { to: '/admin/settings', label: 'Settings', icon: SettingsIcon },
       // Platform access belongs to the operator, not the business owner. An

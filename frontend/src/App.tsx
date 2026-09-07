@@ -35,6 +35,7 @@ import AdminOrders from './pages/admin/AdminOrders'
 import Users from './pages/admin/Users'
 import CostPrices from './pages/admin/CostPrices'
 import CatalogueAccuracy from './pages/admin/CatalogueAccuracy'
+import FloatRisk from './pages/admin/FloatRisk'
 import AdminWithdrawals from './pages/admin/AdminWithdrawals'
 import NumberApprovals from './pages/admin/NumberApprovals'
 import PaymentReturn from './pages/PaymentReturn'
@@ -308,6 +309,7 @@ export default function App() {
               <Route path="/admin/users" element={<Users />} />
               <Route path="/admin/prices" element={<CostPrices />} />
               <Route path="/admin/catalogue-accuracy" element={<CatalogueAccuracy />} />
+              <Route path="/admin/float-risk" element={<FloatRisk />} />
               <Route path="/admin/withdrawals" element={<AdminWithdrawals />} />
               <Route path="/admin/approvals" element={<NumberApprovals />} />
               <Route path="/admin/refunds" element={<Refunds />} />

@@ -430,8 +430,16 @@ export class FloatMonitorService {
    * real reason.
    *
    * Null until James has logged at least one capital move.
+   *
+   * Public (not just used internally by `referenceBalance`/`reconcile`): also
+   * what `AdminService.floatRisk` judges the catalogue against, deliberately
+   * in preference to the live reading — the live balance only ever refreshes
+   * on an order, so it can sit stale for days, while this recomputes from
+   * every logged top-up and cost the moment either changes. A top-up James
+   * just logged should immediately stop flagging products as too expensive,
+   * not wait for the next order to confirm it landed.
    */
-  private async expectedBalance(): Promise<{ balance: number; capturedAt: Date } | null> {
+  async expectedBalance(): Promise<{ balance: number; capturedAt: Date } | null> {
     const baselineRow = await this.prisma.setting.findUnique({ where: { key: CAPITAL_BASELINE_KEY } })
     if (!baselineRow) return null
 
