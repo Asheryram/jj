@@ -64,6 +64,14 @@ export class CatalogueService {
          * preview promise a margin the real order does not deliver.
          */
         paystackFeeBp: settings.paystackFeeBp,
+        /**
+         * The admin's WhatsApp channel invite, for agents to join.
+         *
+         * Sent only to an agent or admin session — a customer or guest browsing
+         * the shop has no use for it, and there is no reason to advertise it
+         * more widely than the audience it is actually for.
+         */
+        ...(role === 'agent' || isAdminRole(role) ? { whatsappChannelUrl: settings.whatsappChannelUrl } : {}),
       },
     }
   }

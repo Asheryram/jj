@@ -237,6 +237,14 @@ export interface CatalogueSnapshot {
      * particular, is computed here rather than looked up.
      */
     paystackFeeBp: number
+    /**
+     * The admin's WhatsApp channel invite, for agents to join.
+     *
+     * Absent (not just null) for a customer or guest session — an agent-only
+     * page reading it optionally is a much smaller risk than reading `null` and
+     * mistaking that for "sent, but empty."
+     */
+    whatsappChannelUrl?: string | null
   }
 }
 
@@ -402,6 +410,8 @@ export interface PlatformSettings {
   paystackBusinessAccount: boolean
   /** The smallest amount worth a manual MoMo transfer, in pesewas (FR-2.6). */
   minWithdrawal: number
+  /** The admin's WhatsApp channel invite link, shown to agents. Null = not set. */
+  whatsappChannelUrl: string | null
 }
 
 /** One SKU in the provider's catalogue. */
@@ -1100,6 +1110,10 @@ export const api = {
       body: { phone },
     }),
 
+  /** Dismissing or acting on the WhatsApp-channel popup both count as "seen". */
+  markWhatsappChannelSeen: () =>
+    request<{ user: Session }>('/auth/me/whatsapp-seen', { method: 'POST' }),
+
   /** Swap the session for another of this person's profiles. */
   switchProfile: (userId: string) =>
     request<AuthResult>('/auth/switch', { method: 'POST', body: { userId } }),
@@ -1148,7 +1162,7 @@ export const api = {
 
   revenueByDay: (days = 7) => request<RevenueDay[]>(`/admin/reports/revenue?days=${days}`),
 
-  setSetting: (key: keyof PlatformSettings, value: boolean | number) =>
+  setSetting: (key: keyof PlatformSettings, value: boolean | number | string) =>
     request<PlatformSettings>(
       '/admin/settings',
       { method: 'PATCH', body: { key, value } },

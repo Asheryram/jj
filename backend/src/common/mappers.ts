@@ -181,6 +181,12 @@ export function toSession(row: User) {
     status: row.status,
     /** Why an application was refused. Shown to them, so it travels with them. */
     statusNote: row.statusNote,
+    /**
+     * Which `whatsappChannelUrl` this agent has already been shown the join
+     * popup for. Compared against the current setting, not a plain flag — see
+     * the field's own comment on the schema.
+     */
+    whatsappChannelSeenUrl: row.whatsappChannelSeenUrl,
   }
 }
 

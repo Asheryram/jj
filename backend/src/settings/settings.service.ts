@@ -81,6 +81,14 @@ export interface PlatformSettings {
    * could change.
    */
   minWithdrawal: number
+  /**
+   * The admin's WhatsApp channel invite link, shown to agents.
+   *
+   * Null means nothing is set — no banner, no popup. Not validated beyond
+   * "looks like a link": this only ever opens in a new tab, so a bad value is
+   * merely a dead link, never a place money or a password could go.
+   */
+  whatsappChannelUrl: string | null
 }
 
 const DEFAULTS: PlatformSettings = {
@@ -92,6 +100,7 @@ const DEFAULTS: PlatformSettings = {
   paystackFeeBp: 200,
   paystackBusinessAccount: false,
   minWithdrawal: 1000,
+  whatsappChannelUrl: null,
 }
 
 /**
@@ -107,6 +116,9 @@ const MONEY_KEYS = ['floatWatchAt', 'floatRiskAt', 'minWithdrawal'] as const
 
 /** Keys holding a fee rate in basis points — bounded, unlike a plain amount. */
 const FEE_BP_KEYS = ['paystackFeeBp'] as const
+
+/** Keys holding free text rather than a number or a switch. */
+const STRING_KEYS = ['whatsappChannelUrl'] as const
 
 @Injectable()
 export class SettingsService {
@@ -124,6 +136,7 @@ export class SettingsService {
       paystackFeeBp: feeBp(stored.paystackFeeBp, DEFAULTS.paystackFeeBp),
       paystackBusinessAccount: bool(stored.paystackBusinessAccount, DEFAULTS.paystackBusinessAccount),
       minWithdrawal: money(stored.minWithdrawal, DEFAULTS.minWithdrawal),
+      whatsappChannelUrl: str(stored.whatsappChannelUrl, DEFAULTS.whatsappChannelUrl),
     }
   }
 
@@ -154,13 +167,34 @@ export class SettingsService {
     if ((NUMERIC_KEYS as readonly string[]).includes(key)) {
       return percent(row.value, DEFAULTS[key] as number) as PlatformSettings[K]
     }
+    if ((STRING_KEYS as readonly string[]).includes(key)) {
+      return str(row.value, DEFAULTS[key] as string | null) as PlatformSettings[K]
+    }
     return bool(row.value, DEFAULTS[key] as boolean) as PlatformSettings[K]
   }
 
   async set(
     key: keyof PlatformSettings,
-    value: boolean | number,
+    value: boolean | number | string,
   ): Promise<PlatformSettings> {
+    if ((STRING_KEYS as readonly string[]).includes(key)) {
+      const text = String(value ?? '').trim()
+      if (text !== '' && !/^https?:\/\//i.test(text)) {
+        throw new ValidationError('That needs to be a full link, starting with https://.')
+      }
+      if (text.length > 300) {
+        throw new ValidationError('That link is too long.')
+      }
+      // An empty string clears it — stored as such rather than deleting the row,
+      // matching how every other setting here is always upserted, never removed.
+      await this.prisma.setting.upsert({
+        where: { key },
+        create: { key, value: text },
+        update: { value: text },
+      })
+      return this.all()
+    }
+
     if ((MONEY_KEYS as readonly string[]).includes(key)) {
       const amount = Number(value)
       if (!Number.isInteger(amount) || amount < 0) {
@@ -271,4 +305,11 @@ function feeBp(value: unknown, fallback: number): number {
   const parsed = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(parsed) || parsed < 0 || parsed >= 10_000) return fallback
   return Math.round(parsed)
+}
+
+/** Free text, or null for "not set" — an empty string means the same thing. */
+function str(value: unknown, fallback: string | null): string | null {
+  if (typeof value !== 'string') return fallback
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
 }

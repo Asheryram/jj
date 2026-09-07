@@ -144,6 +144,9 @@ export class SettleRefundManuallyDto {
 /** Keys whose value is a number rather than a switch. */
 const NUMERIC_SETTING_KEYS = ['floatWatchAt', 'floatRiskAt', 'paystackFeeBp', 'minWithdrawal'] as const
 
+/** Keys whose value is free text rather than a number or a switch. */
+const STRING_SETTING_KEYS = ['whatsappChannelUrl'] as const
+
 export class SetSettingDto {
   @IsIn([
     'simulateFailure',
@@ -154,6 +157,7 @@ export class SetSettingDto {
     'paystackFeeBp',
     'paystackBusinessAccount',
     'minWithdrawal',
+    'whatsappChannelUrl',
   ])
   key!:
     | 'simulateFailure'
@@ -164,25 +168,34 @@ export class SetSettingDto {
     | 'paystackFeeBp'
     | 'paystackBusinessAccount'
     | 'minWithdrawal'
+    | 'whatsappChannelUrl'
 
   /**
-   * A whole number for the numeric keys, a boolean for the switches.
+   * A whole number for the numeric keys, free text for `whatsappChannelUrl`,
+   * a boolean for every other switch.
    *
-   * Only the shape is checked here. The ranges belong to SettingsService, which
-   * knows that a referral rate caps at 100 while a float threshold is pesewas
-   * with no ceiling, and that at-risk has to sit below watch — a rule that needs
-   * the other value and so cannot live on a DTO at all.
+   * Only the shape is checked here. The ranges (and, for the link, that it looks
+   * like one) belong to SettingsService, which also knows that at-risk has to
+   * sit below watch — a rule that needs the other value and so cannot live on a
+   * DTO at all.
    */
   @ValidateIf((dto: SetSettingDto) =>
     (NUMERIC_SETTING_KEYS as readonly string[]).includes(dto.key),
   )
   @IsInt({ message: 'That setting takes a whole number.' })
   @Min(0)
+  @ValidateIf((dto: SetSettingDto) =>
+    (STRING_SETTING_KEYS as readonly string[]).includes(dto.key),
+  )
+  @IsString()
+  @MaxLength(300)
   @ValidateIf(
-    (dto: SetSettingDto) => !(NUMERIC_SETTING_KEYS as readonly string[]).includes(dto.key),
+    (dto: SetSettingDto) =>
+      !(NUMERIC_SETTING_KEYS as readonly string[]).includes(dto.key) &&
+      !(STRING_SETTING_KEYS as readonly string[]).includes(dto.key),
   )
   @IsBoolean()
-  value!: boolean | number
+  value!: boolean | number | string
 }
 
 export class ReportQueryDto {

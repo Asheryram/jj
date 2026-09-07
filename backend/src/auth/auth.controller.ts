@@ -171,6 +171,15 @@ export class AuthController {
     return this.auth.updatePhone(user.id, dto.phone)
   }
 
+  /** Dismissing or acting on the WhatsApp-channel popup both count as "seen". */
+  @SkipThrottle({ burst: true, grind: true })
+  @Roles()
+  @ApiBearerAuth()
+  @Post('me/whatsapp-seen')
+  markWhatsappChannelSeen(@CurrentUser() user: AuthUser) {
+    return this.auth.markWhatsappChannelSeen(user.id)
+  }
+
   @SkipThrottle({ burst: true, grind: true })
   @Roles()
   @ApiBearerAuth()

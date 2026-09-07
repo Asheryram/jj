@@ -155,6 +155,10 @@ interface Store {
   pricingAgents: PricingAgent[]
   /** What Paystack keeps on a Mobile Money payment, in basis points. */
   paystackFeeBp: number
+  /** The admin's WhatsApp channel invite link. Null for anyone it is not sent to. */
+  whatsappChannelUrl: string | null
+  /** Call once the popup has been acted on or dismissed, so it does not return. */
+  markWhatsappChannelSeen: () => Promise<void>
   retailPrice: (product: Product, sellerCode?: string | null) => number
   myBand: (product: Product) => PriceBand
   myResalePrice: (product: Product) => number
@@ -247,6 +251,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    */
   const [paystackFeeBp, setPaystackFeeBp] = useState(0)
 
+  /**
+   * The admin's WhatsApp channel link, sent only to an agent or admin session
+   * — absent (rather than null) for anyone else, which reads the same as "not
+   * set" here.
+   */
+  const [whatsappChannelUrl, setWhatsappChannelUrl] = useState<string | null>(null)
+
   const [admin, setAdmin] = useState<{ userId: string; name: string }>({
     userId: '',
     name: 'JamesDataConsult',
@@ -293,6 +304,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // get to the screen that fixes it.
     if (snapshot.admin) setAdmin(snapshot.admin)
     setPaystackFeeBp(snapshot.settings.paystackFeeBp)
+    setWhatsappChannelUrl(snapshot.settings.whatsappChannelUrl ?? null)
   }, [])
 
   /**
@@ -929,6 +941,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [pushToast, reportError],
   )
 
+  /**
+   * Dismissing the popup or tapping "Join channel" both call this — either
+   * way the point is the same: don't show it again for this same link.
+   * Silent on failure, deliberately: worst case the popup reappears once
+   * more, which is a much smaller problem than a toast about a WhatsApp link.
+   */
+  const markWhatsappChannelSeen = useCallback(async () => {
+    try {
+      const result = await api.markWhatsappChannelSeen()
+      setSession(result.user)
+    } catch {
+      // See above.
+    }
+  }, [])
+
   const requestWithdrawal = useCallback(
     async (amount: number, momoNetwork: Network, momoNumber: string) => {
       try {
@@ -1038,6 +1065,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setProductOnSale,
       pricingAgents,
       paystackFeeBp,
+      whatsappChannelUrl,
+      markWhatsappChannelSeen,
       retailPrice,
       myBand,
       myResalePrice,
@@ -1090,6 +1119,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       previewSplit,
       pricingAgents,
       paystackFeeBp,
+      whatsappChannelUrl,
+      markWhatsappChannelSeen,
       products,
       pushToast,
       ready,

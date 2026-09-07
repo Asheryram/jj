@@ -154,6 +154,13 @@ model User {
   /// product the agent has not priced explicitly.
   markupPercent Int @default(8) @map("markup_percent")
 
+  /// The platform's `whatsappChannelUrl` setting, as it stood the last time this
+  /// agent was shown the join popup. Compared against the *current* setting
+  /// value, not stored as a plain boolean — so a channel James replaces later is
+  /// shown again, once, rather than staying dismissed forever for a link that no
+  /// longer exists.
+  whatsappChannelSeenUrl String? @map("whatsapp_channel_seen_url")
+
   /// Customers: spendable wallet. Agents: withdrawable earnings. One column,
   /// because a user holds exactly one role. Guarded by CHECK (balance >= 0).
   balance Int @default(0)

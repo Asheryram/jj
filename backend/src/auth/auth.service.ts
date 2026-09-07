@@ -199,6 +199,27 @@ export class AuthService {
   }
 
   /**
+   * Record that this profile has now seen the join-the-WhatsApp-channel popup
+   * for whichever link is currently set.
+   *
+   * Scoped to this one profile, unlike `updatePhone` — the popup is an agent
+   * thing, and someone's admin profile never sees it in the first place, so
+   * there is nothing to keep in sync across their other profiles.
+   *
+   * Stores the link itself rather than a plain "seen: true": if James later
+   * replaces the channel, the stored value no longer matches the live setting
+   * and the popup is shown again, once, for the new one.
+   */
+  async markWhatsappChannelSeen(userId: string) {
+    const current = await this.settings.get('whatsappChannelUrl')
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { whatsappChannelSeenUrl: current },
+    })
+    return { user: toSession(updated) }
+  }
+
+  /**
    * Every profile this person holds, for the switcher.
    *
    * Keyed on the email because that is what identifies the human: profiles share

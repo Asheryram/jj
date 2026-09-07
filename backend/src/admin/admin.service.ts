@@ -508,7 +508,7 @@ export class AdminService {
   }
 
   /** Keyed off PlatformSettings, so a new setting needs no change here. */
-  setSetting(key: keyof PlatformSettings, value: boolean | number) {
+  setSetting(key: keyof PlatformSettings, value: boolean | number | string) {
     return this.settings.set(key, value)
   }
 

@@ -13,7 +13,7 @@ import {
   TextInput,
   Toggle,
 } from '../../components/ui'
-import { AlertIcon, ShieldIcon } from '../../components/icons'
+import { AlertIcon, ShieldIcon, WhatsAppIcon } from '../../components/icons'
 
 /** FR-5.5, FR-6.4, NFR-2.4, NFR-5.1, NFR-5.2 */
 export default function Settings() {
@@ -189,6 +189,8 @@ export default function Settings() {
       <FloatThresholds />
 
       <MinWithdrawalSetting />
+
+      <WhatsAppChannelSetting />
     </div>
   )
 }
@@ -757,6 +759,93 @@ function PaystackPayoutSetting() {
           checked={watching ?? false}
           onChange={(next) => void change(next)}
         />
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * The admin's WhatsApp channel, offered to every agent.
+ *
+ * Shown to an agent as a permanent card on their dashboard, and once as a
+ * popup the first time they see a given link — see `Dashboard.tsx`. Nothing
+ * here is sensitive: a bad or missing link just means nobody sees a channel
+ * to join, never a place money or a password could go, so validation is
+ * limited to "looks like a link."
+ */
+function WhatsAppChannelSetting() {
+  const { pushToast } = useStore()
+  const [draft, setDraft] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api
+      .adminSettings()
+      .then((settings) => {
+        if (!live) return
+        setDraft(settings.whatsappChannelUrl ?? '')
+        setLoaded(true)
+      })
+      .catch(() => live && setLoaded(true))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const save = async () => {
+    const text = draft.trim()
+    if (text !== '' && !/^https?:\/\//i.test(text)) {
+      pushToast({ tone: 'error', title: 'That needs to be a full link, starting with https://.' })
+      return
+    }
+    try {
+      await api.setSetting('whatsappChannelUrl', text)
+      pushToast({
+        tone: 'success',
+        title: text === '' ? 'WhatsApp channel removed' : 'WhatsApp channel saved',
+        detail:
+          text === ''
+            ? 'Agents no longer see a channel to join.'
+            : 'Every agent sees a card to join it, and it pops up once for anyone who has not seen this link before.',
+      })
+    } catch (error) {
+      pushToast({
+        tone: 'error',
+        title: error instanceof Error ? error.message : 'We could not save that.',
+      })
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="WhatsApp channel"
+        subtitle="Invite every agent to join your announcements channel"
+        action={<WhatsAppIcon className="size-5 text-emerald-600 dark:text-emerald-400" />}
+      />
+      <div className="space-y-3 px-4 pb-4">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          Paste the invite link from WhatsApp's own "Invite to channel" share sheet. Every agent gets a
+          quick-join card on their dashboard, and anyone who has not seen <em>this</em> link before sees
+          it once as a popup too. Leave it blank to stop offering one.
+        </p>
+
+        <Field
+          label="Channel invite link"
+          htmlFor="whatsapp-channel"
+          hint="Something like https://whatsapp.com/channel/..."
+        >
+          <TextInput
+            id="whatsapp-channel"
+            type="url"
+            placeholder="https://whatsapp.com/channel/..."
+            disabled={!loaded}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={() => void save()}
+          />
+        </Field>
       </div>
     </Card>
   )

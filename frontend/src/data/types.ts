@@ -273,4 +273,10 @@ export interface Session {
   status: 'pending' | 'active' | 'rejected' | 'suspended'
   /** Why an application was refused. Shown to them. */
   statusNote: string | null
+  /**
+   * Which `whatsappChannelUrl` this profile has already been shown the join
+   * popup for. Compare against the current setting, not just truthy/falsy — a
+   * channel James replaces later should be shown again, once.
+   */
+  whatsappChannelSeenUrl: string | null
 }
