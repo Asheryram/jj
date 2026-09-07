@@ -120,6 +120,7 @@ export class ApprovalsService {
 
     const networkKeys = new Map(registry.map((row) => [row.phone, row.networkKey]))
     const attemptsBy = new Map(registry.map((row) => [row.phone, row.attempts]))
+    const copiedAtBy = new Map(registry.map((row) => [row.phone, row.copiedAt]))
 
     return [...byPhone.values()]
       .sort(
@@ -140,7 +141,39 @@ export class ApprovalsService {
         lastProduct: row.lastProduct,
         lastValue: row.lastValue,
         waitingSince: row.oldest.toISOString(),
+        /**
+         * Last time this specific number was copied to hand to DataHub, or
+         * null if it never has been — the checkpoint `markCopied` sets. Not a
+         * claim DataHub received it, only that it was handed over; DataHub's
+         * own answer still only ever arrives through `recheck`.
+         */
+        copiedAt: copiedAtBy.get(row.phone)?.toISOString() ?? null,
       }))
+  }
+
+  /**
+   * Record that these numbers were just copied to paste into DataHub's
+   * dashboard by hand.
+   *
+   * The actual problem this solves: a batch copied five minutes ago and a
+   * number that just showed up look identical in the list otherwise, and a
+   * few numbers in either direction is enough to lose track of which is
+   * which by memory alone. This is the checkpoint — not a claim about
+   * DataHub's side, just "this one was handed over, and when."
+   *
+   * A plain `updateMany`, not an upsert: every phone shown on the approvals
+   * screen already has a `BeneficiaryRequest` row from the moment a sale to
+   * it was first refused or held, so there is nothing to create here — bar
+   * a handful of pre-existing held orders older than that tracking itself,
+   * which this silently no-ops on rather than inventing a row with no real
+   * `networkKey` or attempt count behind it.
+   */
+  async markCopied(phones: string[]): Promise<void> {
+    if (phones.length === 0) return
+    await this.prisma.beneficiaryRequest.updateMany({
+      where: { phone: { in: phones } },
+      data: { copiedAt: new Date() },
+    })
   }
 
   /**

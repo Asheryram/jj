@@ -24,6 +24,7 @@ import {
   CheckIcon,
   ChevronRightIcon,
   ClockIcon,
+  CopyIcon,
   DataIcon,
   GlobeIcon,
   HelpIcon,
@@ -229,7 +230,16 @@ export default function Dashboard() {
         >
           {domain.allowed && domain.active ? (
             <>
-              <strong className="font-semibold">{domain.domain}</strong> carries your shop now.
+              <a
+                href={`https://${domain.domain}`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold underline"
+              >
+                {domain.domain}
+              </a>{' '}
+              carries your shop now.{' '}
+              <CopyIconButton value={`https://${domain.domain}`} />
             </>
           ) : domain.reviewedAt === null ? (
             <>
@@ -454,6 +464,36 @@ export default function Dashboard() {
         </Modal>
       )}
     </div>
+  )
+}
+
+/**
+ * A tiny inline copy affordance for a value sitting inside a sentence — the
+ * full `CopyField` box (used for the sell link below) would be too heavy for
+ * a one-line status message.
+ */
+function CopyIconButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+    } catch {
+      // Clipboard can be blocked; the link is still there to select by hand.
+    }
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1800)
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label={`Copy ${value}`}
+      className="inline-flex size-6 items-center justify-center rounded-md align-text-bottom hover:bg-black/5 dark:hover:bg-white/10"
+    >
+      {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+    </button>
   )
 }
 

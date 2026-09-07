@@ -650,6 +650,13 @@ export interface PendingApproval {
   /** Pesewas the last attempt was worth. */
   lastValue: number | null
   waitingSince: string
+  /**
+   * Last time this number was copied to hand to DataHub, by hand. Null means
+   * never — the one worth noticing, since a batch copied minutes ago and a
+   * number that just showed up otherwise look identical in the list. Not a
+   * claim DataHub received it, only that it was handed over.
+   */
+  copiedAt: string | null
 }
 
 export interface SupplierSku {
@@ -1225,6 +1232,10 @@ export const api = {
     request<{ submitted: number; error: string | null }>('/admin/beneficiaries/submit', {
       method: 'POST',
     }),
+
+  /** Checkpoint: these numbers were just copied to hand to DataHub by hand. */
+  markApprovalsCopied: (phones: string[]) =>
+    request<void>('/admin/beneficiaries/mark-copied', { method: 'POST', body: { phones } }),
 
   /**
    * Re-read every configured supplier's catalogue and make ours match.

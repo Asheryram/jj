@@ -594,6 +594,12 @@ model BeneficiaryRequest {
   /// Set once /verify confirms DataHub accepted it. Kept rather than deleted so
   /// the same number is not re-submitted on a later attempt.
   approvedAt  DateTime? @map("approved_at")
+  /// The last time an admin copied this number to paste into DataHub's own
+  /// dashboard, by hand — not confirmation DataHub received or actioned it,
+  /// only that it was handed over. Null means never copied at all, which is
+  /// exactly the number that's easy to lose track of once a few more have
+  /// come in since the last copy — see `ApprovalsService.pending`.
+  copiedAt    DateTime? @map("copied_at")
 
   @@index([approvedAt])
   @@map("beneficiary_requests")

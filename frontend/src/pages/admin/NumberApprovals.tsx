@@ -83,17 +83,51 @@ export default function NumberApprovals() {
   const heldValue = (rows ?? []).reduce((sum, row) => sum + row.valueHeld, 0)
   const heldOrders = (rows ?? []).reduce((sum, row) => sum + row.ordersHeld, 0)
 
-  const copyAll = async () => {
-    const list = (rows ?? []).map((row) => row.phone).join('\n')
+  /**
+   * The checkpoint itself: mark every one of these as copied just now, both
+   * on the server (so it survives a reload) and locally (so the badge
+   * updates immediately without waiting on a re-fetch).
+   */
+  const [copyingPhone, setCopyingPhone] = useState<string | null>(null)
+  const checkpoint = async (phones: string[]) => {
     try {
-      await navigator.clipboard.writeText(list)
+      await api.markApprovalsCopied(phones)
+      const now = new Date().toISOString()
+      setRows((current) =>
+        (current ?? []).map((row) => (phones.includes(row.phone) ? { ...row, copiedAt: now } : row)),
+      )
+    } catch {
+      // The clipboard copy itself already succeeded — worth completing that
+      // rather than failing the whole action over a checkpoint that can
+      // simply be set again next time.
+    }
+  }
+
+  const copyAll = async () => {
+    const phones = (rows ?? []).map((row) => row.phone)
+    try {
+      await navigator.clipboard.writeText(phones.join('\n'))
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2500)
+      await checkpoint(phones)
     } catch {
       pushToast({
         tone: 'error',
         title: 'Your browser would not let us copy that.',
       })
+    }
+  }
+
+  /** Copying just one — for a single new number, without re-sending the batch. */
+  const copyOne = async (phone: string) => {
+    setCopyingPhone(phone)
+    try {
+      await navigator.clipboard.writeText(phone)
+      await checkpoint([phone])
+    } catch {
+      pushToast({ tone: 'error', title: 'Your browser would not let us copy that.' })
+    } finally {
+      setCopyingPhone(null)
     }
   }
 
@@ -266,16 +300,36 @@ export default function NumberApprovals() {
                     <Th align="right">Orders held</Th>
                     <Th align="right">Value held</Th>
                     <Th align="right">Since</Th>
+                    <Th align="right">Copied</Th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row) => (
                     <tr key={row.phone} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                       <Td>
-                        <p className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                          {prettyPhone(row.phone)}
-                        </p>
-                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{row.networkKey}</p>
+                        <div className="flex items-center gap-1.5">
+                          <div>
+                            <p className="tabular font-semibold text-slate-900 dark:text-slate-50">
+                              {prettyPhone(row.phone)}
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{row.networkKey}</p>
+                          </div>
+                          {/* Copying just this one number, and checkpointing only
+                              it — for a single fresh arrival, without re-sending
+                              (and re-dating) the whole batch. */}
+                          <button
+                            type="button"
+                            onClick={() => void copyOne(row.phone)}
+                            aria-label={`Copy ${row.phone}`}
+                            className="flex size-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                          >
+                            {copyingPhone === row.phone ? (
+                              <CheckIcon className="size-3.5" />
+                            ) : (
+                              <CopyIcon className="size-3.5" />
+                            )}
+                          </button>
+                        </div>
                       </Td>
                       <Td>
                         <p className="text-slate-800 dark:text-slate-100">{row.lastProduct ?? '—'}</p>
@@ -299,6 +353,21 @@ export default function NumberApprovals() {
                       <Td align="right" className="text-xs text-slate-500 dark:text-slate-400">
                         {dateTime(row.waitingSince)}
                       </Td>
+                      <Td align="right">
+                        {/* The checkpoint itself. Not-yet-copied is the row worth
+                            noticing — a fresh arrival since the last batch — so
+                            it's the one that stands out, not the routine case. */}
+                        {row.copiedAt ? (
+                          <span
+                            className="text-xs text-slate-500 dark:text-slate-400"
+                            title={dateTime(row.copiedAt)}
+                          >
+                            {timeAgo(row.copiedAt)}
+                          </span>
+                        ) : (
+                          <Badge tone="danger">Not yet</Badge>
+                        )}
+                      </Td>
                     </tr>
                   ))}
                 </tbody>
@@ -309,4 +378,22 @@ export default function NumberApprovals() {
       </Card>
     </div>
   )
+}
+
+/**
+ * "3m ago", "2h ago" — deliberately relative rather than a clock time. The
+ * whole point of the checkpoint is answering "was this one already in the
+ * last batch I sent" at a glance, and a bare timestamp needs doing that
+ * arithmetic by hand every time; the full time is still one hover away, via
+ * the `title` on the span that renders this.
+ */
+function timeAgo(iso: string): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(iso)) / 1000))
+  if (seconds < 60) return 'moments ago'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
 }

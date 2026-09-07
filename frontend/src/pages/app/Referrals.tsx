@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react'
 import { useStore } from '../../state/store'
 import { referralLinkFor, sellLinkFor } from '../../lib/origin'
 import { cedis, longDate } from '../../lib/format'
 import { STATUS_LABEL, STATUS_TONE } from '../../lib/userStatus'
+import { api, type MyDomainStatus } from '../../lib/api'
 import {
   Badge,
   Button,
@@ -16,17 +18,32 @@ import {
   Td,
   Th,
 } from '../../components/ui'
-import { StoreIcon, UsersIcon, WhatsAppIcon } from '../../components/icons'
+import { GlobeIcon, StoreIcon, UsersIcon, WhatsAppIcon } from '../../components/icons'
 
 
 /** FR-1.7, FR-5.1, FR-5.2, FR-5.4, FR-5.6, FR-5.7 */
 export default function Referrals() {
   const { session, subAgents } = useStore()
+
+  const [domain, setDomain] = useState<MyDomainStatus | null>(null)
+  useEffect(() => {
+    let live = true
+    api
+      .myDomain()
+      .then((result) => live && setDomain(result))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+
   if (!session) return null
 
   // Two different links doing two different jobs.
   const sellLink = sellLinkFor(session.referralCode)
   const referralLink = referralLinkFor(session.referralCode)
+  const domainLive = domain && domain.allowed && domain.active
+  const domainUrl = domainLive ? `https://${domain.domain}` : null
 
   const direct = subAgents.filter((a) => a.uplineCode === session.referralCode)
   const indirect = subAgents.filter((a) => a.uplineCode !== session.referralCode)
@@ -36,6 +53,11 @@ export default function Referrals() {
   const shareSell = encodeURIComponent(
     `Buy data, airtime and result checkers from me — instant delivery: ${sellLink}`,
   )
+  const shareDomain = domainUrl
+    ? encodeURIComponent(
+        `Buy data, airtime and result checkers from me — instant delivery: ${domainUrl}`,
+      )
+    : ''
   const shareRefer = encodeURIComponent(
     `Start selling data bundles at your own prices with JamesDataConsult. Sign up with my link: ${referralLink}`,
   )
@@ -68,6 +90,27 @@ export default function Referrals() {
           </a>
         </div>
       </Card>
+
+      {/* ── Your own domain, once it's actually live — the same shop, your own
+          address. Shown only once DNS has confirmed it; before that, ShopBranding
+          is where its status lives, not here. ── */}
+      {domainLive && domainUrl && (
+        <Card className="mt-3">
+          <CardHead
+            title="Your own domain"
+            subtitle="The same shop, at your own address — share this instead when you have it"
+            action={<GlobeIcon className="size-5 text-brand-600 dark:text-brand-300" />}
+          />
+          <div className="space-y-3 p-4 sm:p-5">
+            <CopyField label="Your domain" value={domainUrl} />
+            <a href={`https://wa.me/?text=${shareDomain}`} target="_blank" rel="noreferrer" className="block">
+              <Button block size="lg" variant="whatsapp">
+                <WhatsAppIcon className="size-5" /> Share your domain on WhatsApp
+              </Button>
+            </a>
+          </div>
+        </Card>
+      )}
 
       {/* ── The referral link. Recruiting, not selling. ── */}
       <Card className="mt-3">

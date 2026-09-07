@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import {
+  ArrayNotEmpty,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -39,6 +41,13 @@ export class SetTierDto {
 export class SetActiveDto {
   @IsBoolean()
   active!: boolean
+}
+
+export class MarkCopiedDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsString({ each: true })
+  phones!: string[]
 }
 
 export class LogCapitalDto {
@@ -365,6 +374,15 @@ export class AdminController {
   @Post('beneficiaries/submit')
   submitBeneficiaries() {
     return this.approvals.submit()
+  }
+
+  /**
+   * Checkpoint: these numbers were just copied to hand to DataHub by hand —
+   * see `ApprovalsService.markCopied`. Not a claim they were received.
+   */
+  @Post('beneficiaries/mark-copied')
+  markBeneficiariesCopied(@Body() dto: MarkCopiedDto) {
+    return this.approvals.markCopied(dto.phones)
   }
 
   /**
