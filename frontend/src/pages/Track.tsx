@@ -15,7 +15,7 @@ import {
   StatusBadge,
   TextInput,
 } from '../components/ui'
-import { CertificateIcon, ReceiptIcon, SearchIcon } from '../components/icons'
+import { CertificateIcon, CheckIcon, ClockIcon, ReceiptIcon, SearchIcon } from '../components/icons'
 
 /**
  * FR-4.9 — a guest has no order history, so the reference plus their phone
@@ -131,10 +131,31 @@ export default function Track() {
           </div>
 
           <div className="space-y-4 p-5">
-            {result.status === 'failed' && (
-              <Callout tone="success" title="This order was refunded">
-                {cedis(result.salePrice)} was returned. If you paid with Mobile Money it is held as
-                credit against your number — check your SMS for the claim link.
+            {/* Two different truths, and saying the wrong one is the problem — see
+                the identical logic on Buy.tsx's own receipt. A refund is authorised
+                by a person, so until that happens the money is *owed*, not
+                returned; telling a guest it is already back when it is not is the
+                fastest way to lose their trust twice. */}
+            {result.status === 'failed' && !result.refunded && (
+              <Callout tone="info" title="A refund is being arranged" icon={<ClockIcon className="size-4" />}>
+                {cedis(result.salePrice)} is owed back to you and has been logged for approval.
+                Refunds are checked by a person rather than sent automatically, so this usually takes
+                a few hours. You do not need to ask — we will text{' '}
+                <strong className="tabular font-bold">{result.buyerPhone}</strong> when it is done.
+              </Callout>
+            )}
+
+            {result.status === 'failed' && result.refunded && result.paidWith === 'wallet' && (
+              <Callout tone="success" title="Refunded to your wallet" icon={<CheckIcon className="size-4" />}>
+                {cedis(result.salePrice)} has gone back into your wallet. Nothing was lost.
+              </Callout>
+            )}
+
+            {result.status === 'failed' && result.refunded && result.paidWith !== 'wallet' && (
+              <Callout tone="success" title="Your money has been sent back" icon={<CheckIcon className="size-4" />}>
+                {cedis(result.salePrice)} has been sent to{' '}
+                <strong className="tabular font-bold">{result.buyerPhone}</strong> — the same number
+                you paid from. Mobile Money usually lands within a few minutes.
               </Callout>
             )}
 

@@ -168,7 +168,8 @@ interface Store {
   myShareOf: (order: Order) => SplitShare | undefined
 
   withdrawals: WithdrawalRequest[]
-  requestWithdrawal: (amount: number, momoNetwork: Network, momoNumber: string) => Promise<void>
+  /** Resolves false on a server rejection, so the request form knows to stay open. */
+  requestWithdrawal: (amount: number, momoNetwork: Network, momoNumber: string) => Promise<boolean>
   cancelWithdrawal: (id: string) => Promise<void>
   updatePhone: (phone: string) => Promise<void>
   decideWithdrawal: (id: string, status: WithdrawalStatus) => Promise<void>
@@ -968,8 +969,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           title: 'Withdrawal request sent',
           detail: 'James reviews requests within 24 hours.',
         })
+        return true
       } catch (error) {
         reportError(error, 'We could not send that withdrawal request.')
+        return false
       }
     },
     [loadForSession, pushToast, reportError, session],

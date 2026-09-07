@@ -163,9 +163,14 @@ export default function Withdrawals() {
         onClose={() => setOpen(false)}
         balance={balance}
         defaultPhone={session?.phone ?? ''}
-        onSubmit={(amount, network, number) => {
-          requestWithdrawal(amount, network, number)
-          setOpen(false)
+        onSubmit={async (amount, network, number) => {
+          // Reported back to the modal — only closing and clearing on success
+          // is the point; the server validates the minimum and the current
+          // balance, and a rejected request used to close the form and blank
+          // the amount anyway, silently discarding what the agent had just typed.
+          const ok = await requestWithdrawal(amount, network, number)
+          if (ok) setOpen(false)
+          return ok
         }}
       />
     </div>
@@ -183,7 +188,7 @@ function RequestModal({
   onClose: () => void
   balance: number
   defaultPhone: string
-  onSubmit: (amount: number, network: Network, number: string) => void
+  onSubmit: (amount: number, network: Network, number: string) => Promise<boolean>
 }) {
   const [value, setValue] = useState('')
   const [network, setNetwork] = useState<Network>('MTN')
@@ -194,11 +199,12 @@ function RequestModal({
    */
   const [phone, setPhone] = useState(defaultPhone === PLACEHOLDER_PHONE ? '' : defaultPhone)
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
   const [phoneError, setPhoneError] = useState('')
 
   const parsed = value.trim() ? parseCedis(value) : null
 
-  const submit = () => {
+  const submit = async () => {
     if (parsed === null) {
       setError('Enter an amount like 50 or 50.00.')
       return
@@ -217,8 +223,17 @@ function RequestModal({
     }
     setError('')
     setPhoneError('')
-    setValue('')
-    onSubmit(parsed, network, phone.trim())
+    // Cleared only once `onSubmit` reports success — a rejection (below the
+    // minimum, balance changed, too many pending) used to blank the amount
+    // and close the form regardless, losing everything the agent had just
+    // typed.
+    setBusy(true)
+    try {
+      const ok = await onSubmit(parsed, network, phone.trim())
+      if (ok) setValue('')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -295,7 +310,7 @@ function RequestModal({
           />
         </Field>
 
-        <Button block size="lg" onClick={submit}>
+        <Button block size="lg" loading={busy} disabled={busy} onClick={() => void submit()}>
           Send request
         </Button>
       </div>
