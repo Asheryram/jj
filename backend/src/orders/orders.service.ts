@@ -456,6 +456,24 @@ export class OrdersService {
       if (p.orderId) feeByOrderId.set(p.orderId, p.fee)
     }
 
+    /**
+     * Where a failed order's refund actually stands — a person always
+     * decides this (see `RefundRequest`'s own doc comment), so unlike
+     * delivery there is no "automatic" version to compare against. `pending`
+     * is the one that matters most to surface: a failed order sitting there
+     * is money nobody has actually paid back yet, waiting on a click.
+     * `approved` is already covered by `Order.refunded` and isn't repeated
+     * here; this exists for `pending` and `rejected`, which nothing else shows.
+     */
+    const refundRequests = await this.prisma.refundRequest.findMany({
+      where: { orderId: { in: rows.map((r) => r.id) } },
+      select: { orderId: true, status: true },
+    })
+    const refundStatusByOrderId = new Map<string, 'pending' | 'approved' | 'rejected'>()
+    for (const r of refundRequests) {
+      refundStatusByOrderId.set(r.orderId, r.status)
+    }
+
     return rows.map((row) => ({
       ...toOrder(row),
       actualSupplierCost: actualCostByOrderId.get(row.id) ?? null,
@@ -502,6 +520,16 @@ export class OrdersService {
        * staff. This one is about who on our side decided the outcome.
        */
       resolvedManually: row.resolvedManually,
+      /**
+       * `pending`/`rejected` only — `approved` is already `Order.refunded`,
+       * shown as the existing "Refunded" badge, so this deliberately doesn't
+       * repeat it. Null when there's no refund request at all (nothing was
+       * ever owed back).
+       */
+      refundStatus: (() => {
+        const status = refundStatusByOrderId.get(row.id)
+        return status && status !== 'approved' ? status : null
+      })(),
     }))
   }
 

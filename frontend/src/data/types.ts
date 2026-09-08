@@ -195,6 +195,14 @@ export interface Order {
    * is about DataHub routing the purchase to their own staff, not ours.
    */
   resolvedManually?: boolean
+  /**
+   * Admin only: where a failed order's refund actually stands, when it isn't
+   * already `approved` (that case is `refunded` instead — see above). A
+   * person always decides a refund, so `pending` means one is genuinely
+   * waiting on a click; `rejected` means an admin refused it. Null when
+   * nothing was ever owed back.
+   */
+  refundStatus?: 'pending' | 'rejected' | null
 }
 
 /** Customer wallet ledger entry (FR-2.4). */

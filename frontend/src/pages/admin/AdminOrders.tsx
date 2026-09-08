@@ -203,6 +203,7 @@ export default function AdminOrders() {
       'DataHub fulfilment',
       'DataHub ticket ID',
       'Resolved by admin',
+      'Refund status',
     ]
     const rows = visible.map((o) => {
       const agentShares = o.split.shares.filter((s) => s.role === 'agent')
@@ -228,6 +229,7 @@ export default function AdminOrders() {
         o.fulfilmentReference ?? '',
         o.manualOrderNumber ?? '',
         o.resolvedManually ? 'yes' : 'no',
+        o.refunded ? 'approved' : (o.refundStatus ?? ''),
       ]
     })
     const csv = [header, ...rows].map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n')
@@ -401,6 +403,22 @@ export default function AdminOrders() {
                         <Badge tone="info" className="ml-1.5">
                           Refunded
                         </Badge>
+                      )}
+                      {order.refundStatus === 'pending' && (
+                        <span
+                          className="ml-1.5 inline-block"
+                          title="This money is owed back and nobody has approved paying it yet — a person always decides a refund, so this is waiting on a click, not automation."
+                        >
+                          <Badge tone="warning">Refund pending</Badge>
+                        </span>
+                      )}
+                      {order.refundStatus === 'rejected' && (
+                        <span
+                          className="ml-1.5 inline-block"
+                          title="An admin looked at this refund request and refused it — no money moved."
+                        >
+                          <Badge tone="danger">Refund rejected</Badge>
+                        </span>
                       )}
                       {order.fulfilmentReference === 'manual' && (
                         <span className="ml-1.5 inline-flex items-center gap-1">
