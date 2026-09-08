@@ -42,7 +42,7 @@ export default function FloatRisk() {
     api
       .floatRisk()
       .then(setData)
-      .catch(() => setData({ floatReference: null, observedAt: null, atRisk: [], inactive: [] }))
+      .catch(() => setData({ floatReference: null, trackedSince: null, atRisk: [], inactive: [] }))
   }
 
   useEffect(load, [])
