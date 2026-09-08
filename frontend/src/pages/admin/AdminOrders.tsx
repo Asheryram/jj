@@ -199,7 +199,7 @@ export default function AdminOrders() {
       'Paid with',
       'Status',
       'Refunded',
-      'Manual fulfilment',
+      'DataHub fulfilment',
     ]
     const rows = visible.map((o) => {
       const agentShares = o.split.shares.filter((s) => s.role === 'agent')
@@ -222,7 +222,7 @@ export default function AdminOrders() {
         o.paidWith,
         o.status,
         o.refunded ? 'yes' : 'no',
-        o.manualFulfilment ? 'yes' : 'no',
+        o.fulfilmentReference ?? '',
       ]
     })
     const csv = [header, ...rows].map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n')
@@ -397,12 +397,20 @@ export default function AdminOrders() {
                           Refunded
                         </Badge>
                       )}
-                      {order.manualFulfilment && (
+                      {order.fulfilmentReference === 'manual' && (
                         <span
                           className="ml-1.5 inline-block"
                           title="DataHub routed this one to a person to clear by hand, not their automated system — it can take much longer to settle than a normal order."
                         >
                           <Badge tone="warning">Manual</Badge>
+                        </span>
+                      )}
+                      {order.fulfilmentReference === 'code' && (
+                        <span
+                          className="ml-1.5 inline-block"
+                          title="DataHub's automated system handled this one — a plain reference, not routed to a person."
+                        >
+                          <Badge tone="neutral">Code</Badge>
                         </span>
                       )}
                       {/* "Failed" flattens a dead float, an unapproved

@@ -173,13 +173,15 @@ export interface Order {
    */
   paystackFee?: number | null
   /**
-   * Admin only: true when DataHub's own reference for this order is
-   * `manual_`-prefixed — their staff have to clear it by hand rather than
-   * it going through their automated path. Not predictable from anything
-   * else about the order, and the reason a manual-routed one can take much
-   * longer to settle than an identical automated one.
+   * Admin only: how DataHub routed this order's fulfilment — 'manual' when
+   * their own reference is `manual_`-prefixed (a person on their side has to
+   * clear it by hand), 'code' when it went through their automated path
+   * instead, or null when DataHub hasn't replied with a reference yet. Not
+   * predictable from anything else about the order, and the reason a
+   * manual-routed one can take much longer to settle than an identical
+   * automated one.
    */
-  manualFulfilment?: boolean
+  fulfilmentReference?: 'manual' | 'code' | null
 }
 
 /** Customer wallet ledger entry (FR-2.4). */
