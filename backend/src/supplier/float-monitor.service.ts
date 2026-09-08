@@ -422,12 +422,15 @@ export class FloatMonitorService {
 
   /**
    * What the float should hold right now, going only by tracked capital —
-   * independent of any live reading. Forward-only from the baseline captured
-   * at the first logged top-up: the baseline plus every capital move since,
-   * minus every bundle paid for since. It deliberately does not reach further
-   * back: sales from before capital tracking began have no matching top-up on
-   * record, so pulling in their cost would make the float look short for no
-   * real reason.
+   * independent of any live reading. The baseline captured at the first
+   * logged top-up (whatever DataHub held before any tracked money moved),
+   * plus every capital move ever logged, minus every bundle DataHub has ever
+   * actually charged for — a full replay from the start, not a running total
+   * that only picks up spending from whenever it happened to be captured.
+   * `capitalSummary` was already all-time; the cost side used to stop at the
+   * baseline's moment, which was only ever equivalent to a full replay
+   * because nothing has yet been charged before tracking began — this makes
+   * that true by construction instead of by accident of the data so far.
    *
    * Null until James has logged at least one capital move.
    *
@@ -451,7 +454,7 @@ export class FloatMonitorService {
     const [capital, cost] = await Promise.all([
       this.capitalSummary(),
       this.prisma.ledgerEntry.aggregate({
-        where: { kind: 'supplier_cost', occurredAt: { gte: capturedAt } },
+        where: { kind: 'supplier_cost' },
         _sum: { amount: true },
       }),
     ])

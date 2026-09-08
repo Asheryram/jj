@@ -4,7 +4,7 @@ import { api, ApiError, type SupplierFloat } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { cedis, dateTime, parseCedis } from '../../lib/format'
 import { Button, Callout, Card, CardHead, Field, Modal, Segmented, Spinner, TextInput, cn } from '../../components/ui'
-import { AlertIcon, CheckIcon } from '../../components/icons'
+import { AlertIcon, CheckIcon, RefreshIcon } from '../../components/icons'
 
 type FloatLevel = 'ok' | 'watch' | 'risk'
 
@@ -41,6 +41,7 @@ export default function FloatPanel() {
   const [float, setFloat] = useState<SupplierFloat | null>(null)
   const [error, setError] = useState('')
   const [logging, setLogging] = useState<'in' | 'out' | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
   const refresh = () =>
     api
@@ -52,6 +53,20 @@ export default function FloatPanel() {
             caught instanceof ApiError ? caught.message : 'We could not read the provider float.',
           ),
       )
+
+  /**
+   * "Should hold" is never a stored figure — it is recomputed from every
+   * capital move and every order ever charged, fresh on every request. So
+   * there is nothing to "recalculate" on the backend; the only reason this
+   * screen can look stale is that it fetched once on load and nothing since
+   * has told it to ask again. This is that ask, on demand, without a reload.
+   */
+  const manualRefresh = async () => {
+    setRefreshing(true)
+    setError('')
+    await refresh()
+    setRefreshing(false)
+  }
 
   useEffect(() => {
     let live = true
@@ -101,6 +116,11 @@ export default function FloatPanel() {
       <CardHead
         title="Provider float"
         subtitle="What DataHub GH has left to buy bundles with"
+        action={
+          <Button size="sm" variant="ghost" loading={refreshing} onClick={() => void manualRefresh()}>
+            <RefreshIcon className="size-4" /> Refresh
+          </Button>
+        }
       />
       <div className="space-y-3 px-4 pb-4">
         {observation === null ? (
@@ -128,7 +148,8 @@ export default function FloatPanel() {
                   <p className="text-sm text-slate-400 dark:text-slate-500">Not tracked yet</p>
                 )}
                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  What you've logged, minus every order since
+                  Every top-up and withdrawal you've logged, minus every order DataHub has ever
+                  charged you for
                 </p>
               </div>
               <div className="text-right">
