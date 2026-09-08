@@ -28,6 +28,7 @@ import {
   AlertIcon,
   CheckIcon,
   ClockIcon,
+  CopyIcon,
   DownloadIcon,
   ReceiptIcon,
   SearchIcon,
@@ -200,6 +201,7 @@ export default function AdminOrders() {
       'Status',
       'Refunded',
       'DataHub fulfilment',
+      'DataHub ticket ID',
     ]
     const rows = visible.map((o) => {
       const agentShares = o.split.shares.filter((s) => s.role === 'agent')
@@ -223,6 +225,7 @@ export default function AdminOrders() {
         o.status,
         o.refunded ? 'yes' : 'no',
         o.fulfilmentReference ?? '',
+        o.manualOrderNumber ?? '',
       ]
     })
     const csv = [header, ...rows].map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n')
@@ -398,11 +401,17 @@ export default function AdminOrders() {
                         </Badge>
                       )}
                       {order.fulfilmentReference === 'manual' && (
-                        <span
-                          className="ml-1.5 inline-block"
-                          title="DataHub routed this one to a person to clear by hand, not their automated system — it can take much longer to settle than a normal order."
-                        >
-                          <Badge tone="warning">Manual</Badge>
+                        <span className="ml-1.5 inline-flex items-center gap-1">
+                          <span
+                            title="DataHub routed this one to a person to clear by hand, not their automated system — it can take much longer to settle than a normal order."
+                          >
+                            <Badge tone="warning">
+                              Manual{order.manualOrderNumber ? ` · ${order.manualOrderNumber}` : ''}
+                            </Badge>
+                          </span>
+                          {/* DataHub's own ticket ID for this one — what to quote
+                              back to their support if it needs chasing. */}
+                          {order.manualOrderNumber && <CopyIconButton value={order.manualOrderNumber} />}
                         </span>
                       )}
                       {order.fulfilmentReference === 'code' && (
@@ -481,6 +490,31 @@ export default function AdminOrders() {
 
       <DispatchModal order={inspecting} onClose={() => setInspecting(null)} />
     </div>
+  )
+}
+
+function CopyIconButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+    } catch {
+      // Clipboard can be blocked; the value is still visible to select by hand.
+    }
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1800)
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label={`Copy ${value}`}
+      className="inline-flex size-5 items-center justify-center rounded-md hover:bg-black/5 dark:hover:bg-white/10"
+    >
+      {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+    </button>
   )
 }
 

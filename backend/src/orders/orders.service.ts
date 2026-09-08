@@ -479,6 +479,21 @@ export class OrdersService {
         : row.providerReference.startsWith('manual_')
           ? ('manual' as const)
           : ('code' as const),
+      /**
+       * DataHub's own numeric ticket ID for a manual-routed order, pulled
+       * straight out of the reference they already gave us — `manual_<this>_
+       * <their-timestamp>`. Confirmed against a real duplicate-order error
+       * they once sent, which named the same order by this exact number
+       * (`existingOrder.orderNumber`) as well as by this same reference. Not
+       * a new thing to store: every manual order that has ever existed
+       * already carries it, so this shows up for old orders too, not just
+       * ones placed from now on. It's what admin would quote back to
+       * DataHub's support when a manual order needs chasing.
+       */
+      manualOrderNumber:
+        row.providerReference?.startsWith('manual_') && row.providerReference.split('_').length >= 2
+          ? row.providerReference.split('_')[1]
+          : null,
     }))
   }
 

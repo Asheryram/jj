@@ -182,6 +182,12 @@ export interface Order {
    * automated one.
    */
   fulfilmentReference?: 'manual' | 'code' | null
+  /**
+   * Admin only: DataHub's own numeric ticket ID for a manual-routed order,
+   * pulled from the reference they gave us — null unless `fulfilmentReference`
+   * is 'manual'. What admin would quote to DataHub's support when chasing one.
+   */
+  manualOrderNumber?: string | null
 }
 
 /** Customer wallet ledger entry (FR-2.4). */
