@@ -172,6 +172,14 @@ export interface Order {
    * to the buyer at checkout.
    */
   paystackFee?: number | null
+  /**
+   * Admin only: true when DataHub's own reference for this order is
+   * `manual_`-prefixed — their staff have to clear it by hand rather than
+   * it going through their automated path. Not predictable from anything
+   * else about the order, and the reason a manual-routed one can take much
+   * longer to settle than an identical automated one.
+   */
+  manualFulfilment?: boolean
 }
 
 /** Customer wallet ledger entry (FR-2.4). */

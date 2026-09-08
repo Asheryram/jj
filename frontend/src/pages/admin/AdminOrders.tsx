@@ -199,6 +199,7 @@ export default function AdminOrders() {
       'Paid with',
       'Status',
       'Refunded',
+      'Manual fulfilment',
     ]
     const rows = visible.map((o) => {
       const agentShares = o.split.shares.filter((s) => s.role === 'agent')
@@ -221,6 +222,7 @@ export default function AdminOrders() {
         o.paidWith,
         o.status,
         o.refunded ? 'yes' : 'no',
+        o.manualFulfilment ? 'yes' : 'no',
       ]
     })
     const csv = [header, ...rows].map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n')
@@ -394,6 +396,14 @@ export default function AdminOrders() {
                         <Badge tone="info" className="ml-1.5">
                           Refunded
                         </Badge>
+                      )}
+                      {order.manualFulfilment && (
+                        <span
+                          className="ml-1.5 inline-block"
+                          title="DataHub routed this one to a person to clear by hand, not their automated system — it can take much longer to settle than a normal order."
+                        >
+                          <Badge tone="warning">Manual</Badge>
+                        </span>
                       )}
                       {/* "Failed" flattens a dead float, an unapproved
                           recipient and a withdrawn bundle into one word. The
@@ -769,7 +779,14 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
                     </summary>
                     <div className="mt-1.5 space-y-1">
                       {attempt.providerReference && (
-                        <p className="font-mono break-all">Ref {attempt.providerReference}</p>
+                        <p className="font-mono break-all">
+                          Ref {attempt.providerReference}
+                          {attempt.providerReference.startsWith('manual_') && (
+                            <span className="ml-1.5 font-sans font-semibold text-amber-700 dark:text-amber-400">
+                              (their manual queue — a person clears this, not their system)
+                            </span>
+                          )}
+                        </p>
                       )}
                       {attempt.providerStatus && <p>Status {attempt.providerStatus}</p>}
                       <p className="font-mono">SKU {attempt.supplierCode}</p>

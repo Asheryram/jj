@@ -460,6 +460,18 @@ export class OrdersService {
       ...toOrder(row),
       actualSupplierCost: actualCostByOrderId.get(row.id) ?? null,
       paystackFee: feeByOrderId.get(row.id) ?? null,
+      /**
+       * A `manual_`-prefixed reference is DataHub's own naming, not ours — it
+       * means this particular purchase landed in a queue one of their staff
+       * has to clear by hand, rather than their automated path (a plain
+       * numeric reference). Nothing about the order or the recipient
+       * predicts it: the exact same bundle to the exact same number has
+       * gone either way on different days. It matters to admin only because
+       * a manual-routed order can take many hours longer to settle, and is
+       * the shape most likely to get permanently stuck and need
+       * `resolveManually`.
+       */
+      manualFulfilment: row.providerReference?.startsWith('manual_') ?? false,
     }))
   }
 
