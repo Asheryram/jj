@@ -122,6 +122,40 @@ export class FulfilmentService implements OnApplicationBootstrap {
     // not guess in either direction. Both leave the order in `processing`, where
     // the webhook or the reconciler will find it.
     if (result.outcome === 'pending') {
+      /**
+       * The float moved the moment DataHub accepted this — not once we later
+       * settle it as delivered or rejected. Booking the real cost here, the
+       * instant it's known, rather than waiting for that later moment is what
+       * keeps `FloatMonitorService.expectedBalance` honest while an order
+       * sits in this state: without it, an order that's genuinely still
+       * awaiting DataHub's webhook makes the float look short by exactly its
+       * cost, and the low-float alert reads that as a missing top-up.
+       *
+       * Safe to book twice: `recordDelivered` and the rejected branch below
+       * both write this exact same idempotency key once the order actually
+       * settles, and `LedgerService.record` skips a duplicate rather than
+       * writing it again — so whichever of the two runs first is the one
+       * that sticks, and the amount is identical either way since both read
+       * the same `SupplierDispatch.providerCharged`.
+       */
+      if (result.providerCharged != null) {
+        const believedCost = (order.split as unknown as OrderSplit).supplierCost
+        await this.ledger.record([
+          {
+            idempotencyKey: LedgerService.key('order', order.reference, 'supplier_cost'),
+            kind: 'supplier_cost',
+            amount: -result.providerCharged,
+            description:
+              `Bundle cost · ${order.productName} (charged by DataHub; not yet settled)` +
+              (result.providerCharged !== believedCost
+                ? ` (expected ${(believedCost / 100).toFixed(2)}, charged ${(result.providerCharged / 100).toFixed(2)})`
+                : ''),
+            orderRef: order.reference,
+            occurredAt: new Date(),
+          },
+        ])
+      }
+
       await this.prisma.order.update({
         where: { id: orderId },
         data: { providerReference: result.providerReference ?? null },
