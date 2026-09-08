@@ -585,17 +585,41 @@ export default function Buy() {
             </Card>
           ) : placed.status === 'processing' || placed.status === 'pending' ? (
             /* The status flips from a provider callback, not from a click, so it
-               needs announcing (WCAG 4.1.3). */
-            <Card className="mt-3 p-8 text-center" role="status" aria-live="polite">
-              <Spinner className="mx-auto size-9 text-brand-600 dark:text-brand-300" />
-              <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">
-                Sending to {prettyPhone(placed.recipient)}
-              </p>
-              <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
-                {placed.paidWith === 'wallet' ? 'Paid from your wallet.' : 'Payment confirmed.'} We
-                are waiting for the network to confirm delivery — this usually takes a few seconds.
-              </p>
-              <p className="tabular mt-4 text-xs text-slate-500 dark:text-slate-400">Reference {placed.reference}</p>
+               needs announcing (WCAG 4.1.3).
+               Two separate facts, said as two separate things: the payment is
+               already done (that is why this screen exists at all), and the
+               bundle is still on its way. Leading with a spinner and no
+               confirmation read as "did my payment even go through?" — this
+               leads with the answer to that question first. */
+            <Card className="mt-3 overflow-hidden" role="status" aria-live="polite">
+              <div className="p-8 text-center">
+                <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400">
+                  <CheckIcon className="size-7" strokeWidth={2.4} />
+                </span>
+                <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">Payment received</p>
+                <p className="mt-1.5 flex items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                  <Spinner className="size-3.5 text-brand-600 dark:text-brand-300" />
+                  Sending your bundle now — this usually takes a few seconds.
+                </p>
+              </div>
+
+              <dl className="space-y-2.5 border-t border-slate-100 dark:border-slate-800 p-5 text-sm">
+                {sellerName && <Line label="Store" value={sellerName} />}
+                {placed.network && <Line label="Network" value={placed.network} />}
+                <Line label="Item" value={placed.productName} />
+                <Line label="Phone" value={prettyPhone(placed.recipient)} />
+                <Line label="Amount" value={cedis(placed.salePrice)} strong />
+                <Line label="Status" value="Processing" />
+                <Line label="Reference" value={placed.reference} />
+              </dl>
+
+              <div className="px-5 pb-5">
+                <Link to={shopPath('/shop')}>
+                  <Button block variant="outline">
+                    Back to shop
+                  </Button>
+                </Link>
+              </div>
             </Card>
           ) : placed.status === 'completed' ? (
             <Card className="mt-3 overflow-hidden">
