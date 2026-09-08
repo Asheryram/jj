@@ -494,6 +494,14 @@ export class OrdersService {
         row.providerReference?.startsWith('manual_') && row.providerReference.split('_').length >= 2
           ? row.providerReference.split('_')[1]
           : null,
+      /**
+       * True when an admin forced this order's outcome through `resolveManually`
+       * rather than DataHub's own webhook or the reconciler's polling ever
+       * confirming it — a completely different thing from `fulfilmentReference`
+       * being 'manual', which is about DataHub routing the purchase to their own
+       * staff. This one is about who on our side decided the outcome.
+       */
+      resolvedManually: row.resolvedManually,
     }))
   }
 

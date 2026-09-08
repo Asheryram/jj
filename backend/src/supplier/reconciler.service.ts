@@ -371,7 +371,13 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     }
 
     this.log.warn(`${order.reference}: resolving by hand as ${outcome} by ${adminId} — ${reason}`)
-    const result = await this.fulfilment.settleFromProvider(orderId, outcome, `Marked ${outcome} by hand — ${reason}`)
+    const result = await this.fulfilment.settleFromProvider(
+      orderId,
+      outcome,
+      `Marked ${outcome} by hand — ${reason}`,
+      undefined,
+      true,
+    )
 
     /**
      * This pre-check and the atomic claim inside `settle` are not the same

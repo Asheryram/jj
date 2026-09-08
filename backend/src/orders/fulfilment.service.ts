@@ -339,8 +339,9 @@ export class FulfilmentService implements OnApplicationBootstrap {
     outcome: 'delivered' | 'rejected',
     reason?: string,
     voucher?: { serial: string; pin: string },
+    resolvedManually = false,
   ): Promise<SettleResult> {
-    return this.settle(orderId, outcome, reason, voucher)
+    return this.settle(orderId, outcome, reason, voucher, resolvedManually)
   }
 
   /**
@@ -386,6 +387,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
     outcome: 'delivered' | 'rejected',
     reason?: string,
     voucher?: { serial: string; pin: string },
+    resolvedManually = false,
   ): Promise<SettleResult> {
     return this.prisma.$transaction(async (tx) => {
       // Re-read inside the transaction; the status may have moved since dispatch.
@@ -427,6 +429,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
             completedAt: new Date(),
             voucherSerial: voucher?.serial ?? null,
             voucherPin: voucher?.pin ?? null,
+            resolvedManually,
           },
         })
         if (claim.count === 0) {
@@ -479,7 +482,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
       // yet — it is owed, and a person has to authorise paying it.
       const claim = await tx.order.updateMany({
         where: { id: orderId, status: { notIn: ['completed', 'failed'] } },
-        data: { status: 'failed', refunded: false },
+        data: { status: 'failed', refunded: false, resolvedManually },
       })
       if (claim.count === 0) {
         // Same race as the delivered branch above — see that comment.

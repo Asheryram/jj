@@ -202,6 +202,7 @@ export default function AdminOrders() {
       'Refunded',
       'DataHub fulfilment',
       'DataHub ticket ID',
+      'Resolved by admin',
     ]
     const rows = visible.map((o) => {
       const agentShares = o.split.shares.filter((s) => s.role === 'agent')
@@ -226,6 +227,7 @@ export default function AdminOrders() {
         o.refunded ? 'yes' : 'no',
         o.fulfilmentReference ?? '',
         o.manualOrderNumber ?? '',
+        o.resolvedManually ? 'yes' : 'no',
       ]
     })
     const csv = [header, ...rows].map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n')
@@ -402,11 +404,17 @@ export default function AdminOrders() {
                       )}
                       {order.fulfilmentReference === 'manual' && (
                         <span className="ml-1.5 inline-flex items-center gap-1">
+                          {/* Deliberately not just "Manual" — this app also has
+                              "resolve manually" (an admin forcing a stuck order's
+                              outcome by hand), a completely different thing. A
+                              bare "Manual" badge here would read as that instead
+                              of what it actually means: DataHub routed this to
+                              one of their own staff, nobody on our side touched it. */}
                           <span
-                            title="DataHub routed this one to a person to clear by hand, not their automated system — it can take much longer to settle than a normal order."
+                            title="DataHub routed this one to a person on their side to clear by hand, not their automated system — it can take much longer to settle than a normal order. Not the same thing as resolving an order manually here."
                           >
                             <Badge tone="warning">
-                              Manual{order.manualOrderNumber ? ` · ${order.manualOrderNumber}` : ''}
+                              DataHub manual{order.manualOrderNumber ? ` · ${order.manualOrderNumber}` : ''}
                             </Badge>
                           </span>
                           {/* DataHub's own ticket ID for this one — what to quote
@@ -420,6 +428,19 @@ export default function AdminOrders() {
                           title="DataHub's automated system handled this one — a plain reference, not routed to a person."
                         >
                           <Badge tone="neutral">Code</Badge>
+                        </span>
+                      )}
+                      {/* Who on OUR side decided this outcome — separate from,
+                          and shown next to, whatever DataHub's own badge above
+                          says. An admin clicking "mark as delivered/failed" and
+                          DataHub routing to their manual queue are unrelated
+                          facts; an order can be either, both, or neither. */}
+                      {order.resolvedManually && (
+                        <span
+                          className="ml-1.5 inline-block"
+                          title="An admin forced this order's outcome by hand — DataHub's own webhook or polling never confirmed it."
+                        >
+                          <Badge tone="info">Resolved by admin</Badge>
                         </span>
                       )}
                       {/* "Failed" flattens a dead float, an unapproved

@@ -421,6 +421,13 @@ model Order {
   /// Set when the order failed and the buyer was made whole (FR-2.7).
   refunded Boolean @default(false)
 
+  /// Set when an admin forced this order's outcome by hand (see
+  /// `ReconcilerService.resolveManually`) rather than DataHub's own webhook or
+  /// the reconciler's polling ever confirming it. Distinct from a `manual_`
+  /// provider reference, which is DataHub routing an order to their own
+  /// staff — this is about who on OUR side decided the outcome, not theirs.
+  resolvedManually Boolean @default(false) @map("resolved_manually")
+
   /// DataHub GH's reference for this order, once they have accepted it.
   ///
   /// Unique because it is what an inbound webhook is matched on: two orders

@@ -188,6 +188,13 @@ export interface Order {
    * is 'manual'. What admin would quote to DataHub's support when chasing one.
    */
   manualOrderNumber?: string | null
+  /**
+   * Admin only: true when an admin forced this order's outcome by hand
+   * (resolve manually) rather than DataHub's webhook or the reconciler ever
+   * confirming it. Unrelated to `fulfilmentReference` being 'manual', which
+   * is about DataHub routing the purchase to their own staff, not ours.
+   */
+  resolvedManually?: boolean
 }
 
 /** Customer wallet ledger entry (FR-2.4). */
