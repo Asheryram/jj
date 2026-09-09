@@ -12,6 +12,13 @@ import { ApprovalsService } from '../orders/approvals.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
 import { PricingService } from '../pricing/pricing.service'
 import { resalePriceFor } from '../domain/pricing'
+import { AdminService } from '../admin/admin.service'
+import { ApplicationsService } from '../admin/applications.service'
+import { BrandingService } from '../branding/branding.service'
+import { WithdrawalsService } from '../withdrawals/withdrawals.service'
+import { LedgerService } from '../finance/ledger.service'
+import { SettingsService } from '../settings/settings.service'
+import { OrdersService } from '../orders/orders.service'
 
 /**
  * Free-tier friendly, and deliberately so: this answers plain questions about
@@ -43,7 +50,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_downline',
       description:
-        'The agents this agent has personally referred (their "downline"), and how much each has sold.',
+        'The agents this agent has personally referred (their "downline"), how much each has sold, and the total earned from the downline overall.',
     },
   },
   {
@@ -67,6 +74,38 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
       name: 'get_my_withdrawals',
       description:
         "The agent's own recent withdrawal (payout) requests and where each one stands — pending, paid, rejected, and so on.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_recent_orders',
+      description:
+        "The agent's most recent sales (their own and their downline's), each with its reference, product, status, amount and date — use this for any question about a specific order or sale, or whether one went through.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_summary',
+      description:
+        "How the agent's shop is doing right now: earned today, earned all time, orders today vs completed vs total, how many of their downline are active, and this week's earnings against last week's — use this for any \"how am I doing\" or \"how's business\" style question.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_branding_status',
+      description:
+        "The status of the agent's own shop-look (branding) request — their live shop name/colour/logo, anything still waiting on an admin's decision, and the most recent decision if one was made.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_markup',
+      description:
+        "The agent's own default markup percentage — the extra they charge above cost on any product they haven't set a specific price for.",
     },
   },
 ]
@@ -117,6 +156,69 @@ const ADMIN_TOOLS: ChatCompletionTool[] = [
       description: "Custom domain requests still waiting on a decision, oldest first.",
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'get_business_overview',
+      description:
+        "The last 30 days of the whole business: orders, revenue, payment fees, delivery success rate, average order value, active agents, customers, pending withdrawals, unclaimed refund credits, this week vs last week's revenue, the refund rate, this week's checkout funnel, and agents who used to sell but have gone quiet. Use this for any general \"how's the business doing\" question.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_profit_statement',
+      description:
+        "The real profit and loss for the last 30 days — revenue minus every actual cost (supplier cost, payment fees, agent margins, referral bonuses, refunds, payout fees), not just revenue. Use this for any question about actual profit or how much the business has made, not just sold.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_agent_stats',
+      description:
+        'How many agents the platform has in total, how much they have earned and sold all-time, and any new agent applications still waiting for a decision.',
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_catalogue_accuracy',
+      description:
+        "Whether the catalogue's believed cost for each product still matches what the supplier actually charged on its most recent sale — flags a product whose real cost has drifted from what the books assume.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_pending_branding_requests',
+      description: "Agent shop-look (branding) requests still waiting for an approval decision, oldest first.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_platform_settings',
+      description:
+        'The platform\'s current configuration: whether new agent signups are open, whether agents are auto-approved, the minimum withdrawal amount, the float watch/risk thresholds, the Paystack processing fee, and the current site notice banner if one is set.',
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_outstanding_manual_advances',
+      description:
+        "Payouts or refunds an admin covered out of their own pocket (because Paystack couldn't send it) that the business still owes back to them.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_float_risk_products',
+      description:
+        'Which specific products cost more than the float can currently cover if ordered right now, and which products are inactive — the detail behind a plain "is the float okay" answer.',
+    },
+  },
 ]
 
 /**
@@ -159,6 +261,13 @@ export class AssistantService {
     private readonly approvals: ApprovalsService,
     private readonly reconciler: ReconcilerService,
     private readonly pricing: PricingService,
+    private readonly admin: AdminService,
+    private readonly applications: ApplicationsService,
+    private readonly branding: BrandingService,
+    private readonly withdrawals: WithdrawalsService,
+    private readonly ledger: LedgerService,
+    private readonly settings: SettingsService,
+    private readonly orders: OrdersService,
   ) {
     const apiKey = this.config.get<string>('GROQ_API_KEY')
     this.client = apiKey ? new Groq({ apiKey }) : null
@@ -278,13 +387,16 @@ export class AssistantService {
       }
       case 'get_my_downline': {
         const downline = await this.agents.downline(user.referralCode)
-        return downline.map((a) => ({
-          name: a.name,
-          joinedAt: a.joinedAt,
-          ordersSold: a.orders,
-          salesVolumeGhs: this.toCedis(a.volume),
-          earnedFromThemGhs: this.toCedis(a.earnedForUpline),
-        }))
+        return {
+          totalEarnedFromDownlineGhs: this.toCedis(downline.reduce((sum, a) => sum + a.earnedForUpline, 0)),
+          agents: downline.map((a) => ({
+            name: a.name,
+            joinedAt: a.joinedAt,
+            ordersSold: a.orders,
+            salesVolumeGhs: this.toCedis(a.volume),
+            earnedFromThemGhs: this.toCedis(a.earnedForUpline),
+          })),
+        }
       }
       case 'get_my_domain': {
         const domain = await this.domains.mine(user.id)
@@ -319,6 +431,39 @@ export class AssistantService {
           requestedAt: w.requestedAt,
           paidAt: w.paidAt,
         }))
+      }
+      case 'get_my_recent_orders': {
+        const rows = await this.orders.list(user, 20)
+        return rows.map((o) => ({
+          reference: o.reference,
+          product: o.productName,
+          status: o.status,
+          amountGhs: this.toCedis(o.salePrice),
+          date: o.createdAt,
+          refunded: 'refunded' in o ? o.refunded : false,
+        }))
+      }
+      case 'get_my_summary': {
+        const summary = await this.admin.mySummary(user)
+        if (summary.role !== 'agent') return { error: 'Not an agent.' }
+        return {
+          earnedTodayGhs: this.toCedis(summary.earnedToday),
+          earnedAllTimeGhs: this.toCedis(summary.earnedAllTime),
+          ordersToday: summary.ordersToday,
+          ordersCompleted: summary.ordersCompleted,
+          ordersTotal: summary.ordersTotal,
+          activeDownlineAgents: summary.activeSubAgents,
+          earnedThisWeekGhs: this.toCedis(summary.earnedTrend.thisWeek),
+          earnedLastWeekGhs: this.toCedis(summary.earnedTrend.lastWeek),
+        }
+      }
+      case 'get_my_branding_status': {
+        const status = await this.branding.mine(user.id)
+        return status
+      }
+      case 'get_my_markup': {
+        const row = await this.prisma.user.findUnique({ where: { id: user.id }, select: { markupPercent: true } })
+        return { markupPercent: row?.markupPercent ?? 0 }
       }
       default:
         return { error: `Unknown tool: ${name}` }
@@ -383,6 +528,106 @@ export class AssistantService {
           domain: r.domain,
           requestedAt: r.requestedAt,
         }))
+      }
+      case 'get_business_overview': {
+        const o = await this.admin.overview()
+        return {
+          windowDays: o.windowDays,
+          orders: o.orders,
+          revenueGhs: this.toCedis(o.revenue),
+          paymentFeesGhs: this.toCedis(o.paymentFees),
+          failedOrders: o.failedOrders,
+          successRatePercent: Math.round(o.successRate * 100),
+          averageOrderValueGhs: this.toCedis(o.averageOrderValue),
+          activeAgents: o.activeAgents,
+          customers: o.customers,
+          pendingWithdrawals: { count: o.pendingWithdrawals.count, amountGhs: this.toCedis(o.pendingWithdrawals.amount) },
+          unclaimedRefundCredits: { count: o.unclaimedCredits.count, amountGhs: this.toCedis(o.unclaimedCredits.amount) },
+          revenueThisWeekGhs: this.toCedis(o.revenueTrend.thisWeek),
+          revenueLastWeekGhs: this.toCedis(o.revenueTrend.lastWeek),
+          refundRatePercent: Math.round(o.refundRate * 100),
+          checkoutFunnelThisWeek: o.checkoutFunnel,
+          agentsGoneQuiet: o.goingQuietAgents,
+        }
+      }
+      case 'get_profit_statement': {
+        const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+        const s = await this.ledger.statement(since)
+        return {
+          sinceDate: s.since,
+          revenueGhs: this.toCedis(s.revenue),
+          costsGhs: {
+            supplier: this.toCedis(s.costs.supplier),
+            paymentFees: this.toCedis(s.costs.paymentFees),
+            agentMargins: this.toCedis(s.costs.agentMargins),
+            referralBonuses: this.toCedis(s.costs.referralBonuses),
+            refunds: this.toCedis(s.costs.refunds),
+            payoutFees: this.toCedis(s.costs.payoutFees),
+          },
+          profitGhs: this.toCedis(s.profit),
+        }
+      }
+      case 'get_agent_stats': {
+        const [pending, pendingCount, summary] = await Promise.all([
+          this.applications.pending(),
+          this.applications.pendingCount(),
+          this.admin.agentSummary(),
+        ])
+        return {
+          totalAgents: summary.agentCount,
+          allTimeEarnedGhs: this.toCedis(summary.totalEarned),
+          allTimeSalesVolumeGhs: this.toCedis(summary.totalVolume),
+          pendingApplicationsCount: pendingCount,
+          pendingApplications: pending.slice(0, 20),
+        }
+      }
+      case 'get_catalogue_accuracy': {
+        const rows = await this.admin.catalogueAccuracy()
+        return rows.slice(0, 20).map((r) => ({
+          product: r.name,
+          network: r.network,
+          believedCostGhs: this.toCedis(r.believed),
+          actualChargedGhs: this.toCedis(r.charged),
+          differenceGhs: this.toCedis(r.diff),
+          lastSoldAt: r.lastSoldAt,
+        }))
+      }
+      case 'get_pending_branding_requests': {
+        const rows = await this.branding.queue('pending')
+        return rows.slice(0, 20).map((r) => ({
+          agentName: r.agentName,
+          shopName: r.shopName,
+          requestedAt: r.createdAt,
+        }))
+      }
+      case 'get_platform_settings': {
+        const s = await this.settings.all()
+        return {
+          registrationOpen: s.registrationOpen,
+          agentsAutoApprove: s.agentsAutoApprove,
+          minWithdrawalGhs: this.toCedis(s.minWithdrawal),
+          floatWatchAtGhs: this.toCedis(s.floatWatchAt),
+          floatRiskAtGhs: this.toCedis(s.floatRiskAt),
+          paystackFeePercent: s.paystackFeeBp / 100,
+          siteNotice: s.siteNotice,
+        }
+      }
+      case 'get_outstanding_manual_advances': {
+        const rows = await this.withdrawals.outstandingManualAdvances()
+        return rows.map((a) => ({
+          amountGhs: this.toCedis(a.amount),
+          description: a.description,
+          occurredAt: a.occurredAt,
+        }))
+      }
+      case 'get_float_risk_products': {
+        const risk = await this.admin.floatRisk()
+        return {
+          floatReferenceGhs: risk.floatReference != null ? this.toCedis(risk.floatReference) : null,
+          trackedSince: risk.trackedSince,
+          atRiskProducts: risk.atRisk.map((p) => ({ product: p.name, network: p.network, costGhs: this.toCedis(p.supplierCost) })),
+          inactiveProducts: risk.inactive.map((p) => ({ product: p.name, network: p.network })),
+        }
       }
       default:
         return { error: `Unknown tool: ${name}` }

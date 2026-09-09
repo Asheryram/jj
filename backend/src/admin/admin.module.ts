@@ -10,5 +10,6 @@ import { AgentsModule } from '../agents/agents.module'
   imports: [SupplierModule, OrdersModule, SettingsModule, AgentsModule],
   controllers: [AdminController, ReportsController],
   providers: [AdminService, ApplicationsService],
+  exports: [AdminService, ApplicationsService],
 })
 export class AdminModule {}
