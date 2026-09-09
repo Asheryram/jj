@@ -85,6 +85,17 @@ export const adminGuide: GuideGroup[] = [
     label: 'Orders & money',
     tasks: [
       {
+        id: 'order-badges',
+        title: 'Read the extra badges on All orders',
+        why: "A plain \"Completed\" or \"Failed\" doesn't say everything worth knowing about an order — these small badges do.",
+        steps: [
+          'A **"DataHub manual"** badge, with a number and a copy icon, means DataHub routed this one to a person on their side to clear by hand, not their automated system — it can take much longer to settle. The number is their own ticket ID, for their support if it needs chasing.',
+          'A **"Code"** badge means their automated system handled it — nothing to chase.',
+          'A **"Resolved by admin"** badge means someone here used "Resolve by hand" on `Needs attention` — DataHub\'s own webhook or polling never actually confirmed this one.',
+          'A **"Refund pending"** or **"Refund rejected"** badge on a failed order tells you where its refund stands without opening `Refunds` first — "Refunded" (a different badge) means it\'s already paid.',
+        ],
+      },
+      {
         id: 'stuck-order',
         title: 'Sort out a stuck or disputed order',
         why: "The reconciler checks and settles almost everything on its own. This is where the rest — the handful it refuses to guess at — waits for you.",
@@ -149,6 +160,24 @@ export const adminGuide: GuideGroup[] = [
         ],
       },
       {
+        id: 'float-risk',
+        title: 'See which products cost more than the float can cover',
+        why: "A product priced above what the float can currently pay for is one whose next sale is likely to fail after the customer has already paid — worth catching before that happens, not after.",
+        steps: [
+          'Go to `Float risk`.',
+          'Read **"Priced above the float"** — on-sale products that currently cost more than the float can cover, worst first.',
+          'Click **"Take it off sale"** on one you want to stop selling until the float catches up.',
+          'Check **"Currently inactive"** below it for anything off sale that might be safe to turn back on — click **"Turn on"** once you\'re satisfied it\'s priced above cost.',
+        ],
+        notes: [
+          {
+            tone: 'info',
+            title: 'A suggestion, not a switch',
+            body: 'Nothing on this page flips a product on or off by itself — every row here is still the same deliberate click it always was.',
+          },
+        ],
+      },
+      {
         id: 'float',
         title: 'Top up and track my DataHub float',
         why: "DataHub's balance is prepaid — an empty float doesn't slow orders down, it fails them after the customer has already paid.",
@@ -181,8 +210,15 @@ export const adminGuide: GuideGroup[] = [
         steps: [
           'Go to `Number approvals` — the page itself is titled "Approvals."',
           'Try automatically first — click **"Try sending automatically."** If it works, a toast confirms how many were sent.',
-          'Otherwise, copy and enter them by hand — click **"Copy all {N},"** paste the list into your DataHub dashboard, add them there.',
+          'Otherwise, copy and enter them by hand — click **"Copy all {N},"** paste the list into your DataHub dashboard, add them there. A single number changed since the last batch? Click the small copy icon on just that row instead of the whole list.',
           'Click **"Re-check"** once you’re done — anything DataHub has approved releases its held order for delivery automatically.',
+        ],
+        notes: [
+          {
+            tone: 'info',
+            title: 'The "Copied" column',
+            body: 'Every number remembers when it was last copied — showing "Not yet" until then, and how long ago after. That\'s the checkpoint: a number that turns up after your last batch is easy to spot, instead of relying on memory for who\'s already been sent.',
+          },
         ],
       },
     ],
@@ -289,6 +325,36 @@ export const adminGuide: GuideGroup[] = [
           },
         ],
       },
+      {
+        id: 'whatsapp-channel',
+        title: 'Set my WhatsApp channel for agents',
+        why: 'Lets every agent join one shared WhatsApp channel from inside the app, without you sending each one the link by hand.',
+        steps: [
+          'Go to `Settings` and find **"WhatsApp channel."**',
+          'Paste your channel\'s invite link into **"Channel invite link"** and save.',
+          'Every agent gets a one-time popup the first time it\'s set (or whenever you change it), plus a standing card on their Dashboard to join whenever they like.',
+        ],
+      },
+      {
+        id: 'site-notice',
+        title: 'Put up a site-wide notice',
+        why: "For something everyone needs to know right now — a network running slow, planned downtime — without messaging each person.",
+        steps: [
+          'Go to `Settings` and find **"Site-wide notice."**',
+          'Type the message into **"Banner message"** and save — it appears at the top of every page, for every agent, customer and guest, immediately.',
+          'Clear the field and save again to take it down. It never expires on its own.',
+        ],
+      },
+      {
+        id: 'ask-for-help-admin',
+        title: 'Ask the assistant instead of hunting for a page',
+        why: 'Plain answers about your own float, refund queue, or stuck orders — from your real numbers, faster than opening each page yourself.',
+        steps: [
+          'Go to `Ask for help`.',
+          'Type a question, or tap one of the suggestions — "Is the float okay right now?", "Any refunds waiting on me?"',
+          'It can only look things up, never act — it will always say where to click yourself to actually approve, resolve, or change something.',
+        ],
+      },
     ],
   },
 ]
@@ -323,6 +389,7 @@ export const agentGuide: GuideGroup[] = [
           'Go to `Sell & refer` — or find the same link on your Dashboard, under "Your sell link."',
           'Copy your sell link from the field at the top — it looks like `yoursite.com/s/YOURCODE`.',
           'Click **"Share my shop on WhatsApp"** to send it straight away with a message already written, or paste the copied link anywhere yourself.',
+          'If your own custom domain is approved and live, `Sell & refer` also shows it under **"Your own domain"** — share whichever one you prefer, both lead to the same shop.',
         ],
         notes: [
           {
@@ -387,6 +454,7 @@ export const agentGuide: GuideGroup[] = [
           'Go to `Shop look` and scroll to the bottom, to **"Your own domain."**',
           'Type your domain — just the domain itself, like `yourshop.com`, no `https://` or `www`.',
           'Click **"Send for approval."** Once approved, point your domain’s DNS at the platform — it goes live as soon as that’s confirmed, which can take a little while.',
+          'Once it’s live, it shows as a real, clickable link on your Dashboard and under "Your own domain" on `Sell & refer` — click the small copy icon beside either to copy it instantly.',
         ],
         notes: [
           {
@@ -455,6 +523,16 @@ export const agentGuide: GuideGroup[] = [
           'Go to `Reports`.',
           'Pick a range — Last 7 days, Last 30 days, or Custom dates.',
           'Click **"Export CSV"** to download the same figures as a spreadsheet.',
+        ],
+      },
+      {
+        id: 'ask-for-help-agent',
+        title: 'Ask the assistant instead of hunting for a page',
+        why: 'Plain answers about your own earnings, prices, downline or domain — from your real numbers, not a generic guide.',
+        steps: [
+          'Go to `Ask for help`.',
+          'Type a question, or tap one of the suggestions — "How much have I earned?", "What are my current prices?"',
+          'It can only look things up, never act on your behalf — it will always explain how to actually do something yourself in the app.',
         ],
       },
     ],

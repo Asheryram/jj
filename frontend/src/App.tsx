@@ -29,6 +29,7 @@ import ShopBranding from './pages/app/ShopBranding'
 import AwaitingApproval from './pages/app/AwaitingApproval'
 import Reports from './pages/app/Reports'
 import Withdrawals from './pages/app/Withdrawals'
+import Assistant from './pages/app/Assistant'
 
 import Overview from './pages/admin/Overview'
 import AdminOrders from './pages/admin/AdminOrders'
@@ -288,6 +289,7 @@ export default function App() {
               <Route path="/app/status" element={<AwaitingApproval />} />
                 <Route path="/app/referrals" element={<Referrals />} />
                 <Route path="/app/withdrawals" element={<Withdrawals />} />
+                <Route path="/app/assistant" element={<Assistant />} />
               </Route>
             </Route>
           </Route>
@@ -318,6 +320,7 @@ export default function App() {
               <Route path="/admin/team" element={<Team />} />
               <Route path="/admin/domains" element={<DomainRequests />} />
               <Route path="/admin/settings" element={<Settings />} />
+              <Route path="/admin/assistant" element={<Assistant />} />
             </Route>
           </Route>
 

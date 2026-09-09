@@ -231,6 +231,12 @@ export interface Earning {
   createdAt: string
 }
 
+/** One turn of the "Ask for help" conversation, kept client-side and replayed on each message. */
+export interface ChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export interface SubAgent {
   id: string
   name: string

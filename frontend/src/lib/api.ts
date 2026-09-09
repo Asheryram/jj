@@ -1,5 +1,6 @@
 import type {
   AgentPrice,
+  ChatTurn,
   Earning,
   Network,
   Order,
@@ -856,6 +857,15 @@ export const api = {
   myEarningsByDay: (days = 7) => request<AgentEarningsDay[]>(`/reports/my-earnings?days=${days}`),
 
   mySummary: () => request<MySummary>('/reports/my-summary'),
+
+  /**
+   * "Ask for help" — plain-language, read-only, grounded in real account or
+   * platform data. Shared across roles: the backend picks the tool set and
+   * voice from the caller's own role, an agent and an admin asking the same
+   * question get different, correctly-scoped answers.
+   */
+  askAssistant: (message: string, history: ChatTurn[]) =>
+    request<{ reply: string }>('/assistant', { method: 'POST', body: { message, history } }),
 
   // Withdrawals
   withdrawals: () => request<WithdrawalRequest[]>('/withdrawals'),

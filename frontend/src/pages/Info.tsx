@@ -50,6 +50,17 @@ export default function Info() {
         </span>
       </div>
 
+      {/* Said once here rather than repeated in every task below: on a phone
+          only a handful of menu items sit at the bottom of the screen at
+          once — everything past those is one tap away behind "More," not
+          missing. Each task below still names the exact real item to look
+          for either way. */}
+      <Callout tone="info" className="mb-6" icon={<HelpIcon className="size-4" />}>
+        On your phone, only a few menu items show at the bottom at once. If a step below sends you
+        somewhere you can't see, tap <strong className="font-semibold">More</strong> first — it's
+        there.
+      </Callout>
+
       <div className="relative mb-6">
         <SearchIcon className="absolute inset-y-0 left-3.5 my-auto size-4 text-slate-500 dark:text-slate-400" />
         <TextInput
