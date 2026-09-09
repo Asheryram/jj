@@ -42,7 +42,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_prices',
       description:
-        "The agent's actual current selling price for every bundle, whether they've set their own price or it's still the standard one — use this for any question about how much a specific bundle costs in their shop.",
+        "The agent's actual current selling price for every bundle, whether they've set their own price or it's still the standard one, each tagged with its real network (MTN, Telecel or AirtelTigo). Use this for any question about how much a bundle costs. When asked about one network, filter using the network field this returns — never guess a product's network from its name, since names like \"1GB Data\" or \"iShare\" don't reliably say which network they're on.",
     },
   },
   {
@@ -374,6 +374,14 @@ export class AssistantService {
         if (!agent) return []
         return products.map((p) => ({
           product: p.name,
+          // A product's own name never says which network it's on — "1GB
+          // Data" exists on both MTN and Telecel with the same name, and
+          // "iShare" (AirtelTigo's own bundle brand) doesn't say "AirtelTigo"
+          // either. Confirmed live: without this field the model guessed at
+          // network from the name and got it wrong (called AirtelTigo's
+          // iShare bundles "MTN"). Always filter by this field, never by
+          // reading the network out of the product name.
+          network: p.network,
           priceGhs: this.toCedis(
             resalePriceFor(agent, {
               id: p.id,
@@ -679,9 +687,11 @@ How to talk:
 - Plain words only — never say "API", "webhook", "database", "endpoint", "provider reference", "tool", "function", "null", "undefined", or any other technical term, and never describe what a lookup "returned" — just say the plain fact itself (e.g. no domain requested yet, not "the tool returned null"). Explain things the way you would to someone who has never used a computer for work before.
 - Keep answers short: a sentence or two first, then offer to say more if they want it. Do not front-load a long explanation nobody asked for.
 - If a question needs real, current information, use the tools available to you rather than guessing or giving a generic answer. This includes questions that need you to work something out from the data, not just look it up directly — always call the tool that matches first, even then. Never tell someone you don't have information without having actually tried a relevant tool.
+- Never state a fact a tool didn't actually give you — a network, a status, a date, anything specific — by guessing it from a product or person's name instead. If a tool's data doesn't say it, say what the tool actually told you, or that you're not sure, rather than filling the gap with a guess that sounds plausible.
 - Any field ending in "Ghs" from a tool is already in Ghana cedis, ready to say as-is (e.g. "GHS 3.25") — never multiply, divide, or otherwise convert it.
 - Use **double asterisks** around a word or phrase only to genuinely emphasise it (a warning, a key number) — not on every heading or label, and never around a link (the next rule) since it already stands out on its own.
 - Whenever you tell someone to go to a specific screen, write it as a markdown link using its exact path from the menu below, e.g. "check [My prices](/app/pricing)" or "go to [Refunds](/admin/refunds)" — plain like that, not bolded — never say a screen name without also linking it this way, and never invent a path that isn't listed below.
+- Never format a list as a markdown table (no "|" pipe characters, no "---" separator row) — it won't display as a table here, just broken-looking text. List several items as plain lines instead, each starting with "- ", one item per line.
 
 What you can never do:
 - ${boundary}
