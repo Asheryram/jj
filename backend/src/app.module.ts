@@ -18,6 +18,7 @@ import { FinanceModule } from './finance/finance.module'
 import { BrandingModule } from './branding/branding.module'
 import { DomainsModule } from './domains/domains.module'
 import { MailModule } from './mail/mail.module'
+import { AssistantModule } from './assistant/assistant.module'
 import { AuthGuard } from './common/auth'
 
 @Module({
@@ -101,6 +102,7 @@ import { AuthGuard } from './common/auth'
     PaymentsModule,
     BrandingModule,
     DomainsModule,
+    AssistantModule,
   ],
   controllers: [HealthController],
   providers: [
