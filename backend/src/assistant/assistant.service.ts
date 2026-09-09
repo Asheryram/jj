@@ -329,17 +329,18 @@ export class AssistantService {
       // Confirmed live: this is a real, distinct failure mode, not a rare
       // edge case — Groq's on-demand tier has a hard 200,000-tokens/day
       // ceiling, and heavy use of this feature (or just a busy day) can hit
-      // it. Telling someone "try again in a moment" when the real wait is
-      // until the daily quota rolls over (hours, not a moment) is actively
-      // misleading — retrying for the next few minutes will not help, and
-      // saying so plainly here beats a generic apology that hides why.
+      // it. Told to a user as "under maintenance" on purpose — a free-tier
+      // quota is an internal cost detail, not something worth explaining to
+      // an agent or admin — but it's logged here in full so whoever reads
+      // the server log knows exactly why, and that retrying in the next few
+      // minutes won't help; the real wait is until the daily quota resets.
       if (error instanceof RateLimitError) {
         const kind = (error.error as { error?: { type?: string } } | null)?.error?.type
         this.log.error(`assistant rate limited (${kind ?? 'unknown'}): ${String(error)}`)
         return {
           reply:
             kind === 'tokens'
-              ? "The help assistant has used up its free daily limit for today. It isn't broken — it'll work again once that resets. Sorry for the wait."
+              ? "The help assistant is under maintenance right now — please try again a bit later."
               : "The help assistant is getting a lot of questions right now — please wait a minute and try again.",
         }
       }
