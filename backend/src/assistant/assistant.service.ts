@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import Groq from 'groq-sdk'
+import Groq, { RateLimitError } from 'groq-sdk'
 import type { ChatCompletionMessageParam, ChatCompletionTool } from 'groq-sdk/resources/chat/completions'
 import { isAdminRole, type AuthUser } from '../common/auth'
 import { PrismaService } from '../prisma/prisma.service'
@@ -242,9 +242,13 @@ const ADMIN_TOOLS: ChatCompletionTool[] = [
  * Runs on Groq rather than Claude or Gemini — a second deliberate swap.
  * Anthropic usage hit a billing wall; Gemini's free tier turned out to cap
  * at 20 requests/day, shared across everyone testing it, and emptied twice
- * within about fifteen minutes of light use; Groq's free tier has no such
- * daily wall and needs no card on file at all. Nothing about the app's own
- * tone or the read-only boundary changed; only the provider underneath did.
+ * within about fifteen minutes of light use. Groq needs no card on file,
+ * but is not actually wall-free either: this account's on-demand tier has a
+ * hard 200,000-tokens/day ceiling, confirmed live by hitting it (a 429 with
+ * `error.type: "tokens"`) — see the `RateLimitError` branch in `ask()` below
+ * for what a caller actually sees when that happens. Real, low-volume usage
+ * is unlikely to hit this in a normal day; heavy testing does. Nothing about
+ * the app's own tone or the read-only boundary changed; only the provider did.
  */
 @Injectable()
 export class AssistantService {
@@ -322,6 +326,23 @@ export class AssistantService {
         reply: "Sorry, I couldn't work that out. Try asking it a different way, or check the app directly.",
       }
     } catch (error) {
+      // Confirmed live: this is a real, distinct failure mode, not a rare
+      // edge case — Groq's on-demand tier has a hard 200,000-tokens/day
+      // ceiling, and heavy use of this feature (or just a busy day) can hit
+      // it. Telling someone "try again in a moment" when the real wait is
+      // until the daily quota rolls over (hours, not a moment) is actively
+      // misleading — retrying for the next few minutes will not help, and
+      // saying so plainly here beats a generic apology that hides why.
+      if (error instanceof RateLimitError) {
+        const kind = (error.error as { error?: { type?: string } } | null)?.error?.type
+        this.log.error(`assistant rate limited (${kind ?? 'unknown'}): ${String(error)}`)
+        return {
+          reply:
+            kind === 'tokens'
+              ? "The help assistant has used up its free daily limit for today. It isn't broken — it'll work again once that resets. Sorry for the wait."
+              : "The help assistant is getting a lot of questions right now — please wait a minute and try again.",
+        }
+      }
       // A broken assistant reply must never look like a broken app — this
       // is a help feature, not the checkout or the ledger.
       this.log.error(`assistant request failed: ${String(error)}`)

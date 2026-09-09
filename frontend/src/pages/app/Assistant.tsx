@@ -42,6 +42,17 @@ const ADMIN_SUGGESTIONS = [
 const CONNECTION_ERROR_REPLY = "Sorry, I couldn't reach the assistant just now — please try asking again."
 
 /**
+ * How many of the most recent turns go to the backend as conversation
+ * context — not the whole session. The full history still stays on screen
+ * and in `sessionStorage`; only what's sent to the model on each new
+ * question is capped, since every turn sent is billed as input tokens on
+ * the free-tier model behind this, on every single question asked from
+ * here on. Confirmed live: this backend's provider has a real daily token
+ * ceiling, not just a per-minute one — see `AssistantService`.
+ */
+const HISTORY_TURNS_SENT = 12
+
+/**
  * Kept in `sessionStorage`, keyed by user id — so leaving the page (this is
  * a nav item, not a modal; navigating away unmounts it) and coming back
  * still has the conversation, but a different person signing in on the same
@@ -267,7 +278,12 @@ export default function Assistant() {
     setBusy(true)
 
     try {
-      const { reply } = await api.askAssistant(text, history)
+      // Capped, not the whole session — every turn sent here is billed as
+      // input tokens on the free-tier model behind this on every single
+      // question, and a chat left open for a long session otherwise resends
+      // its entire history, growing without bound. The last few exchanges
+      // are enough for the assistant to follow a real back-and-forth.
+      const { reply } = await api.askAssistant(text, history.slice(-HISTORY_TURNS_SENT))
       setTurns((current) => [...current, { role: 'assistant', content: reply }])
     } catch {
       // Kept as a normal reply, not a page banner — see CONNECTION_ERROR_REPLY.
