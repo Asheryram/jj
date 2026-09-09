@@ -80,8 +80,9 @@ services:
         sync: false
       - key: MAIL_FROM
         sync: false
-      # Powers the agent app's "Ask for help" assistant. A free-tier key from
-      # aistudio.google.com works to start. Left unset, the feature degrades
-      # to "not set up yet" rather than erroring.
-      - key: GEMINI_API_KEY
+      # Powers the "Ask for help" assistant (agent, admin, superadmin). A free
+      # key from console.groq.com/keys works — no card, no daily cap the way
+      # some other providers' free tiers have. Left unset, the feature
+      # degrades to "not set up yet" rather than erroring.
+      - key: GROQ_API_KEY
         sync: false

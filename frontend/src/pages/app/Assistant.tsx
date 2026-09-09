@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import { api, ApiError } from '../../lib/api'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import { api } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { isAdmin } from '../../lib/roles'
 import type { ChatTurn } from '../../data/types'
-import { Button, Callout, Card, PageHead, Spinner, TextInput } from '../../components/ui'
-import { AlertIcon, HelpIcon } from '../../components/icons'
+import { Button, Card, PageHead, Spinner, TextInput } from '../../components/ui'
+import { AlertIcon, ChevronRightIcon, HelpIcon } from '../../components/icons'
 
 /**
  * A few starting questions rather than a blank box. The people using this
@@ -30,6 +31,17 @@ const ADMIN_SUGGESTIONS = [
 ]
 
 /**
+ * Shown as a normal assistant reply, in place, when a question fails outright
+ * (a dropped connection, a slow free-tier model timing out, a 500). Kept in
+ * `turns` rather than a page-level banner — a banner can be silently
+ * overwritten by whatever the *next* message does, so a question asked right
+ * before one that fails used to just look ignored, with no trace of what
+ * happened. Matched at render time (see the `turn.content ===` check below)
+ * to style it distinctly from a real answer.
+ */
+const CONNECTION_ERROR_REPLY = "Sorry, I couldn't reach the assistant just now — please try asking again."
+
+/**
  * Kept in `sessionStorage`, keyed by user id — so leaving the page (this is
  * a nav item, not a modal; navigating away unmounts it) and coming back
  * still has the conversation, but a different person signing in on the same
@@ -53,6 +65,48 @@ function loadTurns(userId: string | undefined): ChatTurn[] {
 }
 
 /**
+ * Renders the assistant's reply markup: `**bold**` for emphasis and
+ * `[label](/path)` for a screen the assistant is pointing someone to — see
+ * `AssistantService.systemPrompt` on the backend for the instruction that
+ * produces this shape. A link renders as an actual in-app button rather than
+ * plain text, so "go to Refunds" is something to tap, not just read.
+ */
+function renderReply(text: string): ReactNode {
+  const nodes: ReactNode[] = []
+  // The link alternative comes first and optionally swallows a surrounding
+  // `**...**` — the model is told not to bold a link (it already stands out
+  // as a button), but this stays correct even when it does anyway.
+  const pattern = /(\*{0,2}\[[^\]]+\]\(\/[^)\s]*\)\*{0,2}|\*\*[^*]+\*\*)/g
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  let key = 0
+
+  while ((match = pattern.exec(text))) {
+    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index))
+    const token = match[0]
+    const linkMatch = /^\*{0,2}\[([^\]]+)\]\((\/[^)\s]*)\)\*{0,2}$/.exec(token)
+    if (linkMatch) {
+      const [, label, path] = linkMatch
+      nodes.push(
+        <Link
+          key={key++}
+          to={path}
+          className="mx-0.5 inline-flex items-center gap-1 rounded-full bg-brand-600 px-3 py-1 text-xs font-semibold text-white align-middle hover:bg-brand-700"
+        >
+          {label}
+          <ChevronRightIcon className="size-3.5" />
+        </Link>,
+      )
+    } else {
+      nodes.push(<strong key={key++}>{token.slice(2, -2)}</strong>)
+    }
+    lastIndex = pattern.lastIndex
+  }
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex))
+  return nodes
+}
+
+/**
  * "Ask for help" — a plain-language chat grounded in the signed-in user's
  * own real data, shared by every role. Read-only by design: it can look
  * things up, never act — see `AssistantService` on the backend for exactly
@@ -65,8 +119,38 @@ export default function Assistant() {
   const [turns, setTurns] = useState<ChatTurn[]>(() => loadTurns(userId))
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const [fillHeight, setFillHeight] = useState<number | null>(null)
+
+  /**
+   * Measured, not guessed. A fixed `dvh`-based calc here has to know the exact
+   * height of everything above this page — the sticky header, and James's
+   * optional site-wide notice banner (`SiteNotice` in layout.tsx), which only
+   * exists when he's set one and otherwise contributes nothing. A static
+   * number is right until the day a notice is live, then it's short by
+   * however tall that banner is — confirmed live: with one set, the page
+   * still had exactly that much of itself below the fold. Measuring this
+   * element's own actual top avoids needing to track that at all; only the
+   * bottom clearance below it is a real constant, because it exists purely to
+   * clear the fixed mobile nav (`pb-28` on `main` in layout.tsx) and never
+   * changes with what's above.
+   */
+  useLayoutEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+    const recompute = () => {
+      if (window.matchMedia('(min-width: 1024px)').matches) {
+        setFillHeight(null) // desktop has a sidebar, not a fixed bottom nav — no scroll-fighting to fix
+        return
+      }
+      const top = el.getBoundingClientRect().top
+      setFillHeight(Math.max(320, window.innerHeight - top - 112))
+    }
+    recompute()
+    window.addEventListener('resize', recompute)
+    return () => window.removeEventListener('resize', recompute)
+  }, [])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -91,23 +175,27 @@ export default function Assistant() {
     setTurns([...history, { role: 'user', content: text }])
     setDraft('')
     setBusy(true)
-    setError('')
 
     try {
       const { reply } = await api.askAssistant(text, history)
       setTurns((current) => [...current, { role: 'assistant', content: reply }])
-    } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'Could not reach the assistant.')
+    } catch {
+      // Kept as a normal reply, not a page banner — see CONNECTION_ERROR_REPLY.
+      setTurns((current) => [...current, { role: 'assistant', content: CONNECTION_ERROR_REPLY }])
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <div>
+    <div
+      ref={wrapperRef}
+      className="flex flex-col lg:block"
+      style={fillHeight != null ? { height: fillHeight } : undefined}
+    >
       <PageHead title="Ask for help" subtitle="Ask in your own words " />
 
-      <Card className="flex h-[70vh] flex-col overflow-hidden">
+      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden lg:h-[70vh] lg:flex-none">
         <div className="flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
           {turns.length === 0 && (
             <div className="py-8 text-center">
@@ -132,19 +220,25 @@ export default function Assistant() {
             </div>
           )}
 
-          {turns.map((turn, index) => (
-            <div key={index} className={turn.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-              <p
-                className={
-                  turn.role === 'user'
-                    ? 'max-w-[80%] rounded-2xl rounded-br-sm bg-brand-700 px-4 py-2.5 text-sm text-white'
-                    : 'max-w-[80%] whitespace-pre-line rounded-2xl rounded-bl-sm bg-slate-100 dark:bg-slate-800 px-4 py-2.5 text-sm text-slate-800 dark:text-slate-100'
-                }
-              >
-                {turn.content}
-              </p>
-            </div>
-          ))}
+          {turns.map((turn, index) => {
+            const failed = turn.role === 'assistant' && turn.content === CONNECTION_ERROR_REPLY
+            return (
+              <div key={index} className={turn.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+                <p
+                  className={
+                    turn.role === 'user'
+                      ? 'max-w-[85%] sm:max-w-[80%] rounded-2xl rounded-br-sm bg-brand-700 px-4 py-2.5 text-sm text-white'
+                      : failed
+                        ? 'flex max-w-[85%] items-start gap-2 rounded-2xl rounded-bl-sm bg-amber-50 dark:bg-amber-900/20 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-200 sm:max-w-[80%]'
+                        : 'max-w-[85%] whitespace-pre-line rounded-2xl rounded-bl-sm bg-slate-100 dark:bg-slate-800 px-4 py-2.5 text-sm text-slate-800 dark:text-slate-100 sm:max-w-[80%]'
+                  }
+                >
+                  {failed && <AlertIcon className="mt-0.5 size-4 shrink-0" />}
+                  {turn.role === 'assistant' ? renderReply(turn.content) : turn.content}
+                </p>
+              </div>
+            )
+          })}
 
           {busy && (
             <div className="flex justify-start">
@@ -152,12 +246,6 @@ export default function Assistant() {
                 <Spinner className="size-4 text-slate-500 dark:text-slate-400" />
               </div>
             </div>
-          )}
-
-          {error && (
-            <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
-              {error}
-            </Callout>
           )}
 
           <div ref={bottomRef} />

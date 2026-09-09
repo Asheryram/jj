@@ -1,70 +1,121 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { GoogleGenAI, createPartFromFunctionResponse, type Content, type Tool } from '@google/genai'
+import Groq from 'groq-sdk'
+import type { ChatCompletionMessageParam, ChatCompletionTool } from 'groq-sdk/resources/chat/completions'
 import { isAdminRole, type AuthUser } from '../common/auth'
+import { PrismaService } from '../prisma/prisma.service'
 import { AgentsService } from '../agents/agents.service'
 import { DomainsService } from '../domains/domains.service'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
 import { RefundsService } from '../orders/refunds.service'
 import { ApprovalsService } from '../orders/approvals.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
+import { PricingService } from '../pricing/pricing.service'
+import { resalePriceFor } from '../domain/pricing'
 
 /**
  * Free-tier friendly, and deliberately so: this answers plain questions about
  * an agent's own account from a handful of small read-only lookups, not hard
  * reasoning — the kind of workload where a bigger model buys nothing but cost.
  */
-const MODEL = 'gemini-3.6-flash'
+const MODEL = 'openai/gpt-oss-20b'
 
 const MAX_TOOL_ROUNDS = 4
 
-const AGENT_TOOLS: Tool[] = [
+const AGENT_TOOLS: ChatCompletionTool[] = [
   {
-    functionDeclarations: [
-      {
-        name: 'get_my_earnings',
-        description: "The agent's current wallet balance and recent earnings history.",
-      },
-      {
-        name: 'get_my_prices',
-        description: 'The custom prices the agent has set for specific products, if any.',
-      },
-      {
-        name: 'get_my_downline',
-        description:
-          'The agents this agent has personally referred (their "downline"), and how much each has sold.',
-      },
-      {
-        name: 'get_my_domain',
-        description: "The status of the agent's own custom domain request, if they have one.",
-      },
-    ],
+    type: 'function',
+    function: {
+      name: 'get_my_earnings',
+      description: "The agent's current wallet balance and recent earnings history.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_prices',
+      description:
+        "The agent's actual current selling price for every bundle, whether they've set their own price or it's still the standard one — use this for any question about how much a specific bundle costs in their shop.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_downline',
+      description:
+        'The agents this agent has personally referred (their "downline"), and how much each has sold.',
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_domain',
+      description: "The status of the agent's own custom domain request, if they have one.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_top_products',
+      description:
+        "Which products the agent has sold the most of, ranked by number of completed sales. Use this for any question about what's popular, best-selling, or most bought — never try to work it out yourself from the earnings list.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_my_withdrawals',
+      description:
+        "The agent's own recent withdrawal (payout) requests and where each one stands — pending, paid, rejected, and so on.",
+    },
   },
 ]
 
-const ADMIN_TOOLS: Tool[] = [
+const ADMIN_TOOLS: ChatCompletionTool[] = [
   {
-    functionDeclarations: [
-      {
-        name: 'get_float_status',
-        description:
-          "The DataHub float: what it should hold going by logged capital and spending, and what DataHub's last reply actually reported.",
-      },
-      {
-        name: 'get_pending_refunds',
-        description: 'Refund requests still waiting on a decision, oldest first.',
-      },
-      {
-        name: 'get_pending_number_approvals',
-        description:
-          'Phone numbers still waiting on DataHub to approve them for delivery, and how much paid business is held up by each.',
-      },
-      {
-        name: 'get_needs_attention',
-        description:
-          'Orders nothing automatic has resolved — stuck in progress too long, or flagged because two different sources disagreed on the outcome.',
-      },
-    ],
+    type: 'function',
+    function: {
+      name: 'get_float_status',
+      description:
+        "The DataHub float: what it should hold going by logged capital and spending, and what DataHub's last reply actually reported.",
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_pending_refunds',
+      description: 'Refund requests still waiting on a decision, oldest first.',
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_pending_number_approvals',
+      description:
+        'Phone numbers still waiting on DataHub to approve them for delivery, and how much paid business is held up by each.',
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_needs_attention',
+      description:
+        'Orders nothing automatic has resolved — stuck in progress too long, or flagged because two different sources disagreed on the outcome.',
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_pending_withdrawals',
+      description: 'Agent withdrawal (payout) requests still waiting on a decision, oldest first.',
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_pending_domain_requests',
+      description: "Custom domain requests still waiting on a decision, oldest first.",
+    },
   },
 ]
 
@@ -86,27 +137,31 @@ const ADMIN_TOOLS: Tool[] = [
  * jargon, a short answer first — which is why that voice is spelled out in
  * the system prompt below rather than left to the model to guess at.
  *
- * Runs on Gemini rather than Claude — a deliberate swap once real Anthropic
- * usage hit a billing wall and Gemini's free tier was the lower-friction
- * path. Nothing about the app's own tone or the read-only boundary changed;
- * only the provider underneath did.
+ * Runs on Groq rather than Claude or Gemini — a second deliberate swap.
+ * Anthropic usage hit a billing wall; Gemini's free tier turned out to cap
+ * at 20 requests/day, shared across everyone testing it, and emptied twice
+ * within about fifteen minutes of light use; Groq's free tier has no such
+ * daily wall and needs no card on file at all. Nothing about the app's own
+ * tone or the read-only boundary changed; only the provider underneath did.
  */
 @Injectable()
 export class AssistantService {
   private readonly log = new Logger(AssistantService.name)
-  private readonly client: GoogleGenAI | null
+  private readonly client: Groq | null
 
   constructor(
     private readonly config: ConfigService,
+    private readonly prisma: PrismaService,
     private readonly agents: AgentsService,
     private readonly domains: DomainsService,
     private readonly float: FloatMonitorService,
     private readonly refunds: RefundsService,
     private readonly approvals: ApprovalsService,
     private readonly reconciler: ReconcilerService,
+    private readonly pricing: PricingService,
   ) {
-    const apiKey = this.config.get<string>('GEMINI_API_KEY')
-    this.client = apiKey ? new GoogleGenAI({ apiKey }) : null
+    const apiKey = this.config.get<string>('GROQ_API_KEY')
+    this.client = apiKey ? new Groq({ apiKey }) : null
   }
 
   async ask(
@@ -116,49 +171,40 @@ export class AssistantService {
   ): Promise<{ reply: string }> {
     if (!this.client) {
       return {
-        reply: "The help assistant isn't set up yet — ask an admin to add the Gemini API key.",
+        reply: "The help assistant isn't set up yet — ask an admin to add the Groq API key.",
       }
     }
 
     const admin = isAdminRole(user.role)
     const tools = admin ? ADMIN_TOOLS : AGENT_TOOLS
 
-    const contents: Content[] = [
-      ...history.map((turn) => ({
-        role: turn.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: turn.content }],
-      })),
-      { role: 'user', parts: [{ text: message }] },
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'system', content: this.systemPrompt(user, admin) },
+      ...history.map((turn) => ({ role: turn.role, content: turn.content }) as ChatCompletionMessageParam),
+      { role: 'user', content: message },
     ]
 
     try {
       for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-        const response = await this.client.models.generateContent({
+        const response = await this.client.chat.completions.create({
           model: MODEL,
-          contents,
-          config: {
-            systemInstruction: this.systemPrompt(user, admin),
-            tools,
-          },
+          messages,
+          tools,
         })
 
-        const modelContent = response.candidates?.[0]?.content
-        if (modelContent) contents.push(modelContent)
+        const reply = response.choices[0]?.message
+        if (!reply) break
+        messages.push(reply)
 
-        const calls = response.functionCalls
+        const calls = reply.tool_calls
         if (!calls || calls.length === 0) {
-          return { reply: (response.text ?? '').trim() }
+          return { reply: (reply.content ?? '').trim() }
         }
 
-        const responseParts = []
         for (const call of calls) {
-          if (!call.name) continue
-          const result = await this.runTool(call.name, user, admin)
-          responseParts.push(
-            createPartFromFunctionResponse(call.id ?? call.name, call.name, { result }),
-          )
+          const result = await this.runTool(call.function.name, user, admin)
+          messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) })
         }
-        contents.push({ role: 'user', parts: responseParts })
       }
 
       // Ran out of rounds without a final answer — say so plainly rather
@@ -206,8 +252,29 @@ export class AssistantService {
         }
       }
       case 'get_my_prices': {
-        const prices = await this.agents.prices(user.id)
-        return prices.map((p) => ({ productId: p.productId, priceGhs: this.toCedis(p.resalePrice) }))
+        // Deliberately every active product's actual current price, not just
+        // the ones the agent has personally overridden — "what's my price for
+        // 1GB?" has a real answer even when it's still the standard one, and
+        // the old version (just the override table) left the assistant with
+        // nothing to say for any product an agent hadn't touched.
+        const [agents, products] = await Promise.all([
+          this.pricing.agents(),
+          this.prisma.product.findMany({ where: { active: true } }),
+        ])
+        const agent = agents.find((a) => a.userId === user.id)
+        if (!agent) return []
+        return products.map((p) => ({
+          product: p.name,
+          priceGhs: this.toCedis(
+            resalePriceFor(agent, {
+              id: p.id,
+              supplierCost: p.supplierCost,
+              adminPrice: p.adminPrice,
+              standardPrice: p.standardPrice,
+            }),
+          ),
+          isCustomPrice: agent.prices?.some((pr) => pr.productId === p.id) ?? false,
+        }))
       }
       case 'get_my_downline': {
         const downline = await this.agents.downline(user.referralCode)
@@ -219,8 +286,40 @@ export class AssistantService {
           earnedFromThemGhs: this.toCedis(a.earnedForUpline),
         }))
       }
-      case 'get_my_domain':
-        return this.domains.mine(user.id)
+      case 'get_my_domain': {
+        const domain = await this.domains.mine(user.id)
+        return domain ?? { requested: false, note: "This agent has never requested a custom domain." }
+      }
+      case 'get_my_top_products': {
+        // Computed here rather than left for the model to work out by
+        // eyeballing the earnings list — confirmed live that this model
+        // family won't reliably do that arithmetic itself and would rather
+        // claim it doesn't have the information at all. A ranked count is a
+        // fact, not a judgement call, so it's cheaper and more reliable to
+        // just hand over the answer.
+        const rows = await this.prisma.order.groupBy({
+          by: ['productName'],
+          where: { soldByCode: user.referralCode, status: 'completed' },
+          _count: { _all: true },
+          orderBy: { _count: { productName: 'desc' } },
+          take: 5,
+        })
+        return rows.map((r) => ({ product: r.productName, completedSales: r._count._all }))
+      }
+      case 'get_my_withdrawals': {
+        const rows = await this.prisma.withdrawal.findMany({
+          where: { userId: user.id },
+          orderBy: { requestedAt: 'desc' },
+          take: 10,
+        })
+        return rows.map((w) => ({
+          amountGhs: this.toCedis(w.amount),
+          status: w.status,
+          network: w.momoNetwork,
+          requestedAt: w.requestedAt,
+          paidAt: w.paidAt,
+        }))
+      }
       default:
         return { error: `Unknown tool: ${name}` }
     }
@@ -264,6 +363,27 @@ export class AssistantService {
           reason: r.reason,
         }))
       }
+      case 'get_pending_withdrawals': {
+        const rows = await this.prisma.withdrawal.findMany({
+          where: { status: 'pending' },
+          orderBy: { requestedAt: 'asc' },
+          take: 20,
+        })
+        return rows.map((w) => ({
+          agentName: w.agentName,
+          amountGhs: this.toCedis(w.amount),
+          network: w.momoNetwork,
+          requestedAt: w.requestedAt,
+        }))
+      }
+      case 'get_pending_domain_requests': {
+        const rows = await this.domains.list(true)
+        return rows.slice(0, 20).map((r) => ({
+          agentName: r.agentName,
+          domain: r.domain,
+          requestedAt: r.requestedAt,
+        }))
+      }
       default:
         return { error: `Unknown tool: ${name}` }
     }
@@ -284,13 +404,13 @@ export class AssistantService {
 
     const menu = admin
       ? `Where things are in the menu — use these exact names, never a paraphrase:
-- Overview, Ask for help, All orders, Refunds — always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
-- Withdrawals, Needs attention, Number approvals, Users, Cost prices, Catalogue accuracy, Float risk, Branding, Settings — on a phone these are one tap further: tap "More" at the bottom first, then the name above. On a computer they're just in the left-hand sidebar, no extra tap.
-- Platform team and Custom domains only exist for the platform owner (superadmin), not a regular admin — don't send a regular admin looking for either. Both are behind "More" on a phone for a superadmin too.
+- Overview (/admin), Ask for help (/admin/assistant), All orders (/admin/orders), Refunds (/admin/refunds) — always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
+- Withdrawals (/admin/withdrawals), Needs attention (/admin/needs-attention), Number approvals (/admin/approvals), Users (/admin/users), Cost prices (/admin/prices), Catalogue accuracy (/admin/catalogue-accuracy), Float risk (/admin/float-risk), Branding (/admin/branding), Settings (/admin/settings) — on a phone these are one tap further: tap "More" at the bottom first, then the name above. On a computer they're just in the left-hand sidebar, no extra tap.
+- Platform team (/admin/team) and Custom domains (/admin/domains) only exist for the platform owner (superadmin), not a regular admin — don't send a regular admin looking for either. Both are behind "More" on a phone for a superadmin too.
 - Whenever you send someone to one of the second group on a phone, say the "More" step out loud — don't assume they can see the full menu.`
       : `Where things are in the menu — use these exact names, never a paraphrase (an agent who taps "Prices" and finds nothing loses trust fast):
-- Dashboard, Ask for help, Sell & refer, Earnings — always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
-- Sales, My prices, Shop look, Browse shop, Reports, Withdraw — on a phone these are one tap further: tap "More" at the bottom first, then the name above. On a computer they're just in the left-hand sidebar, no extra tap.
+- Dashboard (/app), Ask for help (/app/assistant), Sell & refer (/app/referrals), Earnings (/app/earnings) — always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
+- Sales (/app/orders), My prices (/app/pricing), Shop look (/app/shop-look), Browse shop (/shop), Reports (/app/reports), Withdraw (/app/withdrawals) — on a phone these are one tap further: tap "More" at the bottom first, then the name above. On a computer they're just in the left-hand sidebar, no extra tap.
 - Whenever you send someone to one of the second group on a phone, say the "More" step out loud — don't assume they can see the full menu, most agents here are on a phone, and a step that skips it sends them looking for something that isn't on screen yet.`
 
     const domainKnowledge = admin
@@ -305,16 +425,18 @@ export class AssistantService {
 - An agent can set their own price for a product, within a band the platform allows — that is what decides their margin on that sale.
 - An agent can build a "downline" by referring other agents; they earn a bonus on their downline's sales too, on top of their own.
 - A withdrawal moves money out of an agent's earnings balance into their Mobile Money account. It is reviewed by an admin before it pays out — it is not instant.
-- A custom domain (like sageshop.example.com) is optional. An agent can request one so their shop has its own web address instead of a shared link; it needs an admin's approval before it goes live.
+- A custom domain (like sageshop.example.com) is optional. An agent requests one from the [Shop look](/app/shop-look) screen — that's the only place to do it — so their shop has its own web address instead of a shared link; it needs an admin's approval before it goes live.
 - An order can be "processing" (still being delivered, usually seconds to a few minutes), "completed" (delivered), or "failed" (something went wrong — the money is either already back with the customer or being sorted out, never simply lost).`
 
     return `You are the in-app help assistant for JamesDataConsult (JKB Data Hub), a data bundle, airtime and result-checker reselling platform in Ghana. ${who}
 
 How to talk:
-- Plain words only — never say "API", "webhook", "database", "endpoint", "provider reference", or any other technical term. Explain things the way you would to someone who has never used a computer for work before.
+- Plain words only — never say "API", "webhook", "database", "endpoint", "provider reference", "tool", "function", "null", "undefined", or any other technical term, and never describe what a lookup "returned" — just say the plain fact itself (e.g. no domain requested yet, not "the tool returned null"). Explain things the way you would to someone who has never used a computer for work before.
 - Keep answers short: a sentence or two first, then offer to say more if they want it. Do not front-load a long explanation nobody asked for.
-- If a question needs real, current information, use the tools available to you rather than guessing or giving a generic answer.
+- If a question needs real, current information, use the tools available to you rather than guessing or giving a generic answer. This includes questions that need you to work something out from the data, not just look it up directly — always call the tool that matches first, even then. Never tell someone you don't have information without having actually tried a relevant tool.
 - Any field ending in "Ghs" from a tool is already in Ghana cedis, ready to say as-is (e.g. "GHS 3.25") — never multiply, divide, or otherwise convert it.
+- Use **double asterisks** around a word or phrase only to genuinely emphasise it (a warning, a key number) — not on every heading or label, and never around a link (the next rule) since it already stands out on its own.
+- Whenever you tell someone to go to a specific screen, write it as a markdown link using its exact path from the menu below, e.g. "check [My prices](/app/pricing)" or "go to [Refunds](/admin/refunds)" — plain like that, not bolded — never say a screen name without also linking it this way, and never invent a path that isn't listed below.
 
 What you can never do:
 - ${boundary}
