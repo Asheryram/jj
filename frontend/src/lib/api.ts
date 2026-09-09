@@ -859,7 +859,7 @@ export const api = {
   mySummary: () => request<MySummary>('/reports/my-summary'),
 
   /**
-   * "Ask for help" — plain-language, read-only, grounded in real account or
+   * " Assistant " — plain-language, read-only, grounded in real account or
    * platform data. Shared across roles: the backend picks the tool set and
    * voice from the caller's own role, an agent and an admin asking the same
    * question get different, correctly-scoped answers.

@@ -65,13 +65,13 @@ function loadTurns(userId: string | undefined): ChatTurn[] {
 }
 
 /**
- * Renders the assistant's reply markup: `**bold**` for emphasis and
+ * Renders one line's worth of markup: `**bold**` for emphasis and
  * `[label](/path)` for a screen the assistant is pointing someone to — see
  * `AssistantService.systemPrompt` on the backend for the instruction that
  * produces this shape. A link renders as an actual in-app button rather than
  * plain text, so "go to Refunds" is something to tap, not just read.
  */
-function renderReply(text: string): ReactNode {
+function renderInline(text: string): ReactNode {
   const nodes: ReactNode[] = []
   // The link alternative comes first and optionally swallows a surrounding
   // `**...**` — the model is told not to bold a link (it already stands out
@@ -106,8 +106,98 @@ function renderReply(text: string): ReactNode {
   return nodes
 }
 
+/** A markdown table's separator row, e.g. `|---|:--:|---|` or `--- | ---`. */
+const TABLE_SEPARATOR_ROW = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/
+
+function splitTableRow(row: string): string[] {
+  return row
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim())
+}
+
 /**
- * "Ask for help" — a plain-language chat grounded in the signed-in user's
+ * Renders a whole reply: plain paragraphs through `renderInline`, plus real
+ * `<table>` markup for any markdown table the model produced (asked for
+ * explicitly, e.g. "as a table", or reached for on its own for naturally
+ * tabular data like a per-bundle price/cost/profit breakdown) — wrapped in
+ * its own horizontally-scrolling container so a wide table never forces the
+ * whole page to scroll sideways on a narrow phone.
+ */
+function renderReply(text: string): ReactNode {
+  const lines = text.split('\n')
+  const blocks: ReactNode[] = []
+  let paragraph: string[] = []
+  let blockKey = 0
+
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return
+    blocks.push(
+      <p key={`p${blockKey++}`} className="whitespace-pre-line">
+        {renderInline(paragraph.join('\n'))}
+      </p>,
+    )
+    paragraph = []
+  }
+
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    const next = lines[i + 1]
+    if (line.includes('|') && next !== undefined && TABLE_SEPARATOR_ROW.test(next)) {
+      flushParagraph()
+      const header = splitTableRow(line)
+      const rows: string[][] = []
+      i += 2
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim() !== '') {
+        rows.push(splitTableRow(lines[i]))
+        i++
+      }
+      blocks.push(
+        <div
+          key={`t${blockKey++}`}
+          className="my-1 overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700"
+        >
+          <table className="w-full text-left text-xs sm:text-sm">
+            <thead className="bg-slate-50 dark:bg-slate-800/60">
+              <tr>
+                {header.map((cell, ci) => (
+                  <th
+                    key={ci}
+                    className="whitespace-nowrap px-2.5 py-1.5 font-semibold text-slate-700 dark:text-slate-200"
+                  >
+                    {renderInline(cell)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {rows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} className="whitespace-nowrap px-2.5 py-1.5">
+                      {renderInline(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>,
+      )
+      continue
+    }
+    paragraph.push(line)
+    i++
+  }
+  flushParagraph()
+  return blocks
+}
+
+/**
+ * " Assistant " — a plain-language chat grounded in the signed-in user's
  * own real data, shared by every role. Read-only by design: it can look
  * things up, never act — see `AssistantService` on the backend for exactly
  * why and where that line is.
@@ -193,7 +283,7 @@ export default function Assistant() {
       className="flex flex-col lg:block"
       style={fillHeight != null ? { height: fillHeight } : undefined}
     >
-      <PageHead title="Ask for help" subtitle="Ask in your own words " />
+      <PageHead title=" Assistant " subtitle="Ask in your own words " />
 
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden lg:h-[70vh] lg:flex-none">
         <div className="flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
@@ -224,18 +314,18 @@ export default function Assistant() {
             const failed = turn.role === 'assistant' && turn.content === CONNECTION_ERROR_REPLY
             return (
               <div key={index} className={turn.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-                <p
+                <div
                   className={
                     turn.role === 'user'
-                      ? 'max-w-[85%] sm:max-w-[80%] rounded-2xl rounded-br-sm bg-brand-700 px-4 py-2.5 text-sm text-white'
+                      ? 'max-w-[85%] rounded-2xl rounded-br-sm bg-brand-700 px-4 py-2.5 text-sm text-white sm:max-w-[80%]'
                       : failed
                         ? 'flex max-w-[85%] items-start gap-2 rounded-2xl rounded-bl-sm bg-amber-50 dark:bg-amber-900/20 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-200 sm:max-w-[80%]'
-                        : 'max-w-[85%] whitespace-pre-line rounded-2xl rounded-bl-sm bg-slate-100 dark:bg-slate-800 px-4 py-2.5 text-sm text-slate-800 dark:text-slate-100 sm:max-w-[80%]'
+                        : 'max-w-[85%] space-y-1.5 rounded-2xl rounded-bl-sm bg-slate-100 dark:bg-slate-800 px-4 py-2.5 text-sm text-slate-800 dark:text-slate-100 sm:max-w-[80%]'
                   }
                 >
                   {failed && <AlertIcon className="mt-0.5 size-4 shrink-0" />}
                   {turn.role === 'assistant' ? renderReply(turn.content) : turn.content}
-                </p>
+                </div>
               </div>
             )
           })}

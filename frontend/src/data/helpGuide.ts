@@ -350,7 +350,7 @@ export const adminGuide: GuideGroup[] = [
         title: 'Ask the assistant instead of hunting for a page',
         why: 'Plain answers about your own float, refund queue, or stuck orders — from your real numbers, faster than opening each page yourself.',
         steps: [
-          'Go to `Ask for help`.',
+          'Go to ` Assistant `.',
           'Type a question, or tap one of the suggestions — "Is the float okay right now?", "Any refunds waiting on me?"',
           'It can only look things up, never act — it will always say where to click yourself to actually approve, resolve, or change something.',
         ],
@@ -530,7 +530,7 @@ export const agentGuide: GuideGroup[] = [
         title: 'Ask the assistant instead of hunting for a page',
         why: 'Plain answers about your own earnings, prices, downline or domain — from your real numbers, not a generic guide.',
         steps: [
-          'Go to `Ask for help`.',
+          'Go to ` Assistant `.',
           'Type a question, or tap one of the suggestions — "How much have I earned?", "What are my current prices?"',
           'It can only look things up, never act on your behalf — it will always explain how to actually do something yourself in the app.',
         ],

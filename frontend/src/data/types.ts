@@ -231,7 +231,7 @@ export interface Earning {
   createdAt: string
 }
 
-/** One turn of the "Ask for help" conversation, kept client-side and replayed on each message. */
+/** One turn of the " Assistant " conversation, kept client-side and replayed on each message. */
 export interface ChatTurn {
   role: 'user' | 'assistant'
   content: string

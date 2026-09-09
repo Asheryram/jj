@@ -126,7 +126,7 @@ function navFor(
   if (isAdmin(role)) {
     return [
       { to: '/admin', label: 'Overview', icon: HomeIcon, end: true },
-      { to: '/admin/assistant', label: 'Ask for help', icon: HelpIcon },
+      { to: '/admin/assistant', label: ' Assistant ', icon: HelpIcon },
       { to: '/admin/orders', label: 'All orders', icon: ReceiptIcon },
       { to: '/admin/refunds', label: 'Refunds', icon: ReceiptIcon },
       { to: '/admin/withdrawals', label: 'Withdrawals', icon: CashIcon },
@@ -169,7 +169,7 @@ function navFor(
     // Agents have earnings, not a wallet — they never pre-fund anything.
     return [
       { to: '/app', label: 'Dashboard', icon: HomeIcon, end: true },
-      { to: '/app/assistant', label: 'Ask for help', icon: HelpIcon },
+      { to: '/app/assistant', label: ' Assistant ', icon: HelpIcon },
       { to: '/app/referrals', label: 'Sell & refer', icon: StoreIcon },
       { to: '/app/earnings', label: 'Earnings', icon: WalletIcon },
       { to: '/app/orders', label: 'Sales', icon: ReceiptIcon },

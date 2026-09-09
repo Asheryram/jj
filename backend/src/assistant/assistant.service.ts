@@ -42,7 +42,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_prices',
       description:
-        "The agent's actual current selling price for every bundle, whether they've set their own price or it's still the standard one, each tagged with its real network (MTN, Telecel or AirtelTigo). Use this for any question about how much a bundle costs. When asked about one network, filter using the network field this returns — never guess a product's network from its name, since names like \"1GB Data\" or \"iShare\" don't reliably say which network they're on.",
+        "The agent's actual current selling price, their own cost, and their own profit for every bundle, whether they've set their own price or it's still the standard one, each tagged with its real network (MTN, Telecel or AirtelTigo). Use this for any question about how much a bundle costs, or how much profit/margin the agent makes per sale. When asked about one network, filter using the network field this returns — never guess a product's network from its name, since names like \"1GB Data\" or \"iShare\" don't reliably say which network they're on.",
     },
   },
   {
@@ -50,7 +50,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_downline',
       description:
-        'The agents this agent has personally referred (their "downline"), how much each has sold, and the total earned from the downline overall.',
+        'The agents this agent has personally referred (their "downline") and how much each has sold — for the agent\'s own visibility only. Referring someone pays no bonus of any kind, so never imply there is money to earn from this list.',
     },
   },
   {
@@ -216,13 +216,13 @@ const ADMIN_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_float_risk_products',
       description:
-        'Which specific products cost more than the float can currently cover if ordered right now, and which products are inactive — the detail behind a plain "is the float okay" answer.',
+        'Which specific products cost more than the float can currently cover right now — the detail behind a plain "is the float okay" answer. This also lists every product that is not on sale at all, for any reason (a fresh import with no price set yet, a product James discontinued, or genuine float risk) — never assume a product is inactive because of the float unless it also appears in the at-risk list.',
     },
   },
 ]
 
 /**
- * The in-app help assistant — "ask for help" rather than a static page.
+ * The in-app help assistant — " Assistant " rather than a static page.
  * Read-only by design: it can look up real account or platform data to answer
  * plainly, but it can never change a price, approve a refund, resolve an
  * order, or anything else — those stay a deliberate click in the app, not
@@ -372,39 +372,51 @@ export class AssistantService {
         ])
         const agent = agents.find((a) => a.userId === user.id)
         if (!agent) return []
-        return products.map((p) => ({
-          product: p.name,
-          // A product's own name never says which network it's on — "1GB
-          // Data" exists on both MTN and Telecel with the same name, and
-          // "iShare" (AirtelTigo's own bundle brand) doesn't say "AirtelTigo"
-          // either. Confirmed live: without this field the model guessed at
-          // network from the name and got it wrong (called AirtelTigo's
-          // iShare bundles "MTN"). Always filter by this field, never by
-          // reading the network out of the product name.
-          network: p.network,
-          priceGhs: this.toCedis(
-            resalePriceFor(agent, {
-              id: p.id,
-              supplierCost: p.supplierCost,
-              adminPrice: p.adminPrice,
-              standardPrice: p.standardPrice,
-            }),
-          ),
-          isCustomPrice: agent.prices?.some((pr) => pr.productId === p.id) ?? false,
-        }))
+        return products.map((p) => {
+          const salePesewas = resalePriceFor(agent, {
+            id: p.id,
+            supplierCost: p.supplierCost,
+            adminPrice: p.adminPrice,
+            standardPrice: p.standardPrice,
+          })
+          return {
+            product: p.name,
+            // A product's own name never says which network it's on — "1GB
+            // Data" exists on both MTN and Telecel with the same name, and
+            // "iShare" (AirtelTigo's own bundle brand) doesn't say
+            // "AirtelTigo" either. Confirmed live: without this field the
+            // model guessed at network from the name and got it wrong
+            // (called AirtelTigo's iShare bundles "MTN"). Always filter by
+            // this field, never by reading the network out of the name.
+            network: p.network,
+            priceGhs: this.toCedis(salePesewas),
+            // What the agent themselves pays James for this bundle — their
+            // own real floor, same number the pricing band on the actual
+            // Pricing screen shows them. Not `supplierCost` (James's own
+            // wholesale cost): that stays admin-only, on purpose — see
+            // `toProduct`'s stripping comment in mappers.ts.
+            costGhs: this.toCedis(p.adminPrice),
+            profitGhs: this.toCedis(salePesewas - p.adminPrice),
+            isCustomPrice: agent.prices?.some((pr) => pr.productId === p.id) ?? false,
+          }
+        })
       }
       case 'get_my_downline': {
+        // No earnings figure here, on purpose — referring someone pays no
+        // bonus (see `pricing.ts`'s "Referring earns nothing"), so there is
+        // no honest non-zero number to report. `AgentsService.downline`'s own
+        // `earnedForUpline` can only ever be a leftover from before that rule
+        // took effect; surfacing it here previously led the model to invent
+        // an explanation for why it was zero, which was worse than the
+        // original gap. Same information Referrals.tsx shows: visibility
+        // only, never earnings.
         const downline = await this.agents.downline(user.referralCode)
-        return {
-          totalEarnedFromDownlineGhs: this.toCedis(downline.reduce((sum, a) => sum + a.earnedForUpline, 0)),
-          agents: downline.map((a) => ({
-            name: a.name,
-            joinedAt: a.joinedAt,
-            ordersSold: a.orders,
-            salesVolumeGhs: this.toCedis(a.volume),
-            earnedFromThemGhs: this.toCedis(a.earnedForUpline),
-          })),
-        }
+        return downline.map((a) => ({
+          name: a.name,
+          joinedAt: a.joinedAt,
+          ordersSold: a.orders,
+          salesVolumeGhs: this.toCedis(a.volume),
+        }))
       }
       case 'get_my_domain': {
         const domain = await this.domains.mine(user.id)
@@ -657,12 +669,12 @@ export class AssistantService {
 
     const menu = admin
       ? `Where things are in the menu — use these exact names, never a paraphrase:
-- Overview (/admin), Ask for help (/admin/assistant), All orders (/admin/orders), Refunds (/admin/refunds) — always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
+- Overview (/admin),  Assistant  (/admin/assistant), All orders (/admin/orders), Refunds (/admin/refunds) — always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
 - Withdrawals (/admin/withdrawals), Needs attention (/admin/needs-attention), Number approvals (/admin/approvals), Users (/admin/users), Cost prices (/admin/prices), Catalogue accuracy (/admin/catalogue-accuracy), Float risk (/admin/float-risk), Branding (/admin/branding), Settings (/admin/settings) — on a phone these are one tap further: tap "More" at the bottom first, then the name above. On a computer they're just in the left-hand sidebar, no extra tap.
 - Platform team (/admin/team) and Custom domains (/admin/domains) only exist for the platform owner (superadmin), not a regular admin — don't send a regular admin looking for either. Both are behind "More" on a phone for a superadmin too.
 - Whenever you send someone to one of the second group on a phone, say the "More" step out loud — don't assume they can see the full menu.`
       : `Where things are in the menu — use these exact names, never a paraphrase (an agent who taps "Prices" and finds nothing loses trust fast):
-- Dashboard (/app), Ask for help (/app/assistant), Sell & refer (/app/referrals), Earnings (/app/earnings) — always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
+- Dashboard (/app),  Assistant  (/app/assistant), Sell & refer (/app/referrals), Earnings (/app/earnings) — always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
 - Sales (/app/orders), My prices (/app/pricing), Shop look (/app/shop-look), Browse shop (/shop), Reports (/app/reports), Withdraw (/app/withdrawals) — on a phone these are one tap further: tap "More" at the bottom first, then the name above. On a computer they're just in the left-hand sidebar, no extra tap.
 - Whenever you send someone to one of the second group on a phone, say the "More" step out loud — don't assume they can see the full menu, most agents here are on a phone, and a step that skips it sends them looking for something that isn't on screen yet.`
 
@@ -676,7 +688,7 @@ export class AssistantService {
       : `How the platform works, in plain terms:
 - Every agent gets their own shop link to share with customers. When someone buys through it, the agent earns the difference between what they charged and what the platform itself charges for that bundle — that difference is their margin.
 - An agent can set their own price for a product, within a band the platform allows — that is what decides their margin on that sale.
-- An agent can build a "downline" by referring other agents; they earn a bonus on their downline's sales too, on top of their own.
+- An agent can build a "downline" by referring other agents, and see them listed for their own visibility — but this pays no bonus of any kind, now or ever. Every agent earns from their own sales only, at the same price from James no matter who is above them in the chain. If asked, say this plainly rather than implying there's a bonus to wait for.
 - A withdrawal moves money out of an agent's earnings balance into their Mobile Money account. It is reviewed by an admin before it pays out — it is not instant.
 - A custom domain (like sageshop.example.com) is optional. An agent requests one from the [Shop look](/app/shop-look) screen — that's the only place to do it — so their shop has its own web address instead of a shared link; it needs an admin's approval before it goes live.
 - An order can be "processing" (still being delivered, usually seconds to a few minutes), "completed" (delivered), or "failed" (something went wrong — the money is either already back with the customer or being sorted out, never simply lost).`
@@ -691,7 +703,7 @@ How to talk:
 - Any field ending in "Ghs" from a tool is already in Ghana cedis, ready to say as-is (e.g. "GHS 3.25") — never multiply, divide, or otherwise convert it.
 - Use **double asterisks** around a word or phrase only to genuinely emphasise it (a warning, a key number) — not on every heading or label, and never around a link (the next rule) since it already stands out on its own.
 - Whenever you tell someone to go to a specific screen, write it as a markdown link using its exact path from the menu below, e.g. "check [My prices](/app/pricing)" or "go to [Refunds](/admin/refunds)" — plain like that, not bolded — never say a screen name without also linking it this way, and never invent a path that isn't listed below.
-- Never format a list as a markdown table (no "|" pipe characters, no "---" separator row) — it won't display as a table here, just broken-looking text. List several items as plain lines instead, each starting with "- ", one item per line.
+- A markdown table (a header row of "|"-separated cells, a "|---|---|" row under it, then more rows the same way) renders as a real table here — use one when someone asks for "a table", or when you're listing several items that each have more than one number attached (like a product with both a price and a cost). For a simple one-value-per-item list, plain "- " lines are still the better fit.
 
 What you can never do:
 - ${boundary}
