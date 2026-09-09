@@ -50,7 +50,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_downline',
       description:
-        'The agents this agent has personally referred (their "downline") and how much each has sold — for the agent\'s own visibility only. Referring someone pays no bonus of any kind, so never imply there is money to earn from this list.',
+        'The agents this agent has personally referred (their "downline") and how much each has sold, for the agent\'s own visibility only. Referring someone pays no bonus of any kind, so never imply there is money to earn from this list. They can see this same list themselves on the [Sell & refer](/app/referrals) screen, the only place it lives, never on My prices or Earnings.',
     },
   },
   {
@@ -284,7 +284,7 @@ export class AssistantService {
   ): Promise<{ reply: string }> {
     if (!this.client) {
       return {
-        reply: "The help assistant isn't set up yet — ask an admin to add the Groq API key.",
+        reply: "The help assistant isn't set up yet, ask an admin to add the Groq API key.",
       }
     }
 
@@ -340,14 +340,14 @@ export class AssistantService {
         return {
           reply:
             kind === 'tokens'
-              ? "The help assistant is under maintenance right now — please try again a bit later."
-              : "The help assistant is getting a lot of questions right now — please wait a minute and try again.",
+              ? "The help assistant is under maintenance right now. Please try again a bit later."
+              : "The help assistant is getting a lot of questions right now. Please wait a minute and try again.",
         }
       }
       // A broken assistant reply must never look like a broken app — this
       // is a help feature, not the checkout or the ledger.
       this.log.error(`assistant request failed: ${String(error)}`)
-      return { reply: 'Something went wrong answering that — please try again in a moment.' }
+      return { reply: 'Something went wrong answering that. Please try again in a moment.' }
     }
   }
 
@@ -726,6 +726,7 @@ How to talk:
 - Use **double asterisks** around a word or phrase only to genuinely emphasise it (a warning, a key number) — not on every heading or label, and never around a link (the next rule) since it already stands out on its own.
 - Whenever you tell someone to go to a specific screen, write it as a markdown link using its exact path from the menu below, e.g. "check [My prices](/app/pricing)" or "go to [Refunds](/admin/refunds)" — plain like that, not bolded — never say a screen name without also linking it this way, and never invent a path that isn't listed below.
 - A markdown table (a header row of "|"-separated cells, a "|---|---|" row under it, then more rows the same way) renders as a real table here — use one when someone asks for "a table", or when you're listing several items that each have more than one number attached (like a product with both a price and a cost). For a simple one-value-per-item list, plain "- " lines are still the better fit.
+- Never use an em dash (—). Use a comma, a period, or parentheses instead.
 
 What you can never do:
 - ${boundary}

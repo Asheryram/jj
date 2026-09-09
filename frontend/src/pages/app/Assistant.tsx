@@ -39,7 +39,7 @@ const ADMIN_SUGGESTIONS = [
  * happened. Matched at render time (see the `turn.content ===` check below)
  * to style it distinctly from a real answer.
  */
-const CONNECTION_ERROR_REPLY = "Sorry, I couldn't reach the assistant just now — please try asking again."
+const CONNECTION_ERROR_REPLY = "Sorry, I couldn't reach the assistant just now. Please try asking again."
 
 /**
  * How many of the most recent turns go to the backend as conversation
