@@ -1287,6 +1287,33 @@ export const api = {
     scope: 'unpriced' | 'all'
     category?: string
   }) => request<{ updated: number }>('/admin/products/markup', { method: 'POST', body: input }),
+
+  /**
+   * What's waiting to be told to agents — consolidated, one row per product,
+   * not one per edit. See `PendingPriceChange` on the server.
+   */
+  pendingPriceChanges: () =>
+    request<
+      {
+        productId: string
+        name: string
+        network: Network | null
+        /** Pesewas agents last knew about — what a round-tripping edit collapses back to. */
+        baselinePrice: number
+        /** Pesewas right now, after however many edits happened since. */
+        currentPrice: number
+        /** Currently-active agents who actually stock this — computed live, not frozen. */
+        affectedAgents: number
+        firstChangedAt: string
+      }[]
+    >('/admin/price-changes', { auth: true }),
+
+  /** Send the consolidated digest and clear the pending list. */
+  notifyPriceChanges: () =>
+    request<{ productsNotified: number; agentsEmailed: number; agentsFailed: number }>(
+      '/admin/price-changes/notify',
+      { method: 'POST' },
+    ),
 }
 
 /**

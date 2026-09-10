@@ -412,25 +412,45 @@ async function solvency() {
  * buyer as a separate checkout surcharge (`checkoutTotal`) and never touches
  * what a price has to clear. So the only real question left is the plain one:
  * does the price beat what the bundle actually costs.
+ *
+ * "Actually costs" is not always the catalogue's `supplierCost` — a price is
+ * allowed to sit below catalogue as long as it still clears the last real
+ * charge a completed order actually paid (`AdminService.setTier`'s floor).
+ * Falls back to `supplierCost` for a product with no real charge on record
+ * yet, same as `setTier` does.
  */
 async function pricesCoverCost() {
   const products = await prisma.product.findMany({
     where: { active: true },
-    select: { name: true, network: true, supplierCost: true, adminPrice: true, standardPrice: true },
+    select: { id: true, name: true, network: true, supplierCost: true, adminPrice: true, standardPrice: true, supplierCode: true },
   })
 
-  const underwater = products.filter(
-    (p) => p.standardPrice <= p.supplierCost || p.adminPrice <= p.supplierCost,
+  const realCosts = await Promise.all(
+    products
+      .filter((p) => p.supplierCode)
+      .map((p) =>
+        prisma.supplierDispatch
+          .findFirst({
+            where: { supplierCode: p.supplierCode as string, providerCharged: { not: null }, order: { status: 'completed' } },
+            orderBy: { createdAt: 'desc' },
+            select: { providerCharged: true },
+          })
+          .then((d) => [p.id, d?.providerCharged ?? null] as const),
+      ),
   )
+  const realCostByProduct = new Map(realCosts)
+  const floorOf = (p: (typeof products)[number]) => realCostByProduct.get(p.id) ?? p.supplierCost
+
+  const underwater = products.filter((p) => {
+    const floor = floorOf(p)
+    return p.standardPrice <= floor || p.adminPrice <= floor
+  })
 
   report(
-    'every active price clears its supplier cost',
+    'every active price clears its last real cost (or catalogue cost, absent one)',
     underwater.length === 0,
     underwater
-      .map(
-        (p) =>
-          `${p.network} ${p.name}: standard ${ghs(p.standardPrice)} / agent ${ghs(p.adminPrice)} vs cost ${ghs(p.supplierCost)}`,
-      )
+      .map((p) => `${p.network} ${p.name}: standard ${ghs(p.standardPrice)} / agent ${ghs(p.adminPrice)} vs floor ${ghs(floorOf(p))}`)
       .join(' | '),
   )
 }

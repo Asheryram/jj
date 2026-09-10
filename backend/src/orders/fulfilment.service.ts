@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { SupplierService } from '../supplier/supplier.service'
 import { LedgerService, type LedgerDraft } from '../finance/ledger.service'
+import { lastRealCost } from '../common/real-cost'
 import type { OrderSplit, SplitShare } from '../domain/pricing'
 
 /**
@@ -261,7 +262,19 @@ export class FulfilmentService implements OnApplicationBootstrap {
       select: { providerCharged: true, costPrice: true, supplierCode: true },
     })
 
-    const actualCost = dispatch?.providerCharged ?? dispatch?.costPrice ?? split.supplierCost
+    /**
+     * This dispatch's own reply beats everything — it is this exact delivery.
+     * Absent that, a real charge from a sibling sale of the same bundle is
+     * still worth more than `costPrice`/`split.supplierCost`, which are only
+     * ever a guess frozen in before anyone had proof — see `lastRealCost`.
+     * Only once there is no real number anywhere does this fall back to that
+     * guess.
+     */
+    const actualCost =
+      dispatch?.providerCharged ??
+      (await lastRealCost(tx, dispatch?.supplierCode)) ??
+      dispatch?.costPrice ??
+      split.supplierCost
     const estimated = split.supplierCost
 
     const entries: (LedgerDraft & { idempotencyKey: string })[] = [

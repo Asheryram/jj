@@ -353,6 +353,18 @@ export class AdminController {
     })
   }
 
+  /** What's waiting to be told to agents — see `PendingPriceChange`. */
+  @Get('price-changes')
+  pendingPriceChanges() {
+    return this.admin.pendingPriceChanges()
+  }
+
+  /** Send the consolidated digest and clear the pending list. */
+  @Post('price-changes/notify')
+  notifyPriceChanges() {
+    return this.admin.notifyPriceChanges()
+  }
+
   /**
    * Numbers a customer tried to buy for that DataHub has not approved.
    *

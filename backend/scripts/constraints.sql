@@ -16,8 +16,19 @@ ALTER TABLE users DROP CONSTRAINT IF EXISTS users_markup_sane;
 ALTER TABLE users ADD CONSTRAINT users_markup_sane
   CHECK (markup_percent >= 0 AND markup_percent <= 200);
 
--- Prices. One rule: neither selling price may be below cost. Selling under cost
--- destroys money on every order, which is never a preference.
+-- Prices. Just non-negative here — neither selling price is pinned to
+-- `supplier_cost` at the row level any more.
+--
+-- The real rule ("never sell below what this actually costs") still holds,
+-- but it is checked in `AdminService.setTier` against the *real* floor — the
+-- last real delivery's charge when one exists, which can honestly sit above
+-- or below this row's own `supplier_cost` — not against this single stored
+-- column. Pinning the CHECK to `supplier_cost` would either block a price
+-- that is genuinely fine against a cheaper real cost, or wave through one
+-- that is genuinely underwater against a real cost the catalogue hasn't
+-- caught up to yet. Same reasoning as `agent_prices_positive` below: a floor
+-- that depends on more than one row's own columns cannot be a row-level
+-- CHECK, so it is enforced in the service instead.
 --
 -- `standard_price` is intentionally free relative to `admin_price`. James retails
 -- as well as wholesales, and whether his own counter price sits below, level
@@ -29,8 +40,8 @@ ALTER TABLE users ADD CONSTRAINT users_markup_sane
 ALTER TABLE products DROP CONSTRAINT IF EXISTS products_tiers_ordered;
 ALTER TABLE products ADD CONSTRAINT products_tiers_ordered
   CHECK (supplier_cost >= 0
-     AND admin_price >= supplier_cost
-     AND standard_price >= supplier_cost);
+     AND admin_price >= 0
+     AND standard_price >= 0);
 
 -- FR-3.4 — an agent's resale price is never negative. The real floor is their
 -- own cost, which depends on the chain and so cannot be a row-level CHECK; that
