@@ -270,11 +270,16 @@ export default function CostPrices() {
    * to act on it can see it.
    */
   const notOnSale = products.filter((p) => !p.active)
+  /**
+   * The real floor, not the catalogue one — same rule as the table row and
+   * `EditPricesModal`. A price sitting below catalogue but at or above the
+   * last real charge is deliberately allowed, so flagging it here against
+   * catalogue alone would call a correctly "Up to date" price broken.
+   */
+  const floorOf = (p: Product) => accuracyByKey.get(accuracyKey(p.name, p.network))?.charged ?? p.supplierCost
   // Both selling prices must clear cost. Walk-up vs agent price is deliberately
   // not checked, and there is no ceiling to check — see EDITABLE_TIERS.
-  const broken = products.filter(
-    (p) => p.adminPrice < p.supplierCost || p.standardPrice < p.supplierCost,
-  )
+  const broken = products.filter((p) => p.adminPrice < floorOf(p) || p.standardPrice < floorOf(p))
 
   return (
     <div>
@@ -490,17 +495,6 @@ export default function CostPrices() {
                 </tr>
                 {!collapsed.has(group.key) &&
                   group.items.map((product) => {
-              // Two margins, not one — what James keeps selling to an agent,
-              // and what he keeps selling direct, at today's catalogue cost.
-              // Neither of these is ever the agent's own cut of a resale.
-              const rowAgentMargin = product.adminPrice - product.supplierCost
-              const rowDirectMargin = product.standardPrice - product.supplierCost
-              const invalid = product.adminPrice < product.supplierCost || product.standardPrice < product.supplierCost
-              // Publishing needs a margin on both channels, not merely a legal
-              // price — matches the server's own guard.
-              const invalidToPublish =
-                product.adminPrice <= product.supplierCost ||
-                product.standardPrice <= product.supplierCost
               const drift = accuracyByKey.get(accuracyKey(product.name, product.network))
               /**
                * Whether the last real delivery is still telling us something
@@ -514,6 +508,27 @@ export default function CostPrices() {
                */
               const realCostIsCurrent = drift != null && drift.charged !== product.supplierCost
               const reviewStatus = reviewStatusOf(product)
+
+              // Two margins, not one — what James keeps selling to an agent,
+              // and what he keeps selling direct, at today's catalogue cost.
+              // Neither of these is ever the agent's own cut of a resale.
+              const rowAgentMargin = product.adminPrice - product.supplierCost
+              const rowDirectMargin = product.standardPrice - product.supplierCost
+              /**
+               * The real floor, not the catalogue one — mirrors
+               * `EditPricesModal` and the server's own check in
+               * `AdminService.setTier`. A price sitting below catalogue but
+               * at or above the last real charge is not wrong, it's exactly
+               * what this whole feature exists to allow, so flagging it here
+               * against catalogue alone used to mark a perfectly fine,
+               * "Up to date" price as invalid the moment it actually used
+               * the real-cost floor.
+               */
+              const floor = drift?.charged ?? product.supplierCost
+              const invalid = product.adminPrice < floor || product.standardPrice < floor
+              // Publishing needs a margin on both channels, not merely a legal
+              // price — matches the server's own guard.
+              const invalidToPublish = product.adminPrice <= floor || product.standardPrice <= floor
               // What James actually keeps at today's real cost — the number
               // to price against, since it's what genuinely lands in his
               // pocket, not what the catalogue assumes. Same two figures
@@ -899,9 +914,26 @@ function EditPricesModal({
               {cedis(product.standardPrice - product.supplierCost)} the catalogue would suggest.
             </p>
             <p className="mt-1.5">
-              {realCostGap > 0
-                ? `If you'd rather pass the saving on and keep the same margin, agents could pay ${cedis(product.adminPrice - realCostGap)} and walk-up ${cedis(product.standardPrice - realCostGap)} — the fields below will let you go as low as ${cedis(drift.charged)}, since that's genuinely what this costs now.`
-                : `To protect the same margin at today's real cost, agents would need to pay ${cedis(product.adminPrice - realCostGap)} and walk-up ${cedis(product.standardPrice - realCostGap)} — the fields below won't accept anything under ${cedis(drift.charged)} any more, so a sale never quietly runs at a loss.`}
+              {reviewStatus === 'outdated'
+                ? /**
+                   * Only makes sense while the price still reflects the OLD
+                   * belief (catalogue cost) rather than this real charge —
+                   * "pass on the saving"/"protect the margin" is relative to
+                   * a price that hasn't reacted to the real number yet.
+                   *
+                   * Once `reviewStatus` is `current`, the price was already
+                   * set knowing this exact real cost — it may deliberately
+                   * sit nowhere near a catalogue-derived margin (thinner,
+                   * because James chose to pass most of a saving on to
+                   * agents, say), and subtracting the gap from it a second
+                   * time double-counts an adjustment already made. That's
+                   * exactly what suggested a price *below* the floor stated
+                   * one sentence later.
+                   */
+                  realCostGap > 0
+                  ? `If you'd rather pass the saving on and keep the same margin, agents could pay ${cedis(product.adminPrice - realCostGap)} and walk-up ${cedis(product.standardPrice - realCostGap)} — the fields below will let you go as low as ${cedis(drift.charged)}, since that's genuinely what this costs now.`
+                  : `To protect the same margin at today's real cost, agents would need to pay ${cedis(product.adminPrice - realCostGap)} and walk-up ${cedis(product.standardPrice - realCostGap)} — the fields below won't accept anything under ${cedis(drift.charged)} any more, so a sale never quietly runs at a loss.`
+                : `You've already priced this against the real cost — the fields below won't accept anything under ${cedis(drift.charged)}.`}
             </p>
           </Callout>
         )}
