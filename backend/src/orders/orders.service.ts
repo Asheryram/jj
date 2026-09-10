@@ -418,22 +418,22 @@ export class OrdersService {
      * to see by how much. Not exposed to an agent or customer: it is the
      * platform's real wholesale cost, not theirs to see.
      *
-     * One dispatch row per attempt, so the latest one for an order is the
-     * one whose reply actually decided the outcome — same selection
-     * `FulfilmentService.recordDelivered` already uses when booking the
-     * real cost to the ledger, so this always agrees with what profit was
-     * actually booked for that order.
+     * Read from the `supplier_cost` ledger entry itself, not re-derived from
+     * `SupplierDispatch` — `FulfilmentService.recordDelivered` can fall back
+     * to a sibling order's real charge when this one's own dispatch didn't
+     * report one (see `lastRealCost`), so the dispatch row alone no longer
+     * always matches what was actually booked. The ledger entry is that
+     * booking, so reading it back here can never disagree with it.
      */
-    const dispatches = await this.prisma.supplierDispatch.findMany({
-      where: { orderId: { in: rows.map((r) => r.id) }, providerCharged: { not: null } },
-      orderBy: { createdAt: 'desc' },
-      select: { orderId: true, providerCharged: true },
+    const costEntries = await this.prisma.ledgerEntry.findMany({
+      where: { kind: 'supplier_cost', orderRef: { in: rows.map((r) => r.reference) } },
+      select: { orderRef: true, amount: true },
     })
+    const orderIdByRef = new Map(rows.map((r) => [r.reference, r.id]))
     const actualCostByOrderId = new Map<string, number>()
-    for (const d of dispatches) {
-      if (!actualCostByOrderId.has(d.orderId)) {
-        actualCostByOrderId.set(d.orderId, d.providerCharged as number)
-      }
+    for (const entry of costEntries) {
+      const orderId = entry.orderRef ? orderIdByRef.get(entry.orderRef) : undefined
+      if (orderId) actualCostByOrderId.set(orderId, -entry.amount)
     }
 
     /**

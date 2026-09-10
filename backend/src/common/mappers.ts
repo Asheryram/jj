@@ -28,7 +28,7 @@ import type { OrderSplit } from '../domain/pricing'
  * Null rather than a guess when nothing is linked yet — an unfulfillable product
  * saying "datahub-gh" would be a claim nobody checked.
  */
-type ProductRow = Product & { supplier?: { provider: string } | null }
+type ProductRow = Product & { supplier?: { provider: string; updatedAt: Date } | null }
 
 /**
  * What every product read must include for `toProduct` to be complete.
@@ -39,7 +39,7 @@ type ProductRow = Product & { supplier?: { provider: string } | null }
  * redrew as "no supplier". The data was fine; the response was simply missing a
  * join, which is the kind of bug that looks like data loss.
  */
-export const PRODUCT_INCLUDE = { supplier: { select: { provider: true } } } as const
+export const PRODUCT_INCLUDE = { supplier: { select: { provider: true, updatedAt: true } } } as const
 
 export function toProduct(row: ProductRow) {
   return {
@@ -50,10 +50,27 @@ export function toProduct(row: ProductRow) {
     name: row.name,
     validity: row.validity,
     supplierCost: row.supplierCost,
+    /**
+     * When the *catalogue's* belief about this cost last changed — Prisma's
+     * `@updatedAt` on `supplier_products`, which moves whenever that provider
+     * row is written, cost or otherwise. Not the same clock as the last real
+     * delivery (`catalogueAccuracy.lastSoldAt`): this says how stale the
+     * catalogue sync is, that says how stale the real-cost comparison is, and
+     * a screen showing both has to be honest about which one it means.
+     */
+    supplierCostSyncedAt: row.supplier?.updatedAt?.toISOString() ?? null,
     adminPrice: row.adminPrice,
     standardPrice: row.standardPrice,
     agentMarkupBp: row.agentMarkupBp,
     walkupMarkupBp: row.walkupMarkupBp,
+    /**
+     * What the real cost actually was the last time a price on this product
+     * was saved — see the column's own doc comment in schema.prisma for why
+     * this is compared by value against today's real charge, not by date.
+     * Null means never saved with a real figure in front of James yet.
+     */
+    pricedAgainstRealCost: row.pricedAgainstRealCost,
+    pricedAgainstRealCostAt: row.pricedAgainstRealCostAt?.toISOString() ?? null,
     active: row.active,
   }
 }
@@ -71,8 +88,11 @@ export function toProduct(row: ProductRow) {
 export function toPublicProduct(row: ProductRow) {
   const {
     supplierCost: _cost,
+    supplierCostSyncedAt: _syncedAt,
     agentMarkupBp: _agentBp,
     walkupMarkupBp: _walkupBp,
+    pricedAgainstRealCost: _pricedAgainst,
+    pricedAgainstRealCostAt: _pricedAgainstAt,
     // Who supplies it is nobody's business but the platform's.
     provider: _provider,
     ...rest

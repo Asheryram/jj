@@ -76,6 +76,14 @@ export interface Product {
   validity: string
   /** What James pays DataHub GH / the voucher supplier. Admin-only. */
   supplierCost: Pesewas
+  /**
+   * When the catalogue's belief about `supplierCost` last changed — a sync,
+   * not necessarily a real delivery. Null once when nothing has ever synced
+   * this row. See `catalogueAccuracy`'s `lastSoldAt` for the other clock: how
+   * recent the *real* charge being compared against is, which is a different
+   * question and can easily disagree with this one.
+   */
+  supplierCostSyncedAt?: string | null
   /** What James charges agents. This is a top-level agent's cost floor. */
   adminPrice: Pesewas
   /** What a walk-up customer pays with no agent link (FR-3.5). */
@@ -87,11 +95,27 @@ export interface Product {
    * its markup gives the cost back. Undefined for everyone else, because the
    * server strips both together.
    *
-   * These are what keeps a margin alive across a provider price change — the
-   * prices above are re-derived from them on every catalogue sync.
+   * Purely a record of intent, shown next to a price and used when applying a
+   * bulk markup — a catalogue sync moves `supplierCost` alone and never
+   * touches a price James already set, so these don't "keep a margin alive"
+   * across a sync the way they once did; see `AdminService.syncSupplierCosts`.
    */
   agentMarkupBp?: number
   walkupMarkupBp?: number
+  /**
+   * What the real cost actually was the last time a price on this product was
+   * saved (`AdminService.setTier`). Null until the first save that had a real
+   * figure to check against. Admin-only, same reason as the rest of this cost
+   * neighbourhood.
+   *
+   * Compared by *value* against today's real charge, not by date: a fresh
+   * delivery that repeats the same number James already priced against is not
+   * news, so "up to date" means the two numbers currently agree, not merely
+   * that this save is recent.
+   */
+  pricedAgainstRealCost?: Pesewas | null
+  /** When the save behind `pricedAgainstRealCost` happened. */
+  pricedAgainstRealCostAt?: string | null
   /**
    * Which supplier fulfils this, when one is linked. Admin-only.
    *

@@ -7,6 +7,10 @@ import { ConflictError, NotFoundError, ValidationError } from '../common/domain-
 import { markupFromPrice, priceFromMarkup, type OrderSplit } from '../domain/pricing'
 import { CatalogueImportService } from '../supplier/catalogue-import.service'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
+import { lastRealCost } from '../common/real-cost'
+import { recordPriceChange } from '../common/pending-price-change'
+import { MailerService } from '../mail/mailer.service'
+import { priceChangeMail } from '../mail/templates'
 import type { Category, Role } from '@prisma/client'
 
 export type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice'
@@ -20,6 +24,7 @@ export class AdminService {
     private readonly settings: SettingsService,
     private readonly catalogueImport: CatalogueImportService,
     private readonly float: FloatMonitorService,
+    private readonly mailer: MailerService,
   ) {}
 
   // ── Users (FR-6.4) ────────────────────────────────────────────────────────
@@ -274,9 +279,22 @@ export class AdminService {
   // ── Price tiers (FR-6.1) ──────────────────────────────────────────────────
 
   /**
-   * Edit one tier. The ordering rule (supplier ≤ admin ≤ standard ≤ cap) is
-   * checked here with a readable message; `products_tiers_ordered` in the
-   * database is the backstop if anything reaches it another way.
+   * Edit one tier. Checked against the real floor — what the last real
+   * delivery actually cost, when we know it, not the catalogue's possibly
+   * stale `supplierCost` — with a readable message. `supplierCost` itself is
+   * never touched here, whichever way the real cost differs from it: it is
+   * James's record of what the provider's catalogue says, kept in step with
+   * that catalogue alone (see `syncSupplierCosts`), and a price he sets is his
+   * own decision, not a correction to that record. `products_tiers_ordered`
+   * in scripts/constraints.sql only checks non-negativity now — the real
+   * floor depends on delivery history, not a single stored column, so like
+   * the pricing-domain floor on an agent's own resale price, it can only be
+   * enforced here, not as a row-level CHECK.
+   *
+   * Also records `pricedAgainstRealCost`, when there's a real figure to record
+   * — the number the Prices screen compares against later to say whether this
+   * price is still "up to date" with the real cost, or whether a fresh real
+   * charge has moved since James last looked.
    *
    * Past orders keep the prices they were sold at, because every order carries
    * its own split snapshot rather than a reference to the current tier.
@@ -303,12 +321,27 @@ export class AdminService {
 
     const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
 
+    /**
+     * The real floor, not the catalogue one.
+     *
+     * The catalogue's `supplierCost` is only ever as fresh as the last sync —
+     * what the last real delivery actually cost is the honest number to price
+     * against. When it's cheaper than the catalogue assumes, that saving is
+     * real and a price between the two is not selling under cost, whatever
+     * the catalogue still says. When it's more expensive, pricing down to the
+     * catalogue's stale, lower number would quietly sell at a loss the
+     * catalogue can't see yet — so the real charge, not the catalogue, is
+     * what a price is actually checked against here.
+     */
+    const realCost = await lastRealCost(this.prisma, row.supplierCode)
+    const floor = realCost ?? row.supplierCost
+
     // Paystack's cut no longer comes out of this price — it is added on top as
     // its own line at checkout (see `checkoutTotal`) — so the only thing to
     // guard against here is selling below what the bundle actually costs.
-    if (next.adminPrice < next.supplierCost) {
+    if (next.adminPrice < floor) {
       throw new ValidationError(
-        `The agent price is below the ${ghs(next.supplierCost)} you pay for this. Raise it a little.`,
+        `The agent price is below the ${ghs(floor)} you pay for this. Raise it a little.`,
       )
     }
 
@@ -322,17 +355,17 @@ export class AdminService {
      * counter; level with it, and he is indifferent to which channel a sale comes
      * through. Forcing retail above wholesale would take that choice away.
      */
-    if (next.standardPrice < next.supplierCost) {
+    if (next.standardPrice < floor) {
       throw new ValidationError(
-        `This is below the ${ghs(next.supplierCost)} you pay for it. Raise it a little.`,
+        `This is below the ${ghs(floor)} you pay for it. Raise it a little.`,
       )
     }
 
 
-    // Re-derive the markup from the price just typed. The price is what James
-    // decided; the markup records the intent behind it, so the next time a
-    // supplier's cost moves this price moves with it rather than being flattened
-    // up to meet the new cost.
+    // Re-derive the markup from the price just typed, purely as a record of
+    // the intent behind it — shown next to the price on the Prices screen.
+    // It plays no part in what a sync does to this product; see
+    // `syncSupplierCosts`.
     const markupField = tier === 'adminPrice' ? 'agentMarkupBp' : 'walkupMarkupBp'
 
     /**
@@ -348,17 +381,39 @@ export class AdminService {
      * still sits at cost would quietly list a bundle that earns nothing on that
      * channel, which is the thing the import is careful not to do.
      */
-    const bothPricesClearCost =
-      next.adminPrice > next.supplierCost && next.standardPrice > next.supplierCost
+    const bothPricesClearCost = next.adminPrice > floor && next.standardPrice > floor
 
-    const updated = await this.prisma.product.update({
-      where: { id: productId },
-      data: {
-        [tier]: value,
-        [markupField]: markupFromPrice(row.supplierCost, value),
-        ...(!row.active && bothPricesClearCost ? { active: true } : {}),
-      },
-      include: PRODUCT_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row2 = await tx.product.update({
+        where: { id: productId },
+        data: {
+          [tier]: value,
+          [markupField]: markupFromPrice(row.supplierCost, value),
+          ...(!row.active && bothPricesClearCost ? { active: true } : {}),
+          /**
+           * Recorded whenever a real figure exists to check against — this is
+           * what lets the Prices screen say "up to date" rather than merely
+           * "priced," and it's compared by value (see the column's own comment
+           * in schema.prisma), never touched when there's no real cost yet.
+           */
+          ...(realCost != null ? { pricedAgainstRealCost: realCost, pricedAgainstRealCostAt: new Date() } : {}),
+        },
+        include: PRODUCT_INCLUDE,
+      })
+
+      /**
+       * Agents only ever pay `adminPrice`, and only on a bundle that was
+       * already for sale — a product's first-ever price isn't a "change"
+       * to anything an agent has seen before, it's a new listing. See
+       * `recordPriceChange` and the model's own doc comment for the rest
+       * of the consolidation rules (one row per product, cancels itself on
+       * a round trip).
+       */
+      if (tier === 'adminPrice' && row.active) {
+        await recordPriceChange(tx, productId, row.adminPrice, value)
+      }
+
+      return row2
     })
 
     if (!row.active && bothPricesClearCost) {
@@ -381,11 +436,18 @@ export class AdminService {
      * both prices clear it. Without the same check here, this toggle would be the
      * one way to list a bundle that earns nothing, and nobody would notice until
      * the margin report came out flat.
+     *
+     * Floored at the real cost, same as `setTier` — a price sitting below the
+     * catalogue's `supplierCost` but above what the last real delivery actually
+     * cost is genuinely profitable, and this check used to disagree with
+     * `setTier` about that and refuse to publish it.
      */
     if (active) {
+      const realCost = await lastRealCost(this.prisma, row.supplierCode)
+      const floor = realCost ?? row.supplierCost
       const flat: string[] = []
-      if (row.adminPrice <= row.supplierCost) flat.push('the agent price')
-      if (row.standardPrice <= row.supplierCost) flat.push('the walk-up price')
+      if (row.adminPrice <= floor) flat.push('the agent price')
+      if (row.standardPrice <= floor) flat.push('the walk-up price')
       if (flat.length > 0) {
         throw new ValidationError(
           `${flat.join(' and ')} ${flat.length === 1 ? 'is' : 'are'} at or below what you pay for ` +
@@ -471,7 +533,7 @@ export class AdminService {
         // deliberate re-pricing of a whole category.
         ...(scope === 'unpriced' ? { active: false } : {}),
       },
-      select: { id: true, supplierCost: true },
+      select: { id: true, supplierCost: true, adminPrice: true, active: true },
     })
 
     if (targets.length === 0) return { updated: 0 }
@@ -479,27 +541,146 @@ export class AdminService {
     const agentBp = Math.round(agentPercent * 100)
     const walkupBp = Math.round(walkupPercent * 100)
 
-    await this.prisma.$transaction(
-      targets.map((product) =>
-        this.prisma.product.update({
+    await this.prisma.$transaction(async (tx) => {
+      for (const product of targets) {
+        const newAdminPrice = priceFromMarkup(product.supplierCost, agentBp)
+        await tx.product.update({
           where: { id: product.id },
           data: {
             agentMarkupBp: agentBp,
             walkupMarkupBp: walkupBp,
-            adminPrice: priceFromMarkup(product.supplierCost, agentBp),
+            adminPrice: newAdminPrice,
             standardPrice: priceFromMarkup(product.supplierCost, walkupBp),
             // Anything being priced is by definition ready to sell.
             active: true,
           },
-        }),
-      ),
-    )
+        })
+
+        // Same rule as `setTier`: only a bundle that was already on sale had
+        // a price for an agent to have seen in the first place. `scope:
+        // 'unpriced'` targets are never active to begin with (see the
+        // `where` above), so this only ever fires for `scope: 'all'`.
+        if (product.active) {
+          await recordPriceChange(tx, product.id, product.adminPrice, newAdminPrice)
+        }
+      }
+    })
 
     this.log.log(
       `markup ${scope}${category ? ` (${category})` : ''}: ${targets.length} product(s) at ` +
         `+${agentPercent}% agent / +${walkupPercent}% walk-up`,
     )
     return { updated: targets.length }
+  }
+
+  /**
+   * Everything currently waiting to be told to agents — see
+   * `PendingPriceChange`'s own doc comment for how this list stays
+   * consolidated rather than growing one row per edit.
+   *
+   * `affectedAgents` is counted fresh here, not stored on the row: an agent
+   * who starts stocking a product after its price moved but before this is
+   * ever sent should still be counted in, and one who stops stocking it
+   * should drop out, right up to the moment the digest actually goes.
+   */
+  async pendingPriceChanges() {
+    const pending = await this.prisma.pendingPriceChange.findMany({
+      orderBy: { lastChangedAt: 'desc' },
+    })
+    if (pending.length === 0) return []
+
+    const productIds = pending.map((p) => p.productId)
+    const [products, agentCounts] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { id: { in: productIds } },
+        select: { id: true, name: true, network: true },
+      }),
+      this.prisma.agentPrice.groupBy({
+        by: ['productId'],
+        where: { productId: { in: productIds }, user: { role: 'agent', status: 'active' } },
+        _count: { _all: true },
+      }),
+    ])
+    const productById = new Map(products.map((p) => [p.id, p]))
+    const agentCountByProduct = new Map(agentCounts.map((c) => [c.productId, c._count._all]))
+
+    return pending.map((change) => ({
+      productId: change.productId,
+      name: productById.get(change.productId)?.name ?? change.productId,
+      network: productById.get(change.productId)?.network ?? null,
+      baselinePrice: change.baselinePrice,
+      currentPrice: change.currentPrice,
+      affectedAgents: agentCountByProduct.get(change.productId) ?? 0,
+      firstChangedAt: change.firstChangedAt.toISOString(),
+    }))
+  }
+
+  /**
+   * Send the consolidated digest and clear the pending list.
+   *
+   * Refuses up front if nothing can actually be sent — a misconfigured
+   * server must not quietly swallow the pending list, since there is no way
+   * to reconstruct it afterwards (see `recordPriceChange`: the row is gone
+   * the moment a price round-trips, not just the moment it's sent).
+   *
+   * Once sending genuinely starts, though, it clears regardless of which
+   * individual agents' mail bounces — same as every other sender in
+   * `MailerService`, a delivery failure is logged, not retried, and must
+   * never be the reason a price the admin already knows about keeps
+   * reappearing here as "pending" forever.
+   */
+  async notifyPriceChanges() {
+    if (!this.mailer.configured) {
+      throw new ValidationError('Email is not set up on this server, so nothing was sent.')
+    }
+
+    const pending = await this.prisma.pendingPriceChange.findMany()
+    if (pending.length === 0) return { productsNotified: 0, agentsEmailed: 0, agentsFailed: 0 }
+
+    const productIds = pending.map((p) => p.productId)
+    const pendingByProduct = new Map(pending.map((p) => [p.productId, p]))
+
+    const [products, shares, shopName] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { id: { in: productIds } },
+        select: { id: true, name: true, network: true },
+      }),
+      this.prisma.agentPrice.findMany({
+        where: { productId: { in: productIds }, user: { role: 'agent', status: 'active' } },
+        select: { productId: true, user: { select: { id: true, name: true, email: true } } },
+      }),
+      this.prisma.branding.findFirst({ where: { userId: null } }).then((b) => b?.shopName ?? 'JamesDataConsult'),
+    ])
+    const productById = new Map(products.map((p) => [p.id, p]))
+
+    // One entry per agent, listing every changed product they actually stock
+    // — never one email per (agent, product) pair.
+    const byAgent = new Map<string, { name: string; email: string; changes: { name: string; network: string | null; from: number; to: number }[] }>()
+    for (const share of shares) {
+      const change = pendingByProduct.get(share.productId)
+      const product = productById.get(share.productId)
+      if (!change || !product) continue
+      const entry = byAgent.get(share.user.id) ?? { name: share.user.name, email: share.user.email, changes: [] }
+      entry.changes.push({ name: product.name, network: product.network, from: change.baselinePrice, to: change.currentPrice })
+      byAgent.set(share.user.id, entry)
+    }
+
+    let agentsEmailed = 0
+    let agentsFailed = 0
+    for (const agent of byAgent.values()) {
+      const { sent } = await this.mailer.send(
+        priceChangeMail({ to: agent.email, name: agent.name, shopName, changes: agent.changes }),
+      )
+      if (sent) agentsEmailed += 1
+      else agentsFailed += 1
+    }
+
+    await this.prisma.pendingPriceChange.deleteMany({ where: { productId: { in: productIds } } })
+
+    this.log.log(
+      `price-change digest: ${pending.length} product(s), ${agentsEmailed} agent(s) emailed, ${agentsFailed} failed`,
+    )
+    return { productsNotified: pending.length, agentsEmailed, agentsFailed }
   }
 
   /**
@@ -525,28 +706,23 @@ export class AdminService {
      * One transaction for the whole sync, not one `update` per product.
      *
      * A thrown error partway through an update-in-loop left some products
-     * re-priced to the new cost and others stranded on the old one — a
-     * silently half-applied catalogue, with margins computed against two
-     * different cost bases until the next sync happened to finish the job.
-     * `applyMarkup` already batches its own updates in one transaction; this
-     * never matched it.
+     * synced to the new cost and others stranded on the old one — a silently
+     * half-applied catalogue. `applyMarkup` already batches its own updates
+     * in one transaction; this never matched it.
+     *
+     * Only `supplierCost` moves here. Selling prices are James's own decision,
+     * made on the Prices screen, not a side effect of the provider's catalogue
+     * changing — a sync that quietly moved them too meant a price he'd
+     * deliberately set could change under him without his say-so. If a cost
+     * rise now sits above a price he already set, that shows up as "priced
+     * wrong" on the Prices screen instead of being silently repriced for him;
+     * the fix is his call, same as setting the price was.
      */
     await this.prisma.$transaction(
       toUpdate.map(({ product, cost }) =>
         this.prisma.product.update({
           where: { id: product.id },
-          data: {
-            supplierCost: cost,
-            // This was `max(price, cost)`, which only guaranteed the sale was not
-            // loss-making: a cost rise past the price pinned the two together and the
-            // margin became exactly zero, on every affected product, with nothing on
-            // any screen to say so. Deriving from the markup keeps the margin.
-            //
-            // `standardPrice` is still not lifted to meet `adminPrice` — James is
-            // allowed to retail below what he charges agents.
-            adminPrice: priceFromMarkup(cost, product.agentMarkupBp),
-            standardPrice: priceFromMarkup(cost, product.walkupMarkupBp),
-          },
+          data: { supplierCost: cost },
         }),
       ),
     )
@@ -580,8 +756,23 @@ export class AdminService {
 
     const rows = await this.prisma.order.findMany({
       where: { status: 'completed', createdAt: { gte: since } },
-      select: { createdAt: true, salePrice: true, split: true },
+      select: { createdAt: true, salePrice: true, split: true, reference: true },
     })
+
+    /**
+     * `adminMarginOf` reads `split`'s admin share, which is only ever the
+     * catalogue cost frozen in at sale time — the same gap `AdminOrders.tsx`
+     * corrects per-order with its own "true margin". This chart gets the same
+     * correction here: the `supplier_cost` ledger entry is what was actually
+     * booked (see `FulfilmentService.recordDelivered`), so the gap between it
+     * and the frozen estimate is real margin this chart was otherwise missing
+     * or overstating whenever the two disagree.
+     */
+    const costEntries = await this.prisma.ledgerEntry.findMany({
+      where: { kind: 'supplier_cost', orderRef: { in: rows.map((r) => r.reference) } },
+      select: { orderRef: true, amount: true },
+    })
+    const actualCostByRef = new Map(costEntries.map((e) => [e.orderRef as string, -e.amount]))
 
     const buckets = emptyDayBuckets(days)
 
@@ -591,7 +782,10 @@ export class AdminService {
       if (!bucket) continue
       bucket.revenue += row.salePrice
       bucket.orders += 1
-      bucket.platformMargin += adminMarginOf(row.split as unknown as OrderSplit)
+      const split = row.split as unknown as OrderSplit
+      const actualCost = actualCostByRef.get(row.reference)
+      bucket.platformMargin +=
+        actualCost != null ? adminMarginOf(split) + (split.supplierCost - actualCost) : adminMarginOf(split)
     }
 
     return [...buckets.entries()].map(([day, value]) => ({

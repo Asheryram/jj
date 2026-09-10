@@ -342,19 +342,40 @@ model Product {
   standardPrice Int @map("standard_price")
 
   /// The intent behind the two prices above, in basis points over cost
-  /// (1500 = 15.00%).
+  /// (1500 = 15.00%) — a record for the Prices screen, not a live formula.
   ///
-  /// Prices are derived from these whenever the provider's cost moves, and that
-  /// is the whole reason they exist. A cost rise used to be absorbed by lifting
-  /// the price to meet it — `max(price, cost)` — which kept the sale legal and
-  /// silently set the margin to exactly zero, on every affected bundle, without
-  /// telling anyone. Storing the markup means a cost change moves the price and
-  /// leaves the margin intact.
-  ///
-  /// Kept in sync when a price is typed in directly: the number James enters is
-  /// still the price, and the markup is re-derived from it.
+  /// Used when James applies a markup across a category (`AdminService.applyMarkup`)
+  /// and re-derived whenever he types a price in directly, so the number shown
+  /// stays honest about what markup that price actually represents. It does
+  /// NOT move a price on its own: when the provider's cost changes
+  /// (`AdminService.syncSupplierCosts`), only `supplierCost` moves — the two
+  /// selling prices are James's own decision and never change under him as a
+  /// side effect of the catalogue changing. A cost that has moved past a price
+  /// he already set shows up as "priced wrong" on the Prices screen for him to
+  /// fix by hand, rather than being silently repriced.
   agentMarkupBp  Int @map("agent_markup_bp")
   walkupMarkupBp Int @map("walkup_markup_bp")
+
+  /// What the last real delivery had charged, at the moment a price on this
+  /// product was last saved — null until the first save that had a real
+  /// figure to check against (`AdminService.setTier`).
+  ///
+  /// This is what "up to date" actually means here: not that `supplierCost`
+  /// is fresh, and not that the price merely clears cost, but that nothing
+  /// has *changed* about the real cost since James last looked at this price
+  /// with that real figure in front of him. A fresh real charge that happens
+  /// to repeat the same number he already priced against changes nothing —
+  /// there was nothing new to review — so this is compared by value, not by
+  /// timestamp: `CostPrices.tsx` flags a product "outdated" only when the
+  /// current real charge (`AdminService.catalogueAccuracy`) differs from
+  /// this, not merely because a sale happened more recently than this save.
+  pricedAgainstRealCost   Int?      @map("priced_against_real_cost")
+  /// When that save happened. Shown next to the outdated/up-to-date status
+  /// so "up to date" can also say "as of when" — a price confirmed against
+  /// today's real cost six months ago and a price confirmed against it
+  /// yesterday are both technically "up to date," but not equally worth
+  /// trusting without a second look.
+  pricedAgainstRealCostAt DateTime? @map("priced_against_real_cost_at")
 
   active Boolean @default(true)
 
@@ -365,6 +386,31 @@ model Product {
   @@index([network])
   @@index([supplierCode])
   @@map("products")
+}
+
+/// One product's `adminPrice` waiting to be told to agents — consolidated,
+/// not a log. `AdminService.setTier`/`applyMarkup` upsert this row on every
+/// change so a product edited five times before anyone hits "notify" still
+/// appears once, and delete it outright the moment `currentPrice` lands back
+/// on `baselinePrice` — a price that round-tripped is not news to anyone who
+/// never saw the middle of it. Cleared entirely once the digest is sent;
+/// the next edit starts a fresh row from whatever the price is by then.
+model PendingPriceChange {
+  /// One row per product, never one per edit — the upsert key.
+  productId String @id @map("product_id")
+
+  /// `adminPrice` as agents last knew it: either when this row was first
+  /// created, or immediately after the last digest was sent. What a
+  /// round-tripping edit collapses back to.
+  baselinePrice Int @map("baseline_price")
+  /// `adminPrice` right now, after however many edits happened since the
+  /// baseline. What actually goes in the email.
+  currentPrice Int @map("current_price")
+
+  firstChangedAt DateTime @default(now()) @map("first_changed_at")
+  lastChangedAt  DateTime @updatedAt @map("last_changed_at")
+
+  @@map("pending_price_changes")
 }
 
 /// An agent's chosen resale price for one product (FR-3.4).

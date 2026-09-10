@@ -92,6 +92,57 @@ export function setupMail(input: {
   }
 }
 
+/**
+ * One agent's digest of every product whose price to them has moved since
+ * the last one — consolidated by `PendingPriceChange`, so this is always
+ * "here's what's different now," never one email per edit.
+ */
+export function priceChangeMail(input: {
+  to: string
+  name: string
+  shopName: string
+  changes: { name: string; network: string | null; from: number; to: number }[]
+}): Mail {
+  const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
+  const line = (c: { name: string; network: string | null; from: number; to: number }) =>
+    `${c.network ? `${c.network} ` : ''}${c.name}: ${ghs(c.from)} -> ${ghs(c.to)}` +
+    (c.to > c.from ? ' (up)' : ' (down)')
+
+  const heading =
+    input.changes.length === 1 ? 'A price you pay just changed' : `${input.changes.length} prices you pay just changed`
+
+  return {
+    to: input.to,
+    subject: `${input.shopName}: ${heading.toLowerCase().replace(/^a /, 'your ')}`,
+    text: [
+      `Hello ${input.name},`,
+      '',
+      `What ${input.shopName} charges you for the following changed. Update your own resale price if you want to keep the same margin.`,
+      '',
+      ...input.changes.map(line),
+    ].join('\n'),
+    html: wrap(
+      input.shopName,
+      heading,
+      `<p style="margin:0 0 16px;font-size:15px;line-height:1.6">Hello ${escape(input.name)},</p>
+       <p style="margin:0 0 16px;font-size:15px;line-height:1.6">What ${escape(input.shopName)} charges you for the following changed. Update your own resale price if you want to keep the same margin.</p>
+       <table style="width:100%;border-collapse:collapse;font-size:14px">
+         ${input.changes
+           .map(
+             (c) => `<tr>
+               <td style="padding:8px 0;border-top:1px solid #e2e8f0">${escape(c.network ? `${c.network} ${c.name}` : c.name)}</td>
+               <td style="padding:8px 0;border-top:1px solid #e2e8f0;text-align:right;white-space:nowrap">
+                 ${escape(ghs(c.from))} &rarr;
+                 <strong style="color:${c.to > c.from ? '#b91c1c' : '#15803d'}">${escape(ghs(c.to))}</strong>
+               </td>
+             </tr>`,
+           )
+           .join('')}
+       </table>`,
+    ),
+  }
+}
+
 /** Somebody locked out of an account that already has a password. */
 export function resetMail(input: { to: string; name: string; shopName: string; link: string }): Mail {
   return {
