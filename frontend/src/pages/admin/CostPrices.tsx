@@ -839,40 +839,64 @@ function EditPricesModal({
               <p className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">
                 {cedis(product.supplierCost)}
               </p>
+              {/* The number that actually matters, right next to the one that
+                  doesn't any more — repeated from the Callout below so it's
+                  visible without reading the whole paragraph. Same colour
+                  rule as the table row: green when the real charge is lower,
+                  red when it's higher. */}
+              {realCostIsCurrent && drift && (
+                <p
+                  className={cn(
+                    'text-xs font-medium',
+                    realCostGap > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400',
+                  )}
+                >
+                  Last real: {cedis(drift.charged)} ({shortDate(drift.lastSoldAt)})
+                </p>
+              )}
             </div>
           </div>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Comes from the supplier catalogue further down this page, so it always matches what you
-            are actually invoiced — sync it there and it flows up here
-            {product.supplierCostSyncedAt && <> · last synced {dateTime(product.supplierCostSyncedAt)}</>}.
+            {/* "Always matches what you are actually invoiced" is only true
+                absent a known real-cost gap — asserting it while the gap
+                above is on screen would be telling you the opposite of what
+                you're looking at. */}
+            {realCostIsCurrent ? (
+              <>
+                Comes from the supplier catalogue further down this page
+                {product.supplierCostSyncedAt && <> · last synced {dateTime(product.supplierCostSyncedAt)}</>} — but
+                the last real delivery, above, actually paid a different amount. See below.
+              </>
+            ) : (
+              <>
+                Comes from the supplier catalogue further down this page, so it always matches what you
+                are actually invoiced — sync it there and it flows up here
+                {product.supplierCostSyncedAt && <> · last synced {dateTime(product.supplierCostSyncedAt)}</>}.
+              </>
+            )}
             {reviewStatus === 'outdated' &&
               ' Saving a price below will mark this reviewed against the real cost currently on record.'}
           </p>
         </div>
 
-        {/* Only the last synced catalogue price, above — not what actually got
-            charged on the last real delivery. The two drift apart between
-            syncs, and that gap changes what "cost + a margin" really means:
-            a thin intended markup can land far wider than planned, which is
-            exactly what looks like an overpriced bundle to a customer. See
-            `AdminService.catalogueAccuracy` for where this number comes from. */}
+        {/* The raw real-vs-catalogue fact already lives on the "Last real"
+            line in the box above — repeating "on {date} this actually cost
+            {X}, not {Y}" here would just be the same fact twice. This is for
+            the part that isn't shown anywhere else: what that gap actually
+            does to your margin, and what to do about it. See
+            `AdminService.catalogueAccuracy` for where the real figure comes
+            from. */}
         {realCostIsCurrent && drift && (
           <Callout
             tone={realCostGap > 0 ? 'success' : 'warning'}
-            title={
-              realCostGap > 0
-                ? `The last real delivery actually cost ${cedis(Math.abs(realCostGap))} less than shown`
-                : `The last real delivery actually cost ${cedis(Math.abs(realCostGap))} more than shown`
-            }
+            title="Your real margin here isn't what the catalogue suggests"
             icon={<TrendUpIcon className="size-4" />}
           >
             <p>
-              On {dateTime(drift.lastSoldAt)}, this bundle actually cost {cedis(drift.charged)} to
-              deliver, not the {cedis(product.supplierCost)} shown above. Your real margin, priced
-              against that, is {cedis(product.adminPrice - drift.charged)} on an agent sale and{' '}
-              {cedis(product.standardPrice - drift.charged)} on a walk-up sale — not the{' '}
-              {cedis(product.adminPrice - product.supplierCost)} / {cedis(product.standardPrice - product.supplierCost)}{' '}
-              the catalogue would suggest.
+              Priced against the real cost, your margin is {cedis(product.adminPrice - drift.charged)} on
+              an agent sale and {cedis(product.standardPrice - drift.charged)} on a walk-up sale — not
+              the {cedis(product.adminPrice - product.supplierCost)} /{' '}
+              {cedis(product.standardPrice - product.supplierCost)} the catalogue would suggest.
             </p>
             <p className="mt-1.5">
               {realCostGap > 0
