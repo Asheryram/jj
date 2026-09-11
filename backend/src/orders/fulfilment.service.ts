@@ -2,6 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common'
 import type { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { SupplierService } from '../supplier/supplier.service'
+import { FloatMonitorService } from '../supplier/float-monitor.service'
 import { LedgerService, type LedgerDraft } from '../finance/ledger.service'
 import { lastRealCost } from '../common/real-cost'
 import type { OrderSplit, SplitShare } from '../domain/pricing'
@@ -43,6 +44,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
     private readonly prisma: PrismaService,
     private readonly supplier: SupplierService,
     private readonly ledger: LedgerService,
+    private readonly float: FloatMonitorService,
   ) {}
 
   /**
@@ -156,6 +158,22 @@ export class FulfilmentService implements OnApplicationBootstrap {
           },
         ])
       }
+
+      /**
+       * Only now, not from inside `dispatch()` itself.
+       *
+       * `SupplierService.dispatchLive` already recorded DataHub's live balance
+       * a moment ago — `observed` reflects this exact order's deduction the
+       * instant their reply arrives. The cost booked just above is what makes
+       * `expectedBalance` reflect it too. Checking anywhere in between (which
+       * is exactly what used to happen, since `float.record` used to check
+       * itself, synchronously, before this booking ever ran) compares an
+       * `observed` that already knows about this order against an `expected`
+       * that doesn't yet — manufacturing a false shortfall roughly equal to
+       * this order's own cost, on every single live dispatch, and mailing it
+       * as "float is short" for money that was never actually missing.
+       */
+      await this.float.recheckFloat()
 
       await this.prisma.order.update({
         where: { id: orderId },

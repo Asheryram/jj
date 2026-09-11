@@ -120,11 +120,21 @@ export class FloatMonitorService {
   ) {}
 
   /**
-   * Record what the provider just said is left, and alert if it crossed a mark.
+   * Record what the provider just said is left.
    *
    * Takes cedis because that is what they send. Never throws: this runs inside
    * the dispatch path, and failing to record a balance must not turn a successful
    * purchase into a failed one.
+   *
+   * Deliberately does NOT check the float itself any more. This runs from
+   * inside `SupplierService.dispatchLive`, the instant DataHub's reply
+   * arrives — before `FulfilmentService.run` has had a chance to book that
+   * same order's cost to the ledger. Checking right here used to compare an
+   * `observed` balance that already reflected this order's deduction against
+   * an `expectedBalance` that didn't yet, which manufactured a false
+   * shortfall the size of whatever this order cost on every live dispatch.
+   * See `recheckFloat`, which the caller runs once the picture is actually
+   * complete.
    */
   async record(balanceCedis: number | null, orderRef: string | null): Promise<void> {
     if (balanceCedis === null || !Number.isFinite(balanceCedis)) return
@@ -137,11 +147,31 @@ export class FloatMonitorService {
         observedAt: new Date().toISOString(),
         orderRef,
       })
-
-      await this.checkFloat(balance)
     } catch (error) {
       // Deliberately swallowed — see the doc comment above.
       this.log.error(`could not record the provider float: ${String(error)}`)
+    }
+  }
+
+  /**
+   * Re-run the watch/risk and shortfall checks against whatever was last
+   * recorded — called once a dispatch has finished doing everything that
+   * could change either side of the comparison (booking a just-learned real
+   * cost, in particular), so the check `record` used to run prematurely now
+   * happens against a consistent picture instead. Also what `logCapital`
+   * uses after logging a top-up or withdrawal, for the same reason: money
+   * moving on the capital side must not wait for the next order to be
+   * re-checked either.
+   *
+   * Never throws, same as `record` — nothing here may turn a successful
+   * dispatch or a logged top-up into a failure.
+   */
+  async recheckFloat(): Promise<void> {
+    try {
+      const observation = await this.latest()
+      if (observation) await this.checkFloat(observation.balance)
+    } catch (error) {
+      this.log.error(`could not check the provider float: ${String(error)}`)
     }
   }
 
@@ -297,11 +327,11 @@ export class FloatMonitorService {
      * A logged withdrawal can push tracked capital into risk on its own,
      * without any order to trigger a re-check — waiting for the next sale to
      * notice would leave that risk silent for however long it takes to sell
-     * again. Skipped only when there is truly no live reading yet to check
-     * against (a shop that has never dispatched an order).
+     * again. `recheckFloat` itself skips this when there is truly no live
+     * reading yet to check against (a shop that has never dispatched an
+     * order).
      */
-    const observation = await this.latest()
-    if (observation) await this.checkFloat(observation.balance)
+    await this.recheckFloat()
   }
 
   /**
