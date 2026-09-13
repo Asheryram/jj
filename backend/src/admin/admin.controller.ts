@@ -549,6 +549,15 @@ export class AdminController {
     return this.ledger.entries(Math.min(500, Math.max(1, Number(limit) || 200)))
   }
 
+  /**
+   * Withdrawals and refunds stuck on `otp`/`unknown` — needs a person to
+   * check Paystack's own dashboard. See `SolvencyService.stuckTransfers`.
+   */
+  @Get('finance/stuck-transfers')
+  stuckTransfers() {
+    return this.solvency.stuckTransfers()
+  }
+
   @Get('settings')
   settings() {
     return this.admin.settingsAll()

@@ -219,9 +219,27 @@ export default function AdminOrders() {
         o.paystackFee == null ? '' : (o.paystackFee / 100).toFixed(2),
         (o.split.supplierCost / 100).toFixed(2),
         (actualCostOf(o) / 100).toFixed(2),
-        (catalogueDiffOf(o) / 100).toFixed(2),
-        (trueMarginOf(o) / 100).toFixed(2),
-        (agentShares.reduce((n, s) => n + s.margin, 0) / 100).toFixed(2),
+        // Blank, not a hypothetical figure, until the supplier's real charge
+        // is actually known — matches the table's own gate on
+        // `actualSupplierCost` (a fresh order priced exactly at catalogue
+        // and one nobody has heard back on yet must not read the same).
+        o.actualSupplierCost == null ? '' : (catalogueDiffOf(o) / 100).toFixed(2),
+        /**
+         * Blank for anything short of `completed`. This used to be written
+         * unconditionally, so a failed order — one that was never delivered,
+         * never paid an agent, and for many rows here never even collected
+         * the customer's payment at all (see the blank Paystack fee on
+         * those same rows) — showed the exact same margin figure as a real
+         * sale. `trueMarginOf`/`agentMarginOf` are the split *priced at
+         * checkout*, not what actually landed; only a completed order ever
+         * turned that price into real money. Matches the table's own gate
+         * exactly — this was the one place still showing the hypothetical
+         * number as if it were real.
+         */
+        o.status === 'completed' ? (trueMarginOf(o) / 100).toFixed(2) : '',
+        o.status === 'completed' && agentShares.length > 0
+          ? (agentShares.reduce((n, s) => n + s.margin, 0) / 100).toFixed(2)
+          : '',
         agentShares.map((s) => s.name).join(' → ') || 'none',
         o.paidWith,
         o.status,
@@ -399,6 +417,14 @@ export default function AdminOrders() {
                     <Td className="tabular">{order.recipient}</Td>
                     <Td>
                       <StatusBadge status={order.status} />
+                      {order.dispatchUnresolved && (
+                        <span
+                          className="ml-1.5 inline-block"
+                          title="The delivery partner never answered at all — no reference exists for the automatic check to use. This will sit exactly like this until a person looks."
+                        >
+                          <Badge tone="warning">Unresolved</Badge>
+                        </span>
+                      )}
                       {order.refunded && (
                         <Badge tone="info" className="ml-1.5">
                           Refunded
@@ -606,13 +632,25 @@ function explain(attempt: DispatchAttempt): {
   }
 
   if (attempt.outcome === 'unknown') {
+    /**
+     * "Checked automatically every minute" is only true when there is a
+     * `providerReference` to check *with* — the reconciler's sweep can only
+     * ask DataHub's `/order-status` for a reference they themselves handed
+     * back. A purchase call that timed out before any reply arrived at all
+     * never got one, so that order is invisible to the sweep forever, not
+     * merely waiting on it. Telling an admin it's being handled automatically
+     * when it never will be is worse than saying nothing — it's exactly the
+     * kind of reassurance that delays the one manual check that will
+     * actually resolve it.
+     */
     return {
       tone: 'warning',
       title: 'We do not know whether this was delivered',
       detail:
         'The connection broke before the partner answered, so the bundle may or may not have been sent.',
-      action:
-        'Do not re-send it manually — that risks paying twice. It is being checked automatically every minute.',
+      action: attempt.providerReference
+        ? 'Do not re-send it manually — that risks paying twice. It is being checked automatically every minute.'
+        : 'This never got a reference back from the delivery partner, so it cannot be checked automatically. Check their own dashboard for this recipient below before doing anything — if nothing was actually sent, it can be retried safely; if you find out some other way what really happened, mark it delivered or failed instead.',
     }
   }
 
@@ -692,6 +730,9 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
   const [resolving, setResolving] = useState<'delivered' | 'rejected' | null>(null)
   const [note, setNote] = useState('')
   const [noteError, setNoteError] = useState('')
+  const [retrying, setRetrying] = useState(false)
+  const [retryNote, setRetryNote] = useState('')
+  const [retryNoteError, setRetryNoteError] = useState('')
   const [busy, setBusy] = useState(false)
 
   /**
@@ -708,6 +749,9 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
       setResolving(null)
       setNote('')
       setNoteError('')
+      setRetrying(false)
+      setRetryNote('')
+      setRetryNoteError('')
       return
     }
     let live = true
@@ -726,6 +770,32 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
   if (!order) return null
 
   const stuck = order.status === 'pending' || order.status === 'processing'
+  /**
+   * Retry is only ever offered for the one case nothing automatic can ever
+   * resolve: the *most recent* attempt timed out before any reply arrived,
+   * so it has no `providerReference` — see `FulfilmentService.retryDispatch`.
+   * `attempts` is oldest-first, so the last element is the latest one.
+   */
+  const latestAttempt = attempts && attempts.length > 0 ? attempts[attempts.length - 1] : null
+  const canRetry = stuck && latestAttempt?.outcome === 'unknown' && !latestAttempt.providerReference
+
+  const submitRetry = async () => {
+    if (retryNote.trim().length < 5) {
+      setRetryNoteError('Say what you checked before retrying. It is kept on the record.')
+      return
+    }
+    setBusy(true)
+    try {
+      await api.retryDispatch(order.id, retryNote.trim())
+      pushToast({ tone: 'success', title: `${order.reference}: sending it again` })
+      await refresh()
+      onClose()
+    } catch (caught) {
+      setRetryNoteError(caught instanceof ApiError ? caught.message : 'We could not retry that.')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const submitResolve = async () => {
     if (!resolving) return
@@ -883,6 +953,72 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
             </div>
           )
         })}
+
+        {/* Only for the one case retrying is actually safe: no reference at
+            all was ever obtained, so this can never be double-sent by both
+            a retry and a delayed real reply landing later — there is no
+            delayed reply coming, because DataHub never gave us anything to
+            match one against. */}
+        {canRetry && (
+          <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 p-3.5">
+            {!retrying ? (
+              <>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Checked the delivery partner's own dashboard for this recipient?
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Only retry once you've confirmed nothing was actually sent — otherwise this risks
+                  paying twice. If they show nothing for this number, it's safe to send it again.
+                </p>
+                <div className="mt-2.5">
+                  <Button size="sm" variant="outline" onClick={() => setRetrying(true)}>
+                    Retry dispatch
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Send this order to the delivery partner again
+                </p>
+                <Field
+                  label="What did you check?"
+                  htmlFor="retry-note"
+                  className="mt-2"
+                  error={retryNoteError}
+                >
+                  <TextInput
+                    id="retry-note"
+                    placeholder="Checked DataHub's dashboard for this number — nothing on record"
+                    value={retryNote}
+                    invalid={Boolean(retryNoteError)}
+                    onChange={(event) => {
+                      setRetryNote(event.target.value)
+                      setRetryNoteError('')
+                    }}
+                  />
+                </Field>
+                <div className="mt-2.5 flex gap-2">
+                  <Button size="sm" loading={busy} onClick={() => void submitRetry()}>
+                    Send it again
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => {
+                      setRetrying(false)
+                      setRetryNote('')
+                      setRetryNoteError('')
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* For the case nothing automatic ever resolves: the provider's own
             status never reaches a word the reconciler recognises as final

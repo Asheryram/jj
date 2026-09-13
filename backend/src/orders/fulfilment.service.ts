@@ -1,10 +1,21 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common'
-import type { Prisma } from '@prisma/client'
+import type { Order, Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { SupplierService } from '../supplier/supplier.service'
 import { LedgerService, type LedgerDraft } from '../finance/ledger.service'
 import { lastRealCost } from '../common/real-cost'
+import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import type { OrderSplit, SplitShare } from '../domain/pricing'
+
+/**
+ * How long a dispatch claim (`Order.dispatchClaimedAt`) has to sit with no
+ * `SupplierDispatch` row at all before it's treated as abandoned rather than
+ * in-flight. DataHub answers in seconds in the ordinary case — this is a
+ * generous multiple of that, wide enough that a live call in progress is
+ * never mistaken for a crashed one, narrow enough that a genuine crash
+ * doesn't strand an order for long.
+ */
+const STALE_CLAIM_MS = 5 * 60 * 1000
 
 /**
  * What actually happened when something tried to settle an order.
@@ -72,7 +83,18 @@ export class FulfilmentService implements OnApplicationBootstrap {
         status: { in: ['pending', 'processing'] },
         providerReference: null,
         dispatches: {
-          none: { OR: [{ providerReference: { not: null } }, { providerCharged: { not: null } }] },
+          /**
+           * `outcome: 'unknown'` added alongside the two existing real-answer
+           * fields — DataHub genuinely answered for this order once already,
+           * just ambiguously (a timeout or a 5xx), and `DispatchResult`'s own
+           * doc comment already says that must NOT be guessed at by retrying,
+           * only parked for a human. Without this, every order left `unknown`
+           * had both fields null forever, so this sweep re-dispatched it —
+           * for real — on every subsequent restart or deploy.
+           */
+          none: {
+            OR: [{ providerReference: { not: null } }, { providerCharged: { not: null } }, { outcome: 'unknown' }],
+          },
         },
       },
       select: { id: true, reference: true },
@@ -116,7 +138,108 @@ export class FulfilmentService implements OnApplicationBootstrap {
     // can all arrive. Only a non-terminal order is still settleable.
     if (order.status === 'completed' || order.status === 'failed') return
 
-    const result = await this.supplier.dispatch(order)
+    /**
+     * Claimed atomically, not read-then-called.
+     *
+     * The check above proves nothing about what is still true by the time
+     * `supplier.dispatch` actually runs — a replayed webhook wake-up, the
+     * restart-recovery sweep, and the originally scheduled timer can all
+     * reach here for the same order, and `dispatch` places a real purchase
+     * with no idempotency key of DataHub's own to protect a retry. Only the
+     * caller that wins this write may call it; every other caller sees
+     * `count: 0` and stops here, before ever placing a second real purchase.
+     * `this.pending`'s in-process map already guards one Node instance
+     * against itself; this is the same guard made to actually hold across
+     * more than one.
+     *
+     * Left set afterward, not released — `dispatch` is meant to run at most
+     * once per order, ever. The one case let back in: a claim old enough
+     * that whoever made it must have crashed before `dispatch` ever
+     * answered — no `SupplierDispatch` row exists at all to say otherwise,
+     * and DataHub answers well inside this window in the ordinary case. That
+     * mirrors the tolerance `onApplicationBootstrap`'s own sweep already
+     * accepts for exactly this scenario; without it, a crash in that narrow
+     * window would strand the order in `processing` forever instead of the
+     * restart recovering it.
+     */
+    const claim = await this.prisma.order.updateMany({
+      where: {
+        id: orderId,
+        status: { notIn: ['completed', 'failed'] },
+        OR: [
+          { dispatchClaimedAt: null },
+          { dispatchClaimedAt: { lt: new Date(Date.now() - STALE_CLAIM_MS) }, dispatches: { none: {} } },
+        ],
+      },
+      data: { dispatchClaimedAt: new Date() },
+    })
+    if (claim.count === 0) return
+
+    await this.dispatchAndHandle(order, 1)
+  }
+
+  /**
+   * An admin re-attempts dispatch for an order stuck exactly the one way
+   * nothing here can ever resolve on its own: the purchase call timed out
+   * before any reply arrived at all, so no `providerReference` exists —
+   * `ReconcilerService.sweep()`'s active check is scoped to
+   * `providerReference: { not: null }` and can never ask about this one.
+   * `run()`'s own claim would otherwise block a second attempt forever, by
+   * design; this is the one deliberate, authorised exception to it, and only
+   * for that exact case — not for a reference DataHub already accepted (the
+   * reconciler is already checking that one) and not for anything already
+   * terminal.
+   *
+   * Safe specifically because a person, not this code, has already done the
+   * one check that actually answers whether a retry is safe: looking up the
+   * recipient directly in DataHub's own dashboard. `note` is required and
+   * kept on the record for exactly that reason — it is the evidence the
+   * retry was authorised on, not a rubber stamp.
+   */
+  async retryDispatch(orderId: string, adminId: string, note: string): Promise<void> {
+    const reason = note.trim()
+    if (reason.length < 5) {
+      throw new ValidationError('Say what you checked before retrying. It is kept on the record.')
+    }
+
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } })
+    if (!order) throw new NotFoundError('We could not find that order.')
+    if (order.status === 'completed' || order.status === 'failed') {
+      throw new ConflictError('ALREADY_SETTLED', `This order is already ${order.status}.`)
+    }
+
+    const lastDispatch = await this.prisma.supplierDispatch.findFirst({
+      where: { orderId },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (!lastDispatch || lastDispatch.outcome !== 'unknown' || lastDispatch.providerReference) {
+      throw new ConflictError(
+        'NOT_RETRYABLE',
+        'Only an order whose last attempt came back unresolved, with no reference from the delivery partner, can be retried by hand.',
+      )
+    }
+
+    const reclaim = await this.prisma.order.updateMany({
+      where: { id: orderId, status: { notIn: ['completed', 'failed'] } },
+      data: { dispatchClaimedAt: new Date() },
+    })
+    if (reclaim.count === 0) {
+      throw new ConflictError('ALREADY_SETTLED', 'This order was settled just now — refresh and check.')
+    }
+
+    this.log.warn(`${order.reference}: admin ${adminId} retrying dispatch by hand — ${reason}`)
+    await this.dispatchAndHandle(order, lastDispatch.attempt + 1)
+  }
+
+  /**
+   * Everything from the actual purchase call onward — shared by the normal
+   * automatic path (`run`, always `attempt: 1`) and `retryDispatch` (whatever
+   * attempt number comes next), so the two can never handle the same result
+   * two different ways.
+   */
+  private async dispatchAndHandle(order: Order, attempt: number): Promise<void> {
+    const orderId = order.id
+    const result = await this.supplier.dispatch(order, attempt)
 
     // Only terminal outcomes settle. `pending` means DataHub has the order and
     // will report back; `unknown` means we cannot tell what happened and must
@@ -165,7 +288,9 @@ export class FulfilmentService implements OnApplicationBootstrap {
     }
 
     if (result.outcome === 'unknown') {
-      // Deliberately no refund and no retry — see DispatchResult.outcome.
+      // No automatic refund and no automatic retry — see DispatchResult.outcome.
+      // An admin can still retry this by hand, once they've checked the
+      // delivery partner's own dashboard for this recipient — see `retryDispatch`.
       this.log.error(
         `${order.reference} left unresolved and needs manual checking: ${result.reason ?? ''}`,
       )
@@ -692,16 +817,39 @@ export class FulfilmentService implements OnApplicationBootstrap {
     })
     if (!credited) return
 
-    const agent = await tx.user.findUnique({
-      where: { id: share.userId },
-      select: { balance: true },
-    })
-    if (!agent) return
+    /**
+     * Clamped and decremented in one atomic statement, not read-then-decided.
+     *
+     * The old shape read `agent.balance` in JS, computed `recoverable` from
+     * that snapshot, and decremented separately below. Two orders for the
+     * *same* agent failing at nearly the same time (a webhook and the
+     * reconciler sweep landing close together, say) could both read the same
+     * pre-reversal balance and both compute a `recoverable` as if the whole
+     * thing were still theirs to claim. Whichever committed second then drove
+     * the decrement below zero, tripping `CHECK (balance >= 0)` and rolling
+     * back the *entire* enclosing transaction — including the order's own
+     * flip to `failed` and its `RefundRequest`, stranding a genuinely failed
+     * order with no bundle and no refund queued.
+     *
+     * `GREATEST(balance - margin, 0)` inside a single `UPDATE` never attempts
+     * the illegal decrement in the first place, and Postgres's own row lock
+     * for the duration of that statement serializes two concurrent reversals
+     * on the same agent — the second one's `GREATEST` sees the *already*
+     * reduced balance, not a stale one, so it clamps correctly instead of
+     * double-claiming the same headroom.
+     */
+    const rows = await tx.$queryRaw<{ old_balance: number; new_balance: number }[]>`
+      WITH prior AS (SELECT balance FROM users WHERE id = ${share.userId} FOR UPDATE)
+      UPDATE users u
+      SET balance = GREATEST(u.balance - ${share.margin}, 0)
+      FROM prior
+      WHERE u.id = ${share.userId}
+      RETURNING u.balance AS new_balance, prior.balance AS old_balance
+    `
+    const claimed = rows[0]
+    if (!claimed) return
 
-    // A reversal must never drive a balance negative — the agent may already have
-    // withdrawn. Clamp to what is actually there and log the shortfall rather
-    // than letting CHECK (balance >= 0) abort the whole refund.
-    const recoverable = Math.min(share.margin, agent.balance)
+    const recoverable = claimed.old_balance - claimed.new_balance
     const shortfall = share.margin - recoverable
     if (shortfall > 0) {
       this.log.warn(
@@ -732,18 +880,14 @@ export class FulfilmentService implements OnApplicationBootstrap {
     }
     if (recoverable === 0) return
 
-    const updated = await tx.user.update({
-      where: { id: share.userId },
-      data: { balance: { decrement: recoverable } },
-      select: { balance: true },
-    })
-
+    // Already decremented above, atomically — nothing left to write here but
+    // the record of it.
     await tx.earning.create({
       data: {
         userId: share.userId,
         type: 'reversal',
         amount: -recoverable,
-        balanceAfter: updated.balance,
+        balanceAfter: claimed.new_balance,
         description: `Reversed · ${productName} failed at provider`,
         productName,
         reference,

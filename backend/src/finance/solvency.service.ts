@@ -434,6 +434,80 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   /**
+   * Withdrawals and refunds stuck on `otp` or `unknown` — the two Paystack
+   * transfer states that never resolve themselves and need a person to
+   * check Paystack's own dashboard, unlike one still genuinely in flight.
+   *
+   * `position()` above already counts these correctly in its liability
+   * totals (`stuckPayouts`/`stuckRefunds`), but a total is not a worklist —
+   * there was nowhere that said "here are the N requests, go look," which
+   * is exactly the operational gap that led an admin straight to
+   * `settleManually` on a row that may have already resolved itself at
+   * Paystack. Comparable to `ReconcilerService.needsAttention` for orders;
+   * this is the equivalent for the money side.
+   */
+  async stuckTransfers() {
+    const [withdrawals, refunds] = await Promise.all([
+      this.prisma.withdrawal.findMany({
+        where: { status: 'approved', transferStatus: { in: ['otp', 'unknown'] } },
+        orderBy: { decidedAt: 'asc' },
+        select: {
+          id: true,
+          agentName: true,
+          agentPhone: true,
+          amount: true,
+          transferStatus: true,
+          transferNote: true,
+          decidedAt: true,
+        },
+      }),
+      this.prisma.refundRequest.findMany({
+        where: { status: 'approved', transferStatus: { in: ['otp', 'unknown'] } },
+        orderBy: { decidedAt: 'asc' },
+        select: {
+          id: true,
+          orderRef: true,
+          buyerName: true,
+          buyerPhone: true,
+          amount: true,
+          transferStatus: true,
+          transferNote: true,
+          decidedAt: true,
+        },
+      }),
+    ])
+
+    const rows = [
+      ...withdrawals.map((w) => ({
+        type: 'withdrawal' as const,
+        id: w.id,
+        reference: `WDR-${w.id.slice(0, 8).toUpperCase()}`,
+        who: w.agentName,
+        phone: w.agentPhone,
+        amount: w.amount,
+        transferStatus: w.transferStatus as 'otp' | 'unknown',
+        note: w.transferNote,
+        decidedAt: w.decidedAt?.toISOString() ?? null,
+      })),
+      ...refunds.map((r) => ({
+        type: 'refund' as const,
+        id: r.id,
+        reference: r.orderRef,
+        who: r.buyerName,
+        phone: r.buyerPhone,
+        amount: r.amount,
+        transferStatus: r.transferStatus as 'otp' | 'unknown',
+        note: r.transferNote,
+        decidedAt: r.decidedAt?.toISOString() ?? null,
+      })),
+    ]
+
+    // Oldest first, same convention as `ReconcilerService.needsAttention` —
+    // the longest-stuck one is the most overdue for a look.
+    return rows.sort((a, b) => (a.decidedAt ?? '').localeCompare(b.decidedAt ?? ''))
+  }
+
+  /**
    * Whether a payout can be honoured right now.
    *
    * Called before approving one, so an agent is told the truth rather than being

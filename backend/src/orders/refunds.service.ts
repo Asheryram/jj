@@ -107,17 +107,29 @@ export class RefundsService {
     }
 
     const settled = await this.prisma.$transaction(async (tx) => {
-      const request = await tx.refundRequest.findUnique({ where: { id } })
-      if (!request) throw new NotFoundError('We could not find that refund request.')
-
-      // Guarded on the row's own state inside the transaction, so a double-click
-      // or two admins at once cannot pay the same refund twice.
-      if (request.status !== 'pending') {
-        throw new ConflictError(
-          'ALREADY_DECIDED',
-          `That refund was already ${request.status}.`,
-        )
+      /**
+       * Claimed atomically, not read-then-written.
+       *
+       * A plain `findUnique` + a status check proves nothing about what is
+       * still true by the time the later `update`s run — two admins clicking
+       * approve within the same window, or one admin double-clicking, both
+       * pass a read-then-write guard and both go on to pay. `updateMany`'s
+       * `WHERE status = 'pending'` is the actual guard: only the caller that
+       * wins this write moves on to credit anything or send anything: the
+       * other sees `count: 0` and stops here, before ever calling
+       * `sendRefund` a second time for the same reference.
+       */
+      const claim = await tx.refundRequest.updateMany({
+        where: { id, status: 'pending' },
+        data: { status: 'approved', decidedAt: new Date(), decidedBy: adminId },
+      })
+      if (claim.count === 0) {
+        const current = await tx.refundRequest.findUnique({ where: { id } })
+        if (!current) throw new NotFoundError('We could not find that refund request.')
+        throw new ConflictError('ALREADY_DECIDED', `That refund was already ${current.status}.`)
       }
+
+      const request = await tx.refundRequest.findUniqueOrThrow({ where: { id } })
 
       const order = await tx.order.findUniqueOrThrow({
         where: { id: request.orderId },
@@ -161,11 +173,6 @@ export class RefundsService {
           update: {},
         })
       }
-
-      await tx.refundRequest.update({
-        where: { id },
-        data: { status: 'approved', decidedAt: new Date(), decidedBy: adminId },
-      })
 
       /**
        * `refunded` says on the receipt that the money has gone back.
@@ -236,42 +243,48 @@ export class RefundsService {
       throw new ValidationError('Say how and where this was sent. It is kept on the record.')
     }
 
-    const request = await this.prisma.refundRequest.findUnique({ where: { id } })
-    if (!request) throw new NotFoundError('We could not find that refund request.')
-    if (request.method !== 'transfer') {
+    const existing = await this.prisma.refundRequest.findUnique({ where: { id } })
+    if (!existing) throw new NotFoundError('We could not find that refund request.')
+    if (existing.method !== 'transfer') {
       throw new ValidationError('Only a Mobile Money refund can be marked as sent manually.')
     }
-    if (request.method === 'transfer' && !momoNetwork && !request.momoNetwork) {
+    if (existing.method === 'transfer' && !momoNetwork && !existing.momoNetwork) {
       throw new ValidationError('Choose which Mobile Money network this was sent on.')
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const request = await tx.refundRequest.findUnique({ where: { id } })
-      if (!request) throw new NotFoundError('We could not find that refund request.')
-
-      // Guarded on the row's own state, same as `approve` and `reject` — a
-      // double-click, or this racing an automatic transfer that just landed,
-      // must not settle the same refund twice.
-      if (request.status !== 'pending') {
-        throw new ConflictError('ALREADY_DECIDED', `That refund was already ${request.status}.`)
-      }
-
-      const order = await tx.order.findUniqueOrThrow({
-        where: { id: request.orderId },
-        select: { buyerUserId: true },
-      })
-
-      await tx.refundRequest.update({
-        where: { id },
+      /**
+       * Claimed atomically, not read-then-written — same reasoning as
+       * `approve()` above. Two admins racing to settle the same stuck refund
+       * by hand must not both credit it and both tell the customer it's sent.
+       */
+      const claim = await tx.refundRequest.updateMany({
+        where: { id, status: 'pending' },
         data: {
           status: 'approved',
           decidedAt: new Date(),
           decidedBy: adminId,
-          momoNetwork: momoNetwork ?? request.momoNetwork,
+          momoNetwork: momoNetwork ?? existing.momoNetwork,
           transferStatus: 'success',
           transferNote: `Sent manually — ${reason}`,
           paidAt: new Date(),
+          // The one thing a later genuine Paystack transfer event for this
+          // same reference can check to refuse acting — see the field's own
+          // doc comment in schema.prisma and `PaymentsService.applyTransfer`.
+          resolvedManually: true,
         },
+      })
+      if (claim.count === 0) {
+        const current = await tx.refundRequest.findUnique({ where: { id } })
+        if (!current) throw new NotFoundError('We could not find that refund request.')
+        throw new ConflictError('ALREADY_DECIDED', `That refund was already ${current.status}.`)
+      }
+
+      const request = await tx.refundRequest.findUniqueOrThrow({ where: { id } })
+
+      const order = await tx.order.findUniqueOrThrow({
+        where: { id: request.orderId },
+        select: { buyerUserId: true },
       })
 
       // Same as a webhook-confirmed transfer: only now can the receipt say
@@ -418,6 +431,7 @@ export class RefundsService {
         'Paystack is asking for an OTP for every transfer. Turn transfer OTP off in your ' +
           'Paystack dashboard, or send this one from there.',
         result.transferCode,
+        'otp',
       )
       return
     }
@@ -442,33 +456,49 @@ export class RefundsService {
   }
 
   /**
-   * The transfer did not go. Put the refund back in the queue.
+   * The transfer did not go. Put the refund back in the queue — usually.
    *
-   * Back to `pending` on purpose: the customer is still owed, so it belongs in
-   * the list of people waiting rather than sitting as an approval that quietly
-   * achieved nothing. The reason travels with it so whoever looks knows what to
-   * fix.
+   * Back to `pending` on a plain `failed`: the customer is still owed, so it
+   * belongs in the list of people waiting rather than sitting as an approval
+   * that quietly achieved nothing. The reason travels with it so whoever
+   * looks knows what to fix.
    *
-   * An `unknown` outcome is the exception — it stays approved, because the money
-   * may already be moving and re-approving it could pay twice.
+   * `unknown` and `otp` are both exceptions, and for related but different
+   * reasons — both stay `approved`, never `pending`:
+   *
+   *  · `unknown` — the money may already be moving, and re-approving it
+   *    could pay it twice.
+   *  · `otp` — nothing has moved (Paystack blocked the transfer outright
+   *    pending a code), but `transferCode` is already set from this very
+   *    attempt. Resetting to `pending` here used to mislabel this as
+   *    `failed`, and an admin who then re-approved it hit `sendRefund`'s own
+   *    "already has a transfer — not sending again" guard — a dead end that
+   *    alternated `pending` → `approved` forever with zero progress. This
+   *    only actually clears by resolving the OTP requirement in Paystack's
+   *    own dashboard, same as the message already says.
+   *
+   * Withdrawals already handle `otp` this way (`WithdrawalsService.sendPayout`);
+   * this was the one place still mislabeling it as an outright failure.
    */
   private async holdRefund(
     refundId: string,
     reason: string,
     transferCode: string | null = null,
-    status: 'failed' | 'unknown' = 'failed',
+    status: 'failed' | 'unknown' | 'otp' = 'failed',
   ): Promise<void> {
     await this.prisma.refundRequest.update({
       where: { id: refundId },
       data: {
-        status: status === 'unknown' ? 'approved' : 'pending',
-        transferStatus: status === 'unknown' ? 'unknown' : 'failed',
+        status: status === 'failed' ? 'pending' : 'approved',
+        transferStatus: status,
         transferNote: reason,
         transferCode,
       },
     })
 
-    // The payout has not happened, so it must not sit on the books as a cost.
+    // Nothing has actually been paid in either `failed` or `otp` — only
+    // `unknown` might genuinely already have moved — so it must not sit on
+    // the books as a cost until it's actually confirmed sent.
     const row = await this.prisma.refundRequest.findUnique({ where: { id: refundId } })
     if (row && status !== 'unknown') {
       await this.prisma.ledgerEntry.deleteMany({

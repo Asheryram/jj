@@ -560,6 +560,7 @@ async function profitAndLoss() {
   console.log(`        referral bonuses           : ${ghs(of('referral_bonus'))}`)
   console.log(`        refunds                    : ${ghs(of('refund'))}`)
   console.log(`        agent margin write-offs    : ${ghs(of('agent_margin_writeoff'))}`)
+  console.log(`        overpayment surplus        : ${ghs(of('overpayment'))}`)
   console.log(`        ────`)
   console.log(`        profit                     : ${ghs(profit._sum.amount ?? 0)}` +
     (revenue > 0 ? `  (${(((profit._sum.amount ?? 0) / revenue) * 100).toFixed(1)}% of revenue)` : ''))

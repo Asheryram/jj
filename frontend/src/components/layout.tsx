@@ -586,11 +586,24 @@ export function PublicShell() {
             >
               Result checkers
             </Link>
+            {/*
+              Was `hidden ... lg:block` — invisible on every phone and most
+              tablets, with nothing else in this header standing in for it on
+              narrow screens (unlike the logged-in shell, which has its own
+              mobile bottom nav). A guest with a failed or delayed order has
+              no account to check it from, so this is the one way in for
+              them, and it was effectively desktop-only. Icon-only below
+              `sm:` keeps it inside the same tight header that already
+              shortens "Become an agent" for the same reason, rather than
+              hiding the whole link again.
+            */}
             <Link
               to={shopPath('/track')}
-              className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 lg:block"
+              aria-label="Track order"
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 sm:px-3"
             >
-              Track order
+              <ReceiptIcon className="size-4.5 sm:hidden" />
+              <span className="hidden sm:inline">Track order</span>
             </Link>
             <ThemeToggle />
             {session ? (
