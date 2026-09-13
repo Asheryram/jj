@@ -3,10 +3,12 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { OrdersService } from './orders.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
+import { FulfilmentService } from './fulfilment.service'
 import {
   AcknowledgeConflictDto,
   PlaceOrderDto,
   ResolveOrderDto,
+  RetryDispatchDto,
   TrackOrderDto,
   VerifyRecipientDto,
 } from './orders.dto'
@@ -17,6 +19,7 @@ export class OrdersController {
   constructor(
     private readonly orders: OrdersService,
     private readonly reconciler: ReconcilerService,
+    private readonly fulfilment: FulfilmentService,
   ) {}
 
   /**
@@ -94,6 +97,20 @@ export class OrdersController {
   @ApiBearerAuth()
   resolve(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ResolveOrderDto) {
     return this.reconciler.resolveManually(id, dto.outcome, user.id, dto.note)
+  }
+
+  /**
+   * Retry dispatch by hand — see `FulfilmentService.retryDispatch`. Only for
+   * an order whose last attempt timed out before DataHub ever answered, so
+   * there is no reference for the automatic reconciler to check with — an
+   * admin who has confirmed nothing was actually sent (their own dashboard,
+   * for this recipient) can send the request again.
+   */
+  @Post(':id/retry-dispatch')
+  @Roles('admin')
+  @ApiBearerAuth()
+  retryDispatch(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: RetryDispatchDto) {
+    return this.fulfilment.retryDispatch(id, user.id, dto.note)
   }
 
   /**

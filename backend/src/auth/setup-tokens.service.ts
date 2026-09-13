@@ -232,8 +232,30 @@ export class SetupTokensService {
         )
       }
 
+      /**
+       * Claimed atomically, not read-then-written.
+       *
+       * The read above proves nothing about what is still true by the time
+       * the writes below run — two genuinely concurrent uses of the same
+       * still-valid link (someone's double click, or the link opened in two
+       * tabs) both pass that read before either commits. `updateMany`'s
+       * `WHERE used_at IS NULL` is the actual single-use guard: only the
+       * caller that wins this write may go on to set the password; the other
+       * sees `count: 0` and is correctly told the link is dead, instead of
+       * silently overwriting whatever the winner just set with no error to
+       * either caller.
+       */
+      const claim = await tx.setupToken.updateMany({
+        where: { id: row.id, usedAt: null },
+        data: { usedAt: new Date() },
+      })
+      if (claim.count === 0) {
+        throw new ValidationError(
+          'That link has expired or has already been used. Ask for a new one.',
+        )
+      }
+
       await tx.user.update({ where: { id: row.user.id }, data: { passwordHash } })
-      await tx.setupToken.update({ where: { id: row.id }, data: { usedAt: new Date() } })
 
       // Every other outstanding link for this account dies with it, so an old
       // one cannot be used to take the account back.

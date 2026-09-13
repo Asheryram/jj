@@ -323,8 +323,23 @@ export class PaymentsService {
         return null
       }
 
-      await tx.payment.update({
-        where: { reference },
+      /**
+       * Claimed atomically, not read-then-written.
+       *
+       * The webhook and the browser's own return-trip call both land here for
+       * the same reference, commonly within the same second, and the read
+       * above proves nothing about what is still true by the time this write
+       * runs. `updateMany`'s `WHERE status = 'pending'` is the actual guard —
+       * Postgres serializes two concurrent claims on the same row, and only
+       * the one that lands first actually flips it; the second sees `count:
+       * 0` and stops here, before ever crediting a wallet or scheduling a
+       * dispatch a second time. A plain `update` (no `WHERE` on `status`)
+       * lets both callers "succeed" and both fall through to the credit
+       * below — a double top-up, or a second live DataHub purchase for one
+       * paid order.
+       */
+      const claim = await tx.payment.updateMany({
+        where: { reference, status: 'pending' },
         data: {
           status: 'paid',
           paidAt: new Date(),
@@ -335,6 +350,7 @@ export class PaymentsService {
           providerResponse: detail.raw,
         },
       })
+      if (claim.count === 0) return null
 
       // Recorded inside the same transaction that applies the payment, so the
       // books cannot show money arriving that the wallet or order never saw.
@@ -356,6 +372,36 @@ export class PaymentsService {
         ],
         tx,
       )
+
+      /**
+       * Overpaid. Some Mobile Money authorisation prompts let the amount be
+       * edited before confirming, so this is a real charge, not just a test
+       * scenario — underpayment gets its own check above and is left for a
+       * human, but nothing here ever checked the other direction. Every
+       * downstream credit below still uses `payment.amount`, which is
+       * correct (that is what the top-up or the order sale price actually
+       * is) — but that means the surplus was previously never recorded
+       * anywhere at all: no ledger entry, no transaction row, no log line,
+       * just silently absorbed into whatever Paystack balance holds it.
+       */
+      const surplus = detail.amount - payment.amount
+      if (surplus > 0) {
+        await this.ledger.record(
+          [
+            {
+              idempotencyKey: LedgerService.key('payment', reference, 'overpayment'),
+              kind: 'overpayment',
+              amount: surplus,
+              description: `Paid GHS ${(surplus / 100).toFixed(2)} more than requested`,
+              paymentRef: reference,
+              userId: payment.userId,
+              occurredAt: paidAt,
+            },
+          ],
+          tx,
+        )
+        this.log.warn(`${reference}: GHS ${(surplus / 100).toFixed(2)} more arrived than requested — booked as surplus`)
+      }
 
       if (payment.purpose === 'topup' && payment.userId) {
         const updated = await tx.user.update({
@@ -534,6 +580,19 @@ export class PaymentsService {
      * reads `success` silently dropped it: the customer's money came back to
      * the business, but their refund stayed marked paid forever.
      */
+    /**
+     * A refund an admin already paid by hand (`RefundsService.settleManually`)
+     * must never be touched by a real Paystack transfer event for the same
+     * reference arriving later — in *either* direction. `transferStatus` alone
+     * cannot tell the two apart: a manual settlement writes `'success'` too,
+     * which already excludes a later genuine `transfer.success` below, but
+     * nothing about `'success'` excludes a later `transfer.failed`/`reversed`
+     * — that combination used to flip the refund back to `pending`, delete
+     * its ledger cost, and leave it sitting in the queue to be paid a real
+     * second time, on top of what already went out by hand.
+     */
+    if (row.resolvedManually) return { applied: false }
+
     const alreadyApplied =
       (event === 'transfer.success' && row.transferStatus === 'success') ||
       (event !== 'transfer.success' && (row.transferStatus === 'reversed' || row.transferStatus === 'failed'))
@@ -563,10 +622,16 @@ export class PaymentsService {
        * database that this explicit form correctly claims from every
        * starting state (null, success, or any in-flight value) and correctly
        * refuses to reclaim from `reversed`/`failed`.
+       *
+       * `resolvedManually: false` repeats the guard above inside the same
+       * transaction that actually writes — the `alreadyApplied` read a
+       * moment ago proves nothing about what is still true by the time this
+       * commits.
        */
       const claim = await tx.refundRequest.updateMany({
         where: {
           id: refundId,
+          resolvedManually: false,
           OR: [{ transferStatus: null }, { transferStatus: { notIn: ['reversed', 'failed'] } }],
         },
         data: {
@@ -627,6 +692,18 @@ export class PaymentsService {
      * came back to the platform, but the agent's balance stayed debited for
      * good.
      */
+    /**
+     * A payout an admin already sent by hand (`WithdrawalsService.settleManually`)
+     * must never be touched by a real Paystack transfer event for the same
+     * reference arriving later — in *either* direction. That manual
+     * settlement writes `status: 'paid'` too, which already excludes a later
+     * genuine `transfer.success` below, but nothing about `status: 'paid'`
+     * excludes a later `transfer.failed`/`reversed` — that combination used
+     * to flip the withdrawal to `failed` and re-credit the agent's balance,
+     * on top of whatever was already paid out by hand.
+     */
+    if (row.resolvedManually) return { applied: false }
+
     const alreadyApplied =
       (event === 'transfer.success' && row.status === 'paid') ||
       (event !== 'transfer.success' && row.status === 'failed')
@@ -658,9 +735,12 @@ export class PaymentsService {
        * silently remove the only thing preventing a double-credit.
        * `WithdrawalStatus` is a required, non-nullable enum, so a plain
        * `{ not: 'failed' }` is safe here — no null-exclusion trap.
+       * `resolvedManually: false` repeats the guard above inside the same
+       * transaction that actually writes — the read a moment ago proves
+       * nothing about what is still true by the time this commits.
        */
       const claim = await tx.withdrawal.updateMany({
-        where: { id, status: { not: 'failed' } },
+        where: { id, status: { not: 'failed' }, resolvedManually: false },
         data: {
           status: 'failed',
           transferStatus: event === 'transfer.reversed' ? 'reversed' : 'failed',

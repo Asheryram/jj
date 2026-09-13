@@ -198,15 +198,27 @@ export class WithdrawalsService {
     }
 
     const decided = await this.prisma.$transaction(async (tx) => {
-      const row = await tx.withdrawal.findUnique({ where: { id } })
-      if (!row) throw new NotFoundError('We could not find that withdrawal request.')
-
-      if (row.status !== 'pending') {
-        throw new ConflictError(
-          'ALREADY_DECIDED',
-          `That request was already ${row.status}.`,
-        )
+      /**
+       * Claimed atomically, not read-then-written.
+       *
+       * A plain read-then-status-check proves nothing about what is still
+       * true by the time the writes below run — two admins deciding the same
+       * request at once, or one double-clicking, both pass a read-then-write
+       * guard and both go on to move money. `updateMany`'s `WHERE status =
+       * 'pending'` is the actual guard: only the caller that wins this write
+       * proceeds; the other sees `count: 0` and stops here.
+       */
+      const claim = await tx.withdrawal.updateMany({
+        where: { id, status: 'pending' },
+        data: { status, decidedAt: new Date() },
+      })
+      if (claim.count === 0) {
+        const current = await tx.withdrawal.findUnique({ where: { id } })
+        if (!current) throw new NotFoundError('We could not find that withdrawal request.')
+        throw new ConflictError('ALREADY_DECIDED', `That request was already ${current.status}.`)
       }
+
+      const row = await tx.withdrawal.findUniqueOrThrow({ where: { id } })
 
       /**
        * A suspension is a decision to stop, not a decision about this specific
@@ -217,7 +229,9 @@ export class WithdrawalsService {
        * agent receiving it is currently under review.
        *
        * Only guards approval — a rejection returns the held balance and moves
-       * nothing external, so it is always safe regardless of status.
+       * nothing external, so it is always safe regardless of status. Throwing
+       * here rolls back the claim above too, so a refused approval leaves the
+       * request exactly as pending as it was before this ran.
        */
       if (status === 'approved') {
         const agent = await tx.user.findUnique({ where: { id: row.userId }, select: { status: true } })
@@ -228,11 +242,6 @@ export class WithdrawalsService {
           )
         }
       }
-
-      const updated = await tx.withdrawal.update({
-        where: { id },
-        data: { status, decidedAt: new Date() },
-      })
 
       if (status === 'rejected') {
         const after = await tx.user.update({
@@ -280,7 +289,7 @@ export class WithdrawalsService {
       }
 
       this.log.log(`withdrawal ${id} ${status}`)
-      return toWithdrawal(updated)
+      return toWithdrawal(row)
     })
 
     // Committed. Now actually send the money.
@@ -487,12 +496,6 @@ export class WithdrawalsService {
     return this.prisma.$transaction(async (tx) => {
       const row = await tx.withdrawal.findUnique({ where: { id } })
       if (!row) throw new NotFoundError('We could not find that withdrawal request.')
-      if (row.status !== 'approved') {
-        throw new ConflictError(
-          'NOT_APPROVED',
-          `Only an approved, not-yet-paid request can be marked sent by hand. This one is ${row.status}.`,
-        )
-      }
       if (row.transferCode) {
         throw new ConflictError(
           'ALREADY_SENT',
@@ -500,15 +503,33 @@ export class WithdrawalsService {
         )
       }
 
-      const updated = await tx.withdrawal.update({
-        where: { id },
+      /**
+       * Claimed atomically, not read-then-written — same reasoning as
+       * `decide()` above. Two admins racing to settle the same stuck payout
+       * by hand must not both book a `capital_in` and both tell the agent
+       * it's sent.
+       */
+      const claim = await tx.withdrawal.updateMany({
+        where: { id, status: 'approved' },
         data: {
           status: 'paid',
           transferStatus: 'success',
           transferNote: `Sent manually — ${reason}`,
           paidAt: new Date(),
+          // The one thing a later genuine Paystack transfer event for this
+          // same reference can check to refuse acting — see the field's own
+          // doc comment in schema.prisma and `PaymentsService.applyTransfer`.
+          resolvedManually: true,
         },
       })
+      if (claim.count === 0) {
+        throw new ConflictError(
+          'NOT_APPROVED',
+          `Only an approved, not-yet-paid request can be marked sent by hand. This one is ${row.status}.`,
+        )
+      }
+
+      const updated = await tx.withdrawal.findUniqueOrThrow({ where: { id } })
 
       await this.ledger.record(
         [

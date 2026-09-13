@@ -5,12 +5,14 @@ import {
   HttpCode,
   Post,
   Req,
+  UseGuards,
 } from '@nestjs/common'
 import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger'
 import { IsString, MinLength } from 'class-validator'
 import type { Request } from 'express'
 import { PaymentsService } from './payments.service'
 import { PaystackClient } from './paystack.client'
+import { LoginThrottleGuard } from '../auth/login-throttle.guard'
 
 export class ConfirmPaymentDto {
   @IsString()
@@ -74,8 +76,19 @@ export class PaymentsController {
    * knows — every decision is made from a fresh server-to-Paystack verify. This
    * exists because the webhook can be late or lost, and the person standing
    * there should not have to wait on it.
+   *
+   * Rate-limited (reusing `LoginThrottleGuard`'s generic burst/grind windows,
+   * not anything login-specific) because it is unauthenticated, takes only a
+   * reference, and answers differently for a real one — a live Paystack verify
+   * call — than for a made-up one — an immediate `failed`. With no limit at
+   * all that difference is a free existence oracle for enumerating real order
+   * references, and each real one burns a call against this account's own
+   * Paystack API quota. `webhook`, just above, stays deliberately unthrottled
+   * — Paystack decides when to call that one, and it must never be the
+   * endpoint a rate limit makes a real payment or delivery go unheard.
    */
   @Post('confirm')
+  @UseGuards(LoginThrottleGuard)
   confirm(@Body() dto: ConfirmPaymentDto) {
     return this.payments.confirm(dto.reference)
   }

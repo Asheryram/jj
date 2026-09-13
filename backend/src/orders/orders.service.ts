@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
-import type { Order, Prisma } from '@prisma/client'
+import { randomInt } from 'node:crypto'
+import { Prisma, type Order } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { PricingService } from '../pricing/pricing.service'
 import { SettingsService } from '../settings/settings.service'
@@ -71,19 +72,8 @@ export class OrdersService {
     // retried cannot tell whether the first attempt was lost in the request or
     // the response, and a 409 would leave a real order stranded.
     if (dto.idempotencyKey) {
-      const existing = await this.prisma.order.findUnique({
-        where: { idempotencyKey: dto.idempotencyKey },
-      })
-      if (existing) {
-        // An unpaid replay needs the payment link back, not a receipt. Dropping
-        // it here left a customer who reloaded checkout looking at an order with
-        // no way to pay for it.
-        if (existing.status === 'awaiting_payment') {
-          const paymentUrl = await this.payments.paymentUrlForOrder(existing.id)
-          if (paymentUrl) return { ...toOrder(existing), paymentUrl }
-        }
-        return toOrder(existing)
-      }
+      const existing = await this.existingOrderFor(dto.idempotencyKey)
+      if (existing) return existing
     }
 
     const buyerPhone = dto.buyerPhone ?? dto.recipient
@@ -111,8 +101,6 @@ export class OrdersService {
       throw new ConflictError('RECIPIENT_NOT_REGISTERED', registration.message)
     }
 
-    const reference = await this.freshReference()
-
     /**
      * Whether real money has to be collected before this order moves.
      *
@@ -126,44 +114,84 @@ export class OrdersService {
      */
     const needsPayment = dto.payWith === 'momo' && this.payments.live
 
-    const order = await this.prisma.$transaction(async (tx) => {
-      const { product, salePrice, split } = await this.priceInside(tx, dto.productId, sellerCode, dto.recipient)
+    /**
+     * The pre-check above proves nothing about what is still true by the
+     * time this transaction actually commits — a genuine double-tap (exactly
+     * the scenario `idempotencyKey` exists to protect against) can have both
+     * requests pass that read before either creates its order. Postgres
+     * correctly stops the loser at the unique constraint, but that used to
+     * surface as a raw, unhandled `P2002` — a bare `409 ALREADY_EXISTS: "That
+     * value is already registered"` instead of the original order or payment
+     * URL, which is precisely the outcome `idempotencyKey` exists to avoid.
+     * Caught here and resolved to the winner's own order instead.
+     *
+     * `reference`'s own collision (unrelated to idempotency — just two
+     * six-digit random picks landing on the same value) is bounded odds, not
+     * a replay, so a few attempts with a fresh one is the right response, not
+     * treating a stranger's order as this customer's.
+     */
+    let order: Order | undefined
+    let reference = await this.freshReference()
+    for (let attempt = 0; !order; attempt++) {
+      try {
+        order = await this.prisma.$transaction(async (tx) => {
+          const { product, salePrice, split } = await this.priceInside(tx, dto.productId, sellerCode, dto.recipient)
 
-      // FR-2.3 — a wallet payment is debited as the order is created, and only a
-      // customer holds a spendable wallet. An agent's balance is earnings.
-      if (dto.payWith === 'wallet') {
-        if (!user || user.role !== 'customer') {
-          throw new ValidationError(
-            'Only a customer account holds a spendable wallet. Pay with Mobile Money instead.',
-          )
+          // FR-2.3 — a wallet payment is debited as the order is created, and only a
+          // customer holds a spendable wallet. An agent's balance is earnings.
+          if (dto.payWith === 'wallet') {
+            if (!user || user.role !== 'customer') {
+              throw new ValidationError(
+                'Only a customer account holds a spendable wallet. Pay with Mobile Money instead.',
+              )
+            }
+            await this.debitWallet(tx, user.id, salePrice, reference, `${product.name} → ${dto.recipient}`)
+          }
+
+          return tx.order.create({
+            data: {
+              reference,
+              idempotencyKey: dto.idempotencyKey ?? null,
+              productId: product.id,
+              productName: product.name,
+              network: product.network,
+              category: product.category,
+              recipient: dto.recipient,
+              salePrice,
+              split: split as unknown as Prisma.InputJsonValue,
+              // Frozen alongside the price it was actually sold against — see
+              // the field's own doc comment in schema.prisma for why dispatch
+              // must read this instead of re-resolving the product live.
+              supplierCodeAtSale: product.supplierCode,
+              soldByCode: sellerCode,
+              // `awaiting_payment` and nothing else until Paystack confirms the
+              // money. Not `pending`: the restart-recovery sweep dispatches anything
+              // pending-without-a-provider-reference, so an unpaid order parked there
+              // was delivered free on the next reboot.
+              status: needsPayment ? 'awaiting_payment' : 'processing',
+              paidWith: dto.payWith,
+              buyer: dto.buyerName?.trim() || user?.name || 'Guest',
+              buyerPhone,
+              buyerUserId: user?.id ?? null,
+            },
+          })
+        })
+      } catch (error) {
+        const conflict = uniqueConstraintField(error)
+
+        if (conflict === 'reference' && attempt < 3) {
+          reference = await this.freshReference()
+          continue
         }
-        await this.debitWallet(tx, user.id, salePrice, reference, `${product.name} → ${dto.recipient}`)
-      }
 
-      return tx.order.create({
-        data: {
-          reference,
-          idempotencyKey: dto.idempotencyKey ?? null,
-          productId: product.id,
-          productName: product.name,
-          network: product.network,
-          category: product.category,
-          recipient: dto.recipient,
-          salePrice,
-          split: split as unknown as Prisma.InputJsonValue,
-          soldByCode: sellerCode,
-          // `awaiting_payment` and nothing else until Paystack confirms the
-          // money. Not `pending`: the restart-recovery sweep dispatches anything
-          // pending-without-a-provider-reference, so an unpaid order parked there
-          // was delivered free on the next reboot.
-          status: needsPayment ? 'awaiting_payment' : 'processing',
-          paidWith: dto.payWith,
-          buyer: dto.buyerName?.trim() || user?.name || 'Guest',
-          buyerPhone,
-          buyerUserId: user?.id ?? null,
-        },
-      })
-      })
+        if (conflict === 'idempotency' && dto.idempotencyKey) {
+          const existing = await this.existingOrderFor(dto.idempotencyKey)
+          if (existing) return existing
+        }
+
+        throw error
+      }
+    }
 
     if (needsPayment) {
       // Hand back somewhere to pay rather than a receipt. Fulfilment is started
@@ -187,6 +215,25 @@ export class OrdersService {
     this.fulfilment.scheduleFor(order.id)
 
     return toOrder(order)
+  }
+
+  /**
+   * What a replayed (or raced) idempotency key resolves to — undefined if
+   * nothing has that key yet. Shared by the pre-check and by the actual
+   * unique-constraint collision, so both agree on what "the same request,
+   * again" means: a still-unpaid order needs its payment link handed back,
+   * not just a receipt, or a customer who reloaded checkout is looking at an
+   * order with no way to pay for it.
+   */
+  private async existingOrderFor(idempotencyKey: string) {
+    const existing = await this.prisma.order.findUnique({ where: { idempotencyKey } })
+    if (!existing) return undefined
+
+    if (existing.status === 'awaiting_payment') {
+      const paymentUrl = await this.payments.paymentUrlForOrder(existing.id)
+      if (paymentUrl) return { ...toOrder(existing), paymentUrl }
+    }
+    return toOrder(existing)
   }
 
   /**
@@ -385,7 +432,14 @@ export class OrdersService {
    */
   private async freshReference(): Promise<string> {
     for (let attempt = 0; attempt < 10; attempt++) {
-      const candidate = `JDC-${Math.floor(100_000 + Math.random() * 899_999)}`
+      // 9 digits (~900 million possibilities), not 6 (~900 thousand) — a
+      // reference is shown on receipts and typed into Track, so it stays
+      // public and guessable-in-principle either way, but the old space was
+      // small enough to make enumerating real references a real option for
+      // whoever tried, not just a theoretical one. `randomInt` over
+      // `Math.random()` for the same reason: no reason to make it any more
+      // predictable than it has to be.
+      const candidate = `JDC-${randomInt(100_000_000, 999_999_999)}`
       const taken = await this.prisma.order.findUnique({
         where: { reference: candidate },
         select: { id: true },
@@ -425,6 +479,34 @@ export class OrdersService {
      * always matches what was actually booked. The ledger entry is that
      * booking, so reading it back here can never disagree with it.
      */
+    /**
+     * Whether the *most recent* dispatch attempt for a still-open order came
+     * back `unknown` — the purchase call timed out before any reply arrived
+     * at all, so there is no `providerReference` for the reconciler to ever
+     * check with, and this order will sit in `processing` looking exactly
+     * like a normal, healthy in-flight one until somebody happens to open it.
+     * Computed only for `pending`/`processing` rows — a completed or failed
+     * order's dispatch history is no longer this urgent.
+     */
+    const openOrderIds = rows.filter((r) => r.status === 'pending' || r.status === 'processing').map((r) => r.id)
+    const dispatchesForOpenOrders =
+      openOrderIds.length > 0
+        ? await this.prisma.supplierDispatch.findMany({
+            where: { orderId: { in: openOrderIds } },
+            orderBy: { createdAt: 'desc' },
+            select: { orderId: true, outcome: true },
+          })
+        : []
+    const unresolvedOrderIds = new Set<string>()
+    const seenOrderId = new Set<string>()
+    for (const dispatch of dispatchesForOpenOrders) {
+      // Already sorted newest-first, so the first row seen per order is its
+      // latest attempt — anything after that for the same order is history.
+      if (seenOrderId.has(dispatch.orderId)) continue
+      seenOrderId.add(dispatch.orderId)
+      if (dispatch.outcome === 'unknown') unresolvedOrderIds.add(dispatch.orderId)
+    }
+
     const costEntries = await this.prisma.ledgerEntry.findMany({
       where: { kind: 'supplier_cost', orderRef: { in: rows.map((r) => r.reference) } },
       select: { orderRef: true, amount: true },
@@ -520,6 +602,8 @@ export class OrdersService {
        * staff. This one is about who on our side decided the outcome.
        */
       resolvedManually: row.resolvedManually,
+      /** See the query above. Only ever true for a `pending`/`processing` row. */
+      dispatchUnresolved: unresolvedOrderIds.has(row.id),
       /**
        * `pending`/`rejected` only — `approved` is already `Order.refunded`,
        * shown as the existing "Refunded" badge, so this deliberately doesn't
@@ -727,17 +811,6 @@ export class OrdersService {
     }))
   }
 
-  /** Used by the fulfilment worker on boot to pick up orders left mid-flight. */
-  async stuckOrderIds(olderThanMs: number): Promise<string[]> {
-    const cutoff = new Date(Date.now() - olderThanMs)
-    const rows = await this.prisma.order.findMany({
-      where: { status: { in: ['pending', 'processing'] }, createdAt: { lt: cutoff } },
-      select: { id: true },
-      take: 200,
-    })
-    return rows.map((r) => r.id)
-  }
-
   toResponse(order: Order) {
     return toOrder(order)
   }
@@ -747,4 +820,19 @@ export class OrdersService {
 function prettyGhanaPhone(phone: string): string {
   const p = phone.replace(/\D/g, '')
   return p.length === 10 ? `${p.slice(0, 3)} ${p.slice(3, 6)} ${p.slice(6)}` : phone
+}
+
+/**
+ * Which unique column a `P2002` actually fired on, in `place()`'s own terms —
+ * `null` for anything else (including a non-Prisma error, which this must
+ * never swallow). Same `String(meta.target).includes(...)` shape as the
+ * global exception filter's own P2002 handling, kept local here because the
+ * two conflicts it distinguishes only mean something to `place()` itself.
+ */
+function uniqueConstraintField(error: unknown): 'idempotency' | 'reference' | null {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return null
+  const target = String((error.meta as { target?: string[] })?.target ?? '')
+  if (target.includes('idempotency')) return 'idempotency'
+  if (target.includes('reference')) return 'reference'
+  return null
 }

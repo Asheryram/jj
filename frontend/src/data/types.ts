@@ -220,6 +220,15 @@ export interface Order {
    */
   resolvedManually?: boolean
   /**
+   * Admin only: true when this order's most recent dispatch attempt came
+   * back `unknown` (the delivery partner never answered at all — no
+   * reference exists to check with) and the order is still `pending` or
+   * `processing`. Without this, a genuinely stuck order looks identical to
+   * a normal, healthy in-flight one everywhere the plain `status` is shown —
+   * an admin had to open every order to find out which was which.
+   */
+  dispatchUnresolved?: boolean
+  /**
    * Admin only: where a failed order's refund actually stands, when it isn't
    * already `approved` (that case is `refunded` instead — see above). A
    * person always decides a refund, so `pending` means one is genuinely

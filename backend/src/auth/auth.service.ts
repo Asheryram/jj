@@ -23,6 +23,20 @@ export class AuthService {
   async login(dto: LoginDto) {
     // Stored lowercase at registration, so compare lowercase. Otherwise someone
     // who typed a capital when signing up can never log in again.
+    const email = dto.email.trim().toLowerCase()
+
+    /**
+     * Per-account lockout, checked before the password is ever compared.
+     *
+     * `LoginThrottleGuard` already limits by IP, but that bucket is keyed on
+     * where the request came from — an attacker who rotates IPs gets a fresh
+     * bucket every time, so cumulative guessing against one target account
+     * faces no limit at all. This is the other dimension: keyed on the
+     * account itself, in Postgres rather than memory, so it holds regardless
+     * of source IP and survives a redeploy.
+     */
+    await this.checkLockout(email)
+
     /**
    * One credential per person, on whichever profile holds it.
    *
@@ -33,7 +47,7 @@ export class AuthService {
    * is what identifies the login, not the email alone.
    */
     const user = await this.prisma.user.findFirst({
-      where: { email: dto.email.trim().toLowerCase(), passwordHash: { not: null } },
+      where: { email, passwordHash: { not: null } },
     })
 
     // Same message and the same amount of work whether the address exists or the
@@ -41,7 +55,10 @@ export class AuthService {
     // addresses are registered.
     const hash = user?.passwordHash ?? NON_EXISTENT_HASH
     const ok = await bcrypt.compare(dto.password, hash)
-    if (!user || !ok) throw new UnauthorisedError()
+    if (!user || !ok) {
+      await this.recordFailedLogin(email)
+      throw new UnauthorisedError()
+    }
 
     if (user.status === 'suspended') {
       throw new ForbiddenError(
@@ -63,7 +80,42 @@ export class AuthService {
     // being told their password is wrong would send them round in circles; they
     // are let in, and the app shows them what they are waiting for.
 
+    // A real, correct password clears whatever this account had built up —
+    // the account it belongs to just proved it isn't the one being guessed at.
+    await this.prisma.loginAttempt.deleteMany({ where: { email } })
+
     return this.issue(user)
+  }
+
+  private async checkLockout(email: string): Promise<void> {
+    const attempt = await this.prisma.loginAttempt.findUnique({ where: { email } })
+    if (attempt?.lockedUntil && attempt.lockedUntil > new Date()) {
+      const minutes = Math.ceil((attempt.lockedUntil.getTime() - Date.now()) / 60_000)
+      throw new ForbiddenError(
+        `Too many attempts on this account. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+      )
+    }
+  }
+
+  /**
+   * One more failed attempt against this account, regardless of which IP it
+   * came from. A stale window (nothing failed recently) starts over rather
+   * than piling onto a count from an unrelated day; a fresh one accumulates,
+   * and crossing the threshold locks the account for `LOCKOUT_DURATION_MS`.
+   */
+  private async recordFailedLogin(email: string): Promise<void> {
+    const now = new Date()
+    const existing = await this.prisma.loginAttempt.findUnique({ where: { email } })
+    const windowExpired = !existing || now.getTime() - existing.windowStart.getTime() > LOCKOUT_WINDOW_MS
+    const failedCount = windowExpired ? 1 : existing.failedCount + 1
+    const windowStart = windowExpired ? now : existing.windowStart
+    const lockedUntil = failedCount >= LOCKOUT_THRESHOLD ? new Date(now.getTime() + LOCKOUT_DURATION_MS) : null
+
+    await this.prisma.loginAttempt.upsert({
+      where: { email },
+      create: { email, failedCount, windowStart, lockedUntil },
+      update: { failedCount, windowStart, lockedUntil },
+    })
   }
 
   /** FR-1.1, FR-1.2, FR-1.6, FR-1.7 */
@@ -379,3 +431,10 @@ export class AuthService {
  * known one.
  */
 const NON_EXISTENT_HASH = '$2b$10$CwTycUXWue0Thq9StjUM0uJ8DkxaWTOa2SLm6cUUUxQuQzFRVi1Iu'
+
+/** How far back a failed attempt still counts toward the lockout threshold. */
+const LOCKOUT_WINDOW_MS = 15 * 60 * 1000
+/** Failed attempts against one account, inside the window above, before it locks. */
+const LOCKOUT_THRESHOLD = 10
+/** How long a locked account stays locked once the threshold is crossed. */
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000

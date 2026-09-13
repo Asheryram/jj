@@ -613,7 +613,7 @@ export const customerGuide: GuideGroup[] = [
         title: 'Track an order I already placed',
         steps: [
           'Go to Track an order (`/track`) — linked from the homepage.',
-          'Enter your order reference (looks like `JDC-884120`, from your receipt or SMS) and the phone number you paid with.',
+          'Enter your order reference (looks like `JDC-884120384`, from your receipt or SMS) and the phone number you paid with.',
           'Click **"Find my order"** to see its status, and your voucher details again if it was a checker.',
         ],
       },

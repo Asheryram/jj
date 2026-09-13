@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, ApiError, type NeedsAttentionOrder } from '../../lib/api'
+import { Link } from 'react-router-dom'
+import { api, ApiError, type NeedsAttentionOrder, type StuckTransfer } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import {
@@ -42,6 +43,7 @@ import { AlertIcon, CheckIcon } from '../../components/icons'
 export default function NeedsAttention() {
   const { pushToast } = useStore()
   const [rows, setRows] = useState<NeedsAttentionOrder[] | null>(null)
+  const [transfers, setTransfers] = useState<StuckTransfer[] | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [resolving, setResolving] = useState<NeedsAttentionOrder | null>(null)
   const [outcome, setOutcome] = useState<'delivered' | 'rejected'>('delivered')
@@ -54,6 +56,11 @@ export default function NeedsAttention() {
       setRows(await api.needsAttentionOrders())
     } catch {
       setRows([])
+    }
+    try {
+      setTransfers(await api.stuckTransfers())
+    } catch {
+      setTransfers([])
     }
   }, [])
 
@@ -192,6 +199,42 @@ export default function NeedsAttention() {
           )}
         </div>
       </Card>
+
+      {transfers !== null && transfers.length > 0 && (
+        <Card className="mt-3">
+          <CardHead
+            title="Stuck transfers"
+            subtitle="Sitting on an OTP challenge or an unresolved reply from Paystack — check their dashboard before doing anything from here."
+          />
+          <div className="space-y-2 p-4 sm:p-5">
+            {transfers.map((row) => (
+              <div
+                key={`${row.type}-${row.id}`}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3"
+              >
+                <div>
+                  <p className="font-semibold text-slate-900 dark:text-slate-50">
+                    {row.reference} · {row.who} · {cedis(row.amount)}
+                    <Badge tone="warning" className="ml-2">
+                      {row.transferStatus}
+                    </Badge>
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                    {row.note ?? 'No further detail from Paystack.'}
+                    {row.decidedAt ? ` · approved ${dateTime(row.decidedAt)}` : ''}
+                  </p>
+                </div>
+                <Link
+                  to={row.type === 'withdrawal' ? '/admin/withdrawals' : '/admin/refunds'}
+                  className="shrink-0 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                >
+                  {row.type === 'withdrawal' ? 'Go to Withdrawals' : 'Go to Refunds'}
+                </Link>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {resolving && (
         <Modal open onClose={() => setResolving(null)} title={`Resolve ${resolving.reference} by hand`}>

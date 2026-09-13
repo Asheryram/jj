@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { IsIn, IsInt, IsString, Matches, Min, MinLength } from 'class-validator'
-import { CurrentUser, Roles, type AuthUser } from '../common/auth'
+import { CurrentUser, RequireActive, Roles, type AuthUser } from '../common/auth'
 import { WithdrawalsService } from './withdrawals.service'
 
 export class RequestWithdrawalDto {
@@ -60,8 +60,15 @@ export class WithdrawalsController {
     return this.withdrawals.list(user)
   }
 
+  /**
+   * `@RequireActive()` because this debits the agent's held balance into a
+   * pending payout the moment it's called — an existing JWT survives a
+   * suspension for up to 12 hours otherwise, and nothing else here re-checks
+   * `status` at all.
+   */
   @Post()
   @Roles('agent')
+  @RequireActive()
   request(@CurrentUser() user: AuthUser, @Body() dto: RequestWithdrawalDto) {
     return this.withdrawals.request(user, dto.amount, dto.momoNetwork, dto.momoNumber)
   }
