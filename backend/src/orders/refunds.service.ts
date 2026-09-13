@@ -5,6 +5,7 @@ import { LedgerService } from '../finance/ledger.service'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import { PaystackClient } from '../payments/paystack.client'
 import { momoCodeFor } from '../payments/momo'
+import type { OrderSplit } from '../domain/pricing'
 
 /**
  * Paying back money that is owed, once a person has authorised it.
@@ -42,35 +43,50 @@ export class RefundsService {
       orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
       take: 200,
       // Just enough of the order to let the "Reorder" picker filter the
-      // catalogue to bundles that could actually fulfil this one.
-      include: { order: { select: { network: true, category: true } } },
+      // catalogue to bundles that could actually fulfil this one, and to show
+      // what reordering would actually net after the agent's frozen share.
+      include: { order: { select: { network: true, category: true, split: true } } },
     })
 
-    return rows.map((row) => ({
-      id: row.id,
-      /** For the "Reorder" action — see `FulfilmentService.reorder`. */
-      orderId: row.orderId,
-      network: row.order.network,
-      category: row.order.category,
-      orderRef: row.orderRef,
-      productName: row.productName,
-      buyerName: row.buyerName,
-      buyerPhone: row.buyerPhone,
-      amount: row.amount,
-      method: row.method,
-      reason: row.reason,
-      status: row.status,
-      note: row.note,
-      /** Chosen at approval for a Mobile Money refund. */
-      momoNetwork: row.momoNetwork,
-      /** Paystack's word on the transfer: pending, success, failed, otp, manual. */
-      transferStatus: row.transferStatus,
-      /** Why it has not gone, when it has not. */
-      transferNote: row.transferNote,
-      createdAt: row.createdAt.toISOString(),
-      decidedAt: row.decidedAt?.toISOString() ?? null,
-      paidAt: row.paidAt?.toISOString() ?? null,
-    }))
+    return rows.map((row) => {
+      // Frozen at the original sale and unchanged by a reorder — `settle`'s
+      // delivered branch always pays an agent this exact amount regardless of
+      // what the SKU costs today, so it is the one number the "Reorder" modal
+      // needs to turn a live cost into a true net margin rather than a gross
+      // one that reads as bigger than it will actually be.
+      const split = row.order.split as unknown as OrderSplit
+      const agentMargin = split.shares
+        .filter((share) => share.role === 'agent' && share.margin > 0)
+        .reduce((sum, share) => sum + share.margin, 0)
+
+      return {
+        id: row.id,
+        /** For the "Reorder" action — see `FulfilmentService.reorder`. */
+        orderId: row.orderId,
+        network: row.order.network,
+        category: row.order.category,
+        /** Owed to an agent from this exact sale, unchanged by a reorder. */
+        agentMargin,
+        orderRef: row.orderRef,
+        productName: row.productName,
+        buyerName: row.buyerName,
+        buyerPhone: row.buyerPhone,
+        amount: row.amount,
+        method: row.method,
+        reason: row.reason,
+        status: row.status,
+        note: row.note,
+        /** Chosen at approval for a Mobile Money refund. */
+        momoNetwork: row.momoNetwork,
+        /** Paystack's word on the transfer: pending, success, failed, otp, manual. */
+        transferStatus: row.transferStatus,
+        /** Why it has not gone, when it has not. */
+        transferNote: row.transferNote,
+        createdAt: row.createdAt.toISOString(),
+        decidedAt: row.decidedAt?.toISOString() ?? null,
+        paidAt: row.paidAt?.toISOString() ?? null,
+      }
+    })
   }
 
   /** What is queued, for the dashboard. */

@@ -559,7 +559,8 @@ function ReorderModal({
   if (!request) return null
 
   const selected = options?.find((row) => row.code === supplierCode) ?? null
-  const margin = selected ? request.amount - selected.costPrice : null
+  const grossMargin = selected ? request.amount - selected.costPrice : null
+  const netMargin = grossMargin === null ? null : grossMargin - request.agentMargin
 
   const submit = async () => {
     if (!supplierCode) {
@@ -635,7 +636,7 @@ function ReorderModal({
           )}
         </Field>
 
-        {selected && margin !== null && (
+        {selected && netMargin !== null && (
           <div className="space-y-1 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-sm">
             <p className="flex items-center justify-between">
               <span className="text-slate-600 dark:text-slate-300">Customer paid</span>
@@ -649,19 +650,35 @@ function ReorderModal({
                 {cedis(selected.costPrice)}
               </span>
             </p>
+            {request.agentMargin > 0 && (
+              <p className="flex items-center justify-between">
+                <span className="text-slate-600 dark:text-slate-300">
+                  Agent's share (fixed, from the original sale)
+                </span>
+                <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
+                  {cedis(request.agentMargin)}
+                </span>
+              </p>
+            )}
             <p
               className={`flex items-center justify-between font-bold ${
-                margin < 0
-                  ? 'text-red-700 dark:text-red-400'
-                  : 'text-emerald-700 dark:text-emerald-400'
+                netMargin < 0 ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
               }`}
             >
-              <span>{margin < 0 ? 'Loss if this goes through' : 'Gross margin if this goes through'}</span>
-              <span className="tabular">{cedis(Math.abs(margin))}</span>
+              <span>
+                {netMargin < 0
+                  ? 'Your loss if this goes through'
+                  : request.agentMargin > 0
+                    ? 'Your margin if this goes through'
+                    : 'Margin if this goes through'}
+              </span>
+              <span className="tabular">{cedis(Math.abs(netMargin))}</span>
             </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Before any agent share, unchanged from the original sale.
-            </p>
+            {request.agentMargin > 0 && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                After the agent's share above — this is what you keep, not the bundle's own margin.
+              </p>
+            )}
           </div>
         )}
 

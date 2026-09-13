@@ -556,6 +556,13 @@ export interface RefundRequest {
    * filter the catalogue to bundles that could actually fulfil it. */
   network: Network | null
   category: Category
+  /**
+   * Pesewas owed to an agent from this exact sale, frozen at sale time. A
+   * reorder pays this same amount regardless of what the bundle costs today,
+   * so it is what turns a gross margin against today's cost into what
+   * actually lands, for the "Reorder" preview.
+   */
+  agentMargin: number
   orderRef: string
   productName: string
   buyerName: string
