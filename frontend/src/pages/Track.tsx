@@ -75,10 +75,10 @@ export default function Track() {
             void search()
           }}
         >
-          <Field label="Order reference" htmlFor="track-ref" hint="Looks like JDC-884120.">
+          <Field label="Order reference" htmlFor="track-ref" hint="Looks like JDC-884120384.">
             <TextInput
               id="track-ref"
-              placeholder="JDC-000000"
+              placeholder="JDC-000000000"
               value={reference}
               onChange={(event) => setReference(event.target.value.toUpperCase())}
               className="font-mono tracking-wide uppercase"

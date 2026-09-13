@@ -9,6 +9,7 @@ import { Reflector } from '@nestjs/core'
 import { JwtService } from '@nestjs/jwt'
 import type { Request } from 'express'
 import type { Role } from '@prisma/client'
+import { PrismaService } from '../prisma/prisma.service'
 import { ForbiddenError, UnauthorisedError } from './domain-errors'
 
 export interface AuthUser {
@@ -29,6 +30,23 @@ export interface TokenPayload {
 }
 
 export const ROLES_KEY = 'jdc:roles'
+export const ACTIVE_ONLY_KEY = 'jdc:activeOnly'
+
+/**
+ * Require the caller's *current* status to be `active`, re-checked against
+ * the database on every call — not just what a 12-hour JWT still claims.
+ *
+ * `@Roles()` alone only proves the token was valid when it was issued: a
+ * suspended agent's existing token keeps passing every role check until it
+ * naturally expires, because nothing re-reads `status` after `login()`. That
+ * is fine for most routes — a suspended agent looking at their own account
+ * is not a problem — but a route that moves real money on their say-so is a
+ * different matter (`WithdrawalsService.request`, for one, had no status
+ * check at all). Apply this only to those, not globally: forcing every
+ * request through a DB round trip would also wrongly log out a `pending`
+ * agent who is deliberately still allowed to sign in and see why.
+ */
+export const RequireActive = () => SetMetadata(ACTIVE_ONLY_KEY, true)
 
 /**
  * Whether a role satisfies what a route asked for.
@@ -91,6 +109,7 @@ export class AuthGuard implements CanActivate {
   constructor(
     private readonly jwt: JwtService,
     private readonly reflector: Reflector,
+    private readonly prisma: PrismaService,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -127,6 +146,22 @@ export class AuthGuard implements CanActivate {
 
     if (required.length > 0 && !satisfies(req.user.role, required)) {
       throw new ForbiddenError('Your account does not have access to that.')
+    }
+
+    const activeOnly = this.reflector.getAllAndOverride<boolean | undefined>(ACTIVE_ONLY_KEY, [
+      ctx.getHandler(),
+      ctx.getClass(),
+    ])
+    if (activeOnly) {
+      const current = await this.prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { status: true },
+      })
+      if (current?.status !== 'active') {
+        throw new ForbiddenError(
+          'Your account is not currently active, so this action is not available.',
+        )
+      }
     }
 
     return true

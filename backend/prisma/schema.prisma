@@ -136,6 +136,30 @@ enum WithdrawalStatus {
   rejected
 }
 
+/// Per-account login lockout — the dimension `LoginThrottleGuard` cannot
+/// cover, since that guard is keyed on source IP and kept in memory: a fresh
+/// IP gets a fresh bucket, so cumulative credential-stuffing against one
+/// target account faces no limit at all, and a redeploy wipes every counter
+/// anyway. This is keyed on the email as submitted (same identity
+/// `AuthService.login` already keys on) and lives in Postgres, so it holds
+/// regardless of which IP is trying, survives a redeploy, and applies the
+/// same whether the app is running as one instance or many.
+model LoginAttempt {
+  email String @id
+
+  /// Failed attempts since `windowStart`. Reset to 1 rather than
+  /// incremented once the window is stale, so an attempt long after the
+  /// last failure doesn't inherit an ancient count.
+  failedCount Int      @default(0) @map("failed_count")
+  windowStart DateTime @default(now()) @map("window_start")
+
+  /// Set once `failedCount` crosses the threshold; null otherwise. Checked
+  /// before the password is ever compared.
+  lockedUntil DateTime? @map("locked_until")
+
+  @@map("login_attempts")
+}
+
 model User {
   id           String     @id @default(uuid())
   name         String
@@ -448,6 +472,18 @@ model Order {
   /// the frontend's OrderSplit exactly.
   split     Json
 
+  /// Which provider SKU this order was actually priced and sold against,
+  /// frozen at the same moment as `salePrice`/`split` — null for a product
+  /// with none mapped yet (a checker, say). `SupplierService` used to
+  /// re-resolve `Product.supplierCode` live at dispatch time instead of
+  /// reading this, which could be minutes later, or the multi-hour
+  /// approval-hold window, or arbitrarily later via the restart-recovery
+  /// sweep. An admin remapping a product's supplier code in that window (a
+  /// real, documented catalogue-correction workflow) then fulfilled an
+  /// in-flight order against a different SKU than the one its frozen sale
+  /// price/split actually represents, with nothing to catch the mismatch.
+  supplierCodeAtSale String? @map("supplier_code_at_sale")
+
   /// Referral code of the agent whose sell link was used, if any.
   soldByCode String? @map("sold_by_code")
 
@@ -473,6 +509,21 @@ model Order {
   /// provider reference, which is DataHub routing an order to their own
   /// staff — this is about who on OUR side decided the outcome, not theirs.
   resolvedManually Boolean @default(false) @map("resolved_manually")
+
+  /// The compare-and-swap for `FulfilmentService.run`'s one real purchase
+  /// call — set the moment a call wins the race to actually dispatch this
+  /// order, before DataHub is ever contacted. DataHub's API has no
+  /// idempotency key of its own ("a retry can deliver twice"), and nothing
+  /// before this stopped two callers — a webhook and the restart-recovery
+  /// sweep, say, on two different instances — from both placing a real
+  /// purchase for the same order. Left set afterward rather than cleared:
+  /// `dispatch` is meant to be attempted at most once per order, ever,
+  /// whatever it answers is settled from there by `settle()`/the reconciler,
+  /// never by calling `dispatch` again. The one exception `run` allows back
+  /// in is a claim old enough that whoever made it must have crashed before
+  /// `dispatch` ever answered (no `SupplierDispatch` row exists at all) —
+  /// see `run`'s own comment for the window.
+  dispatchClaimedAt DateTime? @map("dispatch_claimed_at")
 
   /// DataHub GH's reference for this order, once they have accepted it.
   ///
@@ -573,12 +624,20 @@ model Withdrawal {
   recipientCode  String?   @map("recipient_code")
   /// Paystack's handle for the transfer itself, for looking a dispute up.
   transferCode   String?   @map("transfer_code")
-  /// Their status verbatim: pending, success, failed, reversed, otp.
+  /// Their status verbatim: pending, success, failed, reversed, otp, manual.
   transferStatus String?   @map("transfer_status")
   /// Why a transfer failed, in words that can be shown to the agent.
   transferNote   String?   @map("transfer_note")
   /// When Paystack confirmed the money left.
   paidAt         DateTime? @map("paid_at")
+
+  /// Set when an admin paid this out by hand (`WithdrawalsService.settleManually`)
+  /// rather than Paystack ever confirming a transfer — see the identical field
+  /// on `RefundRequest` for why `transferCode` staying null isn't enough on
+  /// its own to mean the same thing. Checked by the same webhook handler so a
+  /// payout already sent by hand can never also be re-credited or re-marked
+  /// by a genuine Paystack transfer event that turns out to reference it.
+  resolvedManually Boolean @default(false) @map("resolved_manually")
 
   requestedAt DateTime  @default(now()) @map("requested_at")
   decidedAt   DateTime? @map("decided_at")
@@ -793,6 +852,13 @@ enum LedgerKind {
   /// the business — distinct from `agent_margin`, which is the cost of a
   /// margin actually earned. See `FulfilmentService.reverseAgent`.
   agent_margin_writeoff
+  /// Paystack reported more than we asked for on a payment. Some Mobile
+  /// Money authorisation prompts let the amount be edited before confirming,
+  /// so this is a real occurrence, not just a test scenario. Cash in, and
+  /// profit: every downstream credit still uses only what was actually
+  /// requested (`Payment.amount`), so the difference is genuinely extra,
+  /// not owed to anyone. See `PaymentsService.applyPaid`.
+  overpayment
 }
 
 /// Every movement of money, once.
@@ -939,6 +1005,16 @@ model RefundRequest {
   transferNote   String?   @map("transfer_note")
   /// When Paystack confirmed the money reached them.
   paidAt         DateTime? @map("paid_at")
+
+  /// Set when an admin paid this back by hand (`RefundsService.settleManually`)
+  /// rather than Paystack ever confirming a transfer. `transferCode` staying
+  /// null doesn't say this — a transfer whose outcome came back `unknown` also
+  /// has no code, but may still be real. This is the one thing a later
+  /// genuine `transfer.success`/`transfer.failed`/`transfer.reversed` webhook
+  /// for the same reference can check to refuse acting a second time — a
+  /// customer already paid by hand must never also be credited or re-queued
+  /// by that webhook arriving days later.
+  resolvedManually Boolean @default(false) @map("resolved_manually")
 
   createdAt DateTime @default(now()) @map("created_at")
 

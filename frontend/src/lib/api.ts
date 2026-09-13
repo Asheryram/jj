@@ -331,6 +331,23 @@ export interface NeedsAttentionOrder {
   conflict: boolean
 }
 
+/**
+ * A withdrawal or refund stuck on `otp`/`unknown` — Paystack transfer states
+ * that never resolve themselves. See `SolvencyService.stuckTransfers`.
+ */
+export interface StuckTransfer {
+  type: 'withdrawal' | 'refund'
+  id: string
+  reference: string
+  who: string
+  phone: string
+  /** Pesewas. */
+  amount: number
+  transferStatus: 'otp' | 'unknown'
+  note: string | null
+  decidedAt: string | null
+}
+
 /** Where the provider float sits against the thresholds. */
 export type FloatLevel = 'ok' | 'watch' | 'risk'
 
@@ -809,6 +826,15 @@ export const api = {
     request<void>(`/orders/${id}/resolve`, { method: 'POST', body: { outcome, note } }),
 
   /**
+   * Retry dispatch by hand — only valid when the last attempt timed out
+   * before the delivery partner ever answered (no reference exists for the
+   * automatic check to use). `note` is the record of what was checked before
+   * retrying — see `FulfilmentService.retryDispatch`.
+   */
+  retryDispatch: (id: string, note: string) =>
+    request<void>(`/orders/${id}/retry-dispatch`, { method: 'POST', body: { note } }),
+
+  /**
    * Clear a flagged conflict once a human has actually checked what happened
    * — see ReconcilerService.acknowledgeConflict. Never resolves any money by
    * itself; it only closes out the flag.
@@ -818,6 +844,8 @@ export const api = {
 
   /** Orders nobody can resolve automatically — see ReconcilerService.needsAttention. */
   needsAttentionOrders: () => request<NeedsAttentionOrder[]>('/admin/orders/needs-attention'),
+
+  stuckTransfers: () => request<StuckTransfer[]>('/admin/finance/stuck-transfers'),
 
   trackOrder: (reference: string, phone: string) =>
     request<Order>('/orders/track', { method: 'POST', body: { reference, phone }, auth: false }),

@@ -82,6 +82,20 @@ export class ResolveOrderDto {
   note!: string
 }
 
+export class RetryDispatchDto {
+  /**
+   * What was checked before retrying — the delivery partner's own dashboard,
+   * specifically, for this recipient. Required and kept on the record, same
+   * reason `ResolveOrderDto.note` is: a retry is only safe once a human has
+   * confirmed the first attempt genuinely never landed, and this is the
+   * record of that confirmation, not a guess.
+   */
+  @IsString()
+  @MinLength(5, { message: 'Say what you checked before retrying.' })
+  @MaxLength(500)
+  note!: string
+}
+
 export class AcknowledgeConflictDto {
   /** What was checked to confirm this is safe to clear. Kept on the record. */
   @IsString()

@@ -140,9 +140,10 @@ export class SupplierService implements OnModuleInit {
     const live = this.isLive
     const result = live ? await this.dispatchLive(order) : await this.decide(order)
 
-    // The supplier code is nullable on products (a checker has no DataHub SKU
-    // until one is mapped), but the dispatch log needs something to point at.
-    const supplierCode = await this.supplierCodeFor(order.productId)
+    // Frozen at order time (see `Order.supplierCodeAtSale`'s own doc
+    // comment), not re-resolved from the product live — a checker with no
+    // DataHub SKU mapped yet still has null here, same as before.
+    const supplierCode = order.supplierCodeAtSale
 
     if (supplierCode) {
       await this.prisma.supplierDispatch.create({
@@ -200,9 +201,18 @@ export class SupplierService implements OnModuleInit {
       return { outcome: 'rejected', reason: 'Forced failure — admin test switch is on.' }
     }
 
-    const supplier = await this.prisma.product
-      .findUnique({ where: { id: order.productId }, select: { supplier: true } })
-      .then((p) => p?.supplier ?? null)
+    /**
+     * Looked up by the SKU frozen at order time, not by re-reading
+     * `Product.supplierCode` live — see `Order.supplierCodeAtSale`'s own
+     * doc comment. A product remapped to a different provider SKU between
+     * this order being placed and dispatch actually running (a real,
+     * documented catalogue-correction workflow, not just a crash window)
+     * used to fulfil against whatever the mapping currently says, not what
+     * the customer's frozen sale price/split was actually priced against.
+     */
+    const supplier = order.supplierCodeAtSale
+      ? await this.prisma.supplierProduct.findUnique({ where: { code: order.supplierCodeAtSale } })
+      : null
 
     if (!supplier) {
       return { outcome: 'rejected', reason: 'No provider SKU is mapped to this product.' }
@@ -303,12 +313,11 @@ export class SupplierService implements OnModuleInit {
       }
     }
 
-    const supplier = await this.prisma.product
-      .findUnique({
-        where: { id: order.productId },
-        select: { supplier: true },
-      })
-      .then((p) => p?.supplier ?? null)
+    // Same frozen-SKU lookup as `dispatchLive` — see its own comment and
+    // `Order.supplierCodeAtSale`'s doc comment in schema.prisma.
+    const supplier = order.supplierCodeAtSale
+      ? await this.prisma.supplierProduct.findUnique({ where: { code: order.supplierCodeAtSale } })
+      : null
 
     // No mapped SKU means we cannot claim delivery. Better a clean refund than a
     // completed order nobody actually fulfilled.
@@ -330,14 +339,6 @@ export class SupplierService implements OnModuleInit {
       outcome: 'delivered',
       ...(order.category === 'checker' ? { voucher: this.mintVoucher(order.reference) } : {}),
     }
-  }
-
-  private async supplierCodeFor(productId: string): Promise<string | null> {
-    const row = await this.prisma.product.findUnique({
-      where: { id: productId },
-      select: { supplierCode: true },
-    })
-    return row?.supplierCode ?? null
   }
 
   /**
