@@ -232,10 +232,106 @@ export class FulfilmentService implements OnApplicationBootstrap {
   }
 
   /**
+   * Re-attempt a failed order whose refund has not been paid yet, when
+   * whatever caused the rejection turns out not to apply any more — a
+   * catalogue mapping that came back, a stock line that refilled.
+   *
+   * Deliberately not gated the way `retryDispatch` is. That gate exists
+   * because an `unknown` outcome is genuinely ambiguous — the purchase may or
+   * may not have gone through — and only a person checking the provider's own
+   * dashboard can tell. A `rejected` outcome carries none of that: DataHub, or
+   * our own validation before ever reaching them, said no outright. Nothing was
+   * purchased, so there is nothing a second attempt could duplicate.
+   *
+   * Gated on the refund instead. Reordering is only meaningful while it is
+   * still `pending` — once it is approved or paid, the money is already gone
+   * or already promised, and reordering on top of that hands the customer both
+   * the refund and the bundle.
+   */
+  async reorder(orderId: string, adminId: string, note: string): Promise<void> {
+    const reason = note.trim()
+    if (reason.length < 5) {
+      throw new ValidationError('Say why this is being reordered. It is kept on the record.')
+    }
+
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } })
+    if (!order) throw new NotFoundError('We could not find that order.')
+    if (order.status !== 'failed') {
+      throw new ConflictError('NOT_RETRYABLE', 'Only a failed order can be reordered.')
+    }
+
+    /**
+     * Claims the refund itself, not just the order.
+     *
+     * `RefundsService.approve` only ever checks the refund's own status, never
+     * the order's, so this is the one write that actually stops a concurrent
+     * approval from paying out money a successful reorder is about to make
+     * unowed. Restored below if the reorder does not end up delivering.
+     */
+    const claimRefund = await this.prisma.refundRequest.updateMany({
+      where: { orderId, status: 'pending' },
+      data: {
+        status: 'rejected',
+        decidedBy: adminId,
+        decidedAt: new Date(),
+        note: `On hold — reordering by hand: ${reason}`,
+      },
+    })
+    if (claimRefund.count === 0) {
+      throw new ConflictError(
+        'ALREADY_SETTLED',
+        'This refund is no longer pending — refresh and check before reordering.',
+      )
+    }
+
+    const reclaimOrder = await this.prisma.order.updateMany({
+      where: { id: orderId, status: 'failed' },
+      data: { status: 'processing', dispatchClaimedAt: new Date() },
+    })
+    if (reclaimOrder.count === 0) {
+      // The order moved before the reclaim above landed — nothing is actually
+      // being reordered, so the refund is still genuinely owed. Undo the hold.
+      await this.prisma.refundRequest.updateMany({
+        where: { orderId, status: 'rejected', decidedBy: adminId },
+        data: { status: 'pending', decidedBy: null, decidedAt: null, note: null },
+      })
+      throw new ConflictError('ALREADY_SETTLED', 'This order changed just now — refresh and check.')
+    }
+
+    const lastDispatch = await this.prisma.supplierDispatch.findFirst({
+      where: { orderId },
+      orderBy: { createdAt: 'desc' },
+    })
+
+    this.log.warn(`${order.reference}: admin ${adminId} reordering a failed dispatch — ${reason}`)
+    await this.dispatchAndHandle(order, (lastDispatch?.attempt ?? 0) + 1)
+
+    const after = await this.prisma.order.findUnique({ where: { id: orderId }, select: { status: true } })
+    if (after?.status === 'failed') {
+      // Rejected again, cleanly — still genuinely owed. Restore the hold.
+      await this.prisma.refundRequest.updateMany({
+        where: { orderId, status: 'rejected', decidedBy: adminId },
+        data: { status: 'pending', decidedBy: null, decidedAt: null, note: null },
+      })
+    } else if (after?.status === 'completed') {
+      // Delivered after all — the hold above is now permanent. Reword it so
+      // it reads as a settled outcome rather than a still-open one.
+      await this.prisma.refundRequest.updateMany({
+        where: { orderId, status: 'rejected', decidedBy: adminId },
+        data: { note: `Reordered and delivered — ${reason}` },
+      })
+    }
+    // `processing` (`pending`/`unknown` again): left on hold on purpose —
+    // restoring it before this new attempt resolves would reopen exactly the
+    // ambiguity this method exists to avoid. It surfaces again on the Needs
+    // Attention page like any other unresolved dispatch.
+  }
+
+  /**
    * Everything from the actual purchase call onward — shared by the normal
-   * automatic path (`run`, always `attempt: 1`) and `retryDispatch` (whatever
-   * attempt number comes next), so the two can never handle the same result
-   * two different ways.
+   * automatic path (`run`, always `attempt: 1`), `retryDispatch`, and
+   * `reorder` (whatever attempt number comes next), so all three can never
+   * handle the same result two different ways.
    */
   private async dispatchAndHandle(order: Order, attempt: number): Promise<void> {
     const orderId = order.id

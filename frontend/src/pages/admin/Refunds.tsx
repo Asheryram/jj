@@ -47,6 +47,7 @@ export default function Refunds() {
   const [rejecting, setRejecting] = useState<RefundRequest | null>(null)
   const [sending, setSending] = useState<RefundRequest | null>(null)
   const [settling, setSettling] = useState<RefundRequest | null>(null)
+  const [reordering, setReordering] = useState<RefundRequest | null>(null)
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
@@ -221,6 +222,17 @@ export default function Refunds() {
                               Refuse
                             </Button>
                           </div>
+                          {/* For the case the failure itself was wrong — a catalogue
+                              mapping that's since been fixed, stock that's back — rather
+                              than a genuine reason the order couldn't be filled. Cancels
+                              this refund automatically if it delivers this time. */}
+                          <button
+                            type="button"
+                            onClick={() => setReordering(row)}
+                            className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
+                          >
+                            Reorder instead?
+                          </button>
                           {/* Only offered once an automatic transfer has actually bounced —
                               a Starter Business Paystack account refuses every third-party
                               payout outright, and this is the way through that wall. Hidden
@@ -272,6 +284,14 @@ export default function Refunds() {
         request={settling}
         onClose={() => setSettling(null)}
         onSettled={async () => {
+          await load()
+        }}
+      />
+
+      <ReorderModal
+        request={reordering}
+        onClose={() => setReordering(null)}
+        onReordered={async () => {
           await load()
         }}
       />
@@ -445,6 +465,107 @@ function RefuseModal({
             Refuse refund
           </Button>
           <Button block disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * For the case the failure was ours, not the customer's problem — a catalogue
+ * mapping that's since been fixed, stock that's since come back — and the
+ * order should just be filled instead of refunded.
+ *
+ * Only offered while the refund is still pending, and for good reason: a
+ * `rejected` dispatch, unlike the "timed out with no reference" case
+ * `retryDispatch` handles, means the delivery partner (or our own checks)
+ * already said no outright, so there is nothing ambiguous a second attempt
+ * could duplicate. Nothing here needs "check their dashboard first" the way
+ * that other retry does.
+ */
+function ReorderModal({
+  request,
+  onClose,
+  onReordered,
+}: {
+  request: RefundRequest | null
+  onClose: () => void
+  onReordered: () => Promise<void>
+}) {
+  const { pushToast } = useStore()
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const key = request?.id ?? 'none'
+  const [lastKey, setLastKey] = useState(key)
+  if (key !== lastKey) {
+    setLastKey(key)
+    setNote('')
+    setError('')
+  }
+
+  if (!request) return null
+
+  const submit = async () => {
+    if (note.trim().length < 5) {
+      setError('Say why this is being reordered. It is kept on the record.')
+      return
+    }
+    setBusy(true)
+    try {
+      await api.reorderOrder(request.orderId, note.trim())
+      await onReordered()
+      pushToast({
+        tone: 'info',
+        title: `${request.orderRef}: reordering`,
+        detail: 'Refresh in a moment to see whether it delivered — this refund is on hold either way until it answers.',
+      })
+      onClose()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'We could not reorder that.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Reorder — ${request.orderRef}`}>
+      <div className="space-y-4">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
+          <p className="font-semibold text-slate-900 dark:text-slate-50">
+            {request.buyerName} · {cedis(request.amount)}
+          </p>
+          <p className="mt-1 text-slate-600 dark:text-slate-300">{request.reason}</p>
+        </div>
+
+        <Callout tone="info" icon={<AlertIcon className="size-4" />}>
+          This places the order again instead of refunding it. Only do this if the reason above no
+          longer applies — a mapping that's been fixed, stock that's back. If it delivers, this
+          refund is cancelled automatically. If it fails again, the refund stays exactly as it is
+          now, still owed.
+        </Callout>
+
+        <Field label="Why is this being reordered?" htmlFor="reorder-note" error={error}>
+          <TextInput
+            id="reorder-note"
+            placeholder="Catalogue mapping was missing, it's been fixed"
+            value={note}
+            invalid={Boolean(error)}
+            onChange={(event) => {
+              setNote(event.target.value)
+              setError('')
+            }}
+          />
+        </Field>
+
+        <div className="flex gap-2">
+          <Button block loading={busy} onClick={() => void submit()}>
+            Reorder
+          </Button>
+          <Button block variant="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
         </div>

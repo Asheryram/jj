@@ -45,6 +45,8 @@ export class RefundsService {
 
     return rows.map((row) => ({
       id: row.id,
+      /** For the "Reorder" action — see `FulfilmentService.reorder`. */
+      orderId: row.orderId,
       orderRef: row.orderRef,
       productName: row.productName,
       buyerName: row.buyerName,

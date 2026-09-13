@@ -96,6 +96,20 @@ export class RetryDispatchDto {
   note!: string
 }
 
+export class ReorderDto {
+  /**
+   * Why this failed order is being reordered. Required and kept on the
+   * record, though for a different reason than `RetryDispatchDto.note`: a
+   * `rejected` outcome already means DataHub, or our own validation, said no
+   * outright — there is no ambiguity to have checked on a dashboard, only a
+   * decision that the reason for the rejection no longer applies.
+   */
+  @IsString()
+  @MinLength(5, { message: 'Say why this is being reordered.' })
+  @MaxLength(500)
+  note!: string
+}
+
 export class AcknowledgeConflictDto {
   /** What was checked to confirm this is safe to clear. Kept on the record. */
   @IsString()

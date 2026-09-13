@@ -549,6 +549,8 @@ export interface AdminDomainRow extends MyDomainStatus {
 
 export interface RefundRequest {
   id: string
+  /** For the "Reorder" action — see `api.reorderOrder`. */
+  orderId: string
   orderRef: string
   productName: string
   buyerName: string
@@ -833,6 +835,14 @@ export const api = {
    */
   retryDispatch: (id: string, note: string) =>
     request<void>(`/orders/${id}/retry-dispatch`, { method: 'POST', body: { note } }),
+
+  /**
+   * Reorder a failed order whose refund has not been paid yet — see
+   * `FulfilmentService.reorder`. Cancels the pending refund automatically if
+   * this delivers; otherwise the refund is untouched and still owed.
+   */
+  reorderOrder: (id: string, note: string) =>
+    request<void>(`/orders/${id}/reorder`, { method: 'POST', body: { note } }),
 
   /**
    * Clear a flagged conflict once a human has actually checked what happened

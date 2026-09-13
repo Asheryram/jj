@@ -7,6 +7,7 @@ import { FulfilmentService } from './fulfilment.service'
 import {
   AcknowledgeConflictDto,
   PlaceOrderDto,
+  ReorderDto,
   ResolveOrderDto,
   RetryDispatchDto,
   TrackOrderDto,
@@ -111,6 +112,19 @@ export class OrdersController {
   @ApiBearerAuth()
   retryDispatch(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: RetryDispatchDto) {
     return this.fulfilment.retryDispatch(id, user.id, dto.note)
+  }
+
+  /**
+   * Reorder a failed order whose refund has not been paid yet — see
+   * `FulfilmentService.reorder`. Only valid while the refund is still
+   * pending: once it is approved or paid, this is refused, because reordering
+   * on top of that would hand the customer both the money back and the bundle.
+   */
+  @Post(':id/reorder')
+  @Roles('admin')
+  @ApiBearerAuth()
+  reorder(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ReorderDto) {
+    return this.fulfilment.reorder(id, user.id, dto.note)
   }
 
   /**
