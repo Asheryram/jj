@@ -41,12 +41,17 @@ export class RefundsService {
       where: status ? { status } : {},
       orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
       take: 200,
+      // Just enough of the order to let the "Reorder" picker filter the
+      // catalogue to bundles that could actually fulfil this one.
+      include: { order: { select: { network: true, category: true } } },
     })
 
     return rows.map((row) => ({
       id: row.id,
       /** For the "Reorder" action — see `FulfilmentService.reorder`. */
       orderId: row.orderId,
+      network: row.order.network,
+      category: row.order.category,
       orderRef: row.orderRef,
       productName: row.productName,
       buyerName: row.buyerName,

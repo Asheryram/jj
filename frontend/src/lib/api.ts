@@ -1,5 +1,6 @@
 import type {
   AgentPrice,
+  Category,
   ChatTurn,
   Earning,
   Network,
@@ -551,6 +552,10 @@ export interface RefundRequest {
   id: string
   /** For the "Reorder" action — see `api.reorderOrder`. */
   orderId: string
+  /** The failed order's own network and category, so the Reorder picker can
+   * filter the catalogue to bundles that could actually fulfil it. */
+  network: Network | null
+  category: Category
   orderRef: string
   productName: string
   buyerName: string
@@ -838,11 +843,13 @@ export const api = {
 
   /**
    * Reorder a failed order whose refund has not been paid yet — see
-   * `FulfilmentService.reorder`. Cancels the pending refund automatically if
-   * this delivers; otherwise the refund is untouched and still owed.
+   * `FulfilmentService.reorder`. `supplierCode` is chosen from the live
+   * catalogue (`api.supplierCatalogue`), not assumed from the order's own
+   * frozen mapping. Cancels the pending refund automatically if this
+   * delivers; otherwise the refund is untouched and still owed.
    */
-  reorderOrder: (id: string, note: string) =>
-    request<void>(`/orders/${id}/reorder`, { method: 'POST', body: { note } }),
+  reorderOrder: (id: string, note: string, supplierCode: string) =>
+    request<void>(`/orders/${id}/reorder`, { method: 'POST', body: { note, supplierCode } }),
 
   /**
    * Clear a flagged conflict once a human has actually checked what happened

@@ -124,7 +124,7 @@ export class OrdersController {
   @Roles('admin')
   @ApiBearerAuth()
   reorder(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ReorderDto) {
-    return this.fulfilment.reorder(id, user.id, dto.note)
+    return this.fulfilment.reorder(id, user.id, dto.note, dto.supplierCode)
   }
 
   /**

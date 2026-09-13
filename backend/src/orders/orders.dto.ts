@@ -108,6 +108,22 @@ export class ReorderDto {
   @MinLength(5, { message: 'Say why this is being reordered.' })
   @MaxLength(500)
   note!: string
+
+  /**
+   * Which supplier SKU to fulfil this against, chosen by the admin from the
+   * live catalogue at reorder time rather than reused from the order's own
+   * frozen `supplierCodeAtSale`.
+   *
+   * Deliberately not silently reused, for two reasons: it can be stale in a
+   * way nobody caused — see the migration that left it `null` on every order
+   * still open when `supplier_code_at_sale` was introduced — and the cost
+   * behind a SKU moves over time, so the admin needs to see today's price
+   * against what the customer already paid before deciding this is still
+   * worth fulfilling, not after.
+   */
+  @IsString()
+  @MinLength(1, { message: 'Choose which bundle this should be fulfilled against.' })
+  supplierCode!: string
 }
 
 export class AcknowledgeConflictDto {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, ApiError, type ManualRefundAdvance, type RefundRequest } from '../../lib/api'
+import { api, ApiError, type ManualRefundAdvance, type RefundRequest, type SupplierSku } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import { prettyPhone } from '../../lib/networks'
@@ -485,6 +485,26 @@ function RefuseModal({
  * could duplicate. Nothing here needs "check their dashboard first" the way
  * that other retry does.
  */
+/**
+ * For the case the failure was ours, not the customer's problem — a catalogue
+ * mapping that's since been fixed, stock that's since come back — and the
+ * order should just be filled instead of refunded.
+ *
+ * Only offered while the refund is still pending, and for good reason: a
+ * `rejected` dispatch, unlike the "timed out with no reference" case
+ * `retryDispatch` handles, means the delivery partner (or our own checks)
+ * already said no outright, so there is nothing ambiguous a second attempt
+ * could duplicate. Nothing here needs "check their dashboard first" the way
+ * that other retry does.
+ *
+ * The bundle is chosen here, live, rather than assumed from whatever the
+ * order was originally sold against — that assumption is exactly what left
+ * JDC-497709 unrecoverable: its own frozen mapping had gone stale for reasons
+ * nobody at the counter caused. Picking it fresh also surfaces today's cost
+ * next to what the customer already paid, so a price that moved since the
+ * original sale is a decision made with eyes open, not a surprise found later
+ * in the ledger.
+ */
 function ReorderModal({
   request,
   onClose,
@@ -496,6 +516,8 @@ function ReorderModal({
 }) {
   const { pushToast } = useStore()
   const [note, setNote] = useState('')
+  const [supplierCode, setSupplierCode] = useState('')
+  const [options, setOptions] = useState<SupplierSku[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -504,24 +526,59 @@ function ReorderModal({
   if (key !== lastKey) {
     setLastKey(key)
     setNote('')
+    setSupplierCode('')
+    setOptions(null)
     setError('')
   }
 
+  useEffect(() => {
+    if (!request) return
+    let cancelled = false
+    api
+      .supplierCatalogue()
+      .then((rows) => {
+        if (cancelled) return
+        setOptions(
+          rows.filter(
+            (row) =>
+              row.category === request.category &&
+              row.available &&
+              row.autoFulfillable &&
+              (request.network === null || row.network === request.network),
+          ),
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setOptions([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [request])
+
   if (!request) return null
 
+  const selected = options?.find((row) => row.code === supplierCode) ?? null
+  const margin = selected ? request.amount - selected.costPrice : null
+
   const submit = async () => {
+    if (!supplierCode) {
+      setError('Choose which bundle this should be fulfilled against.')
+      return
+    }
     if (note.trim().length < 5) {
       setError('Say why this is being reordered. It is kept on the record.')
       return
     }
     setBusy(true)
     try {
-      await api.reorderOrder(request.orderId, note.trim())
+      await api.reorderOrder(request.orderId, note.trim(), supplierCode)
       await onReordered()
       pushToast({
         tone: 'info',
         title: `${request.orderRef}: reordering`,
-        detail: 'Refresh in a moment to see whether it delivered — this refund is on hold either way until it answers.',
+        detail:
+          'Refresh in a moment to see whether it delivered — this refund is on hold either way until it answers.',
       })
       onClose()
     } catch (caught) {
@@ -542,11 +599,71 @@ function ReorderModal({
         </div>
 
         <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-          This places the order again instead of refunding it. Only do this if the reason above no
-          longer applies — a mapping that's been fixed, stock that's back. If it delivers, this
-          refund is cancelled automatically. If it fails again, the refund stays exactly as it is
-          now, still owed.
+          This places the order again instead of refunding it, against whichever bundle you choose
+          below — not necessarily the one this was originally sold as, since its mapping or price
+          may have changed since. If it delivers, this refund is cancelled automatically. If it
+          fails again, the refund stays exactly as it is now, still owed.
         </Callout>
+
+        <Field label="Which bundle should this fulfil against?" htmlFor="reorder-sku">
+          {options === null ? (
+            <div className="flex items-center gap-2 py-1 text-sm text-slate-500 dark:text-slate-400">
+              <Spinner className="size-4" /> Loading the catalogue…
+            </div>
+          ) : options.length === 0 ? (
+            <p className="text-sm text-red-700 dark:text-red-400">
+              Nothing in the catalogue right now can fulfil a {request.network ?? ''}{' '}
+              {request.category} order — check Supplier catalogue before reordering this one.
+            </p>
+          ) : (
+            <select
+              id="reorder-sku"
+              value={supplierCode}
+              onChange={(event) => {
+                setSupplierCode(event.target.value)
+                setError('')
+              }}
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-50"
+            >
+              <option value="">Choose a bundle…</option>
+              {options.map((row) => (
+                <option key={row.code} value={row.code}>
+                  {row.name} · {row.network ?? row.provider} · {cedis(row.costPrice)}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+
+        {selected && margin !== null && (
+          <div className="space-y-1 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-sm">
+            <p className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-300">Customer paid</span>
+              <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
+                {cedis(request.amount)}
+              </span>
+            </p>
+            <p className="flex items-center justify-between">
+              <span className="text-slate-600 dark:text-slate-300">This bundle costs today</span>
+              <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
+                {cedis(selected.costPrice)}
+              </span>
+            </p>
+            <p
+              className={`flex items-center justify-between font-bold ${
+                margin < 0
+                  ? 'text-red-700 dark:text-red-400'
+                  : 'text-emerald-700 dark:text-emerald-400'
+              }`}
+            >
+              <span>{margin < 0 ? 'Loss if this goes through' : 'Gross margin if this goes through'}</span>
+              <span className="tabular">{cedis(Math.abs(margin))}</span>
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Before any agent share, unchanged from the original sale.
+            </p>
+          </div>
+        )}
 
         <Field label="Why is this being reordered?" htmlFor="reorder-note" error={error}>
           <TextInput

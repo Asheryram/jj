@@ -247,17 +247,45 @@ export class FulfilmentService implements OnApplicationBootstrap {
    * still `pending` — once it is approved or paid, the money is already gone
    * or already promised, and reordering on top of that hands the customer both
    * the refund and the bundle.
+   *
+   * `supplierCode` is chosen by the admin from the live catalogue, not reused
+   * from the order's own `supplierCodeAtSale` — see `ReorderDto.supplierCode`'s
+   * own comment for why silently reusing it is exactly the failure mode this
+   * whole method exists to route around. Re-validated here regardless of
+   * what the client claims to have shown: never trust a request body for
+   * something that is about to drive a real purchase.
    */
-  async reorder(orderId: string, adminId: string, note: string): Promise<void> {
+  async reorder(orderId: string, adminId: string, note: string, supplierCode: string): Promise<void> {
     const reason = note.trim()
     if (reason.length < 5) {
       throw new ValidationError('Say why this is being reordered. It is kept on the record.')
+    }
+
+    const code = supplierCode.trim()
+    if (!code) {
+      throw new ValidationError('Choose which bundle this should be fulfilled against.')
     }
 
     const order = await this.prisma.order.findUnique({ where: { id: orderId } })
     if (!order) throw new NotFoundError('We could not find that order.')
     if (order.status !== 'failed') {
       throw new ConflictError('NOT_RETRYABLE', 'Only a failed order can be reordered.')
+    }
+
+    /**
+     * The same checks `dispatchLive` itself would make, run up front — so a
+     * bad or stale choice is refused here, before the refund is ever put on
+     * hold, rather than surfacing as another confusing "rejected" dispatch.
+     */
+    const supplier = await this.prisma.supplierProduct.findUnique({ where: { code } })
+    if (!supplier) {
+      throw new ValidationError('That is not a bundle we know about — choose one from the list.')
+    }
+    if (!supplier.available) {
+      throw new ValidationError(`${supplier.name} is currently out of stock at ${supplier.provider}.`)
+    }
+    if (!supplier.networkKey || !supplier.capacityGb) {
+      throw new ValidationError(`${supplier.name} has no automated fulfilment — choose a data bundle.`)
     }
 
     /**
@@ -286,7 +314,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
 
     const reclaimOrder = await this.prisma.order.updateMany({
       where: { id: orderId, status: 'failed' },
-      data: { status: 'processing', dispatchClaimedAt: new Date() },
+      data: { status: 'processing', dispatchClaimedAt: new Date(), supplierCodeAtSale: code },
     })
     if (reclaimOrder.count === 0) {
       // The order moved before the reclaim above landed — nothing is actually
@@ -303,8 +331,11 @@ export class FulfilmentService implements OnApplicationBootstrap {
       orderBy: { createdAt: 'desc' },
     })
 
-    this.log.warn(`${order.reference}: admin ${adminId} reordering a failed dispatch — ${reason}`)
-    await this.dispatchAndHandle(order, (lastDispatch?.attempt ?? 0) + 1)
+    this.log.warn(
+      `${order.reference}: admin ${adminId} reordering against ${code} ` +
+        `(was ${order.supplierCodeAtSale ?? 'none'}) — ${reason}`,
+    )
+    await this.dispatchAndHandle({ ...order, supplierCodeAtSale: code }, (lastDispatch?.attempt ?? 0) + 1)
 
     const after = await this.prisma.order.findUnique({ where: { id: orderId }, select: { status: true } })
     if (after?.status === 'failed') {
