@@ -198,6 +198,21 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       where: {
         status: { in: ['pending', 'processing'] },
         providerReference: { not: null },
+        /**
+         * A `manual_`-prefixed reference is DataHub routing this order to
+         * one of their own staff, not their automated pipeline — it was
+         * never going to show up in `/order-status`, which only knows
+         * about the automated path. Checking it here isn't a real attempt
+         * at reconciliation, it's a guaranteed `not_found` on every single
+         * sweep, forever, until a human clears it — verified against the
+         * actual log: every "does not recognise" line this ever produced
+         * was for a `manual_` reference, never once for a real one. That
+         * made an every-60-seconds error log entry for something already
+         * correctly waiting on the Needs Attention page, not a new problem
+         * each time. These still reach that page (its own query has no such
+         * exclusion), just not this wasted round trip.
+         */
+        NOT: { providerReference: { startsWith: 'manual_' } },
         createdAt: { lt: cutoff },
       },
       select: { id: true, reference: true, providerReference: true },
@@ -298,12 +313,19 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       conflict: r.conflictNote !== null,
       // Without a provider reference we never got a usable reply, so there is
       // nothing to ask them about — this one needs a human looking at their
-      // dashboard.
+      // dashboard. A `manual_`-prefixed one is routed to DataHub's own staff
+      // and was never going to show up in `/order-status` at all (see
+      // `sweep`'s own exclusion) — worth saying plainly here, since "accepted
+      // but never reported back" reads as something might still be coming,
+      // when the honest answer is that only a person at DataHub, contacted
+      // directly, ever will.
       reason:
         r.conflictNote ??
-        (r.providerReference
-          ? 'Accepted by DataHub but never reported back'
-          : 'No reply from DataHub — may or may not have been placed'),
+        (r.providerReference?.startsWith('manual_')
+          ? `Routed to DataHub's manual queue — only their own staff can clear it, quote them ${r.providerReference}`
+          : r.providerReference
+            ? 'Accepted by DataHub but never reported back'
+            : 'No reply from DataHub — may or may not have been placed'),
     }))
   }
 
