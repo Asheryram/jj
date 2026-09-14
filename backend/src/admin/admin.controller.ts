@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
+import type { LedgerKind } from '@prisma/client'
 import {
   ArrayNotEmpty,
   IsArray,
@@ -545,8 +546,40 @@ export class AdminController {
   }
 
   @Get('finance/entries')
-  ledgerEntries(@Query('limit') limit?: string) {
-    return this.ledger.entries(Math.min(500, Math.max(1, Number(limit) || 200)))
+  ledgerEntries(
+    @Query('limit') limit?: string,
+    @Query('kind') kind?: string,
+    @Query('since') since?: string,
+    @Query('until') until?: string,
+    @Query('orderRef') orderRef?: string,
+    @Query('userId') userId?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    const validKinds: LedgerKind[] = [
+      'revenue',
+      'payment_fee',
+      'supplier_cost',
+      'agent_margin',
+      'referral_bonus',
+      'refund',
+      'payout',
+      'payout_fee',
+      'topup',
+      'capital_in',
+      'capital_in_reimbursement',
+      'capital_out',
+      'agent_margin_writeoff',
+    ]
+    const parsedKind = validKinds.find((k) => k === kind)
+    return this.ledger.entries({
+      limit: Math.min(500, Math.max(1, Number(limit) || 200)),
+      kind: parsedKind,
+      since: since ? new Date(since) : undefined,
+      until: until ? new Date(until) : undefined,
+      orderRef,
+      userId,
+      cursor,
+    })
   }
 
   /**
@@ -597,5 +630,18 @@ export class ReportsController {
   @Roles('agent', 'customer')
   mySummary(@CurrentUser() user: AuthUser) {
     return this.admin.mySummary(user)
+  }
+
+  /**
+   * `Reports.tsx`'s date-range summary. Real dates in, real aggregates back —
+   * see `AdminService.myReport`'s own doc comment for why this exists instead
+   * of the page deriving it from whatever orders are already loaded client-side.
+   */
+  @Get('summary')
+  @Roles('agent', 'customer')
+  myReportSummary(@CurrentUser() user: AuthUser, @Query('from') from?: string, @Query('to') to?: string) {
+    const until = to ? new Date(`${to}T23:59:59.999Z`) : new Date()
+    const since = from ? new Date(`${from}T00:00:00.000Z`) : new Date(until.getTime() - 7 * 86_400_000)
+    return this.admin.myReport(user, since, until)
   }
 }

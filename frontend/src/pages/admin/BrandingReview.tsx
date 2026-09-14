@@ -13,6 +13,7 @@ import {
   Field,
   Modal,
   PageHead,
+  QuickReasons,
   Segmented,
   Spinner,
   TextInput,
@@ -291,6 +292,12 @@ function AgentQueue() {
   const [filter, setFilter] = useState<Filter>('pending')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [rejecting, setRejecting] = useState<BrandingRequestRow | null>(null)
+  /**
+   * The one field this whole queue exists to scrutinise for impersonation
+   * risk (see the file's own header comment) was a fixed 56×56px thumbnail
+   * with no way to actually look closely at it. This zooms it full-size.
+   */
+  const [zoomedLogo, setZoomedLogo] = useState<{ url: string; agentName: string } | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -361,11 +368,20 @@ function AgentQueue() {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex items-start gap-3">
                       {row.logoUrl ? (
-                        <img
-                          src={apiAsset(row.logoUrl) ?? undefined}
-                          alt={`${row.agentName}'s proposed logo`}
-                          className="size-14 rounded-xl border border-slate-200 dark:border-slate-700 object-contain"
-                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setZoomedLogo({ url: apiAsset(row.logoUrl) ?? '', agentName: row.agentName })
+                          }
+                          className="shrink-0 rounded-xl outline-offset-2 hover:opacity-90"
+                          aria-label={`Zoom in on ${row.agentName}'s proposed logo`}
+                        >
+                          <img
+                            src={apiAsset(row.logoUrl) ?? undefined}
+                            alt={`${row.agentName}'s proposed logo`}
+                            className="size-14 rounded-xl border border-slate-200 dark:border-slate-700 object-contain"
+                          />
+                        </button>
                       ) : (
                         <span className="flex size-14 items-center justify-center rounded-xl border border-dashed border-slate-300 dark:border-slate-600 text-xs text-slate-400 dark:text-slate-500">
                           no logo
@@ -436,6 +452,16 @@ function AgentQueue() {
           await load()
         }}
       />
+
+      {zoomedLogo && (
+        <Modal open onClose={() => setZoomedLogo(null)} title={`${zoomedLogo.agentName}'s proposed logo`}>
+          <img
+            src={zoomedLogo.url}
+            alt={`${zoomedLogo.agentName}'s proposed logo, enlarged`}
+            className="mx-auto max-h-[60vh] w-full rounded-xl border border-slate-200 dark:border-slate-700 object-contain"
+          />
+        </Modal>
+      )}
     </>
   )
 }
@@ -485,10 +511,28 @@ function RefuseModal({
 
   return (
     <Modal open onClose={onClose} title={`Refuse — ${request.agentCode}`}>
-      <div className="space-y-4">
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void submit()
+        }}
+      >
         <Callout tone="info" icon={<AlertIcon className="size-4" />}>
           The agent sees this message, so write it as something they can act on.
         </Callout>
+
+        <QuickReasons
+          options={[
+            'Looks like a bank or network logo',
+            'Name impersonates another business',
+            'Logo image is too low quality to use',
+          ]}
+          onPick={(text) => {
+            setNote(text)
+            setError('')
+          }}
+        />
 
         <Field label="Why are you refusing it?" htmlFor="refuse-branding" error={error}>
           <TextInput
@@ -504,14 +548,14 @@ function RefuseModal({
         </Field>
 
         <div className="flex gap-2">
-          <Button block variant="outline" loading={busy} onClick={() => void submit()}>
+          <Button type="submit" block variant="outline" loading={busy}>
             Refuse
           </Button>
-          <Button block disabled={busy} onClick={onClose}>
+          <Button type="button" block disabled={busy} onClick={onClose}>
             Cancel
           </Button>
         </div>
-      </div>
+      </form>
     </Modal>
   )
 }

@@ -88,3 +88,37 @@ ALTER TABLE earnings ADD CONSTRAINT earnings_sign_matches_type
   CHECK ((type = 'reversal' AND amount < 0)
       OR (type IN ('sale', 'downline') AND amount > 0)
       OR (type = 'withdrawal' AND amount <> 0));
+
+-- A payment for an order must ask for exactly what that order sold for. Not
+-- expressible as a plain CHECK (it reaches across tables), so it is a
+-- trigger instead — the same shape as a foreign key, for an invariant a
+-- foreign key can't state. `amount` is set once, at payment creation, from
+-- the order's own `sale_price` at that moment (`PaymentsService.startOrderPayment`)
+-- and neither ever changes after; a mismatch here means application code
+-- diverged from that, which is exactly the kind of bug behind the "8
+-- customers credited GHS 196" incident referenced on `RefundRequest`'s own
+-- doc comment. A wallet top-up (`purpose = 'topup'`, no `order_id`) has
+-- nothing to check against and is left alone.
+CREATE OR REPLACE FUNCTION payments_amount_matches_order_sale_price() RETURNS trigger AS $$
+DECLARE
+  expected INTEGER;
+BEGIN
+  IF NEW.purpose <> 'order' OR NEW.order_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT sale_price INTO expected FROM orders WHERE id = NEW.order_id;
+
+  IF expected IS NOT NULL AND expected <> NEW.amount THEN
+    RAISE EXCEPTION 'payment % amount % does not match order % sale_price %',
+      NEW.reference, NEW.amount, NEW.order_id, expected;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS payments_amount_matches_order_sale_price ON payments;
+CREATE TRIGGER payments_amount_matches_order_sale_price
+  BEFORE INSERT OR UPDATE OF amount, order_id ON payments
+  FOR EACH ROW EXECUTE FUNCTION payments_amount_matches_order_sale_price();

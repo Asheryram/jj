@@ -238,7 +238,13 @@ export default function NeedsAttention() {
 
       {resolving && (
         <Modal open onClose={() => setResolving(null)} title={`Resolve ${resolving.reference} by hand`}>
-          <div className="space-y-4">
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submit()
+            }}
+          >
             <Callout tone="info" icon={<AlertIcon className="size-4" />}>
               This runs through the same settlement path a real confirmation would — the agent is credited (or the
               refund queued) exactly as if DataHub or Paystack had reported it themselves.
@@ -260,20 +266,32 @@ export default function NeedsAttention() {
               />
             </Field>
             <div className="flex gap-2">
-              <Button block loading={busyId === resolving.id} onClick={() => void submit()}>
+              <Button type="submit" block loading={busyId === resolving.id}>
                 Confirm
               </Button>
-              <Button block variant="outline" disabled={busyId === resolving.id} onClick={() => setResolving(null)}>
+              <Button
+                type="button"
+                block
+                variant="outline"
+                disabled={busyId === resolving.id}
+                onClick={() => setResolving(null)}
+              >
                 Cancel
               </Button>
             </div>
-          </div>
+          </form>
         </Modal>
       )}
 
       {acknowledging && (
         <Modal open onClose={() => setAcknowledging(null)} title={`Acknowledge ${acknowledging.reference}`}>
-          <div className="space-y-4">
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submitAck()
+            }}
+          >
             <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
               {acknowledging.reason}
             </Callout>
@@ -292,10 +310,11 @@ export default function NeedsAttention() {
               />
             </Field>
             <div className="flex gap-2">
-              <Button block loading={busyId === acknowledging.id} onClick={() => void submitAck()}>
+              <Button type="submit" block loading={busyId === acknowledging.id}>
                 Acknowledge
               </Button>
               <Button
+                type="button"
                 block
                 variant="outline"
                 disabled={busyId === acknowledging.id}
@@ -304,7 +323,7 @@ export default function NeedsAttention() {
                 Cancel
               </Button>
             </div>
-          </div>
+          </form>
         </Modal>
       )}
     </div>

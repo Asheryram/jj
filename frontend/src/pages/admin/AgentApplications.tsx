@@ -11,6 +11,7 @@ import {
   CardHead,
   Field,
   Modal,
+  QuickReasons,
   Spinner,
   TextInput,
 } from '../../components/ui'
@@ -193,11 +194,25 @@ function RefuseModal({
 
   return (
     <Modal open onClose={onClose} title={`Refuse — ${application.name}`}>
-      <div className="space-y-4">
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void submit()
+        }}
+      >
         <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
           They are emailed this reason and shown it when they next sign in. Write it as something
           they can act on.
         </Callout>
+
+        <QuickReasons
+          options={['We could not verify your details — call us to sort it out', 'Incomplete application details']}
+          onPick={(text) => {
+            setNote(text)
+            setError('')
+          }}
+        />
 
         <Field label="Why are you refusing?" htmlFor="refuse-application" error={error}>
           <TextInput
@@ -213,14 +228,14 @@ function RefuseModal({
         </Field>
 
         <div className="flex gap-2">
-          <Button block variant="outline" loading={busy} onClick={() => void submit()}>
+          <Button type="submit" block variant="outline" loading={busy}>
             Refuse application
           </Button>
-          <Button block disabled={busy} onClick={onClose}>
+          <Button type="button" block disabled={busy} onClick={onClose}>
             Cancel
           </Button>
         </div>
-      </div>
+      </form>
     </Modal>
   )
 }

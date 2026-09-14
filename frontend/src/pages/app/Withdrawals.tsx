@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { cedis, dateTime, parseCedis } from '../../lib/format'
 import { NETWORKS } from '../../lib/networks'
@@ -34,7 +35,10 @@ const PLACEHOLDER_PHONE = '0000000000'
 
 export default function Withdrawals() {
   const { agentBalance: balance, withdrawals, requestWithdrawal, cancelWithdrawal, session } = useStore()
-  const [open, setOpen] = useState(false)
+  const [params] = useSearchParams()
+  // `?open=1` — the "Withdraw" buttons on Dashboard/Earnings used to land here
+  // and stop, one more click away from the thing they were actually for.
+  const [open, setOpen] = useState(() => params.get('open') === '1')
   const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   /**

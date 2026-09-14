@@ -30,12 +30,18 @@ export class WithdrawalsService {
     private readonly settings: SettingsService,
   ) {}
 
-  async list(user: AuthUser) {
+  /**
+   * `limit` was a hard 200 with no way past it — same clamped-but-adjustable
+   * shape as `OrdersService.list`, rather than true cursor pagination: this
+   * queue is checked by a person deciding what to do next, not paged through
+   * like a report, so "show me more" beats a page-by-page control here.
+   */
+  async list(user: AuthUser, limit = 200) {
     // An agent sees only their own requests; James sees the whole queue.
     const rows = await this.prisma.withdrawal.findMany({
       where: isAdminRole(user.role) ? {} : { userId: user.id },
       orderBy: { requestedAt: 'desc' },
-      take: 200,
+      take: Math.min(Math.max(limit, 1), 2000),
     })
     return rows.map(toWithdrawal)
   }

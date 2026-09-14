@@ -112,6 +112,7 @@ export function toOrder(row: Order) {
     salePrice: row.salePrice,
     split: row.split as unknown as OrderSplit,
     soldByCode: row.soldByCode,
+    soldByAgentName: row.soldByAgentName,
     status: row.status,
     createdAt: row.createdAt.toISOString(),
     /** When this order actually delivered. Null for anything else, including a failed one — see `Order.completedAt`. */

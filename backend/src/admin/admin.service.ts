@@ -999,6 +999,57 @@ export class AdminService {
     }
   }
 
+  /**
+   * `Reports.tsx`'s date-range summary, computed with DB-side aggregates over
+   * the actual window asked for — not derived in the browser from whatever
+   * orders happen to already be loaded client-side (`OrdersService.list()` is
+   * capped, same reasoning as `mySummary`'s own doc comment above), which
+   * silently undercounts the moment an agent's or customer's true total for
+   * the chosen range exceeds that cap.
+   */
+  async myReport(user: { id: string; role: Role; referralCode: string; phone: string }, since: Date, until: Date) {
+    const range = { createdAt: { gte: since, lte: until } }
+    const scope =
+      user.role === 'agent'
+        ? { soldByCode: { in: await this.downlineCodes(user.referralCode) } }
+        : { OR: [{ buyerUserId: user.id }, { buyerPhone: user.phone }] }
+
+    const [revenueAgg, failedCount, byCategory, earnings] = await Promise.all([
+      this.prisma.order.aggregate({
+        where: { ...scope, ...range, status: 'completed' },
+        _sum: { salePrice: true },
+        _count: { _all: true },
+      }),
+      this.prisma.order.count({ where: { ...scope, ...range, status: 'failed' } }),
+      this.prisma.order.groupBy({
+        by: ['category'],
+        where: { ...scope, ...range, status: 'completed' },
+        _sum: { salePrice: true },
+        _count: { _all: true },
+      }),
+      // Only an agent has a margin to report; a customer's own spend has no
+      // "profit" — see `mySummary`'s identical role split.
+      user.role === 'agent'
+        ? this.prisma.earning.aggregate({
+            where: { userId: user.id, type: { in: ['sale', 'downline'] }, createdAt: { gte: since, lte: until } },
+            _sum: { amount: true },
+          })
+        : null,
+    ])
+
+    return {
+      revenue: revenueAgg._sum.salePrice ?? 0,
+      completedCount: revenueAgg._count._all,
+      failedCount,
+      profit: earnings?._sum.amount ?? 0,
+      byCategory: byCategory.map((row) => ({
+        category: row.category,
+        revenue: row._sum.salePrice ?? 0,
+        orders: row._count._all,
+      })),
+    }
+  }
+
   /** The agent's own code plus every code beneath it. Mirrors OrdersService. */
   private async downlineCodes(rootCode: string): Promise<string[]> {
     const codes = new Set<string>([rootCode])

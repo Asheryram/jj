@@ -1,6 +1,6 @@
-import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../../state/store'
+import { useSearchParamState } from '../../lib/useSearchParamState'
 import { cedis, dateTime } from '../../lib/format'
 import type { EarningType } from '../../data/types'
 import { BarChart } from '../../components/charts'
@@ -42,7 +42,10 @@ const TYPE_META: Record<
  */
 export default function Earnings() {
   const { agentBalance, earnings, agentEarningsByDay, withdrawals } = useStore()
-  const [filter, setFilter] = useState<'all' | EarningType>('all')
+  const [filter, setFilter] = useSearchParamState('filter', 'all') as [
+    'all' | EarningType,
+    (v: 'all' | EarningType) => void,
+  ]
 
   const visible = filter === 'all' ? earnings : earnings.filter((e) => e.type === filter)
 
@@ -70,7 +73,7 @@ export default function Earnings() {
         title="Earnings"
         subtitle="Your margin lands here the moment each order completes."
         action={
-          <Link to="/app/withdrawals">
+          <Link to="/app/withdrawals?open=1">
             <Button size="lg">
               <CashIcon className="size-4" /> Withdraw
             </Button>

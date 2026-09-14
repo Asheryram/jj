@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../lib/api'
 import { useShopPath } from '../lib/shopPath'
 import { Button, Callout, Card, Field, TextInput } from '../components/ui'
@@ -19,7 +19,10 @@ import { AlertIcon, CheckIcon } from '../components/icons'
  */
 export default function ForgotPassword() {
   const shopPath = useShopPath()
-  const [email, setEmail] = useState('')
+  const [params] = useSearchParams()
+  // Carried over from Login, same pattern as `?ref=` into Track — retyping
+  // an address just entered a moment ago is friction with no purpose.
+  const [email, setEmail] = useState(() => params.get('email') ?? '')
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)

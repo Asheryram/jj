@@ -61,6 +61,8 @@ const SPLIT_MISMATCH_ALERTED_KEY = 'solvencySplitMismatchAlerted'
  */
 const SPLIT_CHECK_WINDOW_MS = 48 * 60 * 60_000
 
+const REFUND_ORDER_OVERLAP_ALERTED_KEY = 'solvencyRefundOrderOverlapAlerted'
+
 export interface BalanceReconciliation {
   /** What our own records say Paystack's balance should hold right now, in pesewas. */
   expected: number
@@ -121,6 +123,9 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       )
       void this.checkSplitInvariant().catch((error) =>
         this.log.error(`split invariant check failed: ${String(error)}`),
+      )
+      void this.checkCompletedRefundOverlap().catch((error) =>
+        this.log.error(`completed/refund overlap check failed: ${String(error)}`),
       )
     }, CHECK_INTERVAL_MS)
     this.timer.unref?.()
@@ -316,6 +321,94 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
 
     this.log.error(
       `split invariant broken on ${references.join(', ')} — told ${recipients.map((r) => r.email).join(', ')}`,
+    )
+  }
+
+  /**
+   * The other half of a "delivered and refunded simultaneously" double-spend —
+   * the same class of bug that produced the "8 customers credited GHS 196"
+   * incident referenced on `RefundRequest`'s own doc comment, just on the
+   * settlement side rather than the split-arithmetic side.
+   *
+   * No date window needed here, unlike `checkSplitInvariant` — `pending` is
+   * naturally bounded to whatever is currently sitting in the Refunds queue
+   * awaiting a decision, not "every refund ever," so scanning all of it on
+   * every tick never grows with order/ledger history.
+   */
+  private async checkCompletedRefundOverlap(): Promise<void> {
+    const overlaps = await this.prisma.refundRequest.findMany({
+      where: { status: 'pending', order: { status: 'completed' } },
+      select: { orderRef: true },
+    })
+
+    const references = overlaps.map((o) => o.orderRef)
+    const wasAlerted = await this.wasOverlapAlerted()
+    if (references.length > 0 && !wasAlerted) {
+      await this.setOverlapAlerted(true)
+      await this.alertRefundOrderOverlap(references)
+    } else if (references.length === 0 && wasAlerted) {
+      await this.setOverlapAlerted(false)
+      this.log.log('completed/refund overlap cleared')
+    }
+  }
+
+  private async wasOverlapAlerted(): Promise<boolean> {
+    const row = await this.prisma.setting.findUnique({ where: { key: REFUND_ORDER_OVERLAP_ALERTED_KEY } })
+    return row?.value === true
+  }
+
+  private async setOverlapAlerted(value: boolean): Promise<void> {
+    await this.prisma.setting.upsert({
+      where: { key: REFUND_ORDER_OVERLAP_ALERTED_KEY },
+      create: { key: REFUND_ORDER_OVERLAP_ALERTED_KEY, value },
+      update: { value },
+    })
+  }
+
+  /** Tell whoever can act on it that a delivered order still has an unresolved refund sitting open. */
+  private async alertRefundOrderOverlap(references: string[]): Promise<void> {
+    const recipients = await this.adminRecipients()
+    if (recipients.length === 0) {
+      this.log.warn(`completed order with an open refund on ${references.join(', ')} — nobody to tell`)
+      return
+    }
+
+    const shopName = await this.platformName()
+    const list = references.map((r) => escape(r)).join(', ')
+    const explanation =
+      `${references.length} order${references.length === 1 ? '' : 's'} — ${list} — ` +
+      `${references.length === 1 ? 'shows' : 'show'} as delivered, but still ${references.length === 1 ? 'has' : 'have'} a refund ` +
+      'sitting in the queue waiting on a decision. If that refund is approved as it stands, the ' +
+      'customer would be paid back for a bundle they already received.'
+
+    const body =
+      `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${explanation}</p>` +
+      `<p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;color:#1e293b">Check each order before ` +
+      `deciding its refund — if the bundle genuinely arrived, reject the refund rather than approving ` +
+      `it. This note will not repeat until every completed order's refund is resolved.</p>`
+    const text =
+      `${explanation}\n\nCheck each order before deciding its refund — if the bundle genuinely arrived, ` +
+      "reject the refund rather than approving it. This note will not repeat until every completed " +
+      "order's refund is resolved."
+
+    const subject = `${references.length} delivered order${references.length === 1 ? '' : 's'} with an open refund`
+    const html = wrap(
+      shopName,
+      'A delivered order still has an open refund',
+      body,
+      `You are getting this because you are an active admin on ${escape(shopName)}.`,
+    )
+
+    for (const recipient of recipients) {
+      await this.mailer
+        .send({ to: recipient.email, subject, html, text })
+        .catch((error) =>
+          this.log.error(`could not tell ${recipient.email} about the refund overlap: ${String(error)}`),
+        )
+    }
+
+    this.log.error(
+      `completed order with an open refund on ${references.join(', ')} — told ${recipients.map((r) => r.email).join(', ')}`,
     )
   }
 

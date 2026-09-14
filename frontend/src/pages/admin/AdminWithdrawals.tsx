@@ -9,7 +9,6 @@ import {
   Callout,
   Card,
   CardHead,
-  CopyField,
   EmptyState,
   Field,
   Modal,
@@ -21,7 +20,7 @@ import {
   TextInput,
   Th,
 } from '../../components/ui'
-import { AlertIcon, CashIcon, CheckIcon, ClockIcon, XIcon } from '../../components/icons'
+import { AlertIcon, CashIcon, CheckIcon, ClockIcon } from '../../components/icons'
 
 type Filter = 'pending' | 'all'
 
@@ -40,23 +39,33 @@ type Filter = 'pending' | 'all'
 export default function AdminWithdrawals() {
   const { withdrawals, decideWithdrawal, users, pushToast } = useStore()
   const [filter, setFilter] = useState<Filter>('pending')
-  const [reviewing, setReviewing] = useState<WithdrawalRequest | null>(null)
   const [settling, setSettling] = useState<WithdrawalRequest | null>(null)
-  const [deciding, setDeciding] = useState(false)
+  const [decidingId, setDecidingId] = useState<string | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
 
-  const decide = async (status: 'approved' | 'rejected') => {
-    if (!reviewing) return
-    setDeciding(true)
+  /**
+   * Inline, not behind a review modal — every sibling queue (Refunds,
+   * AgentApplications, BrandingReview, DomainRequests) decides in one click
+   * from the row, and nothing here needs a modal to add: the network and
+   * phone a withdrawal pays to are fixed at request time and already shown
+   * in the row, unlike a refund, which sometimes still needs the network
+   * chosen. The modal this replaced also told admins to send the Mobile
+   * Money themselves before approving — stale copy from before approving
+   * did that automatically (see the callout above the table); left in place,
+   * it would have this a real risk of paying an agent twice.
+   */
+  const decide = async (id: string, status: 'approved' | 'rejected') => {
+    setDecidingId(id)
     try {
-      await decideWithdrawal(reviewing.id, status)
-      setReviewing(null)
+      await decideWithdrawal(id, status)
     } catch (caught) {
       pushToast({
         tone: 'error',
         title: caught instanceof ApiError ? caught.message : 'We could not save that.',
       })
     } finally {
-      setDeciding(false)
+      setDecidingId(null)
     }
   }
 
@@ -75,10 +84,51 @@ export default function AdminWithdrawals() {
    * Whether the agent behind a request is currently suspended — a request
    * queued before a suspension otherwise looks identical to any other, and
    * approving it still sends real money out. The server refuses it either
-   * way; this is so the admin sees it before opening the review modal, not
-   * only after the approval bounces.
+   * way; this is so the admin sees it before clicking Approve, not only
+   * after it bounces.
    */
   const isSuspended = (userId: string) => users.find((u) => u.id === userId)?.status === 'suspended'
+
+  // Only a `pending` row is ever selectable — a decided one has nothing left
+  // to bulk-act on.
+  const selectableIds = pending.map((w) => w.id)
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id))
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectableIds))
+
+  /**
+   * A shortcut for clicking the same Approve/Reject button several times in
+   * a row, not a different flow — each request still goes through the exact
+   * same `decideWithdrawal` (same toast, same state update, same server
+   * check), one at a time rather than all at once so a busy Paystack rate
+   * limit is not hit with N simultaneous transfer requests.
+   */
+  const bulkDecide = async (status: 'approved' | 'rejected') => {
+    const ids = [...selected].filter((id) => {
+      if (status !== 'approved') return true
+      // Matches the individual Approve button's own `disabled` — a
+      // suspended agent is skipped rather than attempted and refused.
+      const row = pending.find((w) => w.id === id)
+      return row && !isSuspended(row.userId)
+    })
+    if (ids.length === 0) return
+
+    setBulkBusy(true)
+    try {
+      for (const id of ids) {
+        await decideWithdrawal(id, status)
+      }
+    } finally {
+      setBulkBusy(false)
+      setSelected(new Set())
+    }
+  }
 
   return (
     <div>
@@ -127,6 +177,22 @@ export default function AdminWithdrawals() {
         />
       </div>
 
+      {selected.size > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-900/30 p-3">
+          <span className="text-sm font-semibold text-brand-900 dark:text-brand-200">
+            {selected.size} selected
+          </span>
+          <div className="ml-auto flex gap-2">
+            <Button size="sm" loading={bulkBusy} onClick={() => void bulkDecide('approved')}>
+              Approve selected
+            </Button>
+            <Button size="sm" variant="outline" loading={bulkBusy} onClick={() => void bulkDecide('rejected')}>
+              Reject selected
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Card>
         <CardHead title={filter === 'pending' ? 'Pending requests' : 'All requests'} />
         {visible.length === 0 ? (
@@ -144,6 +210,17 @@ export default function AdminWithdrawals() {
           <TableWrap caption="Agent withdrawal requests">
             <thead>
               <tr>
+                <Th>
+                  {selectableIds.length > 0 && (
+                    <input
+                      type="checkbox"
+                      aria-label="Select all pending"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      className="size-4 rounded border-slate-300 dark:border-slate-600"
+                    />
+                  )}
+                </Th>
                 <Th>Agent</Th>
                 <Th>Requested</Th>
                 <Th>Pay to</Th>
@@ -155,6 +232,17 @@ export default function AdminWithdrawals() {
             <tbody>
               {visible.map((request) => (
                 <tr key={request.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
+                  <Td>
+                    {request.status === 'pending' && (
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${request.agentName}'s request`}
+                        checked={selected.has(request.id)}
+                        onChange={() => toggleOne(request.id)}
+                        className="size-4 rounded border-slate-300 dark:border-slate-600"
+                      />
+                    )}
+                  </Td>
                   <Td>
                     <span className="flex items-center gap-1.5">
                       <p className="font-medium text-slate-900 dark:text-slate-50">{request.agentName}</p>
@@ -207,9 +295,32 @@ export default function AdminWithdrawals() {
                   </Td>
                   <Td align="right">
                     {request.status === 'pending' ? (
-                      <Button size="sm" onClick={() => setReviewing(request)}>
-                        Review
-                      </Button>
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            loading={decidingId === request.id}
+                            disabled={decidingId === request.id || isSuspended(request.userId)}
+                            onClick={() => void decide(request.id, 'approved')}
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            loading={decidingId === request.id}
+                            disabled={decidingId === request.id}
+                            onClick={() => void decide(request.id, 'rejected')}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                        {isSuspended(request.userId) && (
+                          <span className="text-xs text-red-700 dark:text-red-400">
+                            Reactivate first, or reject
+                          </span>
+                        )}
+                      </div>
                     ) : request.status === 'approved' && request.transferStatus !== 'success' ? (
                       /* Automatic sending either had nowhere to go yet (no
                          live Paystack key configured) or hit a wall it can't
@@ -236,62 +347,6 @@ export default function AdminWithdrawals() {
           </TableWrap>
         )}
       </Card>
-
-      <Modal
-        open={Boolean(reviewing)}
-        onClose={() => setReviewing(null)}
-        title="Review withdrawal request"
-      >
-        {reviewing && (
-          <div className="space-y-4">
-            <div className="rounded-xl bg-slate-50 dark:bg-slate-800 p-4 text-center">
-              <p className="text-sm text-slate-500 dark:text-slate-400">{reviewing.agentName} is requesting</p>
-              <p className="tabular mt-1 text-3xl font-bold text-slate-900 dark:text-slate-50">
-                {cedis(reviewing.amount)}
-              </p>
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                to {reviewing.momoNetwork} · {reviewing.agentPhone}
-              </p>
-            </div>
-
-            {/* Make the payout details trivially copyable — this is a manual step. */}
-            <CopyField label="Send to number" value={reviewing.agentPhone} mono />
-            <CopyField label="Amount" value={(reviewing.amount / 100).toFixed(2)} mono />
-
-            {isSuspended(reviewing.userId) ? (
-              <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
-                {reviewing.agentName} is currently suspended. Reactivate them on the Users page
-                first if you still want to pay this out, or reject the request instead.
-              </Callout>
-            ) : (
-              <Callout tone="info">
-                Send the Mobile Money first, then approve here so the ledger matches what actually
-                happened.
-              </Callout>
-            )}
-
-            <div className="flex gap-2">
-              <Button
-                block
-                loading={deciding}
-                disabled={deciding || isSuspended(reviewing.userId)}
-                onClick={() => void decide('approved')}
-              >
-                <CheckIcon className="size-4" /> Approve
-              </Button>
-              <Button
-                block
-                variant="danger"
-                loading={deciding}
-                disabled={deciding}
-                onClick={() => void decide('rejected')}
-              >
-                <XIcon className="size-4" /> Reject
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
 
       <ManualAdvancesCard />
 

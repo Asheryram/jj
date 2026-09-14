@@ -314,6 +314,20 @@ export interface MySummary {
   earnedTrend?: { thisWeek: number; lastWeek: number }
 }
 
+/**
+ * `Reports.tsx`'s date-range summary, aggregated server-side over the actual
+ * `from`/`to` window — same "don't derive it from the capped client list"
+ * reasoning as `MySummary` above, just for a chosen range instead of a fixed one.
+ */
+export interface MyReportSummary {
+  revenue: number
+  completedCount: number
+  failedCount: number
+  /** Zero for a customer — there is no margin on their own spend. */
+  profit: number
+  byCategory: { category: string; revenue: number; orders: number }[]
+}
+
 export interface NeedsAttentionOrder {
   id: string
   reference: string
@@ -958,6 +972,11 @@ export const api = {
   myEarningsByDay: (days = 7) => request<AgentEarningsDay[]>(`/reports/my-earnings?days=${days}`),
 
   mySummary: () => request<MySummary>('/reports/my-summary'),
+
+  myReportSummary: (from: string, to: string) =>
+    request<MyReportSummary>(
+      `/reports/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
 
   /**
    * " Assistant " — plain-language, read-only, grounded in real account or

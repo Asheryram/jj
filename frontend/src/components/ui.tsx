@@ -516,15 +516,37 @@ export function Modal({
   title,
   children,
   footer,
+  dismissable = true,
 }: {
   open: boolean
   onClose: () => void
   title: string
   children: ReactNode
   footer?: ReactNode
+  /**
+   * False while something is genuinely in flight with nothing sensible to do
+   * if it were interrupted (`Wallet.tsx`'s "Opening Paystack…" stage is the
+   * first case) — hides the close button and ignores the backdrop and
+   * Escape, rather than leaving them visibly clickable but silently inert,
+   * which reads as a frozen app.
+   */
+  dismissable?: boolean
 }) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const titleId = useRef(`dialog-${Math.random().toString(36).slice(2, 8)}`).current
+
+  // `onClose` is passed fresh on every render by nearly every caller (an inline
+  // arrow function). Keeping it out of the effect below — read through this ref
+  // instead — means typing into a field inside the dialog (which re-renders the
+  // parent on every keystroke) can't re-trigger the effect. It used to: the
+  // effect depended on `onClose` directly, so each keystroke re-ran the
+  // "move focus inside" step and stole focus back onto the first focusable
+  // element (often a button before the input), blurring the field and — on a
+  // phone — dismissing the keyboard after every character.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const dismissableRef = useRef(dismissable)
+  dismissableRef.current = dismissable
 
   useEffect(() => {
     if (!open) return
@@ -545,7 +567,7 @@ export function Modal({
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose()
+        if (dismissableRef.current) onCloseRef.current()
         return
       }
       if (event.key !== 'Tab') return
@@ -576,7 +598,8 @@ export function Modal({
       document.body.style.overflow = ''
       previouslyFocused?.focus?.()
     }
-  }, [open, onClose])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   if (!open) return null
 
@@ -585,8 +608,10 @@ export function Modal({
       <button
         type="button"
         aria-label="Close"
-        onClick={onClose}
-        className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]"
+        onClick={dismissable ? onClose : undefined}
+        aria-hidden={!dismissable}
+        tabIndex={dismissable ? 0 : -1}
+        className={cn('absolute inset-0 bg-slate-900/50 backdrop-blur-[2px]', !dismissable && 'cursor-default')}
       />
       {/* Bottom sheet on phones, centred dialog on wider screens. */}
       <div
@@ -601,18 +626,45 @@ export function Modal({
           <h2 id={titleId} className="font-semibold text-slate-900 dark:text-slate-50">
             {title}
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="-mr-1 rounded-lg p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300"
-          >
-            <XIcon className="size-5" />
-          </button>
+          {dismissable && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              // `before:-inset-1.5` widens the actual tap target to the app's
+              // 44px minimum without growing the visible hover halo — see the
+              // matching comment on `AdminOrders.tsx`'s `CopyIconButton`.
+              className="relative -mr-1 rounded-lg p-1.5 text-slate-500 dark:text-slate-400 before:absolute before:-inset-1.5 before:content-[''] hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300"
+            >
+              <XIcon className="size-5" />
+            </button>
+          )}
         </div>
         <div className="max-h-[70vh] overflow-y-auto px-4 py-4">{children}</div>
         {footer && <div className="border-t border-slate-100 dark:border-slate-800 px-4 py-3.5">{footer}</div>}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Common reasons as one-click chips above a free-text refusal field — the
+ * common case fills the field in one tap, and it stays a normal, editable
+ * `TextInput` for anything the canned list doesn't cover.
+ */
+export function QuickReasons({ options, onPick }: { options: string[]; onPick: (text: string) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onPick(option)}
+          className="rounded-full border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+        >
+          {option}
+        </button>
+      ))}
     </div>
   )
 }

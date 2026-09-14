@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common'
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { IsIn, IsInt, IsString, Matches, Min, MinLength } from 'class-validator'
 import { CurrentUser, RequireActive, Roles, type AuthUser } from '../common/auth'
@@ -56,8 +56,8 @@ export class WithdrawalsController {
   /** Agents see their own; admin sees the queue. Scoped in the service. */
   @Get()
   @Roles('agent', 'admin')
-  list(@CurrentUser() user: AuthUser) {
-    return this.withdrawals.list(user)
+  list(@CurrentUser() user: AuthUser, @Query('limit') limit?: string) {
+    return this.withdrawals.list(user, limit ? Number(limit) : undefined)
   }
 
   /**

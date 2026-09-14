@@ -12,6 +12,7 @@ import {
   Field,
   Modal,
   PageHead,
+  QuickReasons,
   Segmented,
   Spinner,
   TextInput,
@@ -321,12 +322,26 @@ function RejectModal({
 
   return (
     <Modal open onClose={onClose} title={`${wasLive ? 'Revoke' : 'Refuse'} — ${request.domain}`}>
-      <div className="space-y-4">
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void submit()
+        }}
+      >
         <Callout tone="info" icon={<AlertIcon className="size-4" />}>
           {wasLive
             ? 'This takes the domain offline immediately and clears its approval.'
             : 'The agent sees this message, so write it as something they can act on.'}
         </Callout>
+
+        <QuickReasons
+          options={['This domain impersonates a known bank', 'Could not verify ownership of this domain']}
+          onPick={(text) => {
+            setReason(text)
+            setError('')
+          }}
+        />
 
         <Field label="Why?" htmlFor="reject-domain-reason" error={error}>
           <TextInput
@@ -342,14 +357,14 @@ function RejectModal({
         </Field>
 
         <div className="flex gap-2">
-          <Button block variant="outline" loading={busy} onClick={() => void submit()}>
+          <Button type="submit" block variant="outline" loading={busy}>
             {wasLive ? 'Revoke' : 'Refuse'}
           </Button>
-          <Button block disabled={busy} onClick={onClose}>
+          <Button type="button" block disabled={busy} onClick={onClose}>
             Cancel
           </Button>
         </div>
-      </div>
+      </form>
     </Modal>
   )
 }

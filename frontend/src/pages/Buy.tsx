@@ -70,7 +70,12 @@ export default function Buy() {
   const product = products.find((p) => p.id === productId)
 
   const [step, setStep] = useState(1)
-  const [recipient, setRecipient] = useState('')
+  /**
+   * Prefilled from `?recipient=`, when "Order again" or a similar link
+   * carries the number the app already knows about — otherwise blank, same
+   * as before.
+   */
+  const [recipient, setRecipient] = useState(() => params.get('recipient') ?? '')
   const [touched, setTouched] = useState(false)
   const [ownNumber, setOwnNumber] = useState(true)
   const [buyerPhone, setBuyerPhone] = useState('')
@@ -299,6 +304,21 @@ export default function Buy() {
               />
             </div>
           </Field>
+
+          {/* A signed-in buyer typing their own number in every time is the
+              common case, not the exception — one tap beats re-typing it. */}
+          {session?.phone && recipient !== session.phone && (
+            <button
+              type="button"
+              onClick={() => {
+                setRecipient(session.phone)
+                setNeedsSetup(false)
+              }}
+              className="mt-2 text-sm font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
+            >
+              Use my number ({session.phone})
+            </button>
+          )}
 
           <Button
             block

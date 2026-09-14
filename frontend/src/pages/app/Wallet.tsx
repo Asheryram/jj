@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../../state/store'
+import { useSearchParamState } from '../../lib/useSearchParamState'
 import { cedis, dateTime, parseCedis } from '../../lib/format'
 import { NETWORKS } from '../../lib/networks'
 import type { Network, TxType } from '../../data/types'
@@ -47,7 +48,10 @@ const TX_META: Record<TxType, { label: string; tone: 'success' | 'neutral' | 'in
 export default function Wallet() {
   const { customerBalance: balance, transactions, topUpWallet } = useStore()
   const [open, setOpen] = useState(false)
-  const [filter, setFilter] = useState<'all' | TxType>('all')
+  const [filter, setFilter] = useSearchParamState('filter', 'all') as [
+    'all' | TxType,
+    (v: 'all' | TxType) => void,
+  ]
 
   const visible = filter === 'all' ? transactions : transactions.filter((t) => t.type === filter)
   const toppedUp = transactions.filter((t) => t.type === 'topup').reduce((s, t) => s + t.amount, 0)
@@ -218,6 +222,7 @@ function TopUpModal({
         }
       }}
       title="Top up your wallet"
+      dismissable={stage === 'form'}
     >
       {stage === 'redirecting' ? (
         <div className="py-8 text-center">

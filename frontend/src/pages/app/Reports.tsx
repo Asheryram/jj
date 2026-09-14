@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../../state/store'
+import { api, type MyReportSummary } from '../../lib/api'
 import { cedis } from '../../lib/format'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
 import { BarChart, Donut } from '../../components/charts'
@@ -20,13 +21,42 @@ import { CashIcon, DownloadIcon, ReceiptIcon, TrendUpIcon } from '../../componen
 
 type Range = '7d' | '30d' | 'custom'
 
+const isoDate = (date: Date) => date.toISOString().slice(0, 10)
+const daysAgo = (days: number) => isoDate(new Date(Date.now() - days * 86_400_000))
+
 /** FR-8.2 — an agent's own sales summary for a chosen date range. */
 export default function Reports() {
   const { orders, session, myShareOf, agentEarningsByDay } = useStore()
   const isAgent = session?.role === 'agent'
   const [range, setRange] = useState<Range>('7d')
-  const [from, setFrom] = useState('2026-08-01')
-  const [to, setTo] = useState('2026-08-12')
+  const [from, setFrom] = useState(() => daysAgo(7))
+  const [to, setTo] = useState(() => isoDate(new Date()))
+
+  const windowFrom = range === 'custom' ? from : range === '7d' ? daysAgo(7) : daysAgo(30)
+  const windowTo = range === 'custom' ? to : isoDate(new Date())
+
+  /**
+   * The headline figures — revenue, profit, failed count, category split —
+   * come from the backend, aggregated over the real `windowFrom`/`windowTo`
+   * range. This used to be derived from whatever orders were already sitting
+   * in the client store (capped at 500, and only the most recent of those),
+   * which silently undercounted the moment an agent's or customer's true
+   * total for the chosen range passed that cap. `AdminService.myReport` on
+   * the backend does the actual counting now; the CSV export below is the
+   * one thing still built from the client list, since a per-row export needs
+   * the individual orders anyway.
+   */
+  const [summary, setSummary] = useState<MyReportSummary | null>(null)
+  useEffect(() => {
+    let live = true
+    api
+      .myReportSummary(windowFrom, windowTo)
+      .then((result) => live && setSummary(result))
+      .catch(() => live && setSummary(null))
+    return () => {
+      live = false
+    }
+  }, [windowFrom, windowTo])
 
   // NFR-2.5 — this report covers only the signed-in user's own book.
   const mine = useMemo(() => {
@@ -36,24 +66,21 @@ export default function Reports() {
       : orders.filter((o) => o.buyer === session.name)
   }, [isAgent, orders, session])
 
-  const filtered = useMemo(() => {
-    if (range === 'custom') {
-      return mine.filter((o) => o.createdAt >= from && o.createdAt <= `${to}T23:59:59`)
-    }
-    const cutoff = range === '7d' ? '2026-08-06' : '2026-07-14'
-    return mine.filter((o) => o.createdAt >= cutoff)
-  }, [from, mine, range, to])
+  // Only feeds the CSV export below — the on-screen figures come from `summary`.
+  const filtered = useMemo(
+    () => mine.filter((o) => o.createdAt >= windowFrom && o.createdAt <= `${windowTo}T23:59:59`),
+    [mine, windowFrom, windowTo],
+  )
 
-  const completed = filtered.filter((o) => o.status === 'completed')
-  const revenue = completed.reduce((sum, o) => sum + o.salePrice, 0)
-  const profit = completed.reduce((sum, o) => sum + (myShareOf(o)?.margin ?? 0), 0)
-  const failed = filtered.filter((o) => o.status === 'failed').length
+  const revenue = summary?.revenue ?? 0
+  const profit = summary?.profit ?? 0
+  const failed = summary?.failedCount ?? 0
+  const completedCount = summary?.completedCount ?? 0
 
-  const byCategory = CATEGORY_ORDER.map((category) => ({
-    label: CATEGORY_META[category].label,
-    value: completed.filter((o) => o.category === category).reduce((s, o) => s + o.salePrice, 0),
-    orders: completed.filter((o) => o.category === category).length,
-  })).filter((row) => row.orders > 0)
+  const byCategory = CATEGORY_ORDER.map((category) => {
+    const row = summary?.byCategory.find((r) => r.category === category)
+    return { label: CATEGORY_META[category].label, value: row?.revenue ?? 0, orders: row?.orders ?? 0 }
+  }).filter((row) => row.orders > 0)
 
   const exportCsv = () => {
     const header = [
@@ -86,7 +113,7 @@ export default function Reports() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `jamesdataconsult-sales-${from}-to-${to}.csv`
+    link.download = `jamesdataconsult-sales-${windowFrom}-to-${windowTo}.csv`
     link.click()
     URL.revokeObjectURL(url)
   }
@@ -141,7 +168,7 @@ export default function Reports() {
         <StatTile
           label={isAgent ? 'Volume sold' : 'Total spent'}
           value={cedis(revenue)}
-          hint={`${completed.length} completed orders`}
+          hint={`${completedCount} completed orders`}
           tone="brand"
           icon={<CashIcon className="size-5" />}
         />
@@ -156,7 +183,7 @@ export default function Reports() {
         )}
         <StatTile
           label="Average order"
-          value={cedis(completed.length > 0 ? Math.round(revenue / completed.length) : 0)}
+          value={cedis(completedCount > 0 ? Math.round(revenue / completedCount) : 0)}
           icon={<ReceiptIcon className="size-5" />}
         />
         <StatTile

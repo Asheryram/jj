@@ -21,6 +21,7 @@ import {
   Field,
   Modal,
   PageHead,
+  QuickReasons,
   Segmented,
   Spinner,
   StatTile,
@@ -56,6 +57,9 @@ export default function Refunds() {
   const [settling, setSettling] = useState<RefundRequest | null>(null)
   const [reordering, setReordering] = useState<RefundRequest | null>(null)
   const [error, setError] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkRefusing, setBulkRefusing] = useState<RefundRequest[] | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -93,6 +97,64 @@ export default function Refunds() {
     } finally {
       setBusyId(null)
     }
+  }
+
+  // Only a `pending` row is ever selectable — a decided one has nothing left
+  // to bulk-act on.
+  const selectableIds = (rows ?? []).filter((r) => r.status === 'pending').map((r) => r.id)
+  const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id))
+  const toggleOne = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(selectableIds))
+
+  /**
+   * A wallet refund, or a Mobile Money one whose network is already known
+   * (Paystack reported it on the original payment), can be approved without
+   * asking anything more — same as the inline "Refund" button already does
+   * for those. One still genuinely needing a network choice is skipped
+   * rather than guessed at, and the summary says so, so nothing here ever
+   * picks a network nobody confirmed.
+   */
+  const bulkApprove = async () => {
+    const candidates = (rows ?? []).filter((r) => selected.has(r.id))
+    const skipped = candidates.filter((r) => r.method === 'transfer' && !r.momoNetwork)
+    const actionable = candidates.filter((r) => !(r.method === 'transfer' && !r.momoNetwork))
+    if (actionable.length === 0) {
+      if (skipped.length > 0) {
+        pushToast({
+          tone: 'info',
+          title: `${skipped.length} need a network chosen first`,
+          detail: 'Open each one individually — nothing here guesses which Mobile Money network to use.',
+        })
+      }
+      return
+    }
+
+    setBulkBusy(true)
+    let succeeded = 0
+    let failed = 0
+    for (const row of actionable) {
+      try {
+        await api.approveRefund(row.id, row.momoNetwork ?? undefined)
+        succeeded++
+      } catch {
+        failed++
+      }
+    }
+    await load()
+    setBulkBusy(false)
+    setSelected(new Set())
+
+    pushToast({
+      tone: failed === 0 ? 'success' : 'error',
+      title: `${succeeded} refund${succeeded === 1 ? '' : 's'} sent${failed > 0 ? `, ${failed} failed` : ''}`,
+      detail: skipped.length > 0 ? `${skipped.length} skipped — they still need a network chosen individually.` : undefined,
+    })
   }
 
   return (
@@ -134,6 +196,27 @@ export default function Refunds() {
         />
       </div>
 
+      {selected.size > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-900/30 p-3">
+          <span className="text-sm font-semibold text-brand-900 dark:text-brand-200">
+            {selected.size} selected
+          </span>
+          <div className="ml-auto flex gap-2">
+            <Button size="sm" loading={bulkBusy} onClick={() => void bulkApprove()}>
+              Refund selected
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={bulkBusy}
+              onClick={() => setBulkRefusing((rows ?? []).filter((r) => selected.has(r.id)))}
+            >
+              Refuse selected
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Card className="mt-3">
         <CardHead title="Refund requests" />
         <div className="p-4 sm:p-5">
@@ -161,6 +244,17 @@ export default function Refunds() {
             <TableWrap caption="Refund requests">
               <thead>
                 <tr>
+                  <Th>
+                    {selectableIds.length > 0 && (
+                      <input
+                        type="checkbox"
+                        aria-label="Select all waiting"
+                        checked={allSelected}
+                        onChange={toggleAll}
+                        className="size-4 rounded border-slate-300 dark:border-slate-600"
+                      />
+                    )}
+                  </Th>
                   <Th>Customer</Th>
                   <Th>Order</Th>
                   <Th>Why it failed</Th>
@@ -171,6 +265,17 @@ export default function Refunds() {
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
+                    <Td>
+                      {row.status === 'pending' && (
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${row.buyerName}'s refund`}
+                          checked={selected.has(row.id)}
+                          onChange={() => toggleOne(row.id)}
+                          className="size-4 rounded border-slate-300 dark:border-slate-600"
+                        />
+                      )}
+                    </Td>
                     <Td>
                       <p className="font-medium text-slate-900 dark:text-slate-50">{row.buyerName}</p>
                       <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">
@@ -299,6 +404,15 @@ export default function Refunds() {
         request={reordering}
         onClose={() => setReordering(null)}
         onReordered={async () => {
+          await load()
+        }}
+      />
+
+      <BulkRefuseModal
+        requests={bulkRefusing}
+        onClose={() => setBulkRefusing(null)}
+        onRefused={async () => {
+          setSelected(new Set())
           await load()
         }}
       />
@@ -498,7 +612,13 @@ function RefuseModal({
 
   return (
     <Modal open onClose={onClose} title={`Refuse refund — ${request.orderRef}`}>
-      <div className="space-y-4">
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void submit()
+        }}
+      >
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
           <p className="font-semibold text-slate-900 dark:text-slate-50">
             {request.buyerName} · {cedis(request.amount)}
@@ -510,6 +630,14 @@ function RefuseModal({
           This customer paid and did not get their bundle. Only refuse if you know the bundle
           actually arrived, or the payment never did.
         </Callout>
+
+        <QuickReasons
+          options={['Bundle was delivered — confirmed with the customer', 'Payment never actually went through']}
+          onPick={(text) => {
+            setNote(text)
+            setError('')
+          }}
+        />
 
         <Field label="Why are you refusing it?" htmlFor="refuse-note" error={error}>
           <TextInput
@@ -525,14 +653,127 @@ function RefuseModal({
         </Field>
 
         <div className="flex gap-2">
-          <Button block variant="outline" loading={busy} onClick={() => void submit()}>
+          <Button type="submit" block variant="outline" loading={busy}>
             Refuse refund
           </Button>
-          <Button block disabled={busy} onClick={onClose}>
+          <Button type="button" block disabled={busy} onClick={onClose}>
             Cancel
           </Button>
         </div>
-      </div>
+      </form>
+    </Modal>
+  )
+}
+
+/**
+ * The bulk version of `RefuseModal` — one reason applied to every selected
+ * request, since a batch of refusals sharing a cause ("promo expired before
+ * it was used", say) is exactly the case bulk-refusing exists for. Each one
+ * still goes through the same `rejectRefund` individually, so a request that
+ * was decided by someone else a moment ago fails on its own without taking
+ * the rest of the batch down with it.
+ */
+function BulkRefuseModal({
+  requests,
+  onClose,
+  onRefused,
+}: {
+  requests: RefundRequest[] | null
+  onClose: () => void
+  onRefused: () => Promise<void>
+}) {
+  const { pushToast } = useStore()
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const key = requests?.map((r) => r.id).join(',') ?? 'none'
+  const [lastKey, setLastKey] = useState(key)
+  if (key !== lastKey) {
+    setLastKey(key)
+    setNote('')
+    setError('')
+  }
+
+  if (!requests || requests.length === 0) return null
+
+  const submit = async () => {
+    if (note.trim().length < 5) {
+      setError('Say why. This is kept on the record.')
+      return
+    }
+    setBusy(true)
+    let succeeded = 0
+    let failed = 0
+    for (const request of requests) {
+      try {
+        await api.rejectRefund(request.id, note.trim())
+        succeeded++
+      } catch {
+        failed++
+      }
+    }
+    setBusy(false)
+    await onRefused()
+    pushToast({
+      tone: failed === 0 ? 'info' : 'error',
+      title: `${succeeded} refund${succeeded === 1 ? '' : 's'} refused${failed > 0 ? `, ${failed} failed` : ''}`,
+    })
+    onClose()
+  }
+
+  const total = requests.reduce((sum, r) => sum + r.amount, 0)
+
+  return (
+    <Modal open onClose={onClose} title={`Refuse ${requests.length} refund${requests.length === 1 ? '' : 's'}`}>
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void submit()
+        }}
+      >
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
+          <p className="font-semibold text-slate-900 dark:text-slate-50">
+            {requests.length} request{requests.length === 1 ? '' : 's'} · {cedis(total)} total
+          </p>
+        </div>
+
+        <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
+          This reason is applied to every one of them. Only refuse ones you know the bundle actually
+          arrived for, or the payment never did.
+        </Callout>
+
+        <QuickReasons
+          options={['Promo period expired before it was used', 'Bundle was delivered — confirmed with the customer']}
+          onPick={(text) => {
+            setNote(text)
+            setError('')
+          }}
+        />
+
+        <Field label="Why are you refusing them?" htmlFor="bulk-refuse-note" error={error}>
+          <TextInput
+            id="bulk-refuse-note"
+            placeholder="Promo period expired before it was used"
+            value={note}
+            invalid={Boolean(error)}
+            onChange={(event) => {
+              setNote(event.target.value)
+              setError('')
+            }}
+          />
+        </Field>
+
+        <div className="flex gap-2">
+          <Button type="submit" block variant="outline" loading={busy}>
+            Refuse {requests.length}
+          </Button>
+          <Button type="button" block disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </form>
     </Modal>
   )
 }

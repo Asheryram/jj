@@ -113,7 +113,10 @@ export default function Login() {
         <div className="mt-4 flex items-center justify-between text-sm">
           {/* FR-1.4. This was a button wired to nothing — it looked like a working
               reset and was the reason nobody noticed there was not one. */}
-          <Link to={shopPath('/forgot-password')} className="font-medium text-brand-700 dark:text-brand-300 hover:underline">
+          <Link
+            to={`${shopPath('/forgot-password')}${email.trim() ? `?email=${encodeURIComponent(email.trim())}` : ''}`}
+            className="font-medium text-brand-700 dark:text-brand-300 hover:underline"
+          >
             Forgot password?
           </Link>
           <Link to={registerPath} className="font-medium text-brand-700 dark:text-brand-300 hover:underline">

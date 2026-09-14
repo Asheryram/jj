@@ -506,6 +506,15 @@ model Order {
   /// Referral code of the agent whose sell link was used, if any.
   soldByCode String? @map("sold_by_code")
 
+  /// The agent's name at the moment of sale, frozen alongside `soldByCode` —
+  /// same reasoning as `productName`/`buyerPhone` below. `soldByCode` alone
+  /// depends on a live join to `User.name` for every commission/attribution
+  /// report; if that agent row is ever renamed or deleted, history would
+  /// misrender or lose the seller entirely. Null for a direct (non-agent) sale,
+  /// and for orders placed before this column existed (backfilled to null,
+  /// which is a harmless "unknown name" rather than a wrong one).
+  soldByAgentName String? @map("sold_by_agent_name")
+
   status   OrderStatus @default(processing)
   paidWith PaidWith    @map("paid_with")
 

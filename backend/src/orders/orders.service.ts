@@ -66,7 +66,8 @@ export class OrdersService {
       throw new ValidationError('A wallet purchase needs an idempotency key.')
     }
 
-    const sellerCode = await this.effectiveSeller(dto.sellerCode ?? null, user)
+    const seller = await this.effectiveSeller(dto.sellerCode ?? null, user)
+    const sellerCode = seller?.code ?? null
 
     // Replaying a key returns the original rather than erroring: the client that
     // retried cannot tell whether the first attempt was lost in the request or
@@ -164,6 +165,10 @@ export class OrdersService {
               // must read this instead of re-resolving the product live.
               supplierCodeAtSale: product.supplierCode,
               soldByCode: sellerCode,
+              // Frozen at sale time, same reasoning as `productName`/`buyerPhone`
+              // above: an agent's own name/code can change or be deleted later,
+              // and a historical commission report should still say who earned it.
+              soldByAgentName: seller?.name ?? null,
               // `awaiting_payment` and nothing else until Paystack confirms the
               // money. Not `pending`: the restart-recovery sweep dispatches anything
               // pending-without-a-provider-reference, so an unpaid order parked there
@@ -410,20 +415,20 @@ export class OrdersService {
   private async effectiveSeller(
     posted: string | null,
     user: AuthUser | undefined,
-  ): Promise<string | null> {
+  ): Promise<{ code: string; name: string } | null> {
     const code = posted?.trim().toUpperCase() || null
     if (code) {
       const seller = await this.prisma.user.findUnique({
         where: { referralCode: code },
-        select: { role: true, status: true },
+        select: { role: true, status: true, name: true },
       })
       // An unknown or suspended seller falls back to the standard price rather
       // than failing the sale — the buyer did nothing wrong and should still be
       // able to buy (FR-3.5).
       if (!seller || seller.role !== 'agent' || seller.status !== 'active') return null
-      return code
+      return { code, name: seller.name }
     }
-    return user?.role === 'agent' ? user.referralCode : null
+    return user?.role === 'agent' ? { code: user.referralCode, name: user.name } : null
   }
 
   /**
@@ -667,21 +672,7 @@ export class OrdersService {
     const row = await this.prisma.order.findUnique({ where: { id } })
     if (!row) throw new NotFoundError('We could not find that order.')
 
-    /**
-     * Only meaningful when `status === 'failed'`, and only computed then: a
-     * `RefundRequest` exists exactly when `FulfilmentService.settle` decided
-     * money had actually been collected (see its own `collected` check), so
-     * its presence is the one clean signal that tells apart two very
-     * different failures a buyer can land on — a Mobile Money charge that
-     * never went through at all (nothing to give back) from a payment that
-     * succeeded and a delivery that then failed (a refund genuinely owed).
-     * Without it, both read identically as "failed", and showing refund
-     * language for a charge that was never taken is its own broken promise.
-     */
-    const paymentCollected =
-      row.status === 'failed'
-        ? (await this.prisma.refundRequest.findUnique({ where: { orderId: row.id }, select: { id: true } })) !== null
-        : undefined
+    const paymentCollected = await this.paymentCollectedFlag(row.id, row.status)
 
     // A guest polling their own just-placed order has no session, so ownership is
     // proven by the reference in the URL plus nothing else — the id is a uuid and
@@ -696,6 +687,24 @@ export class OrdersService {
       (row.soldByCode !== null && (await this.downlineCodes(user.referralCode)).includes(row.soldByCode))
 
     return mine ? { ...toOrder(row), paymentCollected } : { ...toTrackedOrder(row), paymentCollected }
+  }
+
+  /**
+   * Only meaningful when `status === 'failed'`, and only computed then: a
+   * `RefundRequest` exists exactly when `FulfilmentService.settle` decided
+   * money had actually been collected (see its own `collected` check), so
+   * its presence is the one clean signal that tells apart two very different
+   * failures a buyer can land on — a Mobile Money charge that never went
+   * through at all (nothing to give back) from a payment that succeeded and
+   * a delivery that then failed (a refund genuinely owed). Without it, both
+   * read identically as "failed", and showing refund language for a charge
+   * that was never taken is its own broken promise — shared by `byId` and
+   * `track`, the two places a buyer ever sees their own order's status.
+   */
+  private async paymentCollectedFlag(orderId: string, status: string): Promise<boolean | undefined> {
+    if (status !== 'failed') return undefined
+    const refund = await this.prisma.refundRequest.findUnique({ where: { orderId }, select: { id: true } })
+    return refund !== null
   }
 
   /** FR-4.9 — a guest looks up an order with its reference and their number. */
@@ -721,7 +730,8 @@ export class OrdersService {
       )
     }
 
-    return toTrackedOrder(row)
+    const paymentCollected = await this.paymentCollectedFlag(row.id, row.status)
+    return { ...toTrackedOrder(row), paymentCollected }
   }
 
   /**

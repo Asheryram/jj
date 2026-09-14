@@ -15,7 +15,7 @@ import {
   StatusBadge,
   TextInput,
 } from '../components/ui'
-import { CertificateIcon, CheckIcon, ClockIcon, ReceiptIcon, SearchIcon } from '../components/icons'
+import { AlertIcon, CertificateIcon, CheckIcon, ClockIcon, ReceiptIcon, SearchIcon } from '../components/icons'
 
 /**
  * FR-4.9 — a guest has no order history, so the reference plus their phone
@@ -24,7 +24,7 @@ import { CertificateIcon, CheckIcon, ClockIcon, ReceiptIcon, SearchIcon } from '
  * NFR-3.3 in spirit even though the money changed hands correctly.
  */
 export default function Track() {
-  const { findOrder } = useStore()
+  const { findOrder, session } = useStore()
   const shopPath = useShopPath()
   const registerPath = useRegisterPath()
   /**
@@ -37,7 +37,10 @@ export default function Track() {
    */
   const [params] = useSearchParams()
   const [reference, setReference] = useState(params.get('ref') ?? '')
-  const [phone, setPhone] = useState('')
+  // A signed-in user's own number, prefilled — the reference is still the
+  // real lookup key, this only saves retyping the one part that's already
+  // known.
+  const [phone, setPhone] = useState(session?.phone ?? '')
   const [result, setResult] = useState<Order | null>(null)
   const [searched, setSearched] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -136,7 +139,13 @@ export default function Track() {
                 by a person, so until that happens the money is *owed*, not
                 returned; telling a guest it is already back when it is not is the
                 fastest way to lose their trust twice. */}
-            {result.status === 'failed' && !result.refunded && (
+            {result.status === 'failed' && result.paymentCollected === false && (
+              <Callout tone="danger" title="That payment did not go through" icon={<AlertIcon className="size-4" />}>
+                Nothing was taken from you. You can try again whenever you are ready.
+              </Callout>
+            )}
+
+            {result.status === 'failed' && result.paymentCollected !== false && !result.refunded && (
               <Callout tone="info" title="A refund is being arranged" icon={<ClockIcon className="size-4" />}>
                 {cedis(result.salePrice)} is owed back to you and has been logged for approval.
                 Refunds are checked by a person rather than sent automatically, so this usually takes

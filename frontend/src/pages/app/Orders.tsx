@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { useShopPath } from '../../lib/shopPath'
+import { useSearchParamState } from '../../lib/useSearchParamState'
 import { cedis, dateTime } from '../../lib/format'
 import type { Order, OrderStatus } from '../../data/types'
 import {
@@ -29,8 +30,8 @@ type Filter = 'all' | OrderStatus
 export default function Orders() {
   const { orders, session, myShareOf } = useStore()
   const shopPath = useShopPath()
-  const [filter, setFilter] = useState<Filter>('all')
-  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useSearchParamState('filter', 'all') as [Filter, (v: Filter) => void]
+  const [query, setQuery] = useSearchParamState('q')
   const [selected, setSelected] = useState<Order | null>(null)
 
   const isAgent = session?.role === 'agent'
@@ -302,9 +303,16 @@ function OrderDetail({
           )}
 
           <div className="flex gap-2">
-            {order.status === 'failed' && (
-              <Link to={`/buy/${order.productId}`} className="flex-1">
-                <Button block>Order again</Button>
+            {/* Not just a failed order's own retry — a completed one gets this
+                too, so an agent re-selling the same bundle to the same
+                walk-up customer next week is one tap, not re-typing a
+                number they already sold to. */}
+            {(order.status === 'failed' || order.status === 'completed') && (
+              <Link
+                to={`/buy/${order.productId}?recipient=${encodeURIComponent(order.recipient)}`}
+                className="flex-1"
+              >
+                <Button block>{order.status === 'failed' ? 'Order again' : 'Buy again'}</Button>
               </Link>
             )}
             <Button block variant="outline" onClick={onClose} className="flex-1">

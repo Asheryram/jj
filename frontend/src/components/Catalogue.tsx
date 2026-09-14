@@ -50,6 +50,20 @@ export default function Catalogue() {
     setParams(next, { replace: true })
   }
 
+  /**
+   * Switching category without clearing `network` left a filter active that
+   * has nothing to do with the tab just opened — a customer on "Data,
+   * AirtelTigo" tapping "Airtime" got an empty grid with no visible filter
+   * to explain why, since AirtelTigo airtime may not exist while the network
+   * pill itself was gone from view for a category with only one network.
+   */
+  const setCategory = (key: Category) => {
+    const next = new URLSearchParams(params)
+    next.set('category', key)
+    next.delete('network')
+    setParams(next, { replace: true })
+  }
+
   const isChecker = category === 'checker'
   const visible = products.filter(
     (product) =>
@@ -89,7 +103,7 @@ export default function Catalogue() {
               <button
                 key={key}
                 type="button"
-                onClick={() => setParam('category', key)}
+                onClick={() => setCategory(key)}
                 aria-pressed={active}
                 className={cn(
                   'flex shrink-0 items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-semibold transition-colors',
@@ -202,7 +216,7 @@ function ProductCard({
       <Link to={shopPath(`/buy/${product.id}`)} className="flex h-full flex-col p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="font-semibold text-slate-900 dark:text-slate-50">{product.name}</p>
+            <p className="truncate font-semibold text-slate-900 dark:text-slate-50">{product.name}</p>
             <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{product.validity}</p>
           </div>
           <NetworkChip network={product.network} />

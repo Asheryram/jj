@@ -16,14 +16,16 @@ import {
   StatTile,
   TableWrap,
   Td,
+  TextInput,
   Th,
 } from '../../components/ui'
-import { GlobeIcon, StoreIcon, UsersIcon, WhatsAppIcon } from '../../components/icons'
+import { GlobeIcon, SearchIcon, StoreIcon, UsersIcon, WhatsAppIcon } from '../../components/icons'
 
 
 /** FR-1.7, FR-5.1, FR-5.2, FR-5.4, FR-5.6, FR-5.7 */
 export default function Referrals() {
   const { session, subAgents } = useStore()
+  const [query, setQuery] = useState('')
 
   const [domain, setDomain] = useState<MyDomainStatus | null>(null)
   useEffect(() => {
@@ -49,6 +51,13 @@ export default function Referrals() {
   const indirect = subAgents.filter((a) => a.uplineCode !== session.referralCode)
   const active = subAgents.filter((a) => a.status === 'active')
   const totalVolume = subAgents.reduce((sum, a) => sum + a.volume, 0)
+
+  const needle = query.trim().toLowerCase()
+  const visibleAgents = needle
+    ? subAgents.filter(
+        (a) => a.name.toLowerCase().includes(needle) || a.phone.replace(/\D/g, '').includes(needle.replace(/\D/g, '')),
+      )
+    : subAgents
 
   const shareSell = encodeURIComponent(
     `Buy data, airtime and result checkers from me — instant delivery: ${sellLink}`,
@@ -160,11 +169,31 @@ export default function Referrals() {
           subtitle={`${subAgents.length} in total`}
           action={<Badge tone="brand">{active.length} active</Badge>}
         />
+        {subAgents.length > 5 && (
+          <div className="border-b border-slate-100 dark:border-slate-800 p-4 sm:p-5">
+            <div className="relative sm:w-72">
+              <SearchIcon className="absolute inset-y-0 left-3 my-auto size-4 text-slate-500 dark:text-slate-400" />
+              <TextInput
+                placeholder="Name or phone number"
+                className="pl-9"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                aria-label="Search your chain"
+              />
+            </div>
+          </div>
+        )}
         {subAgents.length === 0 ? (
           <EmptyState
             icon={<UsersIcon className="size-6" />}
             title="No agents yet"
             detail="Share your referral link on WhatsApp and the people who join will appear here."
+          />
+        ) : visibleAgents.length === 0 ? (
+          <EmptyState
+            icon={<UsersIcon className="size-6" />}
+            title="Nobody matched that search"
+            detail="Try a different name or number."
           />
         ) : (
           <TableWrap caption="Agents in your referral chain">
@@ -178,7 +207,7 @@ export default function Referrals() {
               </tr>
             </thead>
             <tbody>
-              {subAgents.map((agent) => {
+              {visibleAgents.map((agent) => {
                 const isDirect = agent.uplineCode === session.referralCode
                 return (
                   <tr key={agent.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">

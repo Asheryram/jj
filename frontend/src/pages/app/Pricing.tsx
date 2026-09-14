@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../../state/store'
+import { useSearchParamState } from '../../lib/useSearchParamState'
 import { cedis, parseCedis } from '../../lib/format'
 import { validateResalePrice, type PriceBand } from '../../lib/pricing'
 import { NETWORKS } from '../../lib/networks'
@@ -37,9 +38,15 @@ import { AlertIcon, TagIcon, TrendUpIcon } from '../../components/icons'
  * a better cap than a number James would have to maintain per product.
  */
 export default function Pricing() {
-  const { products, myBand, myResalePrice, hasOwnPrice, setAgentPrice } = useStore()
-  const [category, setCategory] = useState<Category>('data')
-  const [network, setNetwork] = useState<Network | null>(null)
+  const { products, myBand, myResalePrice, hasOwnPrice, setAgentPrice, clearAgentPrice } = useStore()
+  const [resettingId, setResettingId] = useState<string | null>(null)
+  const [category, setCategory] = useSearchParamState('category', 'data') as [
+    Category,
+    (v: Category) => void,
+  ]
+  const [networkParam, setNetworkParam] = useSearchParamState('network')
+  const network = (networkParam || null) as Network | null
+  const setNetwork = (value: Network | null) => setNetworkParam(value ?? '')
   const [editing, setEditing] = useState<Product | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -190,9 +197,25 @@ export default function Pricing() {
                     </span>
                   </Td>
                   <Td align="right">
-                    <Button size="sm" variant="outline" onClick={() => setEditing(product)}>
-                      Edit
-                    </Button>
+                    <div className="flex justify-end gap-2">
+                      {own && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          loading={resettingId === product.id}
+                          onClick={async () => {
+                            setResettingId(product.id)
+                            await clearAgentPrice(product.id)
+                            setResettingId(null)
+                          }}
+                        >
+                          Reset
+                        </Button>
+                      )}
+                      <Button size="sm" variant="outline" onClick={() => setEditing(product)}>
+                        Edit
+                      </Button>
+                    </div>
                   </Td>
                 </tr>
               )

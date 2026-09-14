@@ -84,7 +84,7 @@ export default function Checkers() {
           {[
             ['Pick BECE or WASSCE', 'Choose the checker you need.'],
             ['Enter your number', 'This is where the SMS copy goes.'],
-            ['Pay from your wallet', 'Or top up with MoMo first.'],
+            ['Pay with Mobile Money', 'MTN, Telecel or AirtelTigo, through Paystack.'],
             ['Check your result', 'Use the serial and PIN on the WAEC portal.'],
           ].map(([title, detail], index) => (
             <li key={title}>

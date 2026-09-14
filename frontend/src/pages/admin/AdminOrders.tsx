@@ -125,6 +125,7 @@ export default function AdminOrders() {
         order.reference.toLowerCase().includes(needle) ||
         order.buyer.toLowerCase().includes(needle) ||
         (order.soldByCode ?? '').toLowerCase().includes(needle) ||
+        (order.soldByAgentName ?? '').toLowerCase().includes(needle) ||
         order.split.shares.some((s) => s.name.toLowerCase().includes(needle)) ||
         order.productName.toLowerCase().includes(needle)
       )
@@ -210,7 +211,7 @@ export default function AdminOrders() {
       return [
         o.reference,
         o.createdAt,
-        o.soldByCode ?? 'direct',
+        o.soldByCode ? `${o.soldByCode}${o.soldByAgentName ? ` (${o.soldByAgentName})` : ''}` : 'direct',
         o.buyer,
         o.productName,
         o.network ?? 'All',
@@ -318,14 +319,14 @@ export default function AdminOrders() {
           value={filter}
           onChange={setFilter}
         />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <TextInput
             type="date"
             value={fromDate}
             max={toDate || undefined}
             onChange={(event) => setFromDate(event.target.value)}
             aria-label="From date"
-            className="w-40"
+            className="w-full sm:w-40"
           />
           <span className="text-sm text-slate-500 dark:text-slate-400">to</span>
           <TextInput
@@ -334,7 +335,7 @@ export default function AdminOrders() {
             min={fromDate || undefined}
             onChange={(event) => setToDate(event.target.value)}
             aria-label="To date"
-            className="w-40"
+            className="w-full sm:w-40"
           />
           {(fromDate || toDate) && (
             <Button
@@ -374,7 +375,87 @@ export default function AdminOrders() {
             }
           />
         ) : (
-          <TableWrap caption="All orders on the platform, with the split per order">
+          <>
+            {/* Reading one order's financials by scrolling column-by-column
+                doesn't work on a phone — below `sm` this renders the same
+                rows as cards instead, financial figures stacked as
+                label/value pairs rather than columns. */}
+            <div className="space-y-2 p-3 sm:hidden">
+              {visible.map((order) => {
+                const agentShares = order.split.shares.filter((s) => s.role === 'agent')
+                return (
+                  <div
+                    key={order.id}
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 p-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-slate-900 dark:text-slate-50">
+                          {order.productName}
+                        </p>
+                        <div className="mt-1 flex items-center gap-2">
+                          <NetworkChip network={order.network} />
+                          <span className="tabular text-xs text-slate-500 dark:text-slate-400">
+                            {order.reference}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="tabular shrink-0 font-semibold text-slate-900 dark:text-slate-50">
+                        {cedis(order.salePrice)}
+                      </p>
+                    </div>
+
+                    <div className="mt-2">
+                      {agentShares.length > 0 ? (
+                        <p className="text-sm text-slate-800 dark:text-slate-100">
+                          {agentShares.map((s) => s.name).join(' ← ')}
+                        </p>
+                      ) : (
+                        <Badge tone="neutral">Direct sale</Badge>
+                      )}
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                        to {order.recipient} · {order.buyer} · {dateTime(order.createdAt)}
+                      </p>
+                    </div>
+
+                    <div className="mt-2">
+                      <OrderStatusDetails order={order} onWhy={() => setInspecting(order)} />
+                    </div>
+
+                    <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-slate-100 dark:border-slate-800 pt-2.5 text-sm">
+                      <FinancialFigure label="Paystack fee" value={order.paystackFee == null ? '—' : cedis(order.paystackFee)} />
+                      <FinancialFigure label="Catalogue price" value={cedis(order.split.supplierCost)} />
+                      <FinancialFigure label="Actual cost" value={cedis(actualCostOf(order))} />
+                      <FinancialFigure
+                        label="Catalogue P/L"
+                        value={order.actualSupplierCost == null ? '—' : cedis(catalogueDiffOf(order), { sign: true })}
+                        tone={
+                          order.actualSupplierCost == null
+                            ? 'neutral'
+                            : catalogueDiffOf(order) > 0
+                              ? 'positive'
+                              : catalogueDiffOf(order) < 0
+                                ? 'negative'
+                                : 'neutral'
+                        }
+                      />
+                      <FinancialFigure
+                        label="Your profit"
+                        value={order.status === 'completed' ? cedis(trueMarginOf(order), { sign: true }) : '—'}
+                        tone="brand"
+                      />
+                      <FinancialFigure
+                        label="Agents"
+                        value={order.status === 'completed' && agentShares.length > 0 ? cedis(agentMarginOf(order)) : '—'}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="hidden sm:block">
+            <TableWrap caption="All orders on the platform, with the split per order">
             <thead>
               <tr>
                 <Th>Product</Th>
@@ -416,99 +497,7 @@ export default function AdminOrders() {
                     </Td>
                     <Td className="tabular">{order.recipient}</Td>
                     <Td>
-                      <StatusBadge status={order.status} />
-                      {order.dispatchUnresolved && (
-                        <span
-                          className="ml-1.5 inline-block"
-                          title="The delivery partner never answered at all — no reference exists for the automatic check to use. This will sit exactly like this until a person looks."
-                        >
-                          <Badge tone="warning">Unresolved</Badge>
-                        </span>
-                      )}
-                      {order.refunded && (
-                        <Badge tone="info" className="ml-1.5">
-                          Refunded
-                        </Badge>
-                      )}
-                      {order.refundStatus === 'pending' && (
-                        <span
-                          className="ml-1.5 inline-block"
-                          title="This money is owed back and nobody has approved paying it yet — a person always decides a refund, so this is waiting on a click, not automation."
-                        >
-                          <Badge tone="warning">Refund pending</Badge>
-                        </span>
-                      )}
-                      {order.refundStatus === 'rejected' && (
-                        <span
-                          className="ml-1.5 inline-block"
-                          title="An admin looked at this refund request and refused it — no money moved."
-                        >
-                          <Badge tone="danger">Refund rejected</Badge>
-                        </span>
-                      )}
-                      {order.fulfilmentReference === 'manual' && (
-                        <span className="ml-1.5 inline-flex items-center gap-1">
-                          {/* Deliberately not just "Manual" — this app also has
-                              "resolve manually" (an admin forcing a stuck order's
-                              outcome by hand), a completely different thing. A
-                              bare "Manual" badge here would read as that instead
-                              of what it actually means: DataHub routed this to
-                              one of their own staff, nobody on our side touched it. */}
-                          <span
-                            title="DataHub routed this one to a person on their side to clear by hand, not their automated system — it can take much longer to settle than a normal order. Not the same thing as resolving an order manually here."
-                          >
-                            <Badge tone="warning">
-                              DataHub manual{order.manualOrderNumber ? ` · ${order.manualOrderNumber}` : ''}
-                            </Badge>
-                          </span>
-                          {/* DataHub's own ticket ID for this one — what to quote
-                              back to their support if it needs chasing. */}
-                          {order.manualOrderNumber && <CopyIconButton value={order.manualOrderNumber} />}
-                        </span>
-                      )}
-                      {order.fulfilmentReference === 'code' && (
-                        <span
-                          className="ml-1.5 inline-block"
-                          title="DataHub's automated system handled this one — a plain reference, not routed to a person."
-                        >
-                          <Badge tone="neutral">Code</Badge>
-                        </span>
-                      )}
-                      {/* Who on OUR side decided this outcome — separate from,
-                          and shown next to, whatever DataHub's own badge above
-                          says. An admin clicking "mark as delivered/failed" and
-                          DataHub routing to their manual queue are unrelated
-                          facts; an order can be either, both, or neither. */}
-                      {order.resolvedManually && (
-                        <span
-                          className="ml-1.5 inline-block"
-                          title="An admin forced this order's outcome by hand — DataHub's own webhook or polling never confirmed it."
-                        >
-                          <Badge tone="info">Resolved by admin</Badge>
-                        </span>
-                      )}
-                      {/* "Failed" flattens a dead float, an unapproved
-                          recipient and a withdrawn bundle into one word. The
-                          difference decides what to do about it, so it is one
-                          click away rather than a database query. */}
-                      {(order.status === 'failed' || order.status === 'processing') && (
-                        <button
-                          type="button"
-                          onClick={() => setInspecting(order)}
-                          className="mt-1 block text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2 hover:text-brand-800"
-                        >
-                          Why?
-                        </button>
-                      )}
-                      {/* When it actually finished, not just when it was placed
-                          — `completedAt` is exact; a failed order has no
-                          dedicated column for this, so `failedAt` is read off
-                          the refund request settled in the same moment. */}
-                      {(order.completedAt || order.failedAt) && (
-                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          Finished {dateTime(order.completedAt ?? order.failedAt ?? '')}
-                        </p>
-                      )}
+                      <OrderStatusDetails order={order} onWhy={() => setInspecting(order)} />
                     </Td>
                     <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                       {cedis(order.salePrice)}
@@ -558,12 +547,150 @@ export default function AdminOrders() {
                 )
               })}
             </tbody>
-          </TableWrap>
+            </TableWrap>
+            </div>
+          </>
         )}
       </Card>
 
       <DispatchModal order={inspecting} onClose={() => setInspecting(null)} />
     </div>
+  )
+}
+
+/** One label/value line in the mobile card fallback — the table's columns, stacked instead of scrolled. */
+function FinancialFigure({
+  label,
+  value,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  tone?: 'neutral' | 'positive' | 'negative' | 'brand'
+}) {
+  return (
+    <div>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{label}</p>
+      <p
+        className={cn(
+          'tabular font-semibold',
+          tone === 'brand'
+            ? 'text-brand-700 dark:text-brand-300'
+            : tone === 'positive'
+              ? 'text-emerald-600 dark:text-emerald-400'
+              : tone === 'negative'
+                ? 'text-red-600 dark:text-red-400'
+                : 'text-slate-700 dark:text-slate-200',
+        )}
+      >
+        {value}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * Every badge/note about how an order settled — shared between the desktop
+ * table's Status column and the mobile card fallback below, so the two never
+ * drift out of sync with each other.
+ */
+function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void }) {
+  return (
+    <>
+      <StatusBadge status={order.status} />
+      {order.dispatchUnresolved && (
+        <span
+          className="ml-1.5 inline-block"
+          title="The delivery partner never answered at all — no reference exists for the automatic check to use. This will sit exactly like this until a person looks."
+        >
+          <Badge tone="warning">Unresolved</Badge>
+        </span>
+      )}
+      {order.refunded && (
+        <Badge tone="info" className="ml-1.5">
+          Refunded
+        </Badge>
+      )}
+      {order.refundStatus === 'pending' && (
+        <span
+          className="ml-1.5 inline-block"
+          title="This money is owed back and nobody has approved paying it yet — a person always decides a refund, so this is waiting on a click, not automation."
+        >
+          <Badge tone="warning">Refund pending</Badge>
+        </span>
+      )}
+      {order.refundStatus === 'rejected' && (
+        <span
+          className="ml-1.5 inline-block"
+          title="An admin looked at this refund request and refused it — no money moved."
+        >
+          <Badge tone="danger">Refund rejected</Badge>
+        </span>
+      )}
+      {order.fulfilmentReference === 'manual' && (
+        <span className="ml-1.5 inline-flex items-center gap-1">
+          {/* Deliberately not just "Manual" — this app also has
+              "resolve manually" (an admin forcing a stuck order's
+              outcome by hand), a completely different thing. A
+              bare "Manual" badge here would read as that instead
+              of what it actually means: DataHub routed this to
+              one of their own staff, nobody on our side touched it. */}
+          <span
+            title="DataHub routed this one to a person on their side to clear by hand, not their automated system — it can take much longer to settle than a normal order. Not the same thing as resolving an order manually here."
+          >
+            <Badge tone="warning">
+              DataHub manual{order.manualOrderNumber ? ` · ${order.manualOrderNumber}` : ''}
+            </Badge>
+          </span>
+          {/* DataHub's own ticket ID for this one — what to quote
+              back to their support if it needs chasing. */}
+          {order.manualOrderNumber && <CopyIconButton value={order.manualOrderNumber} />}
+        </span>
+      )}
+      {order.fulfilmentReference === 'code' && (
+        <span
+          className="ml-1.5 inline-block"
+          title="DataHub's automated system handled this one — a plain reference, not routed to a person."
+        >
+          <Badge tone="neutral">Code</Badge>
+        </span>
+      )}
+      {/* Who on OUR side decided this outcome — separate from,
+          and shown next to, whatever DataHub's own badge above
+          says. An admin clicking "mark as delivered/failed" and
+          DataHub routing to their manual queue are unrelated
+          facts; an order can be either, both, or neither. */}
+      {order.resolvedManually && (
+        <span
+          className="ml-1.5 inline-block"
+          title="An admin forced this order's outcome by hand — DataHub's own webhook or polling never confirmed it."
+        >
+          <Badge tone="info">Resolved by admin</Badge>
+        </span>
+      )}
+      {/* "Failed" flattens a dead float, an unapproved
+          recipient and a withdrawn bundle into one word. The
+          difference decides what to do about it, so it is one
+          click away rather than a database query. */}
+      {(order.status === 'failed' || order.status === 'processing') && (
+        <button
+          type="button"
+          onClick={onWhy}
+          className="mt-1 block text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2 hover:text-brand-800"
+        >
+          Why?
+        </button>
+      )}
+      {/* When it actually finished, not just when it was placed
+          — `completedAt` is exact; a failed order has no
+          dedicated column for this, so `failedAt` is read off
+          the refund request settled in the same moment. */}
+      {(order.completedAt || order.failedAt) && (
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          Finished {dateTime(order.completedAt ?? order.failedAt ?? '')}
+        </p>
+      )}
+    </>
   )
 }
 
@@ -585,7 +712,12 @@ function CopyIconButton({ value }: { value: string }) {
       type="button"
       onClick={copy}
       aria-label={`Copy ${value}`}
-      className="inline-flex size-5 items-center justify-center rounded-md hover:bg-black/5 dark:hover:bg-white/10"
+      // The visible icon stays 20px so it doesn't dominate the row it sits in,
+      // but the actual tap target is widened to the app's own 44px minimum
+      // (`BUTTON_SIZES`, `ui.tsx`) via an invisible `::before` that doesn't
+      // affect layout — a small icon-only button is otherwise the easiest
+      // thing on the page to miss on a phone.
+      className="relative inline-flex size-5 items-center justify-center rounded-md before:absolute before:-inset-3 before:content-[''] hover:bg-black/5 dark:hover:bg-white/10"
     >
       {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
     </button>

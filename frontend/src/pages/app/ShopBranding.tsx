@@ -44,6 +44,19 @@ export default function ShopBranding() {
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
+  /**
+   * What the form last matched the server — so an edit can be told apart
+   * from a form that just finished loading. Reset every time `load()` runs,
+   * including right after a successful submit, so "sent" doesn't keep
+   * reading as "still has unsaved changes."
+   */
+  const [baseline, setBaseline] = useState<{
+    shopName: string
+    color: string
+    darkEnabled: boolean
+    colorDark: string
+  } | null>(null)
+
   const load = useCallback(async () => {
     try {
       const result = await api.myBranding()
@@ -51,15 +64,49 @@ export default function ShopBranding() {
       // Seed the form from whatever is furthest along: a pending proposal is
       // what they last intended, so editing continues from there.
       const source = result.pending ?? result.live
-      setShopName(source?.shopName ?? '')
-      setColor(source?.brandColor ?? '#0B3B8F')
-      setDarkEnabled(Boolean(source?.brandColorDark))
-      setColorDark(source?.brandColorDark ?? source?.brandColor ?? '#0B3B8F')
+      const seeded = {
+        shopName: source?.shopName ?? '',
+        color: source?.brandColor ?? '#0B3B8F',
+        darkEnabled: Boolean(source?.brandColorDark),
+        colorDark: source?.brandColorDark ?? source?.brandColor ?? '#0B3B8F',
+      }
+      setShopName(seeded.shopName)
+      setColor(seeded.color)
+      setDarkEnabled(seeded.darkEnabled)
+      setColorDark(seeded.colorDark)
+      setBaseline(seeded)
       setError('')
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'We could not load your shop details.')
     }
   }, [])
+
+  // A picked-but-unsent logo counts as dirty too — there is no "baseline" file to compare against.
+  const isDirty =
+    baseline !== null &&
+    (shopName !== baseline.shopName ||
+      color !== baseline.color ||
+      darkEnabled !== baseline.darkEnabled ||
+      colorDark !== baseline.colorDark ||
+      logo !== null)
+
+  /**
+   * Warn before an accidental refresh/close throws away an edit nothing has
+   * saved yet. This only catches leaving the tab, not clicking to another
+   * page inside the app — the app's router (`BrowserRouter` + `Routes`, not
+   * a data router) has no in-app navigation-blocking hook to catch that half
+   * without a bigger routing change; this is the contained fix for the
+   * costlier half of the same problem.
+   */
+  useEffect(() => {
+    if (!isDirty) return
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
 
   useEffect(() => {
     void load()
@@ -393,6 +440,12 @@ export default function ShopBranding() {
                 mobile network or another company will be refused — your shop takes payment
                 details, and customers have to be able to tell who they are paying.
               </Callout>
+
+              {isDirty && (
+                <p className="text-center text-xs text-slate-500 dark:text-slate-400">
+                  Unsaved changes — leaving this page or closing the tab loses them.
+                </p>
+              )}
 
               <Button block loading={busy} onClick={() => void submit()}>
                 Send for approval

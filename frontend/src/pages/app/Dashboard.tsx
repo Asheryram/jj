@@ -139,7 +139,7 @@ export default function Dashboard() {
           <div className="flex gap-2">
             {isAgent ? (
               <>
-                <Link to="/app/withdrawals">
+                <Link to="/app/withdrawals?open=1">
                   <Button variant="onBrand">
                     <CashIcon className="size-4" /> Withdraw
                   </Button>
@@ -490,7 +490,8 @@ function CopyIconButton({ value }: { value: string }) {
       type="button"
       onClick={copy}
       aria-label={`Copy ${value}`}
-      className="inline-flex size-6 items-center justify-center rounded-md align-text-bottom hover:bg-black/5 dark:hover:bg-white/10"
+      // Same widened-tap-target treatment as `AdminOrders.tsx`'s own `CopyIconButton`.
+      className="relative inline-flex size-6 items-center justify-center rounded-md align-text-bottom before:absolute before:-inset-2.5 before:content-[''] hover:bg-black/5 dark:hover:bg-white/10"
     >
       {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
     </button>
@@ -538,7 +539,7 @@ function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
         accent: 'bg-violet-50 text-violet-700',
       },
       {
-        to: '/app/withdrawals',
+        to: '/app/withdrawals?open=1',
         label: 'Withdraw earnings',
         hint: 'Paid to your MoMo',
         icon: CashIcon,

@@ -166,6 +166,8 @@ interface Store {
   myResalePrice: (product: Product) => number
   hasOwnPrice: (productId: string) => boolean
   setAgentPrice: (productId: string, resalePrice: number) => Promise<void>
+  /** Drop an individual override, back to the agent's own default markup. */
+  clearAgentPrice: (productId: string) => Promise<void>
   previewSplit: (product: Product, sellerCode: string | null) => OrderSplit
   myShareOf: (order: Order) => SplitShare | undefined
 
@@ -687,6 +689,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [prices, pushToast, reportError],
   )
 
+  /**
+   * Drop an individual override — back to the agent's own default markup,
+   * the only way back from one before this was recomputing it by hand.
+   */
+  const clearAgentPrice = useCallback(
+    async (productId: string) => {
+      const previous = prices
+      setPrices((current) => current.filter((p) => p.productId !== productId))
+
+      try {
+        await api.clearAgentPrice(productId)
+        pushToast({ tone: 'info', title: 'Back to your default markup' })
+      } catch (error) {
+        setPrices(previous)
+        reportError(error, 'We could not reset that price.')
+      }
+    },
+    [prices, pushToast, reportError],
+  )
+
   const updateProductTier = useCallback(
     async (
       productId: string,
@@ -1091,6 +1113,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       myResalePrice,
       hasOwnPrice,
       setAgentPrice,
+      clearAgentPrice,
       previewSplit,
       myShareOf,
       withdrawals,
@@ -1157,6 +1180,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       switchProfile,
       addProfile,
       setAgentPrice,
+      clearAgentPrice,
       setSellerCode,
       subAgents,
       toasts,

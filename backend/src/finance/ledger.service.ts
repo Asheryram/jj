@@ -103,29 +103,36 @@ export class LedgerService {
    * what the business earned, cash is what actually arrived and left. They differ
    * by exactly the movements that settle obligations — agent payouts, wallet
    * top-ups — which is why `affectsProfit` exists.
+   *
+   * One query, not three. This used to follow the per-kind `groupBy` with two
+   * further all-rows `aggregate` calls — one for `profit` (filtered on
+   * `affectsProfit: true`), one for `cashMovement` (unfiltered) — three full
+   * passes over the exact same window of rows. Grouping by `affectsProfit`
+   * alongside `kind` instead makes both totals derivable from the one result
+   * set already in hand, with no assumption baked in about which kind carries
+   * which `affectsProfit` value — if that ever changes, this still adds up the
+   * actual flag on each row rather than a hardcoded list of kinds.
    */
   async statement(since: Date) {
     const rows = await this.prisma.ledgerEntry.groupBy({
-      by: ['kind'],
+      by: ['kind', 'affectsProfit'],
       where: { occurredAt: { gte: since } },
       _sum: { amount: true },
       _count: { _all: true },
     })
 
-    const byKind = new Map(rows.map((row) => [row.kind, row._sum.amount ?? 0]))
-    const countOf = new Map(rows.map((row) => [row.kind, row._count._all]))
+    const byKind = new Map<LedgerKind, number>()
+    const countOf = new Map<LedgerKind, number>()
+    let profit = 0
+    let cashMovement = 0
+    for (const row of rows) {
+      const amount = row._sum.amount ?? 0
+      byKind.set(row.kind, (byKind.get(row.kind) ?? 0) + amount)
+      countOf.set(row.kind, (countOf.get(row.kind) ?? 0) + row._count._all)
+      cashMovement += amount
+      if (row.affectsProfit) profit += amount
+    }
     const of = (kind: LedgerKind) => byKind.get(kind) ?? 0
-
-    const [profitAgg, cashAgg] = await Promise.all([
-      this.prisma.ledgerEntry.aggregate({
-        where: { occurredAt: { gte: since }, affectsProfit: true },
-        _sum: { amount: true },
-      }),
-      this.prisma.ledgerEntry.aggregate({
-        where: { occurredAt: { gte: since } },
-        _sum: { amount: true },
-      }),
-    ])
 
     const revenue = of('revenue')
 
@@ -143,25 +150,56 @@ export class LedgerService {
         agentMarginWriteoffs: -of('agent_margin_writeoff'),
       },
       /** Revenue less every cost above. What the business earned. */
-      profit: profitAgg._sum.amount ?? 0,
+      profit,
       /** Everything that moved, including money that was never ours. */
-      cashMovement: cashAgg._sum.amount ?? 0,
+      cashMovement,
       /** Settles liabilities rather than earning or spending. */
       settlements: {
         payouts: -of('payout'),
         walletTopUps: of('topup'),
       },
       /** Profit as a share of revenue. Null rather than zero when nothing sold. */
-      marginRate: revenue > 0 ? (profitAgg._sum.amount ?? 0) / revenue : null,
+      marginRate: revenue > 0 ? profit / revenue : null,
       entryCounts: Object.fromEntries(countOf),
     }
   }
 
   /** The statement lines themselves, newest first, for an admin to read. */
-  async entries(limit = 200) {
+  /**
+   * The raw ledger, for whoever needs to see further than the newest slice.
+   *
+   * `limit` alone used to be the only handle on this — safe from a memory
+   * standpoint, but once the table has more than a few hundred rows, the
+   * newest `limit` of them is *all* an admin can ever reach, with no filter
+   * to narrow down to what they actually came looking for and no way to page
+   * past it. `cursor` (an entry's own `id`, from a previous page's last row)
+   * pages backward in time from there; the other filters narrow the same
+   * query rather than filtering client-side over whatever page happened to
+   * load.
+   */
+  async entries(options: {
+    limit?: number
+    kind?: LedgerKind
+    since?: Date
+    until?: Date
+    orderRef?: string
+    userId?: string
+    cursor?: string
+  } = {}) {
+    const { limit = 200, kind, since, until, orderRef, userId, cursor } = options
+
     const rows = await this.prisma.ledgerEntry.findMany({
+      where: {
+        ...(kind ? { kind } : {}),
+        ...(orderRef ? { orderRef } : {}),
+        ...(userId ? { userId } : {}),
+        ...(since || until
+          ? { occurredAt: { ...(since ? { gte: since } : {}), ...(until ? { lte: until } : {}) } }
+          : {}),
+      },
       orderBy: { occurredAt: 'desc' },
       take: limit,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     })
 
     return rows.map((row) => ({

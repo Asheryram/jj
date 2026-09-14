@@ -442,7 +442,9 @@ export function AppShell() {
               type="button"
               onClick={logout}
               aria-label="Log out"
-              className="rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200"
+              // `before:-inset-1` widens the actual tap target to the app's
+              // 44px minimum without growing the visible hover halo.
+              className="relative rounded-lg p-2 text-slate-500 dark:text-slate-400 before:absolute before:-inset-1 before:content-[''] hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200"
             >
               <LogoutIcon className="size-5" />
             </button>
@@ -555,7 +557,9 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-      className="rounded-lg p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200"
+      // `before:-inset-1` widens the actual tap target to the app's 44px
+      // minimum without growing the visible hover halo.
+      className="relative rounded-lg p-2 text-slate-500 dark:text-slate-400 before:absolute before:-inset-1 before:content-[''] hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200"
     >
       {theme === 'dark' ? <SunIcon className="size-5" /> : <MoonIcon className="size-5" />}
     </button>
@@ -787,7 +791,9 @@ function VisualToasts({
             type="button"
             onClick={() => onDismiss(toast.id)}
             aria-label="Dismiss"
-            className="pointer-events-auto -mt-0.5 -mr-0.5 shrink-0 self-start rounded p-1 opacity-60 hover:opacity-100"
+            // `before:-inset-2.5` widens the actual tap target to the app's
+            // 44px minimum without growing the visible icon or its spacing.
+            className="pointer-events-auto relative -mt-0.5 -mr-0.5 shrink-0 self-start rounded p-1 opacity-60 before:absolute before:-inset-2.5 before:content-[''] hover:opacity-100"
           >
             <XIcon className="size-4" />
           </button>

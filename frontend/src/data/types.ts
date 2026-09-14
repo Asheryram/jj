@@ -171,6 +171,8 @@ export interface Order {
   split: OrderSplit
   /** Referral code of the agent whose sell link was used, if any. */
   soldByCode: string | null
+  /** The agent's name at the moment of sale, frozen alongside `soldByCode`. Null for a direct sale. */
+  soldByAgentName: string | null
   status: OrderStatus
   createdAt: string
   /** When this order actually delivered. Null for anything else, including a failed one. */
