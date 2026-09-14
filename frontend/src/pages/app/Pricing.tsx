@@ -42,6 +42,7 @@ export default function Pricing() {
   const [network, setNetwork] = useState<Network | null>(null)
   const [editing, setEditing] = useState<Product | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   const isChecker = category === 'checker'
   const inCategory = products.filter((p) => p.category === category && p.active)
@@ -61,7 +62,7 @@ export default function Pricing() {
         title="My prices"
         subtitle="You buy at your own cost and charge what you like. The difference is yours."
         action={
-          <Button variant="outline" onClick={() => setBulkOpen(true)}>
+          <Button variant="outline" disabled={bulkBusy} onClick={() => setBulkOpen(true)}>
             <TrendUpIcon className="size-4" /> Apply markup to all
           </Button>
         }
@@ -205,20 +206,28 @@ export default function Pricing() {
         band={editing ? myBand(editing) : null}
         currentPrice={editing ? myResalePrice(editing) : undefined}
         onClose={() => setEditing(null)}
-        onSave={(price) => {
-          if (editing) setAgentPrice(editing.id, price)
+        onSave={async (price) => {
+          if (editing) await setAgentPrice(editing.id, price)
           setEditing(null)
         }}
       />
 
       <BulkMarkupModal
         open={bulkOpen}
+        busy={bulkBusy}
         onClose={() => setBulkOpen(false)}
-        onApply={(percent) => {
-          for (const product of products) {
-            const band = myBand(product)
-            const wanted = Math.round(band.floor * (1 + percent / 100))
-            setAgentPrice(product.id, Math.max(wanted, band.floor))
+        onApply={async (percent) => {
+          setBulkBusy(true)
+          try {
+            await Promise.all(
+              products.map((product) => {
+                const band = myBand(product)
+                const wanted = Math.round(band.floor * (1 + percent / 100))
+                return setAgentPrice(product.id, Math.max(wanted, band.floor))
+              }),
+            )
+          } finally {
+            setBulkBusy(false)
           }
           setBulkOpen(false)
         }}
@@ -238,10 +247,11 @@ function EditPriceModal({
   band: PriceBand | null
   currentPrice?: number
   onClose: () => void
-  onSave: (price: number) => void
+  onSave: (price: number) => Promise<void>
 }) {
   const [value, setValue] = useState('')
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
   // Reset the field whenever a different product is opened.
   const key = product?.id ?? 'none'
@@ -250,6 +260,7 @@ function EditPriceModal({
     setLastKey(key)
     setValue(currentPrice !== undefined ? (currentPrice / 100).toFixed(2) : '')
     setError('')
+    setBusy(false)
   }
 
   if (!product || !band) return null
@@ -257,13 +268,18 @@ function EditPriceModal({
   const parsed = parseCedis(value)
   const margin = parsed === null ? null : parsed - band.floor
 
-  const save = () => {
+  const save = async () => {
     const problem = validateResalePrice(parsed, band)
     if (problem) {
       setError(problem)
       return
     }
-    onSave(parsed as number)
+    setBusy(true)
+    try {
+      await onSave(parsed as number)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -323,10 +339,10 @@ function EditPriceModal({
         )}
 
         <div className="flex gap-2">
-          <Button block onClick={save}>
+          <Button block loading={busy} onClick={() => void save()}>
             Save price
           </Button>
-          <Button block variant="outline" onClick={onClose}>
+          <Button block variant="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
         </div>
@@ -337,12 +353,14 @@ function EditPriceModal({
 
 function BulkMarkupModal({
   open,
+  busy,
   onClose,
   onApply,
 }: {
   open: boolean
+  busy: boolean
   onClose: () => void
-  onApply: (percent: number) => void
+  onApply: (percent: number) => Promise<void>
 }) {
   const [percent, setPercent] = useState(15)
 
@@ -379,10 +397,10 @@ function BulkMarkupModal({
         </Callout>
 
         <div className="flex gap-2">
-          <Button block onClick={() => onApply(percent)}>
+          <Button block loading={busy} onClick={() => void onApply(percent)}>
             Apply +{percent}% to all
           </Button>
-          <Button block variant="outline" onClick={onClose}>
+          <Button block variant="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
         </div>

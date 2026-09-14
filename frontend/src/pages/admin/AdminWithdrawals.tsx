@@ -38,10 +38,27 @@ type Filter = 'pending' | 'all'
  * forward at all.
  */
 export default function AdminWithdrawals() {
-  const { withdrawals, decideWithdrawal, users } = useStore()
+  const { withdrawals, decideWithdrawal, users, pushToast } = useStore()
   const [filter, setFilter] = useState<Filter>('pending')
   const [reviewing, setReviewing] = useState<WithdrawalRequest | null>(null)
   const [settling, setSettling] = useState<WithdrawalRequest | null>(null)
+  const [deciding, setDeciding] = useState(false)
+
+  const decide = async (status: 'approved' | 'rejected') => {
+    if (!reviewing) return
+    setDeciding(true)
+    try {
+      await decideWithdrawal(reviewing.id, status)
+      setReviewing(null)
+    } catch (caught) {
+      pushToast({
+        tone: 'error',
+        title: caught instanceof ApiError ? caught.message : 'We could not save that.',
+      })
+    } finally {
+      setDeciding(false)
+    }
+  }
 
   const pending = withdrawals.filter((w) => w.status === 'pending')
   const visible = filter === 'pending' ? pending : withdrawals
@@ -256,21 +273,18 @@ export default function AdminWithdrawals() {
             <div className="flex gap-2">
               <Button
                 block
-                disabled={isSuspended(reviewing.userId)}
-                onClick={() => {
-                  decideWithdrawal(reviewing.id, 'approved')
-                  setReviewing(null)
-                }}
+                loading={deciding}
+                disabled={deciding || isSuspended(reviewing.userId)}
+                onClick={() => void decide('approved')}
               >
                 <CheckIcon className="size-4" /> Approve
               </Button>
               <Button
                 block
                 variant="danger"
-                onClick={() => {
-                  decideWithdrawal(reviewing.id, 'rejected')
-                  setReviewing(null)
-                }}
+                loading={deciding}
+                disabled={deciding}
+                onClick={() => void decide('rejected')}
               >
                 <XIcon className="size-4" /> Reject
               </Button>

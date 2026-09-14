@@ -824,6 +824,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     ? `Sent to ${fresh.recipient}. You earned ${(share.margin / 100).toFixed(2)} cedis.`
                     : `Sent to ${fresh.recipient}. An SMS confirmation is on its way.`,
               })
+            } else if (fresh.paymentCollected === false) {
+              // The Mobile Money charge itself never went through — nothing was
+              // ever taken, so "refund" language here would be a lie. See
+              // `Order.paymentCollected`'s own comment.
+              pushToast({
+                tone: 'error',
+                title: 'Payment did not go through',
+                detail: 'Nothing was taken from you. You can try again whenever you are ready.',
+              })
             } else {
               // Careful with the tense. A refund is authorised by a person, so
               // at this moment the money is owed rather than returned.

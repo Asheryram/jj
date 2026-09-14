@@ -6,8 +6,18 @@
 // amount below is `Int`.
 //
 // CHECK constraints that the schema language cannot express (balance >= 0,
-// resale_price >= floor, the split-balances invariant) live in
-// scripts/constraints.sql and are applied by `npm run setup`.
+// resale_price >= floor) live in scripts/constraints.sql and are applied by
+// `npm run setup`.
+//
+// One invariant that reads like it belongs there does not: `sale_price =
+// supplier_cost + Σ margins` on `orders.split`. A CHECK constraint cannot
+// walk a jsonb array without a set-returning function, and Postgres refuses
+// one of those in a CHECK at all — so this is enforced by staying correct at
+// the one place `split` is ever written (`domain/pricing.ts`), and watched
+// for drift two other ways instead: on demand by `scripts/money-audit.ts`,
+// and automatically, every 30 minutes, over recent orders, by
+// `SolvencyService`'s own periodic check — see its own comment for why that
+// one is scoped to a recent window rather than every order ever.
 
 generator client {
   provider = "prisma-client-js"
@@ -211,6 +221,7 @@ model User {
   brandingRequests BrandingRequest[]
   setupTokens      SetupToken[]
   customDomain     CustomDomain?
+  ledgerEntries    LedgerEntry[]
 
   /**
    * One profile per role per person.
@@ -341,6 +352,10 @@ model SupplierDispatch {
 
   @@index([orderId])
   @@index([outcome])
+  /// The fastest-growing table in the schema, and a good first candidate for
+  /// a retention/archival policy — this at least keeps a date-scoped query
+  /// (or a future archival sweep) off a full scan in the meantime.
+  @@index([createdAt])
   @@map("supplier_dispatches")
 }
 
@@ -443,7 +458,11 @@ model AgentPrice {
   productId   String @map("product_id")
   resalePrice Int    @map("resale_price")
 
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Not a cascade — see `LedgerEntry`'s comment on why deleting a user must
+  /// never silently take financial-audit-adjacent rows down with it. Nothing
+  /// deletes a user today; `UserStatus.suspended` is the real, non-destructive
+  /// alternative already in use.
+  user    User    @relation(fields: [userId], references: [id], onDelete: Restrict)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@id([userId, productId])
@@ -554,11 +573,30 @@ model Order {
   /// Money owed back on this order, once a human has authorised it.
   refundRequest RefundRequest?
 
+  /// Every ledger line about this order, by its `reference` — not an id FK,
+  /// since the ledger denormalises the reference string itself.
+  ledgerEntries LedgerEntry[]
+
   @@index([soldByCode])
   @@index([status])
   @@index([createdAt])
   @@index([buyerPhone])
   @@index([reference, buyerPhone])
+  /// The pervasive query shape across admin.service.ts/orders.service.ts/
+  /// reconciler.service.ts: filter by status, sort by createdAt. The single-
+  /// column indexes above satisfy one half each; Postgres cannot use both to
+  /// answer the same query.
+  @@index([status, createdAt])
+  /// `admin.service.ts`'s "going quiet" agent check, and any future report
+  /// scoped to one seller's orders over time.
+  @@index([soldByCode, createdAt])
+  /// Every customer's order-history load, and the admin Users page's
+  /// `boughtCounts` groupBy — both filter on this with no index today.
+  @@index([buyerUserId])
+  /// Queried all-time on every Overview load; a small-minority boolean is
+  /// exactly what an index (or, later, a partial one on `refunded = true`)
+  /// is for.
+  @@index([refunded])
   @@map("orders")
 }
 
@@ -575,7 +613,10 @@ model Transaction {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Not a cascade — same reasoning as `AgentPrice.user`: a customer's wallet
+  /// history is financial-audit-adjacent, and must not silently vanish just
+  /// because nothing stops a future delete of the user row.
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   /// Idempotency: one wallet movement per (user, reference, type). A replayed
   /// provider callback cannot credit twice.
@@ -599,7 +640,9 @@ model Earning {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Not a cascade — an agent's earnings ledger is exactly the audit trail
+  /// this whole change protects; see `AgentPrice.user`'s comment.
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@unique([userId, reference, type])
   @@index([userId, createdAt])
@@ -642,10 +685,23 @@ model Withdrawal {
   requestedAt DateTime  @default(now()) @map("requested_at")
   decidedAt   DateTime? @map("decided_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Not a cascade — see `LedgerEntry`'s own comment on why a payout with
+  /// ledger history must block the agent's own row from ever being deleted,
+  /// same reasoning as the User relation below, changed alongside it.
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  /// Every ledger line about this payout, by its `id`.
+  ledgerEntries LedgerEntry[]
 
   @@index([status])
   @@index([userId])
+  /// The admin queue sorts the whole table by this with no index today.
+  @@index([requestedAt])
+  /// `SolvencyService.transfersSince()` and "reconcile everything settled
+  /// last week" both filter on this.
+  @@index([paidAt])
+  /// `sendPayout`'s recipient-code reuse lookup scans by this on every payout.
+  @@index([agentPhone])
   @@map("withdrawals")
 }
 
@@ -806,8 +862,13 @@ model Payment {
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
+  /// Every ledger line about this payment, by its `reference`.
+  ledgerEntries LedgerEntry[]
+
   @@index([status])
   @@index([userId])
+  /// "Reconcile everything settled last week" is a full scan on this today.
+  @@index([paidAt])
   @@map("payments")
 }
 
@@ -906,11 +967,23 @@ model LedgerEntry {
 
   /// What this entry is about. All optional: a top-up has no order, a supplier
   /// cost has no payment.
-  orderRef     String? @map("order_ref")
-  paymentRef   String? @map("payment_ref")
-  withdrawalId String? @map("withdrawal_id")
+  ///
+  /// All four are real, enforced foreign keys, `onDelete: Restrict` — nothing
+  /// deletes an Order, Payment, Withdrawal or User today, but "the one place
+  /// that answers what this business actually made" is exactly the row that
+  /// must never point at a typo or a since-vanished record with nothing to
+  /// say so. A restrict, not a cascade or a null-out: if anything ever does
+  /// try to delete one of those while ledger history still points at it, the
+  /// audit trail is what wins, not the delete.
+  orderRef     String?     @map("order_ref")
+  order        Order?      @relation(fields: [orderRef], references: [reference], onDelete: Restrict)
+  paymentRef   String?     @map("payment_ref")
+  payment      Payment?    @relation(fields: [paymentRef], references: [reference], onDelete: Restrict)
+  withdrawalId String?     @map("withdrawal_id")
+  withdrawal   Withdrawal? @relation(fields: [withdrawalId], references: [id], onDelete: Restrict)
   /// The agent or customer this entry concerns, when it concerns one.
-  userId       String? @map("user_id")
+  userId       String?     @map("user_id")
+  user         User?       @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   /// When the money actually moved, which is not always when this was written —
   /// a backfilled or reconciled entry is dated by its event.
@@ -921,6 +994,14 @@ model LedgerEntry {
   @@index([occurredAt])
   @@index([orderRef])
   @@index([userId])
+  /// A real foreign key still benefits from its own index — Postgres does
+  /// not create one automatically, and a payout's own ledger trail (among
+  /// other lookups) filters directly on these two.
+  @@index([paymentRef])
+  @@index([withdrawalId])
+  /// `LedgerService.statement()`'s own query shape: filter by kind, sum/sort
+  /// within a window.
+  @@index([kind, occurredAt])
   @@map("ledger_entries")
 }
 
@@ -968,7 +1049,11 @@ model RefundRequest {
 
   /// One per order. A second failure on the same order does not owe twice.
   orderId String @unique @map("order_id")
-  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// Not a cascade — inconsistent with `Payment.orderId`'s `SET NULL` on the
+  /// same event was the actual bug: a cascade here would silently destroy
+  /// proof that a real payout was authorised and sent, the one thing this
+  /// table exists to keep. Nothing deletes an order today.
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
   /// Denormalised so the queue still renders if the order is later archived.
   orderRef    String @map("order_ref")
@@ -1019,6 +1104,10 @@ model RefundRequest {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([status])
+  /// "Reconcile everything settled last week" is a full scan on this today.
+  @@index([createdAt])
+  /// `SolvencyService.transfersSince()` filters on this.
+  @@index([paidAt])
   @@map("refund_requests")
 }
 

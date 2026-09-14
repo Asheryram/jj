@@ -570,7 +570,12 @@ export class AdminController {
 
   @Get('reports/revenue')
   revenue(@Query('days') days?: string) {
-    return this.admin.revenueByDay(days ? Number(days) : 7)
+    // Same clamp as `finance/statement` — an unbounded `?days=` here used to
+    // size a query's parameter count to however many orders matched, not a
+    // fixed shape; large enough and that hits Postgres's own bind-parameter
+    // ceiling outright, not just slowness.
+    const window = Math.min(365, Math.max(1, Number(days) || 7))
+    return this.admin.revenueByDay(window)
   }
 }
 

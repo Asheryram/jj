@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { momoLabel, useStore } from '../state/store'
+import { useStore } from '../state/store'
 import { useShopPath } from '../lib/shopPath'
 import { api } from '../lib/api'
 import { checkoutTotal } from '../lib/pricing'
 import { cedis, dateTime } from '../lib/format'
-import { NETWORKS, checkPhone, prettyPhone } from '../lib/networks'
-import type { Network, OrderSplit } from '../data/types'
+import { checkPhone, prettyPhone } from '../lib/networks'
+import type { OrderSplit } from '../data/types'
 import { CATEGORY_META } from '../components/categories'
 import {
   Badge,
@@ -75,7 +75,6 @@ export default function Buy() {
   const [ownNumber, setOwnNumber] = useState(true)
   const [buyerPhone, setBuyerPhone] = useState('')
   const [payChoice, setPayChoice] = useState<'wallet' | 'momo' | null>(null)
-  const [momoNetwork, setMomoNetwork] = useState<Network>('MTN')
   const [orderId, setOrderId] = useState<string | null>(null)
   const [placing, setPlacing] = useState(false)
   const [failure, setFailure] = useState('')
@@ -456,26 +455,6 @@ export default function Buy() {
                 detail="You will get a prompt on your phone. Handled by Paystack."
               />
             </div>
-
-            {payWith === 'momo' && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {NETWORKS.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() => setMomoNetwork(option)}
-                    className={cn(
-                      'rounded-xl border px-3 py-2 text-sm font-semibold',
-                      momoNetwork === option
-                        ? 'border-brand-600 bg-brand-700 text-white'
-                        : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
-                    )}
-                  >
-                    {momoLabel(option)}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           <dl className="mt-4 space-y-2.5 border-t border-slate-100 dark:border-slate-800 pt-4 text-sm">
@@ -683,6 +662,50 @@ export default function Buy() {
                   <Link to={session ? '/app/orders' : shopPath('/track')} className="flex-1">
                     <Button block variant="outline">
                       <ReceiptIcon className="size-4" /> {session ? 'My orders' : 'Track order'}
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </Card>
+          ) : placed.paymentCollected === false ? (
+            /*
+             * The Mobile Money charge itself never went through — declined PIN,
+             * insufficient funds, the prompt timed out. Nothing was ever taken,
+             * so refund language here would be a lie, and this is the single
+             * most common failure in MoMo checkout, not the rare "paid but
+             * delivery failed" case the other branch below is actually about.
+             */
+            <Card className="mt-3 overflow-hidden">
+              <div className="bg-red-600 px-5 py-6 text-center text-white">
+                <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-white/15">
+                  <XIcon className="size-7" strokeWidth={2.4} />
+                </span>
+                <p className="mt-3 text-lg font-bold">That payment did not go through</p>
+                <p className="mt-0.5 text-sm text-red-100">Nothing was taken from you.</p>
+              </div>
+              <div className="space-y-4 p-5">
+                <Callout tone="info" icon={<AlertIcon className="size-4" />}>
+                  This can happen from a declined PIN, insufficient funds, or the Mobile Money
+                  prompt timing out. You can try again whenever you are ready.
+                </Callout>
+                <dl className="space-y-2.5 text-sm">
+                  <Line label="Reference" value={placed.reference} />
+                  <Line label="Recipient" value={prettyPhone(placed.recipient)} />
+                </dl>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    block
+                    className="flex-1"
+                    onClick={() => {
+                      setOrderId(null)
+                      setStep(2)
+                    }}
+                  >
+                    <RefreshIcon className="size-4" /> Try again
+                  </Button>
+                  <Link to={shopPath('/shop')} className="flex-1">
+                    <Button block variant="outline">
+                      Choose another bundle
                     </Button>
                   </Link>
                 </div>

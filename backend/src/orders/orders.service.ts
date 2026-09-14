@@ -667,19 +667,35 @@ export class OrdersService {
     const row = await this.prisma.order.findUnique({ where: { id } })
     if (!row) throw new NotFoundError('We could not find that order.')
 
+    /**
+     * Only meaningful when `status === 'failed'`, and only computed then: a
+     * `RefundRequest` exists exactly when `FulfilmentService.settle` decided
+     * money had actually been collected (see its own `collected` check), so
+     * its presence is the one clean signal that tells apart two very
+     * different failures a buyer can land on — a Mobile Money charge that
+     * never went through at all (nothing to give back) from a payment that
+     * succeeded and a delivery that then failed (a refund genuinely owed).
+     * Without it, both read identically as "failed", and showing refund
+     * language for a charge that was never taken is its own broken promise.
+     */
+    const paymentCollected =
+      row.status === 'failed'
+        ? (await this.prisma.refundRequest.findUnique({ where: { orderId: row.id }, select: { id: true } })) !== null
+        : undefined
+
     // A guest polling their own just-placed order has no session, so ownership is
     // proven by the reference in the URL plus nothing else — the id is a uuid and
     // unguessable, which is the same bearer-token logic a payment link uses.
-    if (!user) return toTrackedOrder(row)
+    if (!user) return { ...toTrackedOrder(row), paymentCollected }
 
-    if (isAdminRole(user.role)) return toOrder(row)
+    if (isAdminRole(user.role)) return { ...toOrder(row), paymentCollected }
 
     const mine =
       row.buyerUserId === user.id ||
       row.buyerPhone === user.phone ||
       (row.soldByCode !== null && (await this.downlineCodes(user.referralCode)).includes(row.soldByCode))
 
-    return mine ? toOrder(row) : toTrackedOrder(row)
+    return mine ? { ...toOrder(row), paymentCollected } : { ...toTrackedOrder(row), paymentCollected }
   }
 
   /** FR-4.9 — a guest looks up an order with its reference and their number. */

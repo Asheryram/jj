@@ -86,9 +86,25 @@ export class BrandingService {
    * a name keeps the platform's colour, which is almost always what they meant.
    */
   async forShop(sellerCode?: string | null): Promise<PublicBranding> {
-    const platform = await this.prisma.branding.findFirst({ where: { userId: null } })
+    // Never `logoBytes` here — this runs on every storefront render, for both
+    // platform and agent branding, and everything below only ever needs to
+    // know whether a logo exists (`logoMime !== null`), not the up-to-100KB
+    // blob itself. `logo()` above is the endpoint whose actual job is serving
+    // those bytes.
+    const BRANDING_SELECT = {
+      shopName: true,
+      brandColor: true,
+      brandColorDark: true,
+      logoMime: true,
+    } as const
 
-    let agent: Awaited<ReturnType<typeof this.prisma.branding.findFirst>> = null
+    const platform = await this.prisma.branding.findFirst({
+      where: { userId: null },
+      select: BRANDING_SELECT,
+    })
+
+    let agent: { shopName: string | null; brandColor: string | null; brandColorDark: string | null; logoMime: string | null } | null =
+      null
     let agentKey: string | null = null
 
     if (sellerCode) {
@@ -97,7 +113,7 @@ export class BrandingService {
         select: { id: true, referralCode: true },
       })
       if (owner) {
-        agent = await this.prisma.branding.findUnique({ where: { userId: owner.id } })
+        agent = await this.prisma.branding.findUnique({ where: { userId: owner.id }, select: BRANDING_SELECT })
         agentKey = owner.referralCode
       }
     }
@@ -113,9 +129,9 @@ export class BrandingService {
 
     // Only offer a logo URL when there are bytes behind it, so the client never
     // renders a broken image where a mark should be.
-    const logoUrl = agent?.logoBytes
+    const logoUrl = agent?.logoMime
       ? `/api/branding/logo/${encodeURIComponent(agentKey ?? '')}`
-      : platform?.logoBytes
+      : platform?.logoMime
         ? '/api/branding/logo/platform'
         : null
 
@@ -126,7 +142,7 @@ export class BrandingService {
       brandColorDark: derivedDark.requested,
       rampDark: derivedDark.ramp,
       logoUrl,
-      custom: Boolean(agent?.shopName || agent?.brandColor || agent?.logoBytes),
+      custom: Boolean(agent?.shopName || agent?.brandColor || agent?.logoMime),
     }
   }
 
@@ -150,11 +166,23 @@ export class BrandingService {
 
   /** What an agent currently has live, plus anything they have submitted. */
   async mine(userId: string) {
+    // `hasLogo` below only ever needs `logoMime !== null` — never the blob.
     const [live, pending] = await Promise.all([
-      this.prisma.branding.findUnique({ where: { userId } }),
+      this.prisma.branding.findUnique({
+        where: { userId },
+        select: { shopName: true, brandColor: true, brandColorDark: true, logoMime: true },
+      }),
       this.prisma.brandingRequest.findFirst({
         where: { userId, status: 'pending' },
         orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          shopName: true,
+          brandColor: true,
+          brandColorDark: true,
+          logoMime: true,
+          createdAt: true,
+        },
       }),
     ])
 
@@ -170,7 +198,7 @@ export class BrandingService {
             shopName: live.shopName,
             brandColor: live.brandColor,
             brandColorDark: live.brandColorDark,
-            hasLogo: Boolean(live.logoBytes),
+            hasLogo: live.logoMime !== null,
           }
         : null,
       pending: pending
@@ -179,7 +207,7 @@ export class BrandingService {
             shopName: pending.shopName,
             brandColor: pending.brandColor,
             brandColorDark: pending.brandColorDark,
-            hasLogo: Boolean(pending.logoBytes),
+            hasLogo: pending.logoMime !== null,
             createdAt: pending.createdAt.toISOString(),
           }
         : null,
@@ -283,10 +311,25 @@ export class BrandingService {
 
   /** Everything waiting to be reviewed, oldest first. */
   async queue(status: 'pending' | 'approved' | 'rejected' = 'pending') {
+    // Never `logoBytes` here — up to 100 rows, and only `requestLogo` below
+    // (the endpoint whose actual job is serving the image) needs the blob.
     const rows = await this.prisma.brandingRequest.findMany({
       where: { status },
       orderBy: { createdAt: 'asc' },
       take: 100,
+      select: {
+        id: true,
+        agentName: true,
+        agentCode: true,
+        shopName: true,
+        brandColor: true,
+        brandColorDark: true,
+        logoMime: true,
+        status: true,
+        note: true,
+        createdAt: true,
+        decidedAt: true,
+      },
     })
 
     return rows.map((row) => ({
@@ -297,7 +340,7 @@ export class BrandingService {
       brandColor: row.brandColor,
       brandColorDark: row.brandColorDark,
       /** Preview URL for the submitted logo — the pending one, not the live one. */
-      logoUrl: row.logoBytes ? `/api/admin/branding/requests/${row.id}/logo` : null,
+      logoUrl: row.logoMime ? `/api/admin/branding/requests/${row.id}/logo` : null,
       status: row.status,
       note: row.note,
       createdAt: row.createdAt.toISOString(),

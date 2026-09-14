@@ -3,8 +3,8 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useStore } from '../state/store'
 import { useShopPath } from '../lib/shopPath'
-import { Button, Card, Spinner } from '../components/ui'
-import { AlertIcon, CheckIcon, ClockIcon, SearchIcon } from '../components/icons'
+import { Button, Card, CopyField, Spinner } from '../components/ui'
+import { CheckIcon, ClockIcon, SearchIcon } from '../components/icons'
 
 /**
  * Where Paystack sends the customer back to.
@@ -14,14 +14,19 @@ import { AlertIcon, CheckIcon, ClockIcon, SearchIcon } from '../components/icons
  * with a motive to claim success, so this asks our server, which asks Paystack —
  * `?status=success` in a query string would be a forgeable claim about money.
  *
- * Three outcomes, and the middle one matters most:
+ * Three outcomes, and none of them dead-end here:
  *
  *  · **paid** — straight to the receipt, where the delivery is watched as usual.
+ *  · **failed** — Paystack says it will not be paid (a declined PIN, insufficient
+ *    funds — the single most common outcome in Mobile Money checkout). Resumed
+ *    straight back into the same checkout via `finish()`, exactly like a
+ *    successful payment resumes to its receipt, rather than shown a static
+ *    dead-end here — re-typing the phone number from scratch is not a real
+ *    recovery path for the most ordinary failure this page sees.
  *  · **pending** — Mobile Money in Ghana finishes on the customer's handset, so
  *    coming back before approving the prompt is normal. Polled for a short
- *    while, then handed off with a reference rather than declared failed.
- *  · **failed** — Paystack says it will not be paid. Said plainly, with the
- *    assurance that nothing was taken.
+ *    while, then handed off to Track order with the reference rather than left
+ *    on static text forever.
  */
 export default function PaymentReturn() {
   const [params] = useSearchParams()
@@ -30,9 +35,7 @@ export default function PaymentReturn() {
   const shopPath = useShopPath()
 
   const reference = params.get('reference') ?? params.get('trxref') ?? ''
-  const [state, setState] = useState<'checking' | 'pending' | 'failed' | 'missing'>(
-    reference ? 'checking' : 'missing',
-  )
+  const [state, setState] = useState<'checking' | 'pending' | 'missing'>(reference ? 'checking' : 'missing')
   const attempts = useRef(0)
 
   const finish = useCallback(async () => {
@@ -81,7 +84,11 @@ export default function PaymentReturn() {
           return
         }
         if (status === 'failed') {
-          setState('failed')
+          // Resume the checkout it actually failed on, same as a successful
+          // payment resumes to its receipt — a declined PIN or insufficient
+          // funds is the single most common outcome here, and re-typing the
+          // phone number from scratch is not a real recovery path for it.
+          void finish()
           return
         }
 
@@ -89,11 +96,24 @@ export default function PaymentReturn() {
         // is the ordinary case rather than an error — give it about a minute
         // before handing over to the reference.
         setState('pending')
-        if (attempts.current < 20) timer = window.setTimeout(check, 3000)
+        if (attempts.current < 20) {
+          timer = window.setTimeout(check, 3000)
+        } else {
+          // The poll has run its course. Ghanaian MoMo confirmations routinely
+          // take longer than a minute, so this is not a failure — but sitting
+          // on static text forever with no way out is. Track order is the
+          // honest handoff: it looks the order up by the reference this page
+          // still holds, same as `finish()`'s own fallback.
+          navigate(`${shopPath('/track')}?ref=${encodeURIComponent(reference)}`, { replace: true })
+        }
       } catch {
         if (!live) return
         setState('pending')
-        if (attempts.current < 20) timer = window.setTimeout(check, 3000)
+        if (attempts.current < 20) {
+          timer = window.setTimeout(check, 3000)
+        } else {
+          navigate(`${shopPath('/track')}?ref=${encodeURIComponent(reference)}`, { replace: true })
+        }
       }
     }
 
@@ -128,22 +148,9 @@ export default function PaymentReturn() {
             <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
               Nothing has been taken yet. Your bundle is sent as soon as the payment lands.
             </p>
-            <p className="tabular mt-4 text-xs text-slate-500 dark:text-slate-400">Reference {reference}</p>
-          </>
-        )}
-
-        {state === 'failed' && (
-          <>
-            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400">
-              <AlertIcon className="size-7" />
-            </span>
-            <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">That payment did not go through</p>
-            <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
-              Nothing was taken from you. You can try again whenever you are ready.
-            </p>
-            <Link to={shopPath('/shop')} className="mt-4 inline-block">
-              <Button>Back to shop</Button>
-            </Link>
+            <div className="mt-4 text-left">
+              <CopyField label="Reference" value={reference} mono />
+            </div>
           </>
         )}
 
@@ -163,7 +170,7 @@ export default function PaymentReturn() {
           </>
         )}
 
-        {state !== 'failed' && state !== 'missing' && (
+        {state !== 'missing' && (
           <p className="mt-5 text-xs text-slate-400 dark:text-slate-500">
             <CheckIcon className="mr-1 inline size-3.5" />
             Payments are handled by Paystack. We never see your PIN or card details.

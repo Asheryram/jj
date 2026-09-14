@@ -274,8 +274,8 @@ export default function Refunds() {
         request={sending}
         onClose={() => setSending(null)}
         onSend={async (row, network) => {
-          setSending(null)
           await approve(row, network)
+          setSending(null)
         }}
       />
 
@@ -838,17 +838,28 @@ function SendRefundModal({
   onSend: (row: RefundRequest, network: Network) => Promise<void>
 }) {
   const [network, setNetwork] = useState<Network>('MTN')
+  const [busy, setBusy] = useState(false)
 
   const key = request?.id ?? 'none'
   const [lastKey, setLastKey] = useState(key)
   if (key !== lastKey) {
     setLastKey(key)
     setNetwork(request?.momoNetwork ?? 'MTN')
+    setBusy(false)
   }
 
   if (!request) return null
 
   const known = request.momoNetwork !== null
+
+  const submit = async () => {
+    setBusy(true)
+    try {
+      await onSend(request, network)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <Modal open onClose={onClose} title={`Send ${cedis(request.amount)} back`}>
@@ -887,10 +898,10 @@ function SendRefundModal({
         )}
 
         <div className="flex gap-2">
-          <Button block onClick={() => void onSend(request, network)}>
+          <Button block loading={busy} onClick={() => void submit()}>
             Send {cedis(request.amount)}
           </Button>
-          <Button block variant="outline" onClick={onClose}>
+          <Button block variant="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
         </div>

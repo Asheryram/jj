@@ -134,6 +134,14 @@ export default function Withdrawals() {
                               ? 'Could not be sent — returned to you'
                               : 'Awaiting review'}
                     </Badge>
+                    {/* "Why it hasn't gone" — a rejection or a stalled transfer
+                        with no reason shown here reads as unexplained, sending
+                        an agent to support for something already on record. */}
+                    {request.transferNote && (
+                      <p className="mt-1 max-w-xs text-xs text-slate-500 dark:text-slate-400">
+                        {request.transferNote}
+                      </p>
+                    )}
                   </Td>
                   <Td align="right">
                     {request.status === 'pending' && (

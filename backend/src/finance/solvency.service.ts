@@ -4,6 +4,7 @@ import { PaystackClient } from '../payments/paystack.client'
 import { SettingsService } from '../settings/settings.service'
 import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
+import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
 
 /**
  * What is owed, against what there is to pay it with — plus whether Paystack's
@@ -47,6 +48,19 @@ const CHECK_INTERVAL_MS = 30 * 60_000
 /** Pesewas of slack before a mismatch is worth mentioning — timing noise, not a real gap. */
 const DISCREPANCY_TOLERANCE = 100
 
+const SPLIT_MISMATCH_ALERTED_KEY = 'solvencySplitMismatchAlerted'
+/**
+ * How far back `checkSplitInvariant` looks, every 30 minutes.
+ *
+ * `split` is written once, at sale, and never touched again — an order that
+ * already balanced cannot un-balance later, so re-checking every order ever
+ * on every tick would be the exact "grows forever" shape this whole service
+ * just got fixed out of elsewhere. A bug that starts writing bad splits shows
+ * up here within a couple of ticks of the deploy that caused it either way;
+ * `scripts/money-audit.ts` remains the full, all-time check, run on demand.
+ */
+const SPLIT_CHECK_WINDOW_MS = 48 * 60 * 60_000
+
 export interface BalanceReconciliation {
   /** What our own records say Paystack's balance should hold right now, in pesewas. */
   expected: number
@@ -58,10 +72,28 @@ export interface BalanceReconciliation {
   flagged: boolean
 }
 
+/**
+ * How long a computed `expectedBalance()` stays good enough to reuse.
+ *
+ * `position()` (every Reserve panel load) and the 30-minute background poll
+ * both ultimately call this, and both were re-summing every payment,
+ * withdrawal and refund transfer ever made, from scratch, every single time
+ * — cost that only ever grows, forever, as those tables do. A true O(1)
+ * running total needs an atomically-incremented cache hooked into every
+ * place a payment or transfer can confirm (a webhook, a manual settlement, a
+ * retry) — real work, done separately, on a number that directly drives real
+ * payout decisions. This is the safe, contained half in the meantime: a
+ * short memo so the same few minutes' worth of calls share one scan instead
+ * of paying for it again on every request.
+ */
+const EXPECTED_BALANCE_CACHE_MS = 2 * 60_000
+
 @Injectable()
 export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = new Logger(SolvencyService.name)
   private timer: NodeJS.Timeout | null = null
+  private expectedBalanceCache: { value: number; computedAt: number } | null = null
+  private spentOnBundlesCache: { value: number; computedAt: number } | null = null
 
   constructor(
     private readonly prisma: PrismaService,
@@ -86,6 +118,9 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     this.timer = setInterval(() => {
       void this.checkAndAlert().catch((error) =>
         this.log.error(`solvency check failed: ${String(error)}`),
+      )
+      void this.checkSplitInvariant().catch((error) =>
+        this.log.error(`split invariant check failed: ${String(error)}`),
       )
     }, CHECK_INTERVAL_MS)
     this.timer.unref?.()
@@ -125,20 +160,23 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     })
   }
 
-  /** Tell whoever can act on it that Paystack's balance disagrees with our own records. */
-  private async alertMismatch(reconciliation: BalanceReconciliation): Promise<void> {
+  /** Active admins, falling back to superadmins if none exist yet. */
+  private async adminRecipients(): Promise<{ name: string; email: string }[]> {
     const admins = await this.prisma.user.findMany({
       where: { role: 'admin', status: 'active' },
       select: { name: true, email: true },
     })
-    const recipients =
-      admins.length > 0
-        ? admins
-        : await this.prisma.user.findMany({
-            where: { role: 'superadmin', status: 'active' },
-            select: { name: true, email: true },
-          })
+    return admins.length > 0
+      ? admins
+      : this.prisma.user.findMany({
+          where: { role: 'superadmin', status: 'active' },
+          select: { name: true, email: true },
+        })
+  }
 
+  /** Tell whoever can act on it that Paystack's balance disagrees with our own records. */
+  private async alertMismatch(reconciliation: BalanceReconciliation): Promise<void> {
+    const recipients = await this.adminRecipients()
     if (recipients.length === 0) {
       this.log.warn('balance mismatch — nobody to tell')
       return
@@ -195,6 +233,93 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   /**
+   * `sale_price = supplier_cost + Σ margins` cannot be a database CHECK
+   * constraint — see the schema header's own comment — so this is the
+   * automated half of watching it: every recent order, every 30 minutes.
+   * `scripts/money-audit.ts` is the full, all-time version of the same check,
+   * for someone to run by hand.
+   */
+  private async checkSplitInvariant(): Promise<void> {
+    const since = new Date(Date.now() - SPLIT_CHECK_WINDOW_MS)
+    const orders = await this.prisma.order.findMany({
+      where: { createdAt: { gte: since } },
+      select: { reference: true, salePrice: true, split: true },
+    })
+
+    const broken = orders.filter(
+      (o) => splitDiscrepancy(o.salePrice, o.split as unknown as OrderSplit) !== 0,
+    )
+
+    const wasAlerted = await this.wasSplitAlerted()
+    if (broken.length > 0 && !wasAlerted) {
+      await this.setSplitAlerted(true)
+      await this.alertSplitMismatch(broken.map((o) => o.reference))
+    } else if (broken.length === 0 && wasAlerted) {
+      await this.setSplitAlerted(false)
+      this.log.log('split invariant mismatch cleared')
+    }
+  }
+
+  private async wasSplitAlerted(): Promise<boolean> {
+    const row = await this.prisma.setting.findUnique({ where: { key: SPLIT_MISMATCH_ALERTED_KEY } })
+    return row?.value === true
+  }
+
+  private async setSplitAlerted(value: boolean): Promise<void> {
+    await this.prisma.setting.upsert({
+      where: { key: SPLIT_MISMATCH_ALERTED_KEY },
+      create: { key: SPLIT_MISMATCH_ALERTED_KEY, value },
+      update: { value },
+    })
+  }
+
+  /** Tell whoever can act on it that a recent order's split does not add up. */
+  private async alertSplitMismatch(references: string[]): Promise<void> {
+    const recipients = await this.adminRecipients()
+    if (recipients.length === 0) {
+      this.log.warn(`split invariant broken on ${references.join(', ')} — nobody to tell`)
+      return
+    }
+
+    const shopName = await this.platformName()
+    const list = references.map((r) => escape(r)).join(', ')
+    const explanation =
+      `${references.length} recent order${references.length === 1 ? '' : 's'} — ${list} — ` +
+      `do not add up: the customer's payment does not equal the supplier's cost plus every ` +
+      'margin recorded against it. That should never happen, and it means money was either ' +
+      'created or destroyed at the moment of one of these sales.'
+
+    const body =
+      `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${explanation}</p>` +
+      `<p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;color:#1e293b">This needs a ` +
+      `developer, not an approval — check what changed in how orders are priced or settled. ` +
+      `This note will not repeat until every recent order balances again.</p>`
+    const text =
+      `${explanation}\n\nThis needs a developer, not an approval — check what changed in how ` +
+      'orders are priced or settled. This note will not repeat until every recent order balances again.'
+
+    const subject = `${references.length} order${references.length === 1 ? '' : 's'} do not add up`
+    const html = wrap(
+      shopName,
+      'An order split does not add up',
+      body,
+      `You are getting this because you are an active admin on ${escape(shopName)}.`,
+    )
+
+    for (const recipient of recipients) {
+      await this.mailer
+        .send({ to: recipient.email, subject, html, text })
+        .catch((error) =>
+          this.log.error(`could not tell ${recipient.email} about the split mismatch: ${String(error)}`),
+        )
+    }
+
+    this.log.error(
+      `split invariant broken on ${references.join(', ')} — told ${recipients.map((r) => r.email).join(', ')}`,
+    )
+  }
+
+  /**
    * The reserve position.
    *
    * `available` is the honest answer to "what can I actually spend": the balance
@@ -215,8 +340,6 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       manualRefundReimbursements,
       manualPayoutAdvances,
       manualPayoutReimbursements,
-      bundlesBought,
-      reimbursedToDataHub,
     ] = await Promise.all([
       this.prisma.user.aggregate({ where: { role: 'agent' }, _sum: { balance: true } }),
       this.prisma.user.aggregate({ where: { role: 'customer' }, _sum: { balance: true } }),
@@ -314,31 +437,6 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         where: { kind: 'capital_out', withdrawalId: { not: null } },
         select: { withdrawalId: true },
       }),
-      /**
-       * Every bundle ever bought, all-time. That money came out of the
-       * DataHub float, never out of Paystack directly — the matching customer
-       * payment for each one is still sitting in `expectedAtPaystack` in
-       * full, untouched. But the float does not refill itself: sooner or
-       * later, keeping it funded means moving some of that Paystack money
-       * across to replace what buying those bundles has already spent. So it
-       * is not free to spend on anything else, even though nothing has
-       * physically left Paystack for it yet.
-       */
-      this.prisma.ledgerEntry.aggregate({
-        where: { kind: 'supplier_cost' },
-        _sum: { amount: true },
-      }),
-      /**
-       * Money already moved from Paystack to DataHub specifically to settle
-       * that spending — see `FloatMonitorService.logCapital`'s `source:
-       * 'reimbursement'`. A plain `capital_in` top-up (fresh capital) never
-       * counts here: it funds the float further, it does not pay back what
-       * buying past bundles already cost.
-       */
-      this.prisma.ledgerEntry.aggregate({
-        where: { kind: 'capital_in_reimbursement' },
-        _sum: { amount: true },
-      }),
     ])
 
     const undelivered = heldOrders._sum.salePrice ?? 0
@@ -368,14 +466,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       .reduce((sum, advance) => sum + advance.amount, 0)
     const liabilities =
       owedToAgents + owedToCustomers + undelivered + queuedPayouts + owedForManualRefunds + owedForManualPayouts
-    // supplier_cost entries are stored negative (money leaving the float).
-    // Floored at zero: logging more reimbursement than has ever been spent
-    // should not turn "already spent on bundles" into a negative number that
-    // would add back onto `freeToSpend` instead of merely clearing it.
-    const spentOnBundles = Math.max(
-      0,
-      -(bundlesBought._sum.amount ?? 0) - (reimbursedToDataHub._sum.amount ?? 0),
-    )
+    const spentOnBundles = await this.spentOnBundles()
 
     const expectedAtPaystack = await this.expectedBalance()
 
@@ -616,10 +707,41 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
    * no live call, ever, to compute this.
    */
   private async expectedBalance(): Promise<number> {
+    if (this.expectedBalanceCache && Date.now() - this.expectedBalanceCache.computedAt < EXPECTED_BALANCE_CACHE_MS) {
+      return this.expectedBalanceCache.value
+    }
+
     const [collected, transferred] = await Promise.all([
       this.collectedSince(),
       this.transfersSince(),
     ])
-    return collected - transferred
+    const value = collected - transferred
+    this.expectedBalanceCache = { value, computedAt: Date.now() }
+    return value
+  }
+
+  /**
+   * Every bundle ever bought, all-time, less whatever has already been
+   * reimbursed to the float for it. Same "no date bound, only ever grows"
+   * shape as `expectedBalance()`, and the same short memo for the same
+   * reason — see `EXPECTED_BALANCE_CACHE_MS`'s own comment.
+   */
+  private async spentOnBundles(): Promise<number> {
+    if (this.spentOnBundlesCache && Date.now() - this.spentOnBundlesCache.computedAt < EXPECTED_BALANCE_CACHE_MS) {
+      return this.spentOnBundlesCache.value
+    }
+
+    const [bundlesBought, reimbursedToDataHub] = await Promise.all([
+      this.prisma.ledgerEntry.aggregate({ where: { kind: 'supplier_cost' }, _sum: { amount: true } }),
+      this.prisma.ledgerEntry.aggregate({ where: { kind: 'capital_in_reimbursement' }, _sum: { amount: true } }),
+    ])
+
+    // supplier_cost entries are stored negative (money leaving the float).
+    // Floored at zero: logging more reimbursement than has ever been spent
+    // should not turn "already spent on bundles" into a negative number that
+    // would add back onto `freeToSpend` instead of merely clearing it.
+    const value = Math.max(0, -(bundlesBought._sum.amount ?? 0) - (reimbursedToDataHub._sum.amount ?? 0))
+    this.spentOnBundlesCache = { value, computedAt: Date.now() }
+    return value
   }
 }

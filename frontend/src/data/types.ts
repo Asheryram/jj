@@ -187,6 +187,15 @@ export interface Order {
   voucher?: { serial: string; pin: string }
   /** Set when the order failed and the buyer was refunded (FR-2.7). */
   refunded?: boolean
+  /**
+   * Only meaningful when `status === 'failed'`, undefined otherwise. `false`
+   * means a Mobile Money charge never actually went through — nothing was
+   * ever taken, so there is nothing owed back and nothing to retry except the
+   * payment itself. `true` means the payment succeeded and the delivery
+   * failed afterward, the case `refunded`/refund language actually applies
+   * to. The two read identically as "failed" without this.
+   */
+  paymentCollected?: boolean
   /** How the buyer paid — a wallet, or Mobile Money at checkout. */
   paidWith: 'wallet' | 'momo'
   /** Display name of the buyer; 'Guest' for an account-less purchase. */

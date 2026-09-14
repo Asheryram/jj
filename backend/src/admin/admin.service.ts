@@ -30,7 +30,26 @@ export class AdminService {
   // ── Users (FR-6.4) ────────────────────────────────────────────────────────
 
   async users() {
-    const rows = await this.prisma.user.findMany({ orderBy: { joinedAt: 'asc' } })
+    const rows = await this.prisma.user.findMany({
+      orderBy: { joinedAt: 'asc' },
+      // Bounded, and only the columns this page actually renders — this used
+      // to be a bare `findMany()`, every column including `passwordHash` for
+      // every user ever, on every load. Nothing here needs a hash it never
+      // reads, and nothing here needs more than a sane ceiling on row count.
+      take: 2000,
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        email: true,
+        role: true,
+        status: true,
+        balance: true,
+        referralCode: true,
+        uplineCode: true,
+        joinedAt: true,
+      },
+    })
 
     // Order counts from the orders table, not a stored counter that can drift.
     const counts = await this.prisma.order.groupBy({
@@ -789,12 +808,17 @@ export class AdminService {
   async revenueByDay(days = 7) {
     const since = startOfDayUtc(new Date(), days - 1)
 
-    const rows = await this.prisma.order.findMany({
-      where: { status: 'completed', createdAt: { gte: since } },
-      select: { createdAt: true, salePrice: true, split: true, reference: true },
-    })
-
     /**
+     * One joined query, not `order.findMany` followed by a second query
+     * filtered `orderRef: { in: [...every order just returned] }`. That
+     * second shape sized its own parameter list to however many orders
+     * matched the window — fine at low volume, but a parameter count that
+     * scales with data volume rather than a fixed shape is exactly the kind
+     * of query that stops working outright, not just slowly, once there are
+     * enough orders in a day. A `LEFT JOIN` on the same `orderRef`/`kind`
+     * this used to filter by gets the identical per-order correlation
+     * (never a date-proximity guess) in a single bounded-shape query.
+     *
      * `adminMarginOf` reads `split`'s admin share, which is only ever the
      * catalogue cost frozen in at sale time — the same gap `AdminOrders.tsx`
      * corrects per-order with its own "true margin". This chart gets the same
@@ -803,11 +827,15 @@ export class AdminService {
      * and the frozen estimate is real margin this chart was otherwise missing
      * or overstating whenever the two disagree.
      */
-    const costEntries = await this.prisma.ledgerEntry.findMany({
-      where: { kind: 'supplier_cost', orderRef: { in: rows.map((r) => r.reference) } },
-      select: { orderRef: true, amount: true },
-    })
-    const actualCostByRef = new Map(costEntries.map((e) => [e.orderRef as string, -e.amount]))
+    const rows = await this.prisma.$queryRaw<
+      { reference: string; createdAt: Date; salePrice: number; split: unknown; costAmount: number | null }[]
+    >`
+      SELECT o.reference, o.created_at AS "createdAt", o.sale_price AS "salePrice", o.split,
+             le.amount AS "costAmount"
+      FROM orders o
+      LEFT JOIN ledger_entries le ON le.order_ref = o.reference AND le.kind = 'supplier_cost'
+      WHERE o.status = 'completed' AND o.created_at >= ${since}
+    `
 
     const buckets = emptyDayBuckets(days)
 
@@ -818,7 +846,7 @@ export class AdminService {
       bucket.revenue += row.salePrice
       bucket.orders += 1
       const split = row.split as unknown as OrderSplit
-      const actualCost = actualCostByRef.get(row.reference)
+      const actualCost = row.costAmount != null ? -row.costAmount : undefined
       bucket.platformMargin +=
         actualCost != null ? adminMarginOf(split) + (split.supplierCost - actualCost) : adminMarginOf(split)
     }
