@@ -173,6 +173,16 @@ export interface Order {
   soldByCode: string | null
   status: OrderStatus
   createdAt: string
+  /** When this order actually delivered. Null for anything else, including a failed one. */
+  completedAt: string | null
+  /**
+   * Admin only: when a failed order actually failed. There is no dedicated
+   * column for this the way `completedAt` is one — it is read off the refund
+   * request created in the same transaction that settled the order, so it is
+   * null for the rare failed order that never collected any money at all
+   * (nothing to refund, nothing to time it against).
+   */
+  failedAt?: string | null
   /** Present only for result-checker orders (FR-4.7). */
   voucher?: { serial: string; pin: string }
   /** Set when the order failed and the buyer was refunded (FR-2.7). */

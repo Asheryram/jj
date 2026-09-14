@@ -500,6 +500,15 @@ export default function AdminOrders() {
                           Why?
                         </button>
                       )}
+                      {/* When it actually finished, not just when it was placed
+                          — `completedAt` is exact; a failed order has no
+                          dedicated column for this, so `failedAt` is read off
+                          the refund request settled in the same moment. */}
+                      {(order.completedAt || order.failedAt) && (
+                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          Finished {dateTime(order.completedAt ?? order.failedAt ?? '')}
+                        </p>
+                      )}
                     </Td>
                     <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                       {cedis(order.salePrice)}

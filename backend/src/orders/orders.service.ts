@@ -549,17 +549,28 @@ export class OrdersService {
      */
     const refundRequests = await this.prisma.refundRequest.findMany({
       where: { orderId: { in: rows.map((r) => r.id) } },
-      select: { orderId: true, status: true },
+      select: { orderId: true, status: true, createdAt: true },
     })
     const refundStatusByOrderId = new Map<string, 'pending' | 'approved' | 'rejected'>()
+    /**
+     * A failed order has no dedicated "when it failed" column the way a
+     * delivered one has `completedAt` — but the refund request that pays it
+     * back is written inside the exact same transaction that flips the order
+     * to `failed` (see `FulfilmentService.settle`'s rejected branch), so its
+     * `createdAt` is, for every practical purpose, that same moment.
+     */
+    const refundCreatedAtByOrderId = new Map<string, Date>()
     for (const r of refundRequests) {
       refundStatusByOrderId.set(r.orderId, r.status)
+      refundCreatedAtByOrderId.set(r.orderId, r.createdAt)
     }
 
     return rows.map((row) => ({
       ...toOrder(row),
       actualSupplierCost: actualCostByOrderId.get(row.id) ?? null,
       paystackFee: feeByOrderId.get(row.id) ?? null,
+      /** See `refundCreatedAtByOrderId` above — null for anything that isn't `failed`. */
+      failedAt: row.status === 'failed' ? (refundCreatedAtByOrderId.get(row.id)?.toISOString() ?? null) : null,
       /**
        * How DataHub routed this specific purchase, not something either side
        * chose on this platform. A `manual_`-prefixed reference is their own

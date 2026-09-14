@@ -114,6 +114,8 @@ export function toOrder(row: Order) {
     soldByCode: row.soldByCode,
     status: row.status,
     createdAt: row.createdAt.toISOString(),
+    /** When this order actually delivered. Null for anything else, including a failed one — see `Order.completedAt`. */
+    completedAt: row.completedAt?.toISOString() ?? null,
     paidWith: row.paidWith,
     buyer: row.buyer,
     buyerPhone: row.buyerPhone,
