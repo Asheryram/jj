@@ -564,12 +564,29 @@ export interface RefundRequest {
    */
   agentMargin: number
   /**
+   * Pesewas this order was originally priced against. Reordering at the same
+   * cost the sale already assumed is not a gain, it is this order finally
+   * completing — the "Reorder" preview compares the chosen bundle's cost
+   * today to this, not to zero.
+   */
+  originalCost: number
+  /**
    * Pesewas Paystack actually kept from the original payment — already
    * spent, not something a reorder redoes or gets back. Null for a
    * wallet-paid order, whose fee (if any) was already paid once at top-up
    * time, not against this sale.
    */
   paystackFee: number | null
+  /** Whether this was sold through an agent's own link. */
+  soldByAgent: boolean
+  /**
+   * Pesewas: today's price for this same product — for an agent sale, that
+   * specific agent's own current price (explicit, or their default markup,
+   * priced exactly as a live checkout would); for a direct sale, the standard
+   * walk-up price. A sanity check next to `amount`, not part of the
+   * "Reorder" margin math. Null once the product, or the agent, is gone.
+   */
+  currentSellingPrice: number | null
   orderRef: string
   productName: string
   buyerName: string
@@ -602,6 +619,20 @@ export interface RefundRequest {
   decidedAt: string | null
   /** When the money was confirmed delivered. */
   paidAt: string | null
+}
+
+/**
+ * What actually happened on a reorder attempt — the real answer, not the
+ * preview shown before clicking. DataHub's real charge is never knowable in
+ * advance, only after the purchase is actually placed.
+ */
+export interface ReorderOutcome {
+  outcome: 'delivered' | 'rejected' | 'pending' | 'unknown' | 'needs_approval'
+  reason?: string
+  /** Pesewas DataHub actually charged this attempt. Null when nothing was — a clean pre-flight refusal, a timeout, or an accepted order still awaiting their webhook. */
+  actualCost: number | null
+  /** What this order was originally priced against, for the real number to be compared to. */
+  originalCost: number
 }
 
 export interface ReservePosition {
@@ -869,9 +900,12 @@ export const api = {
    * catalogue (`api.supplierCatalogue`), not assumed from the order's own
    * frozen mapping. Cancels the pending refund automatically if this
    * delivers; otherwise the refund is untouched and still owed.
+   *
+   * Returns what actually happened, not a preview — DataHub's real charge is
+   * only ever known after the purchase is placed, never before.
    */
   reorderOrder: (id: string, note: string, supplierCode: string) =>
-    request<void>(`/orders/${id}/reorder`, { method: 'POST', body: { note, supplierCode } }),
+    request<ReorderOutcome>(`/orders/${id}/reorder`, { method: 'POST', body: { note, supplierCode } }),
 
   /**
    * Clear a flagged conflict once a human has actually checked what happened

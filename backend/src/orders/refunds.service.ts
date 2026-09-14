@@ -5,7 +5,7 @@ import { LedgerService } from '../finance/ledger.service'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import { PaystackClient } from '../payments/paystack.client'
 import { momoCodeFor } from '../payments/momo'
-import type { OrderSplit } from '../domain/pricing'
+import { resalePriceFor, type OrderSplit, type PricingAgent } from '../domain/pricing'
 
 /**
  * Paying back money that is owed, once a person has authorised it.
@@ -45,7 +45,7 @@ export class RefundsService {
       // Just enough of the order to let the "Reorder" picker filter the
       // catalogue to bundles that could actually fulfil this one, and to show
       // what reordering would actually net after the agent's frozen share.
-      include: { order: { select: { network: true, category: true, split: true } } },
+      include: { order: { select: { network: true, category: true, split: true, productId: true, soldByCode: true } } },
     })
 
     /**
@@ -60,6 +60,47 @@ export class RefundsService {
     })
     const feeByOrderId = new Map(payments.filter((p) => p.orderId).map((p) => [p.orderId as string, p.fee]))
 
+    /**
+     * Today's selling price for the same product, for the "Reorder" preview
+     * to sanity-check against — an agent sale against that specific agent's
+     * own current price, a direct sale against the standard one. Purely
+     * informational: the amount actually owed is `row.amount`, frozen at
+     * sale, regardless of what either price has done since.
+     */
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: rows.map((row) => row.order.productId) } },
+      select: { id: true, supplierCost: true, adminPrice: true, standardPrice: true },
+    })
+    const productById = new Map(products.map((p) => [p.id, p]))
+
+    /**
+     * The specific agent an order was sold through, resolved once for every
+     * distinct `soldByCode` in this page — not the wholesale floor everyone
+     * pays, but what *this* agent actually charges, explicit price or their
+     * own default markup, exactly how a live checkout would price it (see
+     * `resalePriceFor`). An agent who has since raised or lowered their own
+     * price shows up here; admin's own wholesale price to agents is a
+     * different, coarser number and is only the fallback once the agent
+     * itself cannot be identified any more.
+     */
+    const soldByCodes = [...new Set(rows.map((row) => row.order.soldByCode).filter((c): c is string => c !== null))]
+    const agentUsers = soldByCodes.length
+      ? await this.prisma.user.findMany({
+          where: { referralCode: { in: soldByCodes } },
+          select: { id: true, referralCode: true, markupPercent: true },
+        })
+      : []
+    const agentPrices = agentUsers.length
+      ? await this.prisma.agentPrice.findMany({
+          where: {
+            userId: { in: agentUsers.map((a) => a.id) },
+            productId: { in: rows.map((row) => row.order.productId) },
+          },
+          select: { userId: true, productId: true, resalePrice: true },
+        })
+      : []
+    const agentByReferralCode = new Map(agentUsers.map((a) => [a.referralCode, a]))
+
     return rows.map((row) => {
       // Frozen at the original sale and unchanged by a reorder — `settle`'s
       // delivered branch always pays an agent this exact amount regardless of
@@ -70,6 +111,7 @@ export class RefundsService {
       const agentMargin = split.shares
         .filter((share) => share.role === 'agent' && share.margin > 0)
         .reduce((sum, share) => sum + share.margin, 0)
+      const product = productById.get(row.order.productId)
 
       return {
         id: row.id,
@@ -80,12 +122,48 @@ export class RefundsService {
         /** Owed to an agent from this exact sale, unchanged by a reorder. */
         agentMargin,
         /**
+         * What this order was originally priced against — see
+         * `Order.supplierCodeAtSale`'s own comment. The "Reorder" modal
+         * compares this to the chosen bundle's cost today: reordering at the
+         * same cost the sale already assumed is not a gain, it is just this
+         * order finally completing, so that comparison is the actual point,
+         * not the raw cost by itself.
+         */
+        originalCost: split.supplierCost,
+        /**
          * What Paystack actually kept from the original payment — already
          * spent, not something a reorder redoes or gets back. Null for a
          * wallet-paid order, whose fee (if any) was booked once already at
          * top-up time, not against this sale.
          */
         paystackFee: feeByOrderId.get(row.orderId) ?? null,
+        /** Whether this was sold through an agent's own link (FR-5.7). */
+        soldByAgent: row.order.soldByCode !== null,
+        /**
+         * Today's price for this same product — for an agent sale, that
+         * specific agent's own current price, explicit or their default
+         * markup, priced exactly as a live checkout would (`resalePriceFor`),
+         * not admin's wholesale floor everyone pays; for a direct sale, the
+         * standard walk-up price. Purely a sanity check, not part of the
+         * margin math below; null once the product, or the agent, is gone.
+         */
+        currentSellingPrice: (() => {
+          if (!product) return null
+          if (!row.order.soldByCode) return product.standardPrice
+          const agent = agentByReferralCode.get(row.order.soldByCode)
+          if (!agent) return product.adminPrice // agent no longer exists — the wholesale floor is the best fallback
+          const pricingAgent: PricingAgent = {
+            userId: agent.id,
+            name: '',
+            referralCode: agent.referralCode,
+            uplineCode: null,
+            markupPercent: agent.markupPercent,
+            prices: agentPrices
+              .filter((p) => p.userId === agent.id)
+              .map((p) => ({ productId: p.productId, resalePrice: p.resalePrice })),
+          }
+          return resalePriceFor(pricingAgent, product)
+        })(),
         orderRef: row.orderRef,
         productName: row.productName,
         buyerName: row.buyerName,

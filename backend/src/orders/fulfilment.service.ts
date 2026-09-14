@@ -29,6 +29,21 @@ const STALE_CLAIM_MS = 5 * 60 * 1000
  * with both a bundle and a refund, or an agent credited for a sale that was
  * actually rejected. See `FulfilmentService.settle`.
  */
+/**
+ * What actually happened on a reorder attempt — the real answer, not the
+ * estimate the admin saw before clicking. DataHub's real charge is never
+ * knowable in advance, only after the purchase is actually placed, so this
+ * is the one place that reports the truth rather than a forecast.
+ */
+export interface ReorderOutcome {
+  outcome: 'delivered' | 'rejected' | 'pending' | 'unknown' | 'needs_approval'
+  reason?: string
+  /** Pesewas DataHub actually charged this attempt. Null when nothing was — a clean pre-flight refusal, a timeout, or an accepted order still awaiting their webhook. */
+  actualCost: number | null
+  /** What this order was originally priced against, for the real number to be compared to. */
+  originalCost: number
+}
+
 export interface SettleResult {
   applied: boolean
   conflict: boolean
@@ -255,7 +270,12 @@ export class FulfilmentService implements OnApplicationBootstrap {
    * what the client claims to have shown: never trust a request body for
    * something that is about to drive a real purchase.
    */
-  async reorder(orderId: string, adminId: string, note: string, supplierCode: string): Promise<void> {
+  async reorder(
+    orderId: string,
+    adminId: string,
+    note: string,
+    supplierCode: string,
+  ): Promise<ReorderOutcome> {
     const reason = note.trim()
     if (reason.length < 5) {
       throw new ValidationError('Say why this is being reordered. It is kept on the record.')
@@ -337,7 +357,21 @@ export class FulfilmentService implements OnApplicationBootstrap {
     )
     await this.dispatchAndHandle({ ...order, supplierCodeAtSale: code }, (lastDispatch?.attempt ?? 0) + 1)
 
-    const after = await this.prisma.order.findUnique({ where: { id: orderId }, select: { status: true } })
+    /**
+     * The real answer, read back from the attempt that just ran — not the
+     * preview the admin saw before clicking. `providerCharged` here is
+     * DataHub's own reply to the purchase actually made a moment ago, the one
+     * number that was never knowable until now.
+     */
+    const [after, thisAttempt] = await Promise.all([
+      this.prisma.order.findUnique({ where: { id: orderId }, select: { status: true } }),
+      this.prisma.supplierDispatch.findFirst({
+        where: { orderId },
+        orderBy: { createdAt: 'desc' },
+        select: { outcome: true, reason: true, providerCharged: true },
+      }),
+    ])
+
     if (after?.status === 'failed') {
       // Rejected again, cleanly — still genuinely owed. Restore the hold.
       await this.prisma.refundRequest.updateMany({
@@ -356,6 +390,13 @@ export class FulfilmentService implements OnApplicationBootstrap {
     // restoring it before this new attempt resolves would reopen exactly the
     // ambiguity this method exists to avoid. It surfaces again on the Needs
     // Attention page like any other unresolved dispatch.
+
+    return {
+      outcome: (thisAttempt?.outcome as ReorderOutcome['outcome']) ?? 'unknown',
+      reason: thisAttempt?.reason ?? undefined,
+      actualCost: thisAttempt?.providerCharged ?? null,
+      originalCost: (order.split as { supplierCost?: number })?.supplierCost ?? 0,
+    }
   }
 
   /**

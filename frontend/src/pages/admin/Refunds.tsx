@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, ApiError, type ManualRefundAdvance, type RefundRequest, type SupplierSku } from '../../lib/api'
+import {
+  api,
+  ApiError,
+  type ManualRefundAdvance,
+  type ReorderOutcome,
+  type RefundRequest,
+  type SupplierSku,
+} from '../../lib/api'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import { prettyPhone } from '../../lib/networks'
@@ -383,6 +390,63 @@ function ManualAdvancesCard() {
 }
 
 /**
+ * The toast for a reorder is built from the real, post-purchase answer, not
+ * the preview shown before clicking — DataHub's actual charge is never
+ * knowable until the purchase has actually been placed.
+ */
+function toastFor(orderRef: string, result: ReorderOutcome): { tone: 'success' | 'error' | 'info'; title: string; detail?: string } {
+  if (result.outcome === 'delivered') {
+    if (result.actualCost === null) {
+      return { tone: 'success', title: `${orderRef}: delivered`, detail: 'The refund is cancelled.' }
+    }
+    const delta = result.originalCost - result.actualCost
+    if (delta === 0) {
+      return {
+        tone: 'success',
+        title: `${orderRef}: delivered, no change`,
+        detail: `Really cost ${cedis(result.actualCost)}, exactly what this was priced against. Refund cancelled.`,
+      }
+    }
+    return {
+      tone: delta > 0 ? 'success' : 'error',
+      title: `${orderRef}: delivered, ${delta > 0 ? 'extra margin' : 'a real loss'} of ${cedis(Math.abs(delta))}`,
+      detail: `Really cost ${cedis(result.actualCost)} against ${cedis(result.originalCost)} originally priced. Refund cancelled.`,
+    }
+  }
+
+  if (result.outcome === 'rejected') {
+    return {
+      tone: 'info',
+      title: `${orderRef}: rejected again`,
+      detail: `${result.reason ?? 'No reason given.'} The refund is restored — still owed, nothing lost.`,
+    }
+  }
+
+  if (result.outcome === 'needs_approval') {
+    return {
+      tone: 'info',
+      title: `${orderRef}: held for number approval`,
+      detail: 'DataHub has to approve this recipient first. The refund stays on hold until that clears one way or another.',
+    }
+  }
+
+  if (result.outcome === 'pending') {
+    return {
+      tone: 'info',
+      title: `${orderRef}: accepted, awaiting confirmation`,
+      detail: 'DataHub has it and will report back. The refund stays on hold until they do.',
+    }
+  }
+
+  // 'unknown' — timed out again, exactly as ambiguous as the very first attempt.
+  return {
+    tone: 'info',
+    title: `${orderRef}: still unresolved`,
+    detail: 'Timed out again before answering. The refund stays on hold — this needs a person to check DataHub directly, same as before.',
+  }
+}
+
+/**
  * Refusing a refund needs a reason, and keeps it.
  *
  * This is a decision not to return money somebody paid. It has to be possible —
@@ -563,9 +627,19 @@ function ReorderModal({
   // synced estimate — see `SupplierSku.realCost`. Falls back to the estimate
   // only when nothing real has ever been charged for this exact SKU yet.
   const effectiveCost = selected ? selected.realCost ?? selected.costPrice : null
-  const grossMargin = selected && effectiveCost !== null ? request.amount - effectiveCost : null
+  /**
+   * The actual question a reorder asks: has anything changed since this
+   * order was originally priced, not "what is the margin" in the abstract.
+   * `agentMargin` and `paystackFee` are frozen and identical either way, so
+   * they cancel out of this comparison entirely — completing the order at
+   * the same cost it already assumed is not a gain, it is just completing
+   * it, and this reads as exactly zero when that's true.
+   */
+  const costDelta = selected && effectiveCost !== null ? request.originalCost - effectiveCost : null
   const netMargin =
-    grossMargin === null ? null : grossMargin - request.agentMargin - (request.paystackFee ?? 0)
+    selected && effectiveCost !== null
+      ? request.amount - effectiveCost - request.agentMargin - (request.paystackFee ?? 0)
+      : null
 
   const submit = async () => {
     if (!supplierCode) {
@@ -578,14 +652,9 @@ function ReorderModal({
     }
     setBusy(true)
     try {
-      await api.reorderOrder(request.orderId, note.trim(), supplierCode)
+      const result = await api.reorderOrder(request.orderId, note.trim(), supplierCode)
       await onReordered()
-      pushToast({
-        tone: 'info',
-        title: `${request.orderRef}: reordering`,
-        detail:
-          'Refresh in a moment to see whether it delivered — this refund is on hold either way until it answers.',
-      })
+      pushToast(toastFor(request.orderRef, result))
       onClose()
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'We could not reorder that.')
@@ -642,59 +711,77 @@ function ReorderModal({
           )}
         </Field>
 
-        {selected && netMargin !== null && effectiveCost !== null && (
-          <div className="space-y-1 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-sm">
-            <p className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-300">Customer paid</span>
-              <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                {cedis(request.amount)}
-              </span>
-            </p>
-            <p className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-300">
-                {selected.realCost !== null ? 'This bundle really costs' : 'This bundle costs (catalogue estimate)'}
-              </span>
-              <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                {cedis(effectiveCost)}
-              </span>
-            </p>
-            {/* The catalogue's own synced figure, shown only when a real charge
-                exists to compare it against — otherwise it's already the number
-                above, and repeating it here would just be noise. */}
-            {selected.realCost !== null && selected.realCost !== selected.costPrice && (
-              <p className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-                <span>Catalogue estimate (informational only)</span>
-                <span className="tabular">{cedis(selected.costPrice)}</span>
-              </p>
-            )}
-            {request.agentMargin > 0 && (
-              <p className="flex items-center justify-between">
-                <span className="text-slate-600 dark:text-slate-300">
-                  Agent's share (fixed, from the original sale)
-                </span>
-                <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                  {cedis(request.agentMargin)}
-                </span>
-              </p>
-            )}
-            {!!request.paystackFee && (
-              <p className="flex items-center justify-between">
-                <span className="text-slate-600 dark:text-slate-300">
-                  Paystack's fee (already taken, from the original payment)
-                </span>
-                <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                  {cedis(request.paystackFee)}
-                </span>
-              </p>
-            )}
+        {selected && netMargin !== null && costDelta !== null && effectiveCost !== null && (
+          <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-sm">
             <p
               className={`flex items-center justify-between font-bold ${
-                netMargin < 0 ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
+                costDelta === 0
+                  ? 'text-slate-700 dark:text-slate-200'
+                  : costDelta > 0
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : 'text-red-700 dark:text-red-400'
               }`}
             >
-              <span>{netMargin < 0 ? 'Your loss if this goes through' : 'Your margin if this goes through'}</span>
-              <span className="tabular">{cedis(Math.abs(netMargin))}</span>
+              <span>
+                {costDelta === 0
+                  ? 'No change since the original sale'
+                  : costDelta > 0
+                    ? 'Costs less than originally priced'
+                    : 'Costs more than originally priced'}
+              </span>
+              {costDelta !== 0 && <span className="tabular">{cedis(Math.abs(costDelta))}</span>}
             </p>
+            {costDelta === 0 && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                This isn't a new sale, it's this order finally completing at the same cost it was
+                already priced against.
+              </p>
+            )}
+
+            <div className="space-y-1 border-t border-slate-100 dark:border-slate-800 pt-2 text-xs text-slate-500 dark:text-slate-400">
+              <p className="flex items-center justify-between">
+                <span>Customer paid</span>
+                <span className="tabular">{cedis(request.amount)}</span>
+              </p>
+              <p className="flex items-center justify-between">
+                <span>Originally priced this bundle at</span>
+                <span className="tabular">{cedis(request.originalCost)}</span>
+              </p>
+              <p className="flex items-center justify-between">
+                <span>
+                  {selected.realCost !== null ? 'This bundle really costs today' : 'This bundle costs today (catalogue estimate)'}
+                </span>
+                <span className="tabular">{cedis(effectiveCost)}</span>
+              </p>
+              {selected.realCost !== null && selected.realCost !== selected.costPrice && (
+                <p className="flex items-center justify-between">
+                  <span>Catalogue estimate (informational only)</span>
+                  <span className="tabular">{cedis(selected.costPrice)}</span>
+                </p>
+              )}
+              {request.currentSellingPrice !== null && (
+                <p className="flex items-center justify-between">
+                  <span>{request.soldByAgent ? "What this agent charges for it today" : "Today's walk-up price"}</span>
+                  <span className="tabular">{cedis(request.currentSellingPrice)}</span>
+                </p>
+              )}
+              {request.agentMargin > 0 && (
+                <p className="flex items-center justify-between">
+                  <span>Agent's share (fixed, from the original sale)</span>
+                  <span className="tabular">{cedis(request.agentMargin)}</span>
+                </p>
+              )}
+              {!!request.paystackFee && (
+                <p className="flex items-center justify-between">
+                  <span>Paystack's fee (already taken, from the original payment)</span>
+                  <span className="tabular">{cedis(request.paystackFee)}</span>
+                </p>
+              )}
+              <p className="flex items-center justify-between font-semibold text-slate-700 dark:text-slate-200">
+                <span>{netMargin < 0 ? 'Your loss if this completes' : 'Your margin if this completes'}</span>
+                <span className="tabular">{cedis(Math.abs(netMargin))}</span>
+              </p>
+            </div>
           </div>
         )}
 

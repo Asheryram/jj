@@ -473,36 +473,57 @@ export class AdminService {
       include: { products: { select: { id: true, name: true } } },
     })
 
-    // One real-cost lookup per SKU, in parallel — see `lastRealCost`'s own
-    // comment. `costPrice` is only ever the last catalogue sync's word; this
-    // is what a real purchase of the exact same SKU actually charged.
-    const realCosts = await Promise.all(rows.map((row) => lastRealCost(this.prisma, row.code)))
+    // One real-charge lookup per SKU, in parallel — timestamped, not just
+    // valued, so it can be weighed against the catalogue's own sync age below.
+    const realCharges = await Promise.all(
+      rows.map((row) =>
+        this.prisma.supplierDispatch.findFirst({
+          where: { supplierCode: row.code, providerCharged: { not: null }, order: { status: 'completed' } },
+          orderBy: { createdAt: 'desc' },
+          select: { providerCharged: true, createdAt: true },
+        }),
+      ),
+    )
 
-    return rows.map((row, i) => ({
-      code: row.code,
-      provider: row.provider,
-      category: row.category,
-      network: row.network,
-      name: row.name,
-      validity: row.validity,
-      costPrice: row.costPrice,
+    return rows.map((row, i) => {
+      const charge = realCharges[i]
       /**
-       * What a real purchase of this SKU most recently actually cost — null
-       * until one has ever completed, in which case `costPrice` is the only
-       * figure there is to go on. Prefer this over `costPrice` wherever a
-       * decision turns on real money, the same preference `recordDelivered`
-       * already gives it; `costPrice` is informational for admin, a sync
-       * estimate, not a receipt.
+       * A real charge only beats the catalogue's own `costPrice` when it is
+       * actually the newer of the two — a real sale from days before the last
+       * sync is not more current than that sync, it is older, and treating it
+       * as authoritative would show a cost as having "really" moved when
+       * nothing has: the sync already caught up. Null here means the
+       * catalogue's own figure is the freshest thing on file, which is a real
+       * answer, not a missing one.
        */
-      realCost: realCosts[i],
-      available: row.available,
-      updatedAt: row.updatedAt.toISOString(),
-      mappedTo: row.products.map((p) => p.id),
-      networkKey: row.networkKey,
-      capacityGb: row.capacityGb,
-      /** Whether the supplier can actually deliver this without a human. */
-      autoFulfillable: Boolean(row.networkKey && row.capacityGb),
-    }))
+      const realCost = charge && charge.createdAt > row.updatedAt ? charge.providerCharged : null
+
+      return {
+        code: row.code,
+        provider: row.provider,
+        category: row.category,
+        network: row.network,
+        name: row.name,
+        validity: row.validity,
+        /** The last catalogue sync's word — informational for admin, not a receipt. */
+        costPrice: row.costPrice,
+        /**
+         * What a real purchase of this SKU most recently actually cost, when
+         * that is newer information than the catalogue sync above. Prefer
+         * this over `costPrice` wherever a decision turns on real money, the
+         * same preference `recordDelivered` already gives it — but only once
+         * it has actually earned that preference by being the fresher figure.
+         */
+        realCost,
+        available: row.available,
+        updatedAt: row.updatedAt.toISOString(),
+        mappedTo: row.products.map((p) => p.id),
+        networkKey: row.networkKey,
+        capacityGb: row.capacityGb,
+        /** Whether the supplier can actually deliver this without a human. */
+        autoFulfillable: Boolean(row.networkKey && row.capacityGb),
+      }
+    })
   }
 
   /**
