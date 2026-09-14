@@ -559,8 +559,13 @@ function ReorderModal({
   if (!request) return null
 
   const selected = options?.find((row) => row.code === supplierCode) ?? null
-  const grossMargin = selected ? request.amount - selected.costPrice : null
-  const netMargin = grossMargin === null ? null : grossMargin - request.agentMargin
+  // What a real purchase of this SKU last actually cost, not the catalogue's
+  // synced estimate — see `SupplierSku.realCost`. Falls back to the estimate
+  // only when nothing real has ever been charged for this exact SKU yet.
+  const effectiveCost = selected ? selected.realCost ?? selected.costPrice : null
+  const grossMargin = selected && effectiveCost !== null ? request.amount - effectiveCost : null
+  const netMargin =
+    grossMargin === null ? null : grossMargin - request.agentMargin - (request.paystackFee ?? 0)
 
   const submit = async () => {
     if (!supplierCode) {
@@ -629,14 +634,15 @@ function ReorderModal({
               <option value="">Choose a bundle…</option>
               {options.map((row) => (
                 <option key={row.code} value={row.code}>
-                  {row.name} · {row.network ?? row.provider} · {cedis(row.costPrice)}
+                  {row.name} · {row.network ?? row.provider} · {cedis(row.realCost ?? row.costPrice)}
+                  {row.realCost !== null && row.realCost !== row.costPrice ? ' (real)' : ''}
                 </option>
               ))}
             </select>
           )}
         </Field>
 
-        {selected && netMargin !== null && (
+        {selected && netMargin !== null && effectiveCost !== null && (
           <div className="space-y-1 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-sm">
             <p className="flex items-center justify-between">
               <span className="text-slate-600 dark:text-slate-300">Customer paid</span>
@@ -645,11 +651,22 @@ function ReorderModal({
               </span>
             </p>
             <p className="flex items-center justify-between">
-              <span className="text-slate-600 dark:text-slate-300">This bundle costs today</span>
+              <span className="text-slate-600 dark:text-slate-300">
+                {selected.realCost !== null ? 'This bundle really costs' : 'This bundle costs (catalogue estimate)'}
+              </span>
               <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                {cedis(selected.costPrice)}
+                {cedis(effectiveCost)}
               </span>
             </p>
+            {/* The catalogue's own synced figure, shown only when a real charge
+                exists to compare it against — otherwise it's already the number
+                above, and repeating it here would just be noise. */}
+            {selected.realCost !== null && selected.realCost !== selected.costPrice && (
+              <p className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                <span>Catalogue estimate (informational only)</span>
+                <span className="tabular">{cedis(selected.costPrice)}</span>
+              </p>
+            )}
             {request.agentMargin > 0 && (
               <p className="flex items-center justify-between">
                 <span className="text-slate-600 dark:text-slate-300">
@@ -660,25 +677,24 @@ function ReorderModal({
                 </span>
               </p>
             )}
+            {!!request.paystackFee && (
+              <p className="flex items-center justify-between">
+                <span className="text-slate-600 dark:text-slate-300">
+                  Paystack's fee (already taken, from the original payment)
+                </span>
+                <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
+                  {cedis(request.paystackFee)}
+                </span>
+              </p>
+            )}
             <p
               className={`flex items-center justify-between font-bold ${
                 netMargin < 0 ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
               }`}
             >
-              <span>
-                {netMargin < 0
-                  ? 'Your loss if this goes through'
-                  : request.agentMargin > 0
-                    ? 'Your margin if this goes through'
-                    : 'Margin if this goes through'}
-              </span>
+              <span>{netMargin < 0 ? 'Your loss if this goes through' : 'Your margin if this goes through'}</span>
               <span className="tabular">{cedis(Math.abs(netMargin))}</span>
             </p>
-            {request.agentMargin > 0 && (
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                After the agent's share above — this is what you keep, not the bundle's own margin.
-              </p>
-            )}
           </div>
         )}
 

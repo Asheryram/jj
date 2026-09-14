@@ -563,6 +563,13 @@ export interface RefundRequest {
    * actually lands, for the "Reorder" preview.
    */
   agentMargin: number
+  /**
+   * Pesewas Paystack actually kept from the original payment — already
+   * spent, not something a reorder redoes or gets back. Null for a
+   * wallet-paid order, whose fee (if any) was already paid once at top-up
+   * time, not against this sale.
+   */
+  paystackFee: number | null
   orderRef: string
   productName: string
   buyerName: string
@@ -698,7 +705,15 @@ export interface SupplierSku {
   network: Network | null
   name: string
   validity: string
+  /** The last catalogue sync's word — informational for admin, not a receipt. */
   costPrice: number
+  /**
+   * What a real purchase of this exact SKU most recently actually cost. Null
+   * until one has ever completed, in which case `costPrice` is the only
+   * figure there is to go on. Prefer this wherever a decision turns on real
+   * money.
+   */
+  realCost: number | null
   available: boolean
   updatedAt: string
   /** Our product ids fulfilled by this SKU. */

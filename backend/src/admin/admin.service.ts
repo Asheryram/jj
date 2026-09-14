@@ -473,7 +473,12 @@ export class AdminService {
       include: { products: { select: { id: true, name: true } } },
     })
 
-    return rows.map((row) => ({
+    // One real-cost lookup per SKU, in parallel — see `lastRealCost`'s own
+    // comment. `costPrice` is only ever the last catalogue sync's word; this
+    // is what a real purchase of the exact same SKU actually charged.
+    const realCosts = await Promise.all(rows.map((row) => lastRealCost(this.prisma, row.code)))
+
+    return rows.map((row, i) => ({
       code: row.code,
       provider: row.provider,
       category: row.category,
@@ -481,6 +486,15 @@ export class AdminService {
       name: row.name,
       validity: row.validity,
       costPrice: row.costPrice,
+      /**
+       * What a real purchase of this SKU most recently actually cost — null
+       * until one has ever completed, in which case `costPrice` is the only
+       * figure there is to go on. Prefer this over `costPrice` wherever a
+       * decision turns on real money, the same preference `recordDelivered`
+       * already gives it; `costPrice` is informational for admin, a sync
+       * estimate, not a receipt.
+       */
+      realCost: realCosts[i],
       available: row.available,
       updatedAt: row.updatedAt.toISOString(),
       mappedTo: row.products.map((p) => p.id),

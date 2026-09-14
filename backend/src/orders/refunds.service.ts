@@ -48,6 +48,18 @@ export class RefundsService {
       include: { order: { select: { network: true, category: true, split: true } } },
     })
 
+    /**
+     * What Paystack actually kept, per `Payment.fee` — not `split.processingFee`,
+     * which is only the checkout estimate. Same figure and same reasoning as
+     * `OrdersService.list`'s own `feeByOrderId`; null for a wallet-paid order,
+     * whose fee (if any) was already paid once at top-up time, not again here.
+     */
+    const payments = await this.prisma.payment.findMany({
+      where: { orderId: { in: rows.map((row) => row.orderId) } },
+      select: { orderId: true, fee: true },
+    })
+    const feeByOrderId = new Map(payments.filter((p) => p.orderId).map((p) => [p.orderId as string, p.fee]))
+
     return rows.map((row) => {
       // Frozen at the original sale and unchanged by a reorder — `settle`'s
       // delivered branch always pays an agent this exact amount regardless of
@@ -67,6 +79,13 @@ export class RefundsService {
         category: row.order.category,
         /** Owed to an agent from this exact sale, unchanged by a reorder. */
         agentMargin,
+        /**
+         * What Paystack actually kept from the original payment — already
+         * spent, not something a reorder redoes or gets back. Null for a
+         * wallet-paid order, whose fee (if any) was booked once already at
+         * top-up time, not against this sale.
+         */
+        paystackFee: feeByOrderId.get(row.orderId) ?? null,
         orderRef: row.orderRef,
         productName: row.productName,
         buyerName: row.buyerName,
