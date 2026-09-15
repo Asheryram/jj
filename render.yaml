@@ -16,7 +16,7 @@ services:
     dockerContext: ./backend
     # Never the free plan for this service. A free instance sleeps when idle, and
     # this API is not idle when nobody is clicking: the reconciler sweeps every
-    # 5 minutes for payments whose webhook never arrived, and orders are
+    # 10 minutes for payments whose webhook never arrived, and orders are
     # dispatched on a timer after the payment confirms. Asleep, a customer is
     # charged and the bundle is never ordered.
     plan: starter

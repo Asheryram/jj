@@ -1040,6 +1040,13 @@ export const api = {
     request<void>(`/orders/${id}/resolve`, { method: 'POST', body: { outcome, note } }),
 
   /**
+   * Ask DataHub about a stuck order right now, see
+   * `ReconcilerService.checkOrderByAdmin`, instead of waiting on the
+   * reconciler's own ten-minute clock.
+   */
+  checkOrderNow: (id: string) => request<{ settled: boolean }>(`/orders/${id}/check-now`, { method: 'POST' }),
+
+  /**
    * Retry dispatch by hand, only valid when the last attempt timed out
    * before the delivery partner ever answered (no reference exists for the
    * automatic check to use). `note` is the record of what was checked before

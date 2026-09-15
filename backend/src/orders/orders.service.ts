@@ -8,6 +8,7 @@ import { FulfilmentService } from './fulfilment.service'
 import { PaymentsService } from '../payments/payments.service'
 import { SupplierService } from '../supplier/supplier.service'
 import { DatahubClient } from '../supplier/datahub.client'
+import { ReconcilerService } from '../supplier/reconciler.service'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
 import { toOrder, toTrackedOrder } from '../common/mappers'
 import {
@@ -40,6 +41,7 @@ export class OrdersService {
     private readonly payments: PaymentsService,
     private readonly supplier: SupplierService,
     private readonly datahub: DatahubClient,
+    private readonly reconciler: ReconcilerService,
   ) {}
 
   /**
@@ -669,8 +671,17 @@ export class OrdersService {
   }
 
   async byId(id: string, user: AuthUser | undefined) {
-    const row = await this.prisma.order.findUnique({ where: { id } })
+    let row = await this.prisma.order.findUnique({ where: { id } })
     if (!row) throw new NotFoundError('We could not find that order.')
+
+    // Whoever is polling this is almost always watching their own receipt
+    // page settle, see `checkOrderNow`'s own comment. Re-read afterwards
+    // only when it actually resolved something, so this stays a no-op read
+    // in the ordinary case where the order was not even due a check yet.
+    if (await this.reconciler.checkOrderNow(row)) {
+      row = await this.prisma.order.findUnique({ where: { id } })
+      if (!row) throw new NotFoundError('We could not find that order.')
+    }
 
     const paymentCollected = await this.paymentCollectedFlag(row.id, row.status)
 

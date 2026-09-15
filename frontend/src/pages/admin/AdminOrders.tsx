@@ -875,6 +875,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
   const [retryNote, setRetryNote] = useState('')
   const [retryNoteError, setRetryNoteError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [checkingNow, setCheckingNow] = useState(false)
 
   /**
    * Keyed on `order?.id`, not `order` itself, a parent re-render can (and
@@ -935,6 +936,31 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
       setRetryNoteError(caught instanceof ApiError ? caught.message : 'We could not retry that.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const submitCheckNow = async () => {
+    setCheckingNow(true)
+    try {
+      const result = await api.checkOrderNow(order.id)
+      if (result.settled) {
+        pushToast({ tone: 'success', title: `${order.reference}: resolved` })
+        await refresh()
+        onClose()
+      } else {
+        pushToast({
+          tone: 'info',
+          title: `${order.reference}: still processing`,
+          detail: "The delivery partner has not answered yet, nothing new to report.",
+        })
+      }
+    } catch (caught) {
+      pushToast({
+        tone: 'error',
+        title: caught instanceof ApiError ? caught.message : 'We could not check that.',
+      })
+    } finally {
+      setCheckingNow(false)
     }
   }
 
@@ -1158,6 +1184,25 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* The automatic sweep still covers this order eventually, but only
+            once every ten minutes, this asks the delivery partner directly,
+            right now, instead of waiting on its clock. */}
+        {stuck && (
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              Don't want to wait for the automatic check?
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              Asks the delivery partner for this order's status right now.
+            </p>
+            <div className="mt-2.5">
+              <Button size="sm" variant="outline" loading={checkingNow} onClick={() => void submitCheckNow()}>
+                Check now
+              </Button>
+            </div>
           </div>
         )}
 

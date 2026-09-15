@@ -34,21 +34,29 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * other three checks here (abandoned payments, stale top-ups, stale
    * approvals) already have their own 15-minute-plus staleness windows
    * before anything becomes actionable, checking those every 60s finds
-   * nothing new that checking every 5 minutes would not have found within a
-   * few minutes anyway. A 60s cadence also sits well inside Neon's 5-minute
-   * autosuspend window, so the database compute could never go idle long
-   * enough to scale down, burning through the free tier's monthly compute
-   * hours with no real benefit. Five minutes still resolves a lost webhook
-   * quickly enough that nobody notices, while giving the database real gaps
-   * to suspend into overnight and during quiet hours.
+   * nothing new that checking every 10 minutes would not have found within
+   * a few minutes anyway. A 60s cadence also sat well inside Neon's
+   * 5-minute autosuspend window, so the database compute could never go
+   * idle long enough to scale down. Landing exactly on 5 minutes would not
+   * reliably fix that either, ordinary timing jitter means the gap between
+   * sweeps is sometimes a hair under the threshold, never quite earning a
+   * suspend. Ten minutes gives a real, comfortable margin past it.
+   *
+   * This no longer has to also be fast enough for a customer watching their
+   * own receipt page, see `checkOrderNow`, which handles that case directly
+   * and is what actually keeps a lost webhook resolving live on screen. This
+   * interval only has to be fast enough for orders nobody is watching.
    */
-  private readonly intervalMs = 5 * 60_000
+  private readonly intervalMs = 10 * 60_000
   /**
    * How long an order may sit before we chase it. Long enough that the webhook
    * gets first refusal, chasing immediately would double the request volume for
    * no benefit and risk their rate limit.
    */
   private readonly graceMs = 90_000
+  /** Keyed by order id. See `checkOrderNow`'s own comment for why this throttles it. */
+  private readonly lastProviderCheckAt = new Map<string, number>()
+  private static readonly MIN_PROVIDER_CHECK_GAP_MS = 30_000
 
   /**
    * How long a paid order may wait for the recipient's number to be approved
@@ -236,46 +244,127 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     })
 
     for (const order of waiting) {
-      const result = await this.datahub.orderStatus(order.providerReference as string)
-
-      if (result.kind === 'unavailable') {
-        this.log.warn(`could not check ${order.reference}: ${result.reason}`)
-        continue
-      }
-
-      if (result.kind === 'not_found') {
-        // They accepted a reference and now do not recognise it. Never resolved
-        // automatically, refunding risks paying back a delivered bundle, and
-        // completing risks crediting a sale that never happened.
-        this.log.error(
-          `${order.reference}: DataHub does not recognise ${order.providerReference}, needs manual checking`,
-        )
-        continue
-      }
-
-      await this.prisma.supplierDispatch.updateMany({
-        where: { orderId: order.id, providerReference: order.providerReference },
-        data: { providerStatus: result.providerStatus },
-      })
-
-      const mapped = mapProviderStatus(result.providerStatus)
-      if (mapped === null) continue // still working on it
-
-      await this.fulfilment.settleFromProvider(
-        order.id,
-        mapped === 'completed' ? 'delivered' : 'rejected',
-        `Reconciled: DataHub GH reported ${result.providerStatus}`,
-      )
-      settled++
-      this.log.log(
-        `reconciled ${order.reference} → ${mapped} (webhook never arrived; DataHub said ${result.providerStatus})`,
-      )
+      if (await this.checkWithProvider(order)) settled++
     }
 
     if (waiting.length > 0) {
       this.log.log(`sweep: checked ${waiting.length}, settled ${settled}`)
     }
     return { checked: waiting.length, settled }
+  }
+
+  /** Ask DataHub about one order and settle it if they now have an answer. Returns whether it settled. */
+  private async checkWithProvider(order: {
+    id: string
+    reference: string
+    providerReference: string | null
+  }): Promise<boolean> {
+    const result = await this.datahub.orderStatus(order.providerReference as string)
+
+    if (result.kind === 'unavailable') {
+      this.log.warn(`could not check ${order.reference}: ${result.reason}`)
+      return false
+    }
+
+    if (result.kind === 'not_found') {
+      // They accepted a reference and now do not recognise it. Never resolved
+      // automatically, refunding risks paying back a delivered bundle, and
+      // completing risks crediting a sale that never happened.
+      this.log.error(
+        `${order.reference}: DataHub does not recognise ${order.providerReference}, needs manual checking`,
+      )
+      return false
+    }
+
+    await this.prisma.supplierDispatch.updateMany({
+      where: { orderId: order.id, providerReference: order.providerReference },
+      data: { providerStatus: result.providerStatus },
+    })
+
+    const mapped = mapProviderStatus(result.providerStatus)
+    if (mapped === null) return false // still working on it
+
+    await this.fulfilment.settleFromProvider(
+      order.id,
+      mapped === 'completed' ? 'delivered' : 'rejected',
+      `Reconciled: DataHub GH reported ${result.providerStatus}`,
+    )
+    this.log.log(
+      `reconciled ${order.reference} → ${mapped} (webhook never arrived; DataHub said ${result.providerStatus})`,
+    )
+    return true
+  }
+
+  /**
+   * Check one order against DataHub right now, for whoever is actively
+   * watching it settle on screen, `Store.watchOrder` polls exactly this
+   * path. `sweep()` still covers every order eventually, but only once
+   * every ten minutes now (see `intervalMs`'s own comment), comfortably too
+   * slow for the five minutes a customer's own screen keeps watching. This
+   * is what keeps a lost webhook resolving live instead of only ever
+   * catching up in the background after the customer has given up and
+   * looked away.
+   *
+   * Throttled per order to the ~30-60s DataHub itself asks for, since the
+   * frontend's own poll runs far tighter than that (every 1.5-5s) and would
+   * otherwise hit them once per screen refresh instead of once per real check.
+   */
+  async checkOrderNow(order: {
+    id: string
+    reference: string
+    status: string
+    providerReference: string | null
+    createdAt: Date
+  }): Promise<boolean> {
+    if (!this.supplier.isLive) return false
+    if (order.status !== 'pending' && order.status !== 'processing') return false
+    if (!order.providerReference || order.providerReference.startsWith('manual_')) return false
+    if (Date.now() - order.createdAt.getTime() < this.graceMs) return false
+
+    const lastChecked = this.lastProviderCheckAt.get(order.id)
+    if (lastChecked !== undefined && Date.now() - lastChecked < ReconcilerService.MIN_PROVIDER_CHECK_GAP_MS) {
+      return false
+    }
+    this.lastProviderCheckAt.set(order.id, Date.now())
+
+    const settled = await this.checkWithProvider(order)
+    if (settled) this.lastProviderCheckAt.delete(order.id)
+    return settled
+  }
+
+  /**
+   * An admin looking at a stuck order who does not want to wait on
+   * `checkOrderNow`'s throttle or `sweep()`'s own ten-minute clock.
+   *
+   * Deliberately skips both: the throttle exists to stop a customer's own
+   * tight polling from hammering DataHub, and an admin clicking a button
+   * once is not that. Throws instead of quietly doing nothing, unlike the
+   * other two check paths, an admin who asks for this deserves to be told
+   * why, not a result that looks identical whether it worked or was refused.
+   */
+  async checkOrderByAdmin(orderId: string): Promise<{ settled: boolean }> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, reference: true, status: true, providerReference: true },
+    })
+    if (!order) throw new NotFoundError('We could not find that order.')
+    if (order.status !== 'pending' && order.status !== 'processing') {
+      throw new ConflictError('ALREADY_SETTLED', `That order is already ${order.status}, there is nothing to check.`)
+    }
+    if (!order.providerReference) {
+      throw new ValidationError('DataHub never gave this order a reference, there is nothing to ask them about.')
+    }
+    if (order.providerReference.startsWith('manual_')) {
+      throw new ValidationError("Routed to DataHub's manual queue, only their own staff can clear it.")
+    }
+    if (!this.supplier.isLive) {
+      throw new ValidationError('The supplier integration is simulated right now, there is nothing real to check.')
+    }
+
+    this.lastProviderCheckAt.set(order.id, Date.now())
+    const settled = await this.checkWithProvider(order)
+    if (settled) this.lastProviderCheckAt.delete(order.id)
+    return { settled }
   }
 
   /**

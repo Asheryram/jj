@@ -101,6 +101,19 @@ export class OrdersController {
   }
 
   /**
+   * Ask DataHub about a stuck order right now, see
+   * `ReconcilerService.checkOrderByAdmin`. For an admin looking at a
+   * "processing" order who does not want to wait on the reconciler's own
+   * ten-minute clock.
+   */
+  @Post(':id/check-now')
+  @Roles('admin')
+  @ApiBearerAuth()
+  checkNow(@Param('id') id: string) {
+    return this.reconciler.checkOrderByAdmin(id)
+  }
+
+  /**
    * Retry dispatch by hand, see `FulfilmentService.retryDispatch`. Only for
    * an order whose last attempt timed out before DataHub ever answered, so
    * there is no reference for the automatic reconciler to check with, an
