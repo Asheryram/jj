@@ -562,6 +562,29 @@ export interface AdminDomainRow extends MyDomainStatus {
   agentCode: string
 }
 
+export type FeedbackCategory = 'suggestion' | 'issue'
+export type FeedbackStatus = 'open' | 'reviewed' | 'resolved'
+
+export interface FeedbackReport {
+  id: string
+  category: FeedbackCategory
+  message: string
+  status: FeedbackStatus
+  note: string | null
+  createdAt: string
+  decidedAt: string | null
+}
+
+export interface AdminFeedbackReport extends FeedbackReport {
+  userId: string
+  agentName: string
+  agentCode: string
+  decidedBy: string | null
+  /** Admin's call that this needs the platform side, not a business decision. */
+  escalated: boolean
+  escalatedAt: string | null
+}
+
 export interface RefundRequest {
   id: string
   /** For the "Reorder" action — see `api.reorderOrder`. */
@@ -840,6 +863,37 @@ export const api = {
 
   reviewDomain: (id: string, body: { allowed?: boolean; active?: boolean; reason?: string }) =>
     request<AdminDomainRow>(`/admin/domains/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+
+  // Feedback: an agent's own suggestions/issue reports, sent in from inside the app
+  submitFeedback: (category: FeedbackCategory, message: string) =>
+    request<FeedbackReport>('/feedback', { method: 'POST', body: { category, message } }),
+
+  myFeedback: () => request<FeedbackReport[]>('/feedback/mine'),
+
+  // Feedback: admin/superadmin's shared queue
+  adminFeedback: (filters: { status?: FeedbackStatus; category?: FeedbackCategory; escalated?: boolean } = {}) => {
+    const params = new URLSearchParams()
+    if (filters.status) params.set('status', filters.status)
+    if (filters.category) params.set('category', filters.category)
+    if (filters.escalated) params.set('escalated', 'true')
+    const query = params.toString()
+    return request<AdminFeedbackReport[]>(`/admin/feedback${query ? `?${query}` : ''}`)
+  },
+
+  adminFeedbackOpenCount: () => request<number>('/admin/feedback/open-count'),
+
+  /** One item by id, what an escalation email's "Open this ticket" link resolves via `?item=`. */
+  adminFeedbackItem: (id: string) => request<AdminFeedbackReport>(`/admin/feedback/${encodeURIComponent(id)}`),
+
+  decideFeedback: (id: string, status: FeedbackStatus, note?: string) =>
+    request<AdminFeedbackReport>(`/admin/feedback/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: { status, note },
+    }),
+
+  /** Admin-only, see `FeedbackService.escalate`'s own doc comment. */
+  escalateFeedback: (id: string) =>
+    request<AdminFeedbackReport>(`/admin/feedback/${encodeURIComponent(id)}/escalate`, { method: 'POST' }),
 
   // Orders
   /**

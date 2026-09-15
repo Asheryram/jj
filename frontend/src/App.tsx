@@ -30,6 +30,7 @@ import AwaitingApproval from './pages/app/AwaitingApproval'
 import Reports from './pages/app/Reports'
 import Withdrawals from './pages/app/Withdrawals'
 import Assistant from './pages/app/Assistant'
+import Feedback from './pages/app/Feedback'
 
 import Overview from './pages/admin/Overview'
 import AdminOrders from './pages/admin/AdminOrders'
@@ -48,6 +49,7 @@ import BrandingReview from './pages/admin/BrandingReview'
 import Team from './pages/admin/Team'
 import DomainRequests from './pages/admin/DomainRequests'
 import Settings from './pages/admin/Settings'
+import AdminFeedback from './pages/admin/AdminFeedback'
 
 /**
  * Decides whose branding the current page wears.
@@ -290,6 +292,7 @@ export default function App() {
                 <Route path="/app/referrals" element={<Referrals />} />
                 <Route path="/app/withdrawals" element={<Withdrawals />} />
                 <Route path="/app/assistant" element={<Assistant />} />
+                <Route path="/app/feedback" element={<Feedback />} />
               </Route>
             </Route>
           </Route>
@@ -317,6 +320,7 @@ export default function App() {
               <Route path="/admin/refunds" element={<Refunds />} />
               <Route path="/admin/needs-attention" element={<NeedsAttention />} />
               <Route path="/admin/branding" element={<BrandingReview />} />
+              <Route path="/admin/feedback" element={<AdminFeedback />} />
               <Route path="/admin/team" element={<Team />} />
               <Route path="/admin/domains" element={<DomainRequests />} />
               <Route path="/admin/settings" element={<Settings />} />

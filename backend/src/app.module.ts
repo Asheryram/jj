@@ -19,6 +19,7 @@ import { BrandingModule } from './branding/branding.module'
 import { DomainsModule } from './domains/domains.module'
 import { MailModule } from './mail/mail.module'
 import { AssistantModule } from './assistant/assistant.module'
+import { FeedbackModule } from './feedback/feedback.module'
 import { AuthGuard } from './common/auth'
 
 @Module({
@@ -103,6 +104,7 @@ import { AuthGuard } from './common/auth'
     BrandingModule,
     DomainsModule,
     AssistantModule,
+    FeedbackModule,
   ],
   controllers: [HealthController],
   providers: [

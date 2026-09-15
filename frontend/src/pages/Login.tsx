@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useStore } from '../state/store'
 import { useRegisterPath, useShopPath } from '../lib/shopPath'
 import { Button, Callout, Card, Field, TextInput } from '../components/ui'
@@ -16,6 +16,7 @@ import { isAdmin } from '../lib/roles'
 export default function Login() {
   const { login } = useStore()
   const navigate = useNavigate()
+  const location = useLocation()
   const shopPath = useShopPath()
   const registerPath = useRegisterPath()
   const [email, setEmail] = useState('')
@@ -40,7 +41,14 @@ export default function Login() {
       // Trimmed and lowercased here as well as server-side: a phone keyboard
       // will happily capitalise the first letter of an address.
       const session = await login(email.trim().toLowerCase(), password)
-      navigate(isAdmin(session.role) ? '/admin' : '/app', { replace: true })
+      // `RequireAuth` remembers where a signed-out visit was actually headed
+      // (`state.from`) before bouncing here. Read it back rather than
+      // always landing on the role's bare home page. If the role this
+      // session turns out to hold cannot reach that page, `RequireAuth`
+      // catches that on arrival and redirects home itself, so there is
+      // nothing to validate here.
+      const from = (location.state as { from?: string } | null)?.from
+      navigate(from && from !== '/login' ? from : isAdmin(session.role) ? '/admin' : '/app', { replace: true })
     } catch (caught) {
       // The API's message is already written for this reader (NFR-4.3).
       setError(

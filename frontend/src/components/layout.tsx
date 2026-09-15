@@ -122,6 +122,7 @@ function navFor(
   shopPath: (path: string) => string,
   pendingApplications = 0,
   needsAttentionCount = 0,
+  openFeedbackCount = 0,
 ): NavItem[] {
   if (isAdmin(role)) {
     return [
@@ -151,6 +152,12 @@ function navFor(
       { to: '/admin/catalogue-accuracy', label: 'Catalogue accuracy', icon: TrendUpIcon },
       { to: '/admin/float-risk', label: 'Float risk', icon: AlertIcon },
       { to: '/admin/branding', label: 'Branding', icon: StoreIcon },
+      {
+        to: '/admin/feedback',
+        label: 'Feedback',
+        icon: HelpIcon,
+        badge: openFeedbackCount > 0 ? openFeedbackCount : undefined,
+      },
       { to: '/admin/settings', label: 'Settings', icon: SettingsIcon },
       // Platform access belongs to the operator, not the business owner. An
       // admin must not be shown a door they cannot open. Approving a custom
@@ -179,6 +186,7 @@ function navFor(
       { to: '/shop', label: 'Browse shop', icon: UsersIcon },
       { to: '/app/reports', label: 'Reports', icon: ChartIcon },
       { to: '/app/withdrawals', label: 'Withdraw', icon: CashIcon },
+      { to: '/app/feedback', label: 'Feedback', icon: HelpIcon },
     ]
   }
 
@@ -231,7 +239,13 @@ export function RequireAuth({ role, roles }: { role?: Role; roles?: Role[] }) {
   const { session } = useStore()
   const location = useLocation()
 
-  if (!session) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  // The full path, not just `pathname`. A deep link like an admin's
+  // "?status=open" filter or a feedback item's own reference in the URL
+  // would otherwise survive the trip to `/login` and then get silently
+  // dropped, landing back on the bare page instead of the exact spot the
+  // link pointed at.
+  if (!session)
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
 
   // `roles` generalises the single-`role` gate below to "any of these" — used
   // where a route belongs to more than one role (e.g. /info, staff-only but
@@ -377,9 +391,23 @@ export function AppShell() {
     }
   }, [session?.id, session?.role])
 
+  /** Same reasoning as `pendingApplications` above, for the Feedback badge. */
+  const [openFeedbackCount, setOpenFeedbackCount] = useState(0)
+  useEffect(() => {
+    if (!session || !isAdmin(session.role)) return
+    let live = true
+    api
+      .adminFeedbackOpenCount()
+      .then((count) => live && setOpenFeedbackCount(count))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [session?.id, session?.role])
+
   if (!session) return null
 
-  const items = navFor(session.role, shopPath, pendingApplications, needsAttentionCount)
+  const items = navFor(session.role, shopPath, pendingApplications, needsAttentionCount, openFeedbackCount)
   const primary = items.slice(0, 4)
   const overflow = items.slice(4)
 

@@ -8,6 +8,7 @@ import {
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
 } from 'react'
 import type { Network, OrderStatus } from '../data/types'
 import { NETWORK_STYLES } from '../lib/networks'
@@ -403,6 +404,32 @@ export function TextInput({
       className={cn(
         CONTROL_BASE,
         'h-11',
+        isInvalid
+          ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100'
+          : 'border-slate-300 dark:border-slate-600 focus:border-brand-500 focus:ring-2 focus:ring-brand-100',
+        className,
+      )}
+      {...rest}
+    />
+  )
+}
+
+export function Textarea({
+  invalid,
+  className,
+  rows = 4,
+  ...rest
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & { invalid?: boolean }) {
+  const field = useContext(FieldContext)
+  const isInvalid = invalid ?? field.invalid
+  return (
+    <textarea
+      rows={rows}
+      aria-invalid={isInvalid || undefined}
+      aria-describedby={rest['aria-describedby'] ?? field.describedBy}
+      className={cn(
+        CONTROL_BASE,
+        'h-auto py-2.5 resize-y',
         isInvalid
           ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100'
           : 'border-slate-300 dark:border-slate-600 focus:border-brand-500 focus:ring-2 focus:ring-brand-100',
