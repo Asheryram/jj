@@ -198,6 +198,15 @@ interface Store {
    */
   mySummary: MySummary | null
 
+  /**
+   * An agent's unread Announcements count, for the nav badge. Lives here
+   * rather than local state in the layout so the Announcements page can
+   * clear it the moment it marks everything read, instead of it sitting
+   * stale until the next login or profile switch.
+   */
+  unreadAnnouncementsCount: number
+  refreshUnreadAnnouncements: () => Promise<void>
+
   /** The referrer's share of James's margin on their referral's sales. */
 
   toasts: Toast[]
@@ -278,6 +287,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [agentEarningsByDay, setAgentEarningsByDay] = useState<AgentEarningsDay[]>([])
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
   const [mySummary, setMySummary] = useState<MySummary | null>(null)
+  const [unreadAnnouncementsCount, setUnreadAnnouncementsCount] = useState(0)
   const [toasts, setToasts] = useState<Toast[]>([])
 
   // ── Toasts ────────────────────────────────────────────────────────────────
@@ -334,6 +344,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSubAgents([])
       setAdminOverview(null)
       setMySummary(null)
+      setUnreadAnnouncementsCount(0)
       return
     }
 
@@ -389,6 +400,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         api
           .myEarningsByDay(7)
           .then(setAgentEarningsByDay)
+          .catch(() => undefined),
+        api
+          .announcementUnreadCount()
+          .then(setUnreadAnnouncementsCount)
           .catch(() => undefined),
       )
     }
@@ -994,6 +1009,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const refreshUnreadAnnouncements = useCallback(async () => {
+    if (!session || session.role !== 'agent') return
+    await api.announcementUnreadCount().then(setUnreadAnnouncementsCount).catch(() => undefined)
+  }, [session])
+
   const requestWithdrawal = useCallback(
     async (amount: number, momoNetwork: Network, momoNumber: string) => {
       try {
@@ -1130,6 +1150,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       agentEarningsByDay,
       adminOverview,
       mySummary,
+      unreadAnnouncementsCount,
+      refreshUnreadAnnouncements,
       toasts,
       pushToast,
       dismissToast,
@@ -1192,6 +1214,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       watchOrder,
       users,
       withdrawals,
+      unreadAnnouncementsCount,
+      refreshUnreadAnnouncements,
     ],
   )
 

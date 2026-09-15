@@ -223,6 +223,7 @@ model User {
   customDomain     CustomDomain?
   ledgerEntries    LedgerEntry[]
   feedbackReports  FeedbackReport[]
+  announcementsReceived AnnouncementRecipient[]
 
   /**
    * One profile per role per person.
@@ -1322,6 +1323,118 @@ model FeedbackReport {
   @@index([createdAt])
   @@index([escalated])
   @@map("feedback_reports")
+}
+
+enum AnnouncementAudience {
+  /// Every active agent at the moment this was sent.
+  all
+  /// A specific list, chosen by whoever sent it.
+  selected
+}
+
+/// A one-way notice from admin/superadmin to agents, for something like
+/// scheduled maintenance or a new feature, not a conversation. Sent by both
+/// channels at once: emailed immediately, and kept here for the in-app
+/// notification list. Reused rather than the existing `Setting.siteNotice`
+/// single global banner, because that has no audience (always everyone),
+/// no history, and no read state, so it cannot answer "who has actually
+/// seen this."
+///
+/// `AnnouncementRecipient` is a frozen snapshot of who this reached at send
+/// time, not a live join to "agents." An agent who joins after an "all
+/// agents" announcement was sent must not suddenly see an old maintenance
+/// notice as if it just arrived.
+model Announcement {
+  id String @id @default(uuid())
+
+  title   String
+  message String
+
+  audience AnnouncementAudience
+
+  createdBy     String
+  /// Denormalised so this still reads correctly if the sender is later
+  /// suspended or renamed, same reasoning as every other "who did this"
+  /// field in this schema.
+  createdByName String @map("created_by_name")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  recipients AnnouncementRecipient[]
+
+  @@index([createdAt])
+  @@map("announcements")
+}
+
+/// One agent's copy of one announcement. Exists even for an agent who never
+/// opens the app again, since it is what makes "12 of 20 read this" and an
+/// agent's own unread badge possible at all.
+model AnnouncementRecipient {
+  id String @id @default(uuid())
+
+  announcementId String       @map("announcement_id")
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Null until the agent opens it. Drives both their own unread badge and
+  /// admin's read count on the sent announcement.
+  readAt DateTime? @map("read_at")
+
+  /// Whether the email side actually landed, kept separately from `readAt`,
+  /// since a failed send and an unread-but-delivered message look identical
+  /// from `readAt` alone and need different follow-up.
+  emailSent  Boolean @default(false) @map("email_sent")
+  emailError String? @map("email_error")
+
+  @@unique([announcementId, userId])
+  @@index([userId, readAt])
+  @@map("announcement_recipients")
+}
+
+/// A third-party service this platform depends on to keep running: hosting,
+/// the database, the domain, a paid API plan. None of these expose a "when
+/// does this expire" endpoint this app can poll, so the date is entered by
+/// hand and this is only the watching half, not a discovery mechanism.
+///
+/// The whole point is catching a lapse before it becomes a live incident:
+/// an expired domain or a hosting plan that silently stopped renewing reads
+/// identical to a real outage to a customer, with no error message pointing
+/// at the actual cause.
+model ServiceSubscription {
+  id String @id @default(uuid())
+
+  /// Free text on purpose. What is actually paid for here (hosting, a
+  /// domain, an API plan, a mail provider) is a business fact this schema
+  /// has no fixed list of, and will not have to be extended in code every
+  /// time a new one is added.
+  name     String
+  provider String?
+  /// Where to actually go renew it, so the alert email is one click from
+  /// action rather than a name someone has to go search for.
+  renewalUrl String? @map("renewal_url")
+  notes      String?
+
+  expiresAt DateTime @map("expires_at")
+  /// How many days out the alert email fires. Not the same for every
+  /// service: a domain worth transferring elsewhere needs more lead time
+  /// than a monthly plan that just needs a card on file.
+  alertDaysBefore Int @default(14) @map("alert_days_before")
+
+  /// Set once the "expiring soon" email has gone out for the *current*
+  /// `expiresAt`. Cleared back to null whenever `expiresAt` itself changes,
+  /// so renewing it re-arms the alert for whatever the new date turns out
+  /// to need, rather than staying permanently silenced by the first alert
+  /// ever sent against this row.
+  alertedAt DateTime? @map("alerted_at")
+
+  createdBy String   @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([expiresAt])
+  @@map("service_subscriptions")
 }
 
 enum SetupTokenPurpose {

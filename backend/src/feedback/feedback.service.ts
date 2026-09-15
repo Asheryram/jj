@@ -4,6 +4,7 @@ import type { FeedbackCategory, FeedbackStatus, Role } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
+import { appUrl } from '../common/app-links'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import type { AuthUser } from '../common/auth'
 
@@ -190,38 +191,6 @@ export class FeedbackService {
     return branding?.shopName ?? 'JamesDataConsult'
   }
 
-  /**
-   * A direct link to one item in the admin Feedback page, see `byId`.
-   *
-   * `origin` is the escalating admin's own browser `Origin` header: the
-   * panel they were actually looking at, which is what the link should
-   * point back to. `PUBLIC_APP_URL` is a single static value naming
-   * *production*, so using it unconditionally sent every escalation email
-   * to the production URL even when the admin escalating it was looking at
-   * staging, or a local dev build.
-   *
-   * Never trusted blindly, the same rule `PaymentsService.callbackUrl`
-   * follows for the identical reason: a request header is client-supplied,
-   * so it only wins here when it exactly matches one of the origins this
-   * API already trusts for CORS, the same allowlist a browser itself would
-   * need to satisfy to call this endpoint at all. Anything else (missing,
-   * malformed, or simply not on the list) falls back to `PUBLIC_APP_URL`.
-   */
-  private feedbackItemUrl(id: string, origin?: string): string {
-    // Same default `main.ts` uses when building the actual CORS allowlist.
-    // This has to mirror that exactly, or "trusted" here would mean
-    // something subtly different from what the server actually accepts.
-    const trustedOrigins = (this.config.get<string>('CORS_ORIGINS') ?? 'http://localhost:5173')
-      .split(',')
-      .map((o) => o.trim())
-      .filter(Boolean)
-    const base =
-      origin && trustedOrigins.includes(origin)
-        ? origin.replace(/\/$/, '')
-        : (this.config.get<string>('PUBLIC_APP_URL')?.trim() || 'http://localhost:5173').replace(/\/$/, '')
-    return `${base}/admin/feedback?item=${encodeURIComponent(id)}`
-  }
-
   /** Tell every active superadmin, the one place in this queue that's aimed at them specifically. */
   private async alertEscalation(
     row: { id: string; agentName: string; agentCode: string; category: FeedbackCategory; message: string },
@@ -242,7 +211,7 @@ export class FeedbackService {
     const explanation =
       `${escape(adminName)} flagged ${kind} from ${escape(row.agentName)} (${escape(row.agentCode)}) as ` +
       `something that needs the platform side, not a business decision.`
-    const link = this.feedbackItemUrl(row.id, origin)
+    const link = appUrl(this.config, `/admin/feedback?item=${encodeURIComponent(row.id)}`, origin)
 
     const body =
       `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${explanation}</p>` +

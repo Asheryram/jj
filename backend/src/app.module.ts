@@ -20,6 +20,8 @@ import { DomainsModule } from './domains/domains.module'
 import { MailModule } from './mail/mail.module'
 import { AssistantModule } from './assistant/assistant.module'
 import { FeedbackModule } from './feedback/feedback.module'
+import { AnnouncementsModule } from './announcements/announcements.module'
+import { SubscriptionsModule } from './subscriptions/subscriptions.module'
 import { AuthGuard } from './common/auth'
 
 @Module({
@@ -105,6 +107,8 @@ import { AuthGuard } from './common/auth'
     DomainsModule,
     AssistantModule,
     FeedbackModule,
+    AnnouncementsModule,
+    SubscriptionsModule,
   ],
   controllers: [HealthController],
   providers: [

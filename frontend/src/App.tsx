@@ -31,6 +31,7 @@ import Reports from './pages/app/Reports'
 import Withdrawals from './pages/app/Withdrawals'
 import Assistant from './pages/app/Assistant'
 import Feedback from './pages/app/Feedback'
+import Announcements from './pages/app/Announcements'
 
 import Overview from './pages/admin/Overview'
 import AdminOrders from './pages/admin/AdminOrders'
@@ -50,6 +51,8 @@ import Team from './pages/admin/Team'
 import DomainRequests from './pages/admin/DomainRequests'
 import Settings from './pages/admin/Settings'
 import AdminFeedback from './pages/admin/AdminFeedback'
+import AdminAnnouncements from './pages/admin/AdminAnnouncements'
+import Subscriptions from './pages/admin/Subscriptions'
 
 /**
  * Decides whose branding the current page wears.
@@ -293,6 +296,7 @@ export default function App() {
                 <Route path="/app/withdrawals" element={<Withdrawals />} />
                 <Route path="/app/assistant" element={<Assistant />} />
                 <Route path="/app/feedback" element={<Feedback />} />
+                <Route path="/app/announcements" element={<Announcements />} />
               </Route>
             </Route>
           </Route>
@@ -321,6 +325,8 @@ export default function App() {
               <Route path="/admin/needs-attention" element={<NeedsAttention />} />
               <Route path="/admin/branding" element={<BrandingReview />} />
               <Route path="/admin/feedback" element={<AdminFeedback />} />
+              <Route path="/admin/announcements" element={<AdminAnnouncements />} />
+              <Route path="/admin/subscriptions" element={<Subscriptions />} />
               <Route path="/admin/team" element={<Team />} />
               <Route path="/admin/domains" element={<DomainRequests />} />
               <Route path="/admin/settings" element={<Settings />} />

@@ -35,7 +35,7 @@ import { AlertIcon, CheckIcon, ShieldIcon, UsersIcon } from '../../components/ic
  * a link that already arrived.
  */
 export default function Team() {
-  const { pushToast } = useStore()
+  const { session, pushToast } = useStore()
   const [rows, setRows] = useState<TeamMember[] | null>(null)
   const [error, setError] = useState('')
   const [adding, setAdding] = useState(false)
@@ -179,7 +179,20 @@ export default function Team() {
                         >
                           {member.pendingSetup ? 'New setup link' : 'Reset link'}
                         </Button>
-                        {member.status === 'active' ? (
+                        {/*
+                          The server already refuses a self-suspend (and
+                          suspending the last active superadmin), see
+                          `TeamService.setStatus`. This is the other half:
+                          the button for an action that can only ever end in
+                          a rejection should not be on screen at all, rather
+                          than inviting the click and then explaining why it
+                          didn't work.
+                        */}
+                        {member.id === session?.id ? (
+                          <span className="self-center text-xs text-slate-400 dark:text-slate-500">
+                            This is you
+                          </span>
+                        ) : member.status === 'active' ? (
                           <Button
                             size="sm"
                             variant="outline"

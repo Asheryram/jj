@@ -62,9 +62,14 @@ export class AdminFeedbackController {
     return this.feedback.list(user.role, status, category, escalated === 'true')
   }
 
+  /**
+   * Wrapped in an object rather than returned bare: Nest's Express adapter
+   * sends a raw number via `response.send(String(body))`, which defaults
+   * Content-Type to text/html and trips the client's JSON sniffing.
+   */
   @Get('open-count')
-  openCount(@CurrentUser() user: AuthUser) {
-    return this.feedback.openCount(user.role)
+  async openCount(@CurrentUser() user: AuthUser): Promise<{ count: number }> {
+    return { count: await this.feedback.openCount(user.role) }
   }
 
   /** One item by id, what an escalation email's "Open this ticket" link resolves. */

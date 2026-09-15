@@ -14,6 +14,7 @@ import {
   CashIcon,
   ChartIcon,
   CheckIcon,
+  ClockIcon,
   GlobeIcon,
   HelpIcon,
   HomeIcon,
@@ -123,6 +124,8 @@ function navFor(
   pendingApplications = 0,
   needsAttentionCount = 0,
   openFeedbackCount = 0,
+  unreadAnnouncementsCount = 0,
+  pendingDomainsCount = 0,
 ): NavItem[] {
   if (isAdmin(role)) {
     return [
@@ -158,6 +161,8 @@ function navFor(
         icon: HelpIcon,
         badge: openFeedbackCount > 0 ? openFeedbackCount : undefined,
       },
+      { to: '/admin/announcements', label: 'Announcements', icon: AlertIcon },
+      { to: '/admin/subscriptions', label: 'Subscriptions', icon: ClockIcon },
       { to: '/admin/settings', label: 'Settings', icon: SettingsIcon },
       // Platform access belongs to the operator, not the business owner. An
       // admin must not be shown a door they cannot open. Approving a custom
@@ -166,7 +171,12 @@ function navFor(
       ...(role === 'superadmin'
         ? [
             { to: '/admin/team', label: 'Platform team', icon: ShieldIcon },
-            { to: '/admin/domains', label: 'Custom domains', icon: GlobeIcon },
+            {
+              to: '/admin/domains',
+              label: 'Custom domains',
+              icon: GlobeIcon,
+              badge: pendingDomainsCount > 0 ? pendingDomainsCount : undefined,
+            },
           ]
         : []),
     ]
@@ -187,6 +197,12 @@ function navFor(
       { to: '/app/reports', label: 'Reports', icon: ChartIcon },
       { to: '/app/withdrawals', label: 'Withdraw', icon: CashIcon },
       { to: '/app/feedback', label: 'Feedback', icon: HelpIcon },
+      {
+        to: '/app/announcements',
+        label: 'Announcements',
+        icon: AlertIcon,
+        badge: unreadAnnouncementsCount > 0 ? unreadAnnouncementsCount : undefined,
+      },
     ]
   }
 
@@ -308,7 +324,7 @@ function SiteNotice() {
 
 export function AppShell() {
   const branding = useBranding()
-  const { session, balance, logout, profiles, switchProfile } = useStore()
+  const { session, balance, logout, profiles, switchProfile, unreadAnnouncementsCount } = useStore()
   const [switching, setSwitching] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
@@ -405,9 +421,31 @@ export function AppShell() {
     }
   }, [session?.id, session?.role])
 
+  /** Same reasoning as `pendingApplications` above, for the Custom domains badge. */
+  const [pendingDomainsCount, setPendingDomainsCount] = useState(0)
+  useEffect(() => {
+    if (!session || session.role !== 'superadmin') return
+    let live = true
+    api
+      .adminDomainsPendingCount()
+      .then((count) => live && setPendingDomainsCount(count))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [session?.id, session?.role])
+
   if (!session) return null
 
-  const items = navFor(session.role, shopPath, pendingApplications, needsAttentionCount, openFeedbackCount)
+  const items = navFor(
+    session.role,
+    shopPath,
+    pendingApplications,
+    needsAttentionCount,
+    openFeedbackCount,
+    unreadAnnouncementsCount,
+    pendingDomainsCount,
+  )
   const primary = items.slice(0, 4)
   const overflow = items.slice(4)
 

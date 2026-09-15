@@ -100,6 +100,11 @@ export class DomainsService {
     }))
   }
 
+  /** How many requests are sitting unreviewed, the superadmin's nav badge. */
+  async pendingCount(): Promise<number> {
+    return this.prisma.customDomain.count({ where: { reviewedAt: null } })
+  }
+
   /**
    * Approve, refuse or suspend — whichever of `allowed`/`active` is present.
    *

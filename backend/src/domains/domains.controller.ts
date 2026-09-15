@@ -85,6 +85,16 @@ export class AdminDomainsController {
     return this.domains.list(pending === 'true')
   }
 
+  /**
+   * Wrapped in an object rather than returned bare: Nest's Express adapter
+   * sends a raw number via `response.send(String(body))`, which defaults
+   * Content-Type to text/html and trips the client's JSON sniffing.
+   */
+  @Get('pending-count')
+  async pendingCount(): Promise<{ count: number }> {
+    return { count: await this.domains.pendingCount() }
+  }
+
   @Patch(':id')
   review(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ReviewDomainDto) {
     return this.domains.review(id, user.id, dto)

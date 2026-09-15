@@ -585,6 +585,43 @@ export interface AdminFeedbackReport extends FeedbackReport {
   escalatedAt: string | null
 }
 
+export interface MyAnnouncement {
+  id: string
+  title: string
+  message: string
+  createdAt: string
+  readAt: string | null
+}
+
+export type AnnouncementAudience = 'all' | 'selected'
+
+export interface AnnouncementHistoryRow {
+  id: string
+  title: string
+  message: string
+  audience: AnnouncementAudience
+  createdByName: string
+  createdAt: string
+  recipientCount: number
+  readCount: number
+}
+
+export type SubscriptionStatus = 'ok' | 'expiring_soon' | 'expired'
+
+export interface ServiceSubscription {
+  id: string
+  name: string
+  provider: string | null
+  renewalUrl: string | null
+  notes: string | null
+  expiresAt: string
+  alertDaysBefore: number
+  daysUntilExpiry: number
+  status: SubscriptionStatus
+  createdAt: string
+  updatedAt: string
+}
+
 export interface RefundRequest {
   id: string
   /** For the "Reorder" action — see `api.reorderOrder`. */
@@ -864,6 +901,9 @@ export const api = {
   reviewDomain: (id: string, body: { allowed?: boolean; active?: boolean; reason?: string }) =>
     request<AdminDomainRow>(`/admin/domains/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
 
+  adminDomainsPendingCount: () =>
+    request<{ count: number }>('/admin/domains/pending-count').then((r) => r.count),
+
   // Feedback: an agent's own suggestions/issue reports, sent in from inside the app
   submitFeedback: (category: FeedbackCategory, message: string) =>
     request<FeedbackReport>('/feedback', { method: 'POST', body: { category, message } }),
@@ -880,7 +920,8 @@ export const api = {
     return request<AdminFeedbackReport[]>(`/admin/feedback${query ? `?${query}` : ''}`)
   },
 
-  adminFeedbackOpenCount: () => request<number>('/admin/feedback/open-count'),
+  adminFeedbackOpenCount: () =>
+    request<{ count: number }>('/admin/feedback/open-count').then((r) => r.count),
 
   /** One item by id, what an escalation email's "Open this ticket" link resolves via `?item=`. */
   adminFeedbackItem: (id: string) => request<AdminFeedbackReport>(`/admin/feedback/${encodeURIComponent(id)}`),
@@ -894,6 +935,50 @@ export const api = {
   /** Admin-only, see `FeedbackService.escalate`'s own doc comment. */
   escalateFeedback: (id: string) =>
     request<AdminFeedbackReport>(`/admin/feedback/${encodeURIComponent(id)}/escalate`, { method: 'POST' }),
+
+  // Announcements: admin/superadmin composing and sending
+  announcementAgents: () => request<{ id: string; name: string; referralCode: string }[]>('/announcements/agents'),
+
+  sendAnnouncement: (title: string, message: string, agentIds?: string[]) =>
+    request<AnnouncementHistoryRow>('/announcements', { method: 'POST', body: { title, message, agentIds } }),
+
+  announcementHistory: () => request<AnnouncementHistoryRow[]>('/announcements/history'),
+
+  // Announcements: an agent's own inbox
+  myAnnouncements: () => request<MyAnnouncement[]>('/announcements/mine'),
+
+  announcementUnreadCount: () =>
+    request<{ count: number }>('/announcements/unread-count').then((r) => r.count),
+
+  markAnnouncementRead: (id: string) =>
+    request<void>(`/announcements/${encodeURIComponent(id)}/read`, { method: 'POST' }),
+
+  // Service subscriptions: admin/superadmin watching third-party renewals
+  subscriptions: () => request<ServiceSubscription[]>('/admin/subscriptions'),
+
+  createSubscription: (body: {
+    name: string
+    provider?: string
+    renewalUrl?: string
+    notes?: string
+    expiresAt: string
+    alertDaysBefore?: number
+  }) => request<ServiceSubscription>('/admin/subscriptions', { method: 'POST', body }),
+
+  updateSubscription: (
+    id: string,
+    body: Partial<{
+      name: string
+      provider: string
+      renewalUrl: string
+      notes: string
+      expiresAt: string
+      alertDaysBefore: number
+    }>,
+  ) => request<ServiceSubscription>(`/admin/subscriptions/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
+
+  deleteSubscription: (id: string) =>
+    request<void>(`/admin/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // Orders
   /**
