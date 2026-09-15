@@ -58,28 +58,28 @@ import Subscriptions from './pages/admin/Subscriptions'
  * Decides whose branding the current page wears.
  *
  * Read from the URL, deliberately NOT from the store's `sellerCode`. That value
- * is sticky by design — it lives in sessionStorage so a buyer who arrives through
- * an agent's link keeps buying from that agent as they move around — and theming
+ * is sticky by design, it lives in sessionStorage so a buyer who arrives through
+ * an agent's link keeps buying from that agent as they move around, and theming
  * from it meant an admin who had once opened an agent's shop kept the agent's
  * colours on their own admin pages for the rest of the session.
  *
  * So: only `/s/<code>` paths wear an agent's brand. The admin screens, the agent
  * dashboard and the platform's own storefront are the platform's, whatever link
  * somebody arrived by. `forceCode` extends the same rule to an agent's own
- * custom domain, where there is no `/s/<code>` in the URL to key off at all —
+ * custom domain, where there is no `/s/<code>` in the URL to key off at all:
  * the domain itself IS the shop, so the public storefront on it wears that
  * agent's brand.
  *
- * Still only the PUBLIC storefront, though — `/admin` is excluded from
+ * Still only the PUBLIC storefront, though, `/admin` is excluded from
  * `forceCode` for exactly the reason the paragraph above exists: logging into
  * the platform's own admin screens from inside someone's custom domain
- * (perfectly normal — `/login` is reachable from any shop) must not leave
+ * (perfectly normal, `/login` is reachable from any shop) must not leave
  * them wearing that agent's colours for the rest of the session. Confirmed
  * live: without this, an admin who logged in from an agent's domain saw that
  * agent's name and colour on `/admin/branding`.
  *
  * `/app` is different: it is a signed-in agent's OWN dashboard, so it wears
- * THEIR OWN approved branding whenever they are one — never the domain
+ * THEIR OWN approved branding whenever they are one, never the domain
  * they happen to be standing on. An agent logged into their own `/app` from
  * a colleague's shop link should see their own shop name there, not the
  * colleague's and not the platform's.
@@ -101,13 +101,13 @@ function ShopTheme({ children, forceCode = null }: { children: ReactNode; forceC
 }
 
 /**
- * Hosts that are this app itself, never an agent's custom domain — resolving
+ * Hosts that are this app itself, never an agent's custom domain, resolving
  * against the API for one of these would be pure waste on every single load.
  *
  * Matched against `SITE_ORIGIN` (see `lib/origin.ts`) rather than a hardcoded
  * production domain: with `VITE_SITE_ORIGIN` unset, `SITE_ORIGIN` falls back to
  * `window.location.origin`, so this is trivially true and resolution stays off
- * everywhere — dev, previews, anywhere the env var has not been deliberately
+ * everywhere, dev, previews, anywhere the env var has not been deliberately
  * set to the real domain. Custom-domain resolution is opt-in, not a default
  * that a forgotten env var could silently switch on somewhere unexpected.
  */
@@ -133,7 +133,7 @@ type DomainState =
 /**
  * Is this page loading on an agent's own domain, and if so, whose shop is it?
  *
- * Deliberately its own hook, run before `StoreProvider` even mounts — the
+ * Deliberately its own hook, run before `StoreProvider` even mounts, the
  * result decides whether the ordinary app renders at all, or a domain that
  * resolved to nobody shows a plain "not set up" page instead.
  */
@@ -159,7 +159,7 @@ function useCustomDomain(): DomainState {
 
 /**
  * Puts a custom domain's agent into the store, the same way `Storefront` does
- * for a `/s/<code>` visit — everything downstream (pricing, the referral
+ * for a `/s/<code>` visit, everything downstream (pricing, the referral
  * chain) already reads `sellerCode` from there, not from the URL, so nothing
  * else needs to know this page was reached by domain rather than by path.
  */
@@ -219,9 +219,9 @@ export default function App() {
         <ShopTheme forceCode={customDomainCode}>
         <RouteMeta />
         <Routes>
-          {/* Public storefront — buyable without an account (FR-4.8) */}
+          {/* Public storefront, buyable without an account (FR-4.8) */}
           <Route element={<PublicShell />}>
-            {/* The front door is the shop itself — buying is never a page away. */}
+            {/* The front door is the shop itself, buying is never a page away. */}
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
@@ -244,7 +244,7 @@ export default function App() {
 
               The same pages as above, mounted a second time under `/s/:code`, so
               a buyer in an agent's shop keeps the agent in the URL as they move
-              around. The pages are identical — `Storefront` only puts the code
+              around. The pages are identical, `Storefront` only puts the code
               into the store, and prices resolve from there. Nothing is
               duplicated but the route table.
             */}
@@ -255,12 +255,12 @@ export default function App() {
               <Route path="track" element={<Track />} />
               <Route path="buy/:productId" element={<Buy />} />
               {/* Where Paystack sends a buyer back to, when they paid from
-                  inside this shop — the backend builds this URL itself from
+                  inside this shop, the backend builds this URL itself from
                   the order's own seller code (see PaymentsService.callbackUrl),
                   so it only ever appears here for a real completed checkout. */}
               <Route path="pay/return" element={<PaymentReturn />} />
               {/* An agent or admin using their own shop link still needs to log
-                  in, reset a password or set one from inside it — the URL
+                  in, reset a password or set one from inside it, the URL
                   should say so, not silently drop back to the platform's own
                   path. This matters beyond tidiness: once an agent's own
                   domain points at /s/<code>, nothing outside that path is
@@ -272,7 +272,7 @@ export default function App() {
             </Route>
           </Route>
 
-          {/* Signed-in area — customers and agents (FR-1.5, NFR-2.5).
+          {/* Signed-in area, customers and agents (FR-1.5, NFR-2.5).
               Checkout deliberately stays on the public shell above so that one
               code path serves guests and account holders alike. */}
           <Route element={<RequireAuth />}>
@@ -301,7 +301,7 @@ export default function App() {
             </Route>
           </Route>
 
-          {/* Staff only — the "what can I do" guide. Not for customers: they
+          {/* Staff only, the "what can I do" guide. Not for customers: they
               never navigate anything more complex than a checkout, and a
               guest reaching it would see a page with nothing they can act on. */}
           <Route element={<RequireAuth roles={['admin', 'agent']} />}>
@@ -310,7 +310,7 @@ export default function App() {
             </Route>
           </Route>
 
-          {/* Admin — James only */}
+          {/* Admin, James only */}
           <Route element={<RequireAuth role="admin" />}>
             <Route element={<AppShell />}>
               <Route path="/admin" element={<Overview />} />

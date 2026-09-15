@@ -27,7 +27,7 @@ const TOKEN_BYTES = 32
 /**
  * The minimum password we will accept.
  *
- * Length only, deliberately. Composition rules — a capital, a digit, a symbol —
+ * Length only, deliberately. Composition rules, a capital, a digit, a symbol,
  * push people towards `Password1!` and towards writing it down, and this account
  * can move money. Ten characters of anything beats eight characters of theatre.
  */
@@ -38,7 +38,7 @@ const MIN_PASSWORD = 10
  *
  * This exists so that no password is ever seeded, emailed, or known by anyone but
  * its owner. Before it, the only way an admin account existed was the seed
- * creating one with a password published in `.env.example` — which is fine on a
+ * creating one with a password published in `.env.example`, which is fine on a
  * laptop and is a live credential in production.
  *
  * The same machinery serves three jobs, because they are the same job: an account
@@ -65,7 +65,7 @@ export class SetupTokensService {
    * `agentCode` routes the link through that agent's own shop path
    * (`/s/<code>/set-password`) instead of the bare platform path.
    *
-   * Only ever an agent's own `referralCode` — see `issueAndSend`, the one
+   * Only ever an agent's own `referralCode`, see `issueAndSend`, the one
    * caller that resolves it. Never anything a request supplied: this URL goes
    * out in an email, so it has to come from something the server already
    * trusts, not from a client-controlled origin or query string.
@@ -111,7 +111,7 @@ export class SetupTokensService {
    * Mint a link and email it.
    *
    * The link comes back either way. Mail failing is not a reason to fail the
-   * action that needed it — an unsent password link is still a working password
+   * action that needed it, an unsent password link is still a working password
    * link, and the caller can hand it over by another route. `sent` says which
    * happened so nothing claims an email arrived when it did not.
    */
@@ -125,7 +125,7 @@ export class SetupTokensService {
       select: { name: true, email: true, role: true, referralCode: true },
     })
 
-    // Only an agent's own code ever routes the link through /s/<code> — an
+    // Only an agent's own code ever routes the link through /s/<code>, an
     // admin's referralCode is an identifier, not a sell link (see TeamService),
     // and nobody else reaches this without one of the two roles.
     const agentCode = user.role === 'agent' ? user.referralCode : null
@@ -156,11 +156,11 @@ export class SetupTokensService {
    * the caller cannot tell an unknown address from a real one.
    *
    * It will not mint a second link within a minute of the last. Nothing here is
-   * guessable, so the risk is not brute force — it is using the platform to send
+   * guessable, so the risk is not brute force, it is using the platform to send
    * somebody a hundred emails.
    */
   async requestReset(email: string): Promise<void> {
-    // The profile that holds the password — see AuthService.login. Resetting a
+    // The profile that holds the password, see AuthService.login. Resetting a
     // secondary profile would set a second password for one person, which is the
     // one thing the profile model exists to avoid.
     const user = await this.prisma.user.findFirst({
@@ -169,7 +169,7 @@ export class SetupTokensService {
     })
 
     // Customers sign in with a wallet they can top up again; agents and admins
-    // have a business behind the account. Both are fine to reset — but a
+    // have a business behind the account. Both are fine to reset, but a
     // never-set password is a `setup`, not a `reset`.
     if (!user || user.status !== 'active') return
 
@@ -177,7 +177,7 @@ export class SetupTokensService {
       where: { userId: user.id, createdAt: { gt: new Date(Date.now() - 60_000) } },
     })
     if (recent) {
-      this.log.warn(`reset for ${email} throttled — one was issued in the last minute`)
+      this.log.warn(`reset for ${email} throttled, one was issued in the last minute`)
       return
     }
 
@@ -207,7 +207,7 @@ export class SetupTokensService {
    *
    * The lookup, the expiry check and the write are one transaction, so a link
    * cannot be used twice by two requests arriving together. Nothing here reveals
-   * whose account it was on failure — a dead link says only that it is dead.
+   * whose account it was on failure, a dead link says only that it is dead.
    */
   async consume(token: string, password: string): Promise<{ email: string }> {
     if (password.length < MIN_PASSWORD) {
@@ -236,7 +236,7 @@ export class SetupTokensService {
        * Claimed atomically, not read-then-written.
        *
        * The read above proves nothing about what is still true by the time
-       * the writes below run — two genuinely concurrent uses of the same
+       * the writes below run, two genuinely concurrent uses of the same
        * still-valid link (someone's double click, or the link opened in two
        * tabs) both pass that read before either commits. `updateMany`'s
        * `WHERE used_at IS NULL` is the actual single-use guard: only the

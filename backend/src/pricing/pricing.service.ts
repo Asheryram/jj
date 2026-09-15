@@ -15,7 +15,7 @@ import {
   type PricingAgent,
 } from '../domain/pricing'
 
-/** Anything that can run a query — the client, or an open transaction. */
+/** Anything that can run a query, the client, or an open transaction. */
 type Db = PrismaService | Prisma.TransactionClient
 
 /**
@@ -36,7 +36,7 @@ export class PricingService {
 
   /**
    * Every agent, with their explicit per-product prices attached. Admins are
-   * excluded — James is the implicit root of every chain and is added by
+   * excluded, James is the implicit root of every chain and is added by
    * `splitFor`, so including him would double-count his margin.
    */
   async agents(db: Db = this.prisma): Promise<PricingAgent[]> {
@@ -67,7 +67,7 @@ export class PricingService {
    * The admin, or null when the platform has no admin yet.
    *
    * Separate from `admin()` because the two callers need opposite answers on a
-   * fresh deployment. Reading the shop is fine with nobody to hold the margin —
+   * fresh deployment. Reading the shop is fine with nobody to hold the margin,
    * there is nothing priced to sell. Placing an order is not.
    *
    * This exists because the strict version made a new deployment unusable: the
@@ -93,7 +93,7 @@ export class PricingService {
     if (!row) {
       // Without an admin row there is nobody to hold the supplier margin, so a
       // split cannot balance. Failing here beats writing a lopsided ledger.
-      throw new NotFoundError('The platform is not configured yet — no admin account exists.')
+      throw new NotFoundError('The platform is not configured yet, no admin account exists.')
     }
     return { userId: row.id, name: row.name }
   }
@@ -114,7 +114,7 @@ export class PricingService {
    * The authoritative price and split for one sale.
    *
    * Callers pass the transaction client so the seller's price and the referral
-   * policy are read under the same snapshot that writes the order — otherwise the
+   * policy are read under the same snapshot that writes the order, otherwise the
    * rate could change between the quote and the ledger write.
    */
   async quote(
@@ -140,7 +140,7 @@ export class PricingService {
   }
 
   /**
-   * FR-3.4 — the legal window for one agent's own price on one product.
+   * FR-3.4, the legal window for one agent's own price on one product.
    *
    * Identical for every agent now: the floor is James's agent price, because
    * that is what all of them pay regardless of who referred them.

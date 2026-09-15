@@ -4,13 +4,13 @@ import { deriveBrand } from '../lib/branding'
 import { useTheme } from '../lib/theme'
 
 /**
- * The shop's identity — its name, mark and colour — applied at runtime.
+ * The shop's identity (its name, mark and colour) applied at runtime.
  *
  * ── Why this can be done at all ──────────────────────────────────────────────
  *
  * Tailwind v4 compiles `bg-brand-700` to `background-color: var(--color-brand-700)`
  * and declares the variable once at `:root`. So re-theming the entire product is
- * a matter of writing ten custom properties — no per-agent stylesheet, no
+ * a matter of writing ten custom properties, no per-agent stylesheet, no
  * rebuild, no flash of the wrong brand beyond the first paint.
  *
  * ── What it does not touch ───────────────────────────────────────────────────
@@ -48,7 +48,7 @@ export function useBranding(): PublicBranding {
  * Fetches the branding for whichever shop is being viewed and writes its ramp
  * onto the document.
  *
- * `sellerCode` comes from the store, which reads it from the `/s/<code>` route —
+ * `sellerCode` comes from the store, which reads it from the `/s/<code>` route,
  * so an agent's link themes the pages, and the platform's own pages do not.
  */
 export function BrandingProvider({
@@ -66,7 +66,7 @@ export function BrandingProvider({
 
     // Back to the platform's look straight away, before asking the server whose
     // shop this is. Without this, leaving an agent's shop kept their colours on
-    // screen for as long as the request took — which on a slow connection is long
+    // screen for as long as the request took, which on a slow connection is long
     // enough to read, and looks like the admin pages belong to the agent.
     setBranding(DEFAULT)
 
@@ -76,7 +76,7 @@ export function BrandingProvider({
         if (live) setBranding(result)
       })
       // A shop that cannot read its branding still has to sell. The default is a
-      // complete, working theme, so failing quietly here is the right call —
+      // complete, working theme, so failing quietly here is the right call,
       // an error banner about a colour would be noise on a checkout page.
       .catch(() => undefined)
     return () => {
@@ -87,7 +87,7 @@ export function BrandingProvider({
   useEffect(() => {
     const root = document.documentElement
     // Picks the ramp for whichever theme is live, so `bg-brand-700` and friends
-    // resolve to the right colour without needing a `dark:` class anywhere —
+    // resolve to the right colour without needing a `dark:` class anywhere,
     // the variable itself changes under them. Depends on `theme` as well as
     // `branding` below, so toggling day/night updates it immediately rather
     // than waiting for some unrelated re-render to catch up.

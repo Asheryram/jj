@@ -25,11 +25,11 @@ import { AlertIcon, CheckIcon, ShieldIcon, UsersIcon } from '../../components/ic
  *
  * The point of this screen is that no password is ever handed over. Creating an
  * admin mints a one-time link; the new admin follows it and chooses their own
- * password, which nobody here ever learns. The alternative — the seed creating an
- * admin with a password published in `.env.example` — is a live credential in
+ * password, which nobody here ever learns. The alternative, the seed creating an
+ * admin with a password published in `.env.example`, is a live credential in
  * production that cannot be rotated without a deploy.
  *
- * The link is emailed when mail is working, and shown here either way — a copy
+ * The link is emailed when mail is working, and shown here either way, a copy
  * rescues the case where it lands in spam. The modal reports which happened
  * rather than assuming, because assuming is how somebody ends up hand-delivering
  * a link that already arrived.
@@ -223,7 +223,7 @@ export default function Team() {
 
       <Callout tone="info" className="mt-3" icon={<UsersIcon className="size-4" />}>
         A reset link is the only way back in for somebody locked out. Anyone with an account can
-        also request one themselves from the sign-in page — it goes to their email, so it reaches
+        also request one themselves from the sign-in page, it goes to their email, so it reaches
         them and nobody else.
       </Callout>
 
@@ -308,7 +308,7 @@ function AddAdminModal({
     <Modal open onClose={onClose} title="Add an admin">
       <div className="space-y-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          They run the business — prices, orders, refunds, payouts. You will get a one-time link to
+          They run the business, prices, orders, refunds, payouts. You will get a one-time link to
           pass on; they choose their own password.
         </p>
 
@@ -370,7 +370,7 @@ function AddAdminModal({
 /**
  * The link, shown once, alongside whether it was actually emailed.
  *
- * The server says which — it tries to send and reports back — and this reads that
+ * The server says which (it tries to send and reports back) and this reads that
  * answer rather than assuming. It previously hardcoded "Nothing has been
  * emailed", which stayed on screen after mail started working and told the
  * operator to hand-deliver links that had already arrived. The exact failure the
@@ -410,7 +410,7 @@ function LinkModal({
           <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
             <strong className="font-semibold">Nothing has been emailed.</strong>{' '}
             {issued.emailProblem ?? 'Email is not working on this server.'} Send this to{' '}
-            {issued.email} yourself — WhatsApp, a message, however you normally reach them.
+            {issued.email} yourself, WhatsApp, a message, however you normally reach them.
           </Callout>
         )}
 
@@ -419,7 +419,7 @@ function LinkModal({
         <p className="text-sm text-slate-600 dark:text-slate-300">
           It works once and expires in{' '}
           {issued.purpose === 'reset' ? 'an hour' : '48 hours'}. If it goes astray, create another
-          from the team list — doing so cancels this one.
+          from the team list, doing so cancels this one.
         </p>
 
         <Button block onClick={onClose}>

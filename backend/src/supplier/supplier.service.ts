@@ -11,10 +11,10 @@ export interface DispatchResult {
    * `delivered` and `rejected` are terminal. The other two are not, and the
    * difference matters more than it looks:
    *
-   *  · `pending` — DataHub accepted the order and will report the real outcome
+   *  · `pending`, DataHub accepted the order and will report the real outcome
    *    by webhook. The order stays in `processing`; nothing is credited or
    *    refunded yet.
-   *  · `unknown` — we never got a usable reply. The order may or may not have
+   *  · `unknown`, we never got a usable reply. The order may or may not have
    *    been placed and the float may or may not have been debited. It must NOT
    *    be refunded (the bundle may have arrived) and must NOT be retried (there
    *    is no idempotency key, so a retry can deliver twice). It is parked for a
@@ -23,7 +23,7 @@ export interface DispatchResult {
   outcome: 'delivered' | 'rejected' | 'pending' | 'unknown' | 'needs_approval'
   /** The provider's reason for a rejection. For admin eyes, not the buyer's. */
   reason?: string
-  /** FR-4.7 — result-checker orders come back with a voucher. */
+  /** FR-4.7, result-checker orders come back with a voucher. */
   voucher?: { serial: string; pin: string }
   /** DataHub's own reference, once they have accepted the order. */
   providerReference?: string
@@ -38,7 +38,7 @@ export interface DispatchResult {
 /**
  * DataHub's way of saying the recipient is not on their beneficiary list.
  *
- * Matched on their words because they send no machine-readable code for it —
+ * Matched on their words because they send no machine-readable code for it,
  * `/verify` answers `Phone number not verified`, and `/data-purchase` returns the
  * same text with a 422. Both mean the order is deliverable later, once a human
  * approves the number, so both must produce `needs_approval` rather than the
@@ -54,7 +54,7 @@ export function isApprovalProblem(reason: string): boolean {
 /**
  * The DataHub GH adapter.
  *
- * With no API key configured it does not call anything — it decides the outcome
+ * With no API key configured it does not call anything, it decides the outcome
  * from the seeded `supplier_products` table and logs the attempt to
  * `supplier_dispatches` in exactly the shape a real call would. That is the
  * whole point of the seam: `dispatch()` keeps its signature when the keys land,
@@ -86,14 +86,14 @@ export class SupplierService implements OnModuleInit {
    *
    * Two independent conditions, and both are deliberate:
    *
-   *  · `DATAHUB_LIVE` must be explicitly "true". Anything else — absent, empty,
-   *    "1", "yes" — is false. A money switch should have exactly one spelling
+   *  · `DATAHUB_LIVE` must be explicitly "true". Anything else, absent, empty,
+   *    "1", "yes", is false. A money switch should have exactly one spelling
    *    that turns it on, so a typo fails safe rather than starting to spend.
    *  · Credentials must exist, or there is nothing to call with.
    *
    * Read from the environment rather than the database on purpose. Going live is
    * a deploy-time decision that costs money on every order, so it takes a
-   * deliberate file change and a restart — not a click, and not something a
+   * deliberate file change and a restart, not a click, and not something a
    * stolen admin session can do.
    */
   get isLive(): boolean {
@@ -111,16 +111,16 @@ export class SupplierService implements OnModuleInit {
 
   onModuleInit(): void {
     if (this.isLive) {
-      this.log.warn('DATAHUB_LIVE=true — orders WILL spend real money at DataHub GH.')
+      this.log.warn('DATAHUB_LIVE=true, orders WILL spend real money at DataHub GH.')
       return
     }
     if (this.providerState === 'live-requested-no-key') {
-      this.log.error('DATAHUB_LIVE=true but no DATAHUB_API_KEY — falling back to simulated.')
+      this.log.error('DATAHUB_LIVE=true but no DATAHUB_API_KEY, falling back to simulated.')
       return
     }
     if (this.hasCredentials) {
       this.log.warn(
-        'DataHub credentials present, DATAHUB_LIVE is not true — orders are simulated ' +
+        'DataHub credentials present, DATAHUB_LIVE is not true, orders are simulated ' +
           'and no bundles are being sent.',
       )
     }
@@ -132,7 +132,7 @@ export class SupplierService implements OnModuleInit {
   }
 
   /**
-   * Attempt delivery and record it. Never throws for a provider-side refusal —
+   * Attempt delivery and record it. Never throws for a provider-side refusal,
    * a rejection is a result, not an exception, and the caller has to run the
    * refund path either way.
    */
@@ -141,7 +141,7 @@ export class SupplierService implements OnModuleInit {
     const result = live ? await this.dispatchLive(order) : await this.decide(order)
 
     // Frozen at order time (see `Order.supplierCodeAtSale`'s own doc
-    // comment), not re-resolved from the product live — a checker with no
+    // comment), not re-resolved from the product live, a checker with no
     // DataHub SKU mapped yet still has null here, same as before.
     const supplierCode = order.supplierCodeAtSale
 
@@ -166,7 +166,7 @@ export class SupplierService implements OnModuleInit {
     }
 
     // Our seeded cost is an estimate until a live purchase contradicts it. When
-    // one does, say so — every margin on this order was computed from the wrong
+    // one does, say so, every margin on this order was computed from the wrong
     // baseline, and silence would let the error repeat on every future sale.
     const believedCost = (order.split as { supplierCost?: number })?.supplierCost ?? 0
     if (result.providerCharged != null && result.providerCharged !== believedCost) {
@@ -179,7 +179,7 @@ export class SupplierService implements OnModuleInit {
 
     this.log.log(
       `${result.outcome} ${order.reference} → ${order.recipient} (${order.productName})${
-        result.reason ? ` — ${result.reason}` : ''
+        result.reason ? `, ${result.reason}` : ''
       }`,
     )
 
@@ -189,7 +189,7 @@ export class SupplierService implements OnModuleInit {
   /**
    * Place the order with DataHub GH for real.
    *
-   * Data bundles only — their API sells nothing else, so anything without a
+   * Data bundles only, their API sells nothing else, so anything without a
    * mapped `networkKey` and `capacityGb` is refused here rather than being
    * quietly marked delivered. That refusal is a real refund, which is the honest
    * outcome: we took money for something we cannot fulfil automatically.
@@ -198,12 +198,12 @@ export class SupplierService implements OnModuleInit {
     // The admin test switch still wins, so the refund path stays reproducible
     // without spending money at the provider.
     if (await this.settings.get('simulateFailure')) {
-      return { outcome: 'rejected', reason: 'Forced failure — admin test switch is on.' }
+      return { outcome: 'rejected', reason: 'Forced failure, admin test switch is on.' }
     }
 
     /**
      * Looked up by the SKU frozen at order time, not by re-reading
-     * `Product.supplierCode` live — see `Order.supplierCodeAtSale`'s own
+     * `Product.supplierCode` live, see `Order.supplierCodeAtSale`'s own
      * doc comment. A product remapped to a different provider SKU between
      * this order being placed and dispatch actually running (a real,
      * documented catalogue-correction workflow, not just a crash window)
@@ -226,12 +226,12 @@ export class SupplierService implements OnModuleInit {
     if (!supplier.networkKey || !supplier.capacityGb) {
       return {
         outcome: 'rejected',
-        reason: `${supplier.name} has no automated fulfilment — DataHub GH sells data bundles only.`,
+        reason: `${supplier.name} has no automated fulfilment, DataHub GH sells data bundles only.`,
       }
     }
 
     // Ask before buying, for the networks they can answer about. Cheaper than a
-    // 422 and it keeps a doomed purchase off their rate limit — but it is only
+    // 422 and it keeps a doomed purchase off their rate limit, but it is only
     // an optimisation: the purchase reply is checked for the same thing below,
     // because /verify covers MTN alone.
     if (VERIFIABLE_KEYS.includes(supplier.networkKey)) {
@@ -255,7 +255,7 @@ export class SupplierService implements OnModuleInit {
        *
        * DataHub publishes no balance endpoint, so this reply is the only place
        * the remaining balance ever appears. Awaited rather than fired and
-       * forgotten, because the process may be about to be replaced on a deploy —
+       * forgotten, because the process may be about to be replaced on a deploy,
        * but `record` swallows its own failures, so it cannot turn a successful
        * purchase into a failed one.
        */
@@ -285,7 +285,7 @@ export class SupplierService implements OnModuleInit {
 
     if (result.insufficientBalance) {
       this.log.error(
-        'DataHub float is empty — every order will fail until it is topped up.',
+        'DataHub float is empty, every order will fail until it is topped up.',
       )
     }
 
@@ -309,11 +309,11 @@ export class SupplierService implements OnModuleInit {
     if (await this.settings.get('simulateFailure')) {
       return {
         outcome: 'rejected',
-        reason: 'Forced failure — admin test switch is on.',
+        reason: 'Forced failure, admin test switch is on.',
       }
     }
 
-    // Same frozen-SKU lookup as `dispatchLive` — see its own comment and
+    // Same frozen-SKU lookup as `dispatchLive`, see its own comment and
     // `Order.supplierCodeAtSale`'s doc comment in schema.prisma.
     const supplier = order.supplierCodeAtSale
       ? await this.prisma.supplierProduct.findUnique({ where: { code: order.supplierCodeAtSale } })
@@ -345,7 +345,7 @@ export class SupplierService implements OnModuleInit {
    * A stand-in for the voucher the supplier would return.
    *
    * Derived from the order reference rather than random, so the same order
-   * always shows the same voucher — a tester who reloads the page and sees
+   * always shows the same voucher, a tester who reloads the page and sees
    * different digits would reasonably report it as a bug.
    */
   private mintVoucher(reference: string): { serial: string; pin: string } {

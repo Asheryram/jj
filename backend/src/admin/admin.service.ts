@@ -32,7 +32,7 @@ export class AdminService {
   async users() {
     const rows = await this.prisma.user.findMany({
       orderBy: { joinedAt: 'asc' },
-      // Bounded, and only the columns this page actually renders — this used
+      // Bounded, and only the columns this page actually renders, this used
       // to be a bare `findMany()`, every column including `passwordHash` for
       // every user ever, on every load. Nothing here needs a hash it never
       // reads, and nothing here needs more than a sane ceiling on row count.
@@ -70,7 +70,7 @@ export class AdminService {
 
     /**
      * Lifetime profit each agent has earned, not their current withdrawable
-     * balance — the two differ the moment anyone withdraws. `sale` is an
+     * balance, the two differ the moment anyone withdraws. `sale` is an
      * agent's own margin; `downline` is historical only (see the note on
      * `LedgerKind.referral_bonus`) but summed in too so a pre-removal agent's
      * total still reads correctly.
@@ -102,7 +102,7 @@ export class AdminService {
   }
 
   /**
-   * Profit earned by every agent combined, all-time — the number "To your
+   * Profit earned by every agent combined, all-time, the number "To your
    * agents" on the Overview page never gives you, since that one is fixed to
    * a 7-day window and never broken out per agent.
    */
@@ -128,14 +128,14 @@ export class AdminService {
 
   /**
    * Whether the catalogue's believed cost for each product still matches
-   * what the supplier is actually charging — going only by the most recent
+   * what the supplier is actually charging, going only by the most recent
    * sale of each, not a running total across every sale that product has
    * ever had.
    *
    * `SupplierDispatch.costPrice` is the estimate `order.split` was priced
    * from, frozen at sale time; `providerCharged` is what the supplier's own
    * reply said it actually took, discovered only after dispatch. The two
-   * regularly disagree — `SupplierService.dispatch` already logs every
+   * regularly disagree, `SupplierService.dispatch` already logs every
    * mismatch as it happens (`COST MISMATCH`), but only to the server log,
    * never anywhere an admin would see it.
    *
@@ -143,11 +143,11 @@ export class AdminService {
    * a supplier's cost from a year ago with today's, so a product that was
    * expensive once and has been fine for months still shows as a loss
    * forever. The question that actually matters is "is the catalogue price
-   * right *now*" — which the most recent sale answers directly, and stops
+   * right *now*", which the most recent sale answers directly, and stops
    * answering the moment the catalogue is corrected.
    *
    * Bounded by how many distinct products have ever sold, not by order
-   * volume — a `groupBy` finds the latest sale timestamp per product, then
+   * volume, a `groupBy` finds the latest sale timestamp per product, then
    * one lookup per product fetches that exact row. A catalogue accuracy
    * report that queried every order ever placed would only get slower as
    * the business grows, for a number that only ever needs its most recent
@@ -155,7 +155,7 @@ export class AdminService {
    *
    * Scoped to completed orders: a rejected order's real charge is a sunk
    * cost already accounted for elsewhere (see `settle`'s rejected branch),
-   * not a pricing-accuracy question — nothing was actually sold to compare
+   * not a pricing-accuracy question, nothing was actually sold to compare
    * a catalogue price against.
    */
   async catalogueAccuracy() {
@@ -198,24 +198,24 @@ export class AdminService {
    * Which products the float can no longer cover, and what's currently off
    * that might be worth a second look now that it can.
    *
-   * A suggestion, not an action — nothing here ever flips `active` itself;
+   * A suggestion, not an action, nothing here ever flips `active` itself;
    * see `setProductActive` for the actual toggle, which this page just links
    * a decision to.
    *
-   * Judged against `expectedBalance` — what tracked capital says the float
-   * should hold — deliberately rather than the live reading or the blended
+   * Judged against `expectedBalance`, what tracked capital says the float
+   * should hold, deliberately rather than the live reading or the blended
    * `reference` the low-float alert uses. The live balance only refreshes on
    * an order, so it can sit stale for days; `expectedBalance` moves the
    * moment James logs a top-up or a cost is booked, so this list reacts
    * immediately rather than waiting on the next order to confirm it.
    *
-   * Deliberately does not try to guess *why* an inactive product is off —
+   * Deliberately does not try to guess *why* an inactive product is off,
    * nothing today records that, and a discontinued or mismapped product
    * doesn't become sellable again just because it happens to be cheap. The
    * inactive list is context to look at alongside the float, not a claim
    * that any particular row is safe to turn back on.
    *
-   * Null `floatReference` (nothing logged yet — no capital move has ever been
+   * Null `floatReference` (nothing logged yet, no capital move has ever been
    * recorded) means there is nothing to judge a cost against, so nothing is
    * flagged rather than everything.
    */
@@ -246,7 +246,7 @@ export class AdminService {
     }
   }
 
-  /** FR-6.4 — suspend or restore an account. */
+  /** FR-6.4, suspend or restore an account. */
   async toggleUserStatus(id: string) {
     const row = await this.prisma.user.findUnique({ where: { id } })
     if (!row) throw new NotFoundError('We could not find that user.')
@@ -257,7 +257,7 @@ export class AdminService {
      * Locking the only admin out of the platform is not an undoable mistake from
      * inside the platform. The superadmin matters more: this endpoint is open to
      * any admin, so checking only for `admin` let an admin suspend the person who
-     * runs the platform — and the account that can restore roles is the one being
+     * runs the platform, and the account that can restore roles is the one being
      * disabled. Hiding the button was never enough, because the request does not
      * need the button.
      */
@@ -275,7 +275,7 @@ export class AdminService {
      *
      * This endpoint only flips between active and suspended. Applied to a
      * `pending` agent it would set them active while skipping everything
-     * `ApplicationsService.approve` does — `decidedBy`, `decidedAt`, and the
+     * `ApplicationsService.approve` does, `decidedBy`, `decidedAt`, and the
      * email telling them they may start selling. An agent who is not told they
      * are approved does not start selling, so the approval would achieve nothing
      * and nobody would know who granted it.
@@ -298,20 +298,20 @@ export class AdminService {
   // ── Price tiers (FR-6.1) ──────────────────────────────────────────────────
 
   /**
-   * Edit one tier. Checked against the real floor — what the last real
+   * Edit one tier. Checked against the real floor, what the last real
    * delivery actually cost, when we know it, not the catalogue's possibly
-   * stale `supplierCost` — with a readable message. `supplierCost` itself is
+   * stale `supplierCost`, with a readable message. `supplierCost` itself is
    * never touched here, whichever way the real cost differs from it: it is
    * James's record of what the provider's catalogue says, kept in step with
    * that catalogue alone (see `syncSupplierCosts`), and a price he sets is his
    * own decision, not a correction to that record. `products_tiers_ordered`
-   * in scripts/constraints.sql only checks non-negativity now — the real
+   * in scripts/constraints.sql only checks non-negativity now, the real
    * floor depends on delivery history, not a single stored column, so like
    * the pricing-domain floor on an agent's own resale price, it can only be
    * enforced here, not as a row-level CHECK.
    *
-   * Also records `pricedAgainstRealCost`, when there's a real figure to record
-   * — the number the Prices screen compares against later to say whether this
+   * Also records `pricedAgainstRealCost`, when there's a real figure to record,
+   * the number the Prices screen compares against later to say whether this
    * price is still "up to date" with the real cost, or whether a fresh real
    * charge has moved since James last looked.
    *
@@ -326,7 +326,7 @@ export class AdminService {
     // What James pays is the provider's number, not his own. It lives in
     // `supplier_products` and is copied down by `syncSupplierCosts`. Letting it
     // be typed here would put our idea of the cost out of step with the invoice
-    // we actually get — and every margin on every screen is measured from it.
+    // we actually get, and every margin on every screen is measured from it.
     if (tier === 'supplierCost') {
       throw new ValidationError(
         'What you pay comes from the provider, not from here. Change it on the provider catalogue and sync.',
@@ -343,20 +343,20 @@ export class AdminService {
     /**
      * The real floor, not the catalogue one.
      *
-     * The catalogue's `supplierCost` is only ever as fresh as the last sync —
+     * The catalogue's `supplierCost` is only ever as fresh as the last sync,
      * what the last real delivery actually cost is the honest number to price
      * against. When it's cheaper than the catalogue assumes, that saving is
      * real and a price between the two is not selling under cost, whatever
      * the catalogue still says. When it's more expensive, pricing down to the
      * catalogue's stale, lower number would quietly sell at a loss the
-     * catalogue can't see yet — so the real charge, not the catalogue, is
+     * catalogue can't see yet, so the real charge, not the catalogue, is
      * what a price is actually checked against here.
      */
     const realCost = await lastRealCost(this.prisma, row.supplierCode)
     const floor = realCost ?? row.supplierCost
 
-    // Paystack's cut no longer comes out of this price — it is added on top as
-    // its own line at checkout (see `checkoutTotal`) — so the only thing to
+    // Paystack's cut no longer comes out of this price, it is added on top as
+    // its own line at checkout (see `checkoutTotal`), so the only thing to
     // guard against here is selling below what the bundle actually costs.
     if (next.adminPrice < floor) {
       throw new ValidationError(
@@ -382,7 +382,7 @@ export class AdminService {
 
 
     // Re-derive the markup from the price just typed, purely as a record of
-    // the intent behind it — shown next to the price on the Prices screen.
+    // the intent behind it, shown next to the price on the Prices screen.
     // It plays no part in what a sync does to this product; see
     // `syncSupplierCosts`.
     const markupField = tier === 'adminPrice' ? 'agentMarkupBp' : 'walkupMarkupBp'
@@ -393,7 +393,7 @@ export class AdminService {
      * `applyMarkup` already holds that anything being priced is by definition
      * ready to sell. This did not, so a freshly imported bundle priced one
      * product at a time stayed invisible to customers, and the only way to
-     * publish it was to run the bulk tool — which is not obvious from anywhere on
+     * publish it was to run the bulk tool, which is not obvious from anywhere on
      * the screen.
      *
      * Both selling prices have to clear cost first. Activating while one of them
@@ -410,7 +410,7 @@ export class AdminService {
           [markupField]: markupFromPrice(row.supplierCost, value),
           ...(!row.active && bothPricesClearCost ? { active: true } : {}),
           /**
-           * Recorded whenever a real figure exists to check against — this is
+           * Recorded whenever a real figure exists to check against, this is
            * what lets the Prices screen say "up to date" rather than merely
            * "priced," and it's compared by value (see the column's own comment
            * in schema.prisma), never touched when there's no real cost yet.
@@ -422,7 +422,7 @@ export class AdminService {
 
       /**
        * Agents only ever pay `adminPrice`, and only on a bundle that was
-       * already for sale — a product's first-ever price isn't a "change"
+       * already for sale, a product's first-ever price isn't a "change"
        * to anything an agent has seen before, it's a new listing. See
        * `recordPriceChange` and the model's own doc comment for the rest
        * of the consolidation rules (one row per product, cancels itself on
@@ -436,7 +436,7 @@ export class AdminService {
     })
 
     if (!row.active && bothPricesClearCost) {
-      this.log.log(`${productId} is now on sale — both prices clear cost`)
+      this.log.log(`${productId} is now on sale, both prices clear cost`)
     }
 
     this.log.log(`tier ${tier} on ${productId} → ${value}p (markup ${updated[markupField]}bp)`)
@@ -450,13 +450,13 @@ export class AdminService {
     /**
      * A product still priced at cost cannot be put on sale.
      *
-     * Every other route to publishing refuses this — the import leaves new SKUs
+     * Every other route to publishing refuses this, the import leaves new SKUs
      * inactive rather than sell them at cost, and `setTier` only activates once
      * both prices clear it. Without the same check here, this toggle would be the
      * one way to list a bundle that earns nothing, and nobody would notice until
      * the margin report came out flat.
      *
-     * Floored at the real cost, same as `setTier` — a price sitting below the
+     * Floored at the real cost, same as `setTier`, a price sitting below the
      * catalogue's `supplierCost` but above what the last real delivery actually
      * cost is genuinely profitable, and this check used to disagree with
      * `setTier` about that and refuse to publish it.
@@ -492,7 +492,7 @@ export class AdminService {
       include: { products: { select: { id: true, name: true } } },
     })
 
-    // One real-charge lookup per SKU, in parallel — timestamped, not just
+    // One real-charge lookup per SKU, in parallel, timestamped, not just
     // valued, so it can be weighed against the catalogue's own sync age below.
     const realCharges = await Promise.all(
       rows.map((row) =>
@@ -508,7 +508,7 @@ export class AdminService {
       const charge = realCharges[i]
       /**
        * A real charge only beats the catalogue's own `costPrice` when it is
-       * actually the newer of the two — a real sale from days before the last
+       * actually the newer of the two, a real sale from days before the last
        * sync is not more current than that sync, it is older, and treating it
        * as authoritative would show a cost as having "really" moved when
        * nothing has: the sync already caught up. Null here means the
@@ -524,13 +524,13 @@ export class AdminService {
         network: row.network,
         name: row.name,
         validity: row.validity,
-        /** The last catalogue sync's word — informational for admin, not a receipt. */
+        /** The last catalogue sync's word, informational for admin, not a receipt. */
         costPrice: row.costPrice,
         /**
          * What a real purchase of this SKU most recently actually cost, when
          * that is newer information than the catalogue sync above. Prefer
          * this over `costPrice` wherever a decision turns on real money, the
-         * same preference `recordDelivered` already gives it — but only once
+         * same preference `recordDelivered` already gives it, but only once
          * it has actually earned that preference by being the fresher figure.
          */
         realCost,
@@ -548,7 +548,7 @@ export class AdminService {
   /**
    * Re-read every configured supplier and make our catalogue match.
    *
-   * There is nothing beside this — no hand-typed cost, no hand-set stock flag.
+   * There is nothing beside this, no hand-typed cost, no hand-set stock flag.
    * Both used to exist here, and both were ways for the platform to state
    * something the supplier had not: a cost that could drift from the invoice
    * every margin is measured against, and an in-stock badge that could claim a
@@ -566,7 +566,7 @@ export class AdminService {
    * Put products on sale at a markup over supplier cost, and remember the markup.
    *
    * Remembering it is the point. The import deliberately leaves a new SKU
-   * inactive and priced at cost, because what it sells for is James's decision —
+   * inactive and priced at cost, because what it sells for is James's decision,
    * but that is dozens of products to price by hand after a single sync, and a
    * price with no recorded intent behind it cannot survive a cost change.
    */
@@ -628,7 +628,7 @@ export class AdminService {
   }
 
   /**
-   * Everything currently waiting to be told to agents — see
+   * Everything currently waiting to be told to agents, see
    * `PendingPriceChange`'s own doc comment for how this list stays
    * consolidated rather than growing one row per edit.
    *
@@ -672,13 +672,13 @@ export class AdminService {
   /**
    * Send the consolidated digest and clear the pending list.
    *
-   * Refuses up front if nothing can actually be sent — a misconfigured
+   * Refuses up front if nothing can actually be sent, a misconfigured
    * server must not quietly swallow the pending list, since there is no way
    * to reconstruct it afterwards (see `recordPriceChange`: the row is gone
    * the moment a price round-trips, not just the moment it's sent).
    *
    * Once sending genuinely starts, though, it clears regardless of which
-   * individual agents' mail bounces — same as every other sender in
+   * individual agents' mail bounces, same as every other sender in
    * `MailerService`, a delivery failure is logged, not retried, and must
    * never be the reason a price the admin already knows about keeps
    * reappearing here as "pending" forever.
@@ -707,8 +707,8 @@ export class AdminService {
     ])
     const productById = new Map(products.map((p) => [p.id, p]))
 
-    // One entry per agent, listing every changed product they actually stock
-    // — never one email per (agent, product) pair.
+    // One entry per agent, listing every changed product they actually stock,
+    // never one email per (agent, product) pair.
     const byAgent = new Map<string, { name: string; email: string; changes: { name: string; network: string | null; from: number; to: number }[] }>()
     for (const share of shares) {
       const change = pendingByProduct.get(share.productId)
@@ -760,13 +760,13 @@ export class AdminService {
      * One transaction for the whole sync, not one `update` per product.
      *
      * A thrown error partway through an update-in-loop left some products
-     * synced to the new cost and others stranded on the old one — a silently
+     * synced to the new cost and others stranded on the old one, a silently
      * half-applied catalogue. `applyMarkup` already batches its own updates
      * in one transaction; this never matched it.
      *
      * Only `supplierCost` moves here. Selling prices are James's own decision,
      * made on the Prices screen, not a side effect of the provider's catalogue
-     * changing — a sync that quietly moved them too meant a price he'd
+     * changing, a sync that quietly moved them too meant a price he'd
      * deliberately set could change under him without his say-so. If a cost
      * rise now sits above a price he already set, that shows up as "priced
      * wrong" on the Prices screen instead of being silently repriced for him;
@@ -801,7 +801,7 @@ export class AdminService {
   /**
    * Platform turnover per day for the last `days` days.
    *
-   * Computed from completed orders — a failed order was refunded and is not
+   * Computed from completed orders, a failed order was refunded and is not
    * revenue. Days with no sales are filled in as zero so the chart has an even
    * x-axis instead of silently compressing quiet days together.
    */
@@ -812,7 +812,7 @@ export class AdminService {
      * One joined query, not `order.findMany` followed by a second query
      * filtered `orderRef: { in: [...every order just returned] }`. That
      * second shape sized its own parameter list to however many orders
-     * matched the window — fine at low volume, but a parameter count that
+     * matched the window, fine at low volume, but a parameter count that
      * scales with data volume rather than a fixed shape is exactly the kind
      * of query that stops working outright, not just slowly, once there are
      * enough orders in a day. A `LEFT JOIN` on the same `orderRef`/`kind`
@@ -820,7 +820,7 @@ export class AdminService {
      * (never a date-proximity guess) in a single bounded-shape query.
      *
      * `adminMarginOf` reads `split`'s admin share, which is only ever the
-     * catalogue cost frozen in at sale time — the same gap `AdminOrders.tsx`
+     * catalogue cost frozen in at sale time, the same gap `AdminOrders.tsx`
      * corrects per-order with its own "true margin". This chart gets the same
      * correction here: the `supplier_cost` ledger entry is what was actually
      * booked (see `FulfilmentService.recordDelivered`), so the gap between it
@@ -898,7 +898,7 @@ export class AdminService {
    *
    * Computed with aggregate queries rather than derived in the browser from the
    * orders list. That list is capped (a busy agent has thousands of orders), so
-   * anything summed from it silently undercounts the moment the cap is hit —
+   * anything summed from it silently undercounts the moment the cap is hit,
    * which is the sort of wrong-but-plausible number that survives a demo and
    * fails an audit.
    *
@@ -928,7 +928,7 @@ export class AdminService {
         this.prisma.user.count({
           where: { uplineCode: user.referralCode, role: 'agent', status: 'active' },
         }),
-        // This week vs last week — a bare "earned today" says nothing about
+        // This week vs last week, a bare "earned today" says nothing about
         // whether things are picking up or trailing off.
         this.prisma.earning.aggregate({
           where: { userId: user.id, type: { in: ['sale', 'downline'] }, createdAt: { gte: startOfThisWeek } },
@@ -1001,7 +1001,7 @@ export class AdminService {
 
   /**
    * `Reports.tsx`'s date-range summary, computed with DB-side aggregates over
-   * the actual window asked for — not derived in the browser from whatever
+   * the actual window asked for, not derived in the browser from whatever
    * orders happen to already be loaded client-side (`OrdersService.list()` is
    * capped, same reasoning as `mySummary`'s own doc comment above), which
    * silently undercounts the moment an agent's or customer's true total for
@@ -1028,7 +1028,7 @@ export class AdminService {
         _count: { _all: true },
       }),
       // Only an agent has a margin to report; a customer's own spend has no
-      // "profit" — see `mySummary`'s identical role split.
+      // "profit", see `mySummary`'s identical role split.
       user.role === 'agent'
         ? this.prisma.earning.aggregate({
             where: { userId: user.id, type: { in: ['sale', 'downline'] }, createdAt: { gte: since, lte: until } },
@@ -1126,7 +1126,7 @@ export class AdminService {
     ])
 
     /**
-     * Active agents who have sold before but gone quiet — not agents still in
+     * Active agents who have sold before but gone quiet, not agents still in
      * their first two weeks, who have not had a fair chance to make a sale
      * yet. `soldByCode` on the order is the agent's referral code, not their
      * id, so this joins back through that.
@@ -1157,7 +1157,7 @@ export class AdminService {
      *
      * Reported separately because it is a real cost that appears nowhere else:
      * the customer paid `salePrice`, agents are credited their margin in full,
-     * and the supplier is paid its cost — so Paystack's cut comes out of what is
+     * and the supplier is paid its cost, so Paystack's cut comes out of what is
      * left, which is James's. A margin figure that ignores it overstates his
      * earnings on every card and Mobile Money sale.
      */
@@ -1173,7 +1173,7 @@ export class AdminService {
       /** Pesewas Paystack kept over the window. */
       paymentFees: fees._sum.fee ?? 0,
       failedOrders: failed,
-      /** NFR-3.1 — delivery success rate over the window. */
+      /** NFR-3.1, delivery success rate over the window. */
       successRate: orders + failed > 0 ? orders / (orders + failed) : 1,
       averageOrderValue: orders > 0 ? Math.round(revenue / orders) : 0,
       activeAgents: agents,
@@ -1182,7 +1182,7 @@ export class AdminService {
         count: pendingWithdrawals._count._all,
         amount: pendingWithdrawals._sum.amount ?? 0,
       },
-      /** NFR-3.3 — money owed back and not yet claimed. Should trend to zero. */
+      /** NFR-3.3, money owed back and not yet claimed. Should trend to zero. */
       unclaimedCredits: {
         count: credits._count._all,
         amount: credits._sum.amount ?? 0,
@@ -1191,7 +1191,7 @@ export class AdminService {
         thisWeek: revenueThisWeek._sum.salePrice ?? 0,
         lastWeek: revenueLastWeek._sum.salePrice ?? 0,
       },
-      /** All-time, on purpose — see the query above. */
+      /** All-time, on purpose, see the query above. */
       refundRate: resolvedOrders > 0 ? refundedOrders / resolvedOrders : 0,
       checkoutFunnel: {
         started: startedThisWeek,
@@ -1206,7 +1206,7 @@ export class AdminService {
   }
 }
 
-/** James's cut of one order — the admin share of its split. */
+/** James's cut of one order, the admin share of its split. */
 function adminMarginOf(split: OrderSplit): number {
   return split.shares?.find((s) => s.role === 'admin')?.margin ?? 0
 }
@@ -1249,7 +1249,7 @@ function emptyDayBuckets(days: number): Map<string, DayBucket> {
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-/** "Tue 12" — matches the axis labels the charts were designed against. */
+/** "Tue 12", matches the axis labels the charts were designed against. */
 function labelFor(isoDate: string): string {
   const d = new Date(`${isoDate}T00:00:00Z`)
   return `${WEEKDAYS[d.getUTCDay()]} ${d.getUTCDate()}`

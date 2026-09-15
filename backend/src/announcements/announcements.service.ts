@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import type { AnnouncementAudience } from '@prisma/client'
+import type { AnnouncementAudience, Role } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
@@ -42,13 +42,22 @@ export class AnnouncementsService {
     private readonly config: ConfigService,
   ) {}
 
-  /** Active agents, for the sender's picker when choosing specific recipients. */
-  async activeAgents(): Promise<{ id: string; name: string; referralCode: string }[]> {
+  /** Active users in the given roles, for a broadcast preset or the picker. */
+  private async activeUsers(roles: Role[]): Promise<{ id: string; name: string; referralCode: string; role: Role }[]> {
     return this.prisma.user.findMany({
-      where: { role: 'agent', status: 'active' },
-      select: { id: true, name: true, referralCode: true },
-      orderBy: { name: 'asc' },
+      where: { role: { in: roles }, status: 'active' },
+      select: { id: true, name: true, referralCode: true, role: true },
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
     })
+  }
+
+  /**
+   * Active agents and admins: the picker's full pool, and what "All" sends
+   * to. A scheduled-maintenance notice is exactly as relevant to the shop
+   * owner as it is to the sellers under them.
+   */
+  async eligibleRecipients(): Promise<{ id: string; name: string; referralCode: string; role: Role }[]> {
+    return this.activeUsers(['agent', 'admin'])
   }
 
   /**
@@ -60,7 +69,7 @@ export class AnnouncementsService {
     sender: AuthUser,
     title: string,
     message: string,
-    audience: 'all' | string[],
+    audience: 'all' | 'agents' | 'admins' | string[],
     origin?: string,
   ): Promise<AnnouncementHistoryRow> {
     const trimmedTitle = title.trim()
@@ -72,25 +81,26 @@ export class AnnouncementsService {
       throw new ValidationError('Say a little more, five characters minimum.')
     }
 
-    const recipients =
-      audience === 'all'
-        ? await this.activeAgents()
-        : await this.prisma.user
-            .findMany({
-              where: { id: { in: audience }, role: 'agent', status: 'active' },
-              select: { id: true, name: true, referralCode: true },
-            })
-            .then((rows) => rows)
+    const recipients = Array.isArray(audience)
+      ? await this.prisma.user.findMany({
+          where: { id: { in: audience }, role: { in: ['agent', 'admin'] }, status: 'active' },
+          select: { id: true, name: true, referralCode: true, role: true },
+        })
+      : audience === 'agents'
+        ? await this.activeUsers(['agent'])
+        : audience === 'admins'
+          ? await this.activeUsers(['admin'])
+          : await this.eligibleRecipients()
 
     if (recipients.length === 0) {
-      throw new ValidationError('Choose at least one active agent to send this to.')
+      throw new ValidationError('Choose at least one active agent or admin to send this to.')
     }
 
     const announcement = await this.prisma.announcement.create({
       data: {
         title: trimmedTitle,
         message: trimmedMessage,
-        audience: audience === 'all' ? 'all' : 'selected',
+        audience: Array.isArray(audience) ? 'selected' : audience,
         createdBy: sender.id,
         createdByName: sender.name,
         recipients: {
@@ -118,16 +128,19 @@ export class AnnouncementsService {
     announcementId: string,
     title: string,
     message: string,
-    recipients: { id: string; name: string }[],
+    recipients: { id: string; name: string; role: Role }[],
     origin?: string,
   ): Promise<void> {
     const shopName = await this.platformName()
     const subject = `${shopName}: ${title}`
-    const link = appUrl(this.config, `/app/announcements?item=${encodeURIComponent(announcementId)}`, origin)
-    const body =
-      `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${escape(message).replace(/\n/g, '<br>')}</p>` +
-      `<p style="margin:0"><a href="${link}" style="display:inline-block;background:#0B3B8F;color:#fff;font-weight:600;font-size:14px;padding:10px 18px;border-radius:8px;text-decoration:none">Open in app</a></p>`
-    const html = wrap(shopName, title, body, `You are getting this because you are an active agent on ${escape(shopName)}.`)
+    // Where "Open in app" goes depends on who is reading it: an admin's copy
+    // of this feature lives on their own screen, not the agent inbox.
+    const linkFor = (role: Role) =>
+      appUrl(
+        this.config,
+        `${role === 'admin' ? '/admin' : '/app'}/announcements?item=${encodeURIComponent(announcementId)}`,
+        origin,
+      )
 
     let sent = 0
     let failed = 0
@@ -135,7 +148,13 @@ export class AnnouncementsService {
       const user = await this.prisma.user.findUnique({ where: { id: recipient.id }, select: { email: true, name: true } })
       if (!user) continue
 
+      const link = linkFor(recipient.role)
+      const body =
+        `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${escape(message).replace(/\n/g, '<br>')}</p>` +
+        `<p style="margin:0"><a href="${link}" style="display:inline-block;background:#0B3B8F;color:#fff;font-weight:600;font-size:14px;padding:10px 18px;border-radius:8px;text-decoration:none">Open in app</a></p>`
+      const html = wrap(shopName, title, body, `You are getting this because you are active on ${escape(shopName)}.`)
       const text = `Hello ${user.name},\n\n${message}\n\nOpen in app: ${link}`
+
       const result = await this.mailer
         .send({ to: user.email, subject, html, text })
         .catch((error) => ({ sent: false, reason: String(error) }))
@@ -149,7 +168,7 @@ export class AnnouncementsService {
       else failed++
     }
 
-    this.log.log(`announcement ${announcementId}: emailed ${sent} agent(s), ${failed} failed`)
+    this.log.log(`announcement ${announcementId}: emailed ${sent} recipient(s), ${failed} failed`)
   }
 
   private async platformName(): Promise<string> {

@@ -43,17 +43,17 @@ export class OrdersService {
   ) {}
 
   /**
-   * FR-4.3 — place an order.
+   * FR-4.3, place an order.
    *
    * Everything that decides money happens inside one transaction: the chain is
    * read, the split computed, the wallet debited, the order written. The provider
-   * call is deliberately NOT in here — never hold a transaction open across an
+   * call is deliberately NOT in here, never hold a transaction open across an
    * outbound HTTP call (skills-breakdown.md §4.4.3). It is dispatched after
    * commit, and the order sits in `processing` until it answers.
    */
   async place(dto: PlaceOrderDto, user: AuthUser | undefined, origin?: string) {
     /**
-     * A wallet purchase debits the balance inside this same call — there is
+     * A wallet purchase debits the balance inside this same call, there is
      * no Paystack step afterward to make it recoverable, unlike `momo`. An
      * idempotency key is optional everywhere else because a `momo` retry just
      * lands on the same `awaiting_payment` order, but a `wallet` retry with no
@@ -91,7 +91,7 @@ export class OrdersService {
      *
      * So the sale is refused up front. `verifyRecipient` records the number as it
      * refuses, so it reaches the approvals queue whether the customer was stopped
-     * at the checkout or got as far as submitting — one place, counted once.
+     * at the checkout or got as far as submitting, one place, counted once.
      *
      * Only a definite refusal stops it. `verifyRecipient` returns verified for
      * both "they say it is fine" and "we could not ask them", because a provider
@@ -105,8 +105,8 @@ export class OrdersService {
     /**
      * Whether real money has to be collected before this order moves.
      *
-     * A wallet payment is already money in hand — it was collected when the
-     * wallet was topped up — so it is debited inside the transaction below and
+     * A wallet payment is already money in hand, it was collected when the
+     * wallet was topped up, so it is debited inside the transaction below and
      * the order proceeds. Mobile Money means Paystack, and nothing proceeds
      * until they say it arrived.
      *
@@ -117,16 +117,16 @@ export class OrdersService {
 
     /**
      * The pre-check above proves nothing about what is still true by the
-     * time this transaction actually commits — a genuine double-tap (exactly
+     * time this transaction actually commits, a genuine double-tap (exactly
      * the scenario `idempotencyKey` exists to protect against) can have both
      * requests pass that read before either creates its order. Postgres
      * correctly stops the loser at the unique constraint, but that used to
-     * surface as a raw, unhandled `P2002` — a bare `409 ALREADY_EXISTS: "That
+     * surface as a raw, unhandled `P2002`, a bare `409 ALREADY_EXISTS: "That
      * value is already registered"` instead of the original order or payment
      * URL, which is precisely the outcome `idempotencyKey` exists to avoid.
      * Caught here and resolved to the winner's own order instead.
      *
-     * `reference`'s own collision (unrelated to idempotency — just two
+     * `reference`'s own collision (unrelated to idempotency, just two
      * six-digit random picks landing on the same value) is bounded odds, not
      * a replay, so a few attempts with a fresh one is the right response, not
      * treating a stranger's order as this customer's.
@@ -138,7 +138,7 @@ export class OrdersService {
         order = await this.prisma.$transaction(async (tx) => {
           const { product, salePrice, split } = await this.priceInside(tx, dto.productId, sellerCode, dto.recipient)
 
-          // FR-2.3 — a wallet payment is debited as the order is created, and only a
+          // FR-2.3, a wallet payment is debited as the order is created, and only a
           // customer holds a spendable wallet. An agent's balance is earnings.
           if (dto.payWith === 'wallet') {
             if (!user || user.role !== 'customer') {
@@ -160,7 +160,7 @@ export class OrdersService {
               recipient: dto.recipient,
               salePrice,
               split: split as unknown as Prisma.InputJsonValue,
-              // Frozen alongside the price it was actually sold against — see
+              // Frozen alongside the price it was actually sold against, see
               // the field's own doc comment in schema.prisma for why dispatch
               // must read this instead of re-resolving the product live.
               supplierCodeAtSale: product.supplierCode,
@@ -216,14 +216,14 @@ export class OrdersService {
     }
 
     // Committed and paid for. Now ask the provider, and let the result land
-    // asynchronously — the shape a real DataHub GH callback arrives in (FR-4.4).
+    // asynchronously, the shape a real DataHub GH callback arrives in (FR-4.4).
     this.fulfilment.scheduleFor(order.id)
 
     return toOrder(order)
   }
 
   /**
-   * What a replayed (or raced) idempotency key resolves to — undefined if
+   * What a replayed (or raced) idempotency key resolves to, undefined if
    * nothing has that key yet. Shared by the pre-check and by the actual
    * unique-constraint collision, so both agree on what "the same request,
    * again" means: a still-unpaid order needs its payment link handed back,
@@ -244,7 +244,7 @@ export class OrdersService {
   /**
    * Remember a number DataHub has not approved, so somebody can go and approve it.
    *
-   * Their `/beneficiaries` endpoint 502s, so this cannot be automated — the only
+   * Their `/beneficiaries` endpoint 502s, so this cannot be automated, the only
    * route is James doing it by hand in their dashboard, and he can only do that
    * if he knows which numbers to enter. `attempts` counts how many sales each
    * one has cost, which is the order to work through them in.
@@ -272,14 +272,14 @@ export class OrdersService {
       },
     })
 
-    this.log.warn(`${recipient} needs DataHub approval — sale refused`)
+    this.log.warn(`${recipient} needs DataHub approval, sale refused`)
   }
 
   /**
    * Price the order from rows read inside the transaction.
    *
    * A price posted by the browser is never trusted. Even the price the browser
-   * *displayed* is only a quote — if an upline changed theirs a second ago, the
+   * *displayed* is only a quote, if an upline changed theirs a second ago, the
    * authoritative number is this one, computed here.
    */
   private async priceInside(
@@ -301,14 +301,14 @@ export class OrdersService {
     //
     // One used to refuse an order whose number looked like the wrong carrier, on
     // a table mapping 024 → MTN and so on. Ghana's number portability makes that
-    // table unable to be right — a 020 line can genuinely be on MTN — so it
+    // table unable to be right (a 020 line can genuinely be on MTN) so it
     // turned away customers who could have been served, and a new NCA range did
     // the same to everyone on it. Deliverability is the supplier's answer to give:
     // it refuses what it cannot send, and a refused order refunds.
     // Do not take money for something we cannot deliver.
     //
     // While live, a product whose provider SKU has no network/capacity mapping
-    // can never be fulfilled — DataHub sells whole-GB data bundles and nothing
+    // can never be fulfilled, DataHub sells whole-GB data bundles and nothing
     // else. Dispatch used to catch this, but only after the buyer had paid: the
     // order failed, the money came back, and the customer was left wondering
     // what they had done wrong. Refusing here costs them nothing.
@@ -342,7 +342,7 @@ export class OrdersService {
     }
 
     // The referral policy is applied inside `quote`, from rows read in this same
-    // transaction — so the rate cannot move between pricing and writing.
+    // transaction, so the rate cannot move between pricing and writing.
     const { salePrice, split } = await this.pricing.quote(productId, sellerCode, tx)
 
     // The invariant, checked before anything is written: the buyer's money is
@@ -361,7 +361,7 @@ export class OrdersService {
   }
 
   /**
-   * FR-2.5 / NFR-3.3 — debit without a read-check-write race.
+   * FR-2.5 / NFR-3.3, debit without a read-check-write race.
    *
    * A naive `read balance → compare → write` lets two concurrent orders both
    * pass the check and overdraw. This is a single conditional UPDATE: Postgres
@@ -376,7 +376,7 @@ export class OrdersService {
     reference: string,
     description: string,
   ): Promise<void> {
-    // `id` is TEXT, not uuid — Prisma maps String @id to text, so no cast here.
+    // `id` is TEXT, not uuid, Prisma maps String @id to text, so no cast here.
     const affected = await tx.$executeRaw`
       UPDATE users SET balance = balance - ${amount}
       WHERE id = ${userId} AND balance >= ${amount}
@@ -423,7 +423,7 @@ export class OrdersService {
         select: { role: true, status: true, name: true },
       })
       // An unknown or suspended seller falls back to the standard price rather
-      // than failing the sale — the buyer did nothing wrong and should still be
+      // than failing the sale, the buyer did nothing wrong and should still be
       // able to buy (FR-3.5).
       if (!seller || seller.role !== 'agent' || seller.status !== 'active') return null
       return { code, name: seller.name }
@@ -432,12 +432,12 @@ export class OrdersService {
   }
 
   /**
-   * A human-quotable reference (FR-4.9 — a guest tracks an order with this and
+   * A human-quotable reference (FR-4.9, a guest tracks an order with this and
    * their phone number). Six digits, checked for collisions rather than trusted.
    */
   private async freshReference(): Promise<string> {
     for (let attempt = 0; attempt < 10; attempt++) {
-      // 9 digits (~900 million possibilities), not 6 (~900 thousand) — a
+      // 9 digits (~900 million possibilities), not 6 (~900 thousand), a
       // reference is shown on receipts and typed into Track, so it stays
       // public and guessable-in-principle either way, but the old space was
       // small enough to make enumerating real references a real option for
@@ -457,7 +457,7 @@ export class OrdersService {
   // ── Reads ─────────────────────────────────────────────────────────────────
 
   /**
-   * Orders visible to the caller. NFR-2.5 — row-level scoping, not just a role
+   * Orders visible to the caller. NFR-2.5, row-level scoping, not just a role
    * check, so agent A cannot read agent B's orders by changing a query param.
    */
   async list(user: AuthUser, limit = 100) {
@@ -472,13 +472,13 @@ export class OrdersService {
 
     /**
      * Admin also gets what the supplier actually charged, alongside the
-     * estimate frozen into `split` at sale time — the two can disagree (see
+     * estimate frozen into `split` at sale time, the two can disagree (see
      * `SupplierService.dispatch`'s COST MISMATCH log), and only admin needs
      * to see by how much. Not exposed to an agent or customer: it is the
      * platform's real wholesale cost, not theirs to see.
      *
      * Read from the `supplier_cost` ledger entry itself, not re-derived from
-     * `SupplierDispatch` — `FulfilmentService.recordDelivered` can fall back
+     * `SupplierDispatch`, `FulfilmentService.recordDelivered` can fall back
      * to a sibling order's real charge when this one's own dispatch didn't
      * report one (see `lastRealCost`), so the dispatch row alone no longer
      * always matches what was actually booked. The ledger entry is that
@@ -486,11 +486,11 @@ export class OrdersService {
      */
     /**
      * Whether the *most recent* dispatch attempt for a still-open order came
-     * back `unknown` — the purchase call timed out before any reply arrived
+     * back `unknown`, the purchase call timed out before any reply arrived
      * at all, so there is no `providerReference` for the reconciler to ever
      * check with, and this order will sit in `processing` looking exactly
      * like a normal, healthy in-flight one until somebody happens to open it.
-     * Computed only for `pending`/`processing` rows — a completed or failed
+     * Computed only for `pending`/`processing` rows, a completed or failed
      * order's dispatch history is no longer this urgent.
      */
     const openOrderIds = rows.filter((r) => r.status === 'pending' || r.status === 'processing').map((r) => r.id)
@@ -506,7 +506,7 @@ export class OrdersService {
     const seenOrderId = new Set<string>()
     for (const dispatch of dispatchesForOpenOrders) {
       // Already sorted newest-first, so the first row seen per order is its
-      // latest attempt — anything after that for the same order is history.
+      // latest attempt, anything after that for the same order is history.
       if (seenOrderId.has(dispatch.orderId)) continue
       seenOrderId.add(dispatch.orderId)
       if (dispatch.outcome === 'unknown') unresolvedOrderIds.add(dispatch.orderId)
@@ -524,11 +524,11 @@ export class OrdersService {
     }
 
     /**
-     * What Paystack actually kept, per `Payment.fee` — not `split.processingFee`,
+     * What Paystack actually kept, per `Payment.fee`, not `split.processingFee`,
      * which is only the estimate charged to the buyer at checkout to cover it.
      * The two are usually close but are never guaranteed equal, and this is the
      * same figure the ledger's `payment_fee` entries and the Overview page's
-     * cost breakdown already use — reading the estimate here would show a
+     * cost breakdown already use, reading the estimate here would show a
      * number that quietly disagreed with the rest of the platform.
      *
      * Null for a wallet-paid order on purpose: the fee was already paid once,
@@ -544,7 +544,7 @@ export class OrdersService {
     }
 
     /**
-     * Where a failed order's refund actually stands — a person always
+     * Where a failed order's refund actually stands, a person always
      * decides this (see `RefundRequest`'s own doc comment), so unlike
      * delivery there is no "automatic" version to compare against. `pending`
      * is the one that matters most to surface: a failed order sitting there
@@ -559,7 +559,7 @@ export class OrdersService {
     const refundStatusByOrderId = new Map<string, 'pending' | 'approved' | 'rejected'>()
     /**
      * A failed order has no dedicated "when it failed" column the way a
-     * delivered one has `completedAt` — but the refund request that pays it
+     * delivered one has `completedAt`, but the refund request that pays it
      * back is written inside the exact same transaction that flips the order
      * to `failed` (see `FulfilmentService.settle`'s rejected branch), so its
      * `createdAt` is, for every practical purpose, that same moment.
@@ -574,20 +574,20 @@ export class OrdersService {
       ...toOrder(row),
       actualSupplierCost: actualCostByOrderId.get(row.id) ?? null,
       paystackFee: feeByOrderId.get(row.id) ?? null,
-      /** See `refundCreatedAtByOrderId` above — null for anything that isn't `failed`. */
+      /** See `refundCreatedAtByOrderId` above, null for anything that isn't `failed`. */
       failedAt: row.status === 'failed' ? (refundCreatedAtByOrderId.get(row.id)?.toISOString() ?? null) : null,
       /**
        * How DataHub routed this specific purchase, not something either side
        * chose on this platform. A `manual_`-prefixed reference is their own
        * naming: it means one of their staff has to clear this one by hand,
        * rather than it going through their automated path (a plain numeric
-       * reference — 'code' below). Nothing about the order or the recipient
+       * reference, 'code' below). Nothing about the order or the recipient
        * predicts which: the exact same bundle to the exact same number has
        * gone either way on different days. It matters to admin because a
        * manual-routed order can take many hours longer to settle, and is the
        * shape most likely to get permanently stuck and need
        * `resolveManually`. Null until DataHub has actually replied with a
-       * reference at all — distinct from 'code', which is a positive answer,
+       * reference at all, distinct from 'code', which is a positive answer,
        * not just the absence of 'manual'.
        */
       fulfilmentReference: row.providerReference == null
@@ -597,7 +597,7 @@ export class OrdersService {
           : ('code' as const),
       /**
        * DataHub's own numeric ticket ID for a manual-routed order, pulled
-       * straight out of the reference they already gave us — `manual_<this>_
+       * straight out of the reference they already gave us, `manual_<this>_
        * <their-timestamp>`. Confirmed against a real duplicate-order error
        * they once sent, which named the same order by this exact number
        * (`existingOrder.orderNumber`) as well as by this same reference. Not
@@ -613,7 +613,7 @@ export class OrdersService {
       /**
        * True when an admin forced this order's outcome through `resolveManually`
        * rather than DataHub's own webhook or the reconciler's polling ever
-       * confirming it — a completely different thing from `fulfilmentReference`
+       * confirming it, a completely different thing from `fulfilmentReference`
        * being 'manual', which is about DataHub routing the purchase to their own
        * staff. This one is about who on our side decided the outcome.
        */
@@ -621,7 +621,7 @@ export class OrdersService {
       /** See the query above. Only ever true for a `pending`/`processing` row. */
       dispatchUnresolved: unresolvedOrderIds.has(row.id),
       /**
-       * `pending`/`rejected` only — `approved` is already `Order.refunded`,
+       * `pending`/`rejected` only, `approved` is already `Order.refunded`,
        * shown as the existing "Refunded" badge, so this deliberately doesn't
        * repeat it. Null when there's no refund request at all (nothing was
        * ever owed back).
@@ -638,7 +638,7 @@ export class OrdersService {
 
     if (user.role === 'customer') {
       // Their own purchases, including ones made as a guest before they signed
-      // up — matched on the phone number they registered with.
+      // up, matched on the phone number they registered with.
       return { OR: [{ buyerUserId: user.id }, { buyerPhone: user.phone }] }
     }
 
@@ -654,7 +654,7 @@ export class OrdersService {
     const codes = new Set<string>([rootCode])
     let frontier = [rootCode]
 
-    // Bounded to match MAX_CHAIN_DEPTH in the pricing domain — a cycle in the
+    // Bounded to match MAX_CHAIN_DEPTH in the pricing domain, a cycle in the
     // referral graph must not turn a list request into an infinite loop.
     for (let depth = 0; depth < 10 && frontier.length > 0; depth++) {
       const children: { referralCode: string }[] = await this.prisma.user.findMany({
@@ -675,7 +675,7 @@ export class OrdersService {
     const paymentCollected = await this.paymentCollectedFlag(row.id, row.status)
 
     // A guest polling their own just-placed order has no session, so ownership is
-    // proven by the reference in the URL plus nothing else — the id is a uuid and
+    // proven by the reference in the URL plus nothing else, the id is a uuid and
     // unguessable, which is the same bearer-token logic a payment link uses.
     if (!user) return { ...toTrackedOrder(row), paymentCollected }
 
@@ -694,11 +694,11 @@ export class OrdersService {
    * `RefundRequest` exists exactly when `FulfilmentService.settle` decided
    * money had actually been collected (see its own `collected` check), so
    * its presence is the one clean signal that tells apart two very different
-   * failures a buyer can land on — a Mobile Money charge that never went
+   * failures a buyer can land on, a Mobile Money charge that never went
    * through at all (nothing to give back) from a payment that succeeded and
    * a delivery that then failed (a refund genuinely owed). Without it, both
    * read identically as "failed", and showing refund language for a charge
-   * that was never taken is its own broken promise — shared by `byId` and
+   * that was never taken is its own broken promise, shared by `byId` and
    * `track`, the two places a buyer ever sees their own order's status.
    */
   private async paymentCollectedFlag(orderId: string, status: string): Promise<boolean | undefined> {
@@ -707,7 +707,7 @@ export class OrdersService {
     return refund !== null
   }
 
-  /** FR-4.9 — a guest looks up an order with its reference and their number. */
+  /** FR-4.9, a guest looks up an order with its reference and their number. */
   async track(dto: TrackOrderDto) {
     const reference = dto.reference.trim().toUpperCase()
     const digits = dto.phone.replace(/\D/g, '')
@@ -739,7 +739,7 @@ export class OrdersService {
    *
    * Local validation (10 digits, a recognised prefix) only proves the number is
    * well-formed. DataHub keeps its own beneficiary list, and an MTN number that
-   * is not on it fails *after* the customer has paid — the money then has to be
+   * is not on it fails *after* the customer has paid, the money then has to be
    * refunded and everybody's time is wasted. Asking first turns that into a
    * warning before checkout instead of a failure after it.
    *
@@ -771,7 +771,7 @@ export class OrdersService {
      * Three answers, and only one of them stops a sale.
      *
      * `registered` proceeds. `not_registered` is a refusal, and the checkout has
-     * to honour it — the money must not be taken for a bundle that cannot be
+     * to honour it, the money must not be taken for a bundle that cannot be
      * delivered. `unknown` proceeds too: their API being unreachable is our
      * problem, not the customer's, and the approval hold already covers an order
      * that turns out to be undeliverable.
@@ -781,7 +781,7 @@ export class OrdersService {
        * Record it here, because this is where the customer is turned away.
        *
        * The checkout disables its pay button on this answer, so the order is never
-       * submitted and `place` never runs — which means recording it there would
+       * submitted and `place` never runs, which means recording it there would
        * capture nothing at all. This is the only point in the flow that sees a
        * refused number, and getting it in front of an admin is the entire reason
        * the refusal is worth anything: they copy it into DataHub's dashboard, and
@@ -794,19 +794,19 @@ export class OrdersService {
         verified: false,
         message:
           `${prettyGhanaPhone(recipient)} is not on our delivery partner's approved list, so ` +
-          'this bundle cannot be sent to it yet. We have passed the number on to be added — ' +
+          'this bundle cannot be sent to it yet. We have passed the number on to be added, ' +
           'please try again a little later, or contact support.',
       }
     }
 
     if (result.kind === 'unknown') {
-      this.log.warn(`could not verify ${recipient}: ${result.reason} — allowing the sale`)
+      this.log.warn(`could not verify ${recipient}: ${result.reason}, allowing the sale`)
     }
 
     return { checked: true, verified: true, message: '' }
   }
 
-  /** NFR-3.3 — money held for a Mobile Money payer whose order failed. */
+  /** NFR-3.3, money held for a Mobile Money payer whose order failed. */
   async claimableCredits(phone: string) {
     const tail = phone.replace(/\D/g, '').slice(-9)
     if (tail.length < 9) return []
@@ -853,14 +853,14 @@ export class OrdersService {
   }
 }
 
-/** 024 411 8820 — for a message a person reads, not a log line. */
+/** 024 411 8820, for a message a person reads, not a log line. */
 function prettyGhanaPhone(phone: string): string {
   const p = phone.replace(/\D/g, '')
   return p.length === 10 ? `${p.slice(0, 3)} ${p.slice(3, 6)} ${p.slice(6)}` : phone
 }
 
 /**
- * Which unique column a `P2002` actually fired on, in `place()`'s own terms —
+ * Which unique column a `P2002` actually fired on, in `place()`'s own terms,
  * `null` for anything else (including a non-Prisma error, which this must
  * never swallow). Same `String(meta.target).includes(...)` shape as the
  * global exception filter's own P2002 handling, kept local here because the

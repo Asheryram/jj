@@ -160,7 +160,7 @@ export default function Home() {
               Become an agent. Set your own prices.
             </h2>
             <p className="mt-3 leading-relaxed text-slate-600 dark:text-slate-300">
-              You get your own shop link to share. Customers buy at your prices and pay directly —
+              You get your own shop link to share. Customers buy at your prices and pay directly,
               you never handle the money or carry any stock. The difference between your price and
               what you pay is yours the moment the order completes.
             </p>
@@ -192,7 +192,7 @@ export default function Home() {
           {/* Margin illustration, from the real catalogue */}
           <Card className="p-5">
             <p className="text-sm font-semibold text-slate-500 dark:text-slate-400">
-              Example — {example ? example.name : 'MTN 5GB'}
+              Example, {example ? example.name : 'MTN 5GB'}
             </p>
             <div className="mt-4 space-y-3">
               <Row label="Your agent price" value={cedis(exampleCost)} />

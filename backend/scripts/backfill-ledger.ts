@@ -2,7 +2,7 @@
  * Write ledger entries for money that moved before the ledger existed.
  *
  * The ledger records events as they happen, which leaves everything that
- * happened earlier invisible to it — and a profit figure covering only the last
+ * happened earlier invisible to it, and a profit figure covering only the last
  * few days of trading is worse than none, because it looks complete.
  *
  * Safe to run repeatedly. Every entry is keyed by its event, so a second run
@@ -146,7 +146,7 @@ async function main() {
   //
   // Only where money was actually collected. A Mobile Money order that failed
   // before the customer paid has nothing to give back, and booking a refund for
-  // it invents a loss the size of the sale — which is exactly what the first run
+  // it invents a loss the size of the sale, which is exactly what the first run
   // of this script did, showing GHS 196 of refunds against GHS 5 of revenue.
   const refunded = await prisma.order.findMany({
     where: {
@@ -189,7 +189,7 @@ async function main() {
   const written = await ledger.record(drafts)
   console.log(`${drafts.length} event(s) considered, ${written} newly recorded.`)
   if (written < drafts.length) {
-    console.log(`${drafts.length - written} were already on the books — that is the idempotency working.`)
+    console.log(`${drafts.length - written} were already on the books, that is the idempotency working.`)
   }
 }
 

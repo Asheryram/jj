@@ -5,7 +5,7 @@ import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { DomainsService } from './domains.service'
 
 /**
- * A reasonable domain shape — labels of letters/digits/hyphens (never
+ * A reasonable domain shape, labels of letters/digits/hyphens (never
  * starting or ending with one), at least one dot, a letters-only TLD of 2+
  * characters. Not a full RFC 1035 validator; just enough to reject "not a
  * domain" before it reaches the database.
@@ -55,7 +55,7 @@ export class DomainsController {
 
   /**
    * What a visitor's browser actually calls, on every page load of a custom
-   * domain, before the app knows which shop it is rendering. Public — a
+   * domain, before the app knows which shop it is rendering. Public, a
    * guest arriving at an agent's domain has no account yet.
    */
   @Get('resolve')
@@ -69,7 +69,7 @@ export class DomainsController {
 /**
  * The superadmin's review queue.
  *
- * `@Roles('superadmin')`, not `admin` — approving a domain is vouching that
+ * `@Roles('superadmin')`, not `admin`, approving a domain is vouching that
  * whoever asked for it actually controls it, the same trust decision as
  * creating an admin account in the first place. James runs the business on
  * this platform; Asher runs the platform itself, and this is platform-level.

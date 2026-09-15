@@ -181,7 +181,7 @@ async function failedOrder({ ref, product, refundState, note }) {
   const refunded = refundState === 'real' || refundState === 'manual'
 
   // A real order's split is computed and frozen at placement time, before the
-  // outcome is known — a failed order still has one, exactly as if it had
+  // outcome is known, a failed order still has one, exactly as if it had
   // gone on to complete. An empty `shares` breaks the salePrice invariant.
   const split = {
     supplierCost: p.supplierCost,

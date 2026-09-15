@@ -5,7 +5,7 @@ import { useSearchParams } from 'react-router-dom'
  *
  * Several list pages (Orders, Wallet, Earnings, Pricing) kept their filter
  * and search text in a plain `useState`, which reset to its default the
- * moment you navigated away and back — a filter chosen a minute ago looked
+ * moment you navigated away and back, a filter chosen a minute ago looked
  * like it had never been touched. Backing it by the URL instead means the
  * back button, a bookmark, or simply returning to the tab all land you where
  * you left off, the same way `Catalogue.tsx`'s own category/network filters

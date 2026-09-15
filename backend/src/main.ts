@@ -20,7 +20,7 @@ async function bootstrap() {
    * Behind a managed host's load balancer, every request arrives from the proxy.
    *
    * Without this, `req.ip` is the proxy for all of them, so per-IP rate limiting
-   * would treat the whole internet as one client — either locking everyone out
+   * would treat the whole internet as one client, either locking everyone out
    * together or nobody at all. One hop, because that is what Render, Railway and
    * Fly put in front of a service; trusting the whole chain would let a caller
    * forge `X-Forwarded-For` and dodge the limit.
@@ -30,7 +30,7 @@ async function bootstrap() {
   /**
    * Standard security headers.
    *
-   * This serves JSON, not HTML, so most of helmet is belt-and-braces — but
+   * This serves JSON, not HTML, so most of helmet is belt-and-braces, but
    * `nosniff` and a denied frame ancestor are what stop a browser being talked
    * into treating an API response as a document. CSP is left off outside
    * production because it blocks the Swagger UI, which only runs in development.
@@ -48,7 +48,7 @@ async function bootstrap() {
     .filter(Boolean)
 
   /**
-   * Allow throwaway tunnel origins — but never by default in production.
+   * Allow throwaway tunnel origins, but never by default in production.
    *
    * A rotating ngrok URL is the whole reason this is a function rather than the
    * array: during development the origin changes on every restart. Live, that
@@ -64,9 +64,9 @@ async function bootstrap() {
 
   /**
    * The static allowlist above never knows an agent's custom domain in
-   * advance — those are added by request, not by redeploying with a new
+   * advance, those are added by request, not by redeploying with a new
    * env var. So anything that misses it falls through to asking whether the
-   * origin's host is an approved, live `CustomDomain` — cached briefly
+   * origin's host is an approved, live `CustomDomain`, cached briefly
    * inside the service itself, since this runs on every preflight from
    * every visitor to every custom domain.
    */
@@ -103,7 +103,7 @@ async function bootstrap() {
     }),
   )
 
-  // NFR-4.3 — domain errors leave as structured codes the frontend maps to
+  // NFR-4.3, domain errors leave as structured codes the frontend maps to
   // friendly copy, never as a stack trace.
   app.useGlobalFilters(new DomainExceptionFilter())
 
@@ -112,7 +112,7 @@ async function bootstrap() {
    *
    * Swagger publishes every route, its shape and its auth requirement. That is
    * exactly the reconnaissance an attacker would otherwise have to guess at, and
-   * it is of no use to a customer — so it is a development tool and stays one.
+   * it is of no use to a customer, so it is a development tool and stays one.
    */
   if (!isProduction) {
     const swagger = new DocumentBuilder()
@@ -134,7 +134,7 @@ async function bootstrap() {
   const log = new Logger('bootstrap')
   if (isProduction && allowTunnels) {
     log.warn(
-      'ALLOW_TUNNEL_ORIGINS is on in production — any ngrok or trycloudflare ' +
+      'ALLOW_TUNNEL_ORIGINS is on in production, any ngrok or trycloudflare ' +
         'site can call this API from a browser. Turn it off once your domain is live.',
     )
   }

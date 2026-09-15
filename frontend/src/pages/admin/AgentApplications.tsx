@@ -82,7 +82,7 @@ export default function AgentApplications() {
               ? 'Agent applications'
               : `${rows.length} agent${rows.length === 1 ? '' : 's'} waiting to be approved`
           }
-          subtitle="They cannot sell until you approve them — their shop link falls back to your standard prices."
+          subtitle="They cannot sell until you approve them, their shop link falls back to your standard prices."
         />
         <div className="space-y-3 p-4 sm:p-5">
           {rows === null ? (
@@ -193,7 +193,7 @@ function RefuseModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Refuse — ${application.name}`}>
+    <Modal open onClose={onClose} title={`Refuse, ${application.name}`}>
       <form
         className="space-y-4"
         onSubmit={(event) => {
@@ -207,7 +207,7 @@ function RefuseModal({
         </Callout>
 
         <QuickReasons
-          options={['We could not verify your details — call us to sort it out', 'Incomplete application details']}
+          options={['We could not verify your details, call us to sort it out', 'Incomplete application details']}
           onPick={(text) => {
             setNote(text)
             setError('')
@@ -217,7 +217,7 @@ function RefuseModal({
         <Field label="Why are you refusing?" htmlFor="refuse-application" error={error}>
           <TextInput
             id="refuse-application"
-            placeholder="We could not verify your details — call us to sort it out"
+            placeholder="We could not verify your details, call us to sort it out"
             value={note}
             invalid={Boolean(error)}
             onChange={(event) => {

@@ -26,15 +26,15 @@ export interface LedgerDraft {
  * Writing here is idempotent and that is the whole design: the key is derived
  * from the event, so `order:JDC-1:supplier_cost` can be written a hundred times
  * and exist once. That matters because every path that settles money in this
- * system can legitimately run twice — Paystack retries webhooks, the reconciler
+ * system can legitimately run twice, Paystack retries webhooks, the reconciler
  * re-checks orders it has already seen, a customer refreshes the return page, and
  * an approval release re-dispatches. Without idempotency each of those would
  * inflate the accounts, and an inflated account is worse than a missing one
  * because it looks plausible.
  *
  * Recording is deliberately non-fatal. A ledger entry is a record of something
- * that already happened elsewhere — the customer has been charged, the bundle has
- * been sent — so a failure to write the note must never roll back the event it
+ * that already happened elsewhere, the customer has been charged, the bundle has
+ * been sent, so a failure to write the note must never roll back the event it
  * describes. It is logged loudly instead, and `money-audit.ts` cross-checks the
  * ledger against the source tables to catch anything that went missing.
  */
@@ -57,7 +57,7 @@ export class LedgerService {
   /**
    * Record entries, skipping any already written.
    *
-   * `skipDuplicates` does the work — the unique index on `idempotencyKey` is the
+   * `skipDuplicates` does the work, the unique index on `idempotencyKey` is the
    * guarantee, not a prior read. Checking first and then writing would leave a
    * race between two concurrent settlements of the same order.
    */
@@ -101,16 +101,16 @@ export class LedgerService {
    *
    * Two totals from one table, because they answer different questions: profit is
    * what the business earned, cash is what actually arrived and left. They differ
-   * by exactly the movements that settle obligations — agent payouts, wallet
-   * top-ups — which is why `affectsProfit` exists.
+   * by exactly the movements that settle obligations, agent payouts, wallet
+   * top-ups, which is why `affectsProfit` exists.
    *
    * One query, not three. This used to follow the per-kind `groupBy` with two
-   * further all-rows `aggregate` calls — one for `profit` (filtered on
-   * `affectsProfit: true`), one for `cashMovement` (unfiltered) — three full
+   * further all-rows `aggregate` calls, one for `profit` (filtered on
+   * `affectsProfit: true`), one for `cashMovement` (unfiltered), three full
    * passes over the exact same window of rows. Grouping by `affectsProfit`
    * alongside `kind` instead makes both totals derivable from the one result
    * set already in hand, with no assumption baked in about which kind carries
-   * which `affectsProfit` value — if that ever changes, this still adds up the
+   * which `affectsProfit` value, if that ever changes, this still adds up the
    * actual flag on each row rather than a hardcoded list of kinds.
    */
   async statement(since: Date) {
@@ -168,7 +168,7 @@ export class LedgerService {
   /**
    * The raw ledger, for whoever needs to see further than the newest slice.
    *
-   * `limit` alone used to be the only handle on this — safe from a memory
+   * `limit` alone used to be the only handle on this, safe from a memory
    * standpoint, but once the table has more than a few hundred rows, the
    * newest `limit` of them is *all* an admin can ever reach, with no filter
    * to narrow down to what they actually came looking for and no way to page

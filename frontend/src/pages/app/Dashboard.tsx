@@ -36,7 +36,7 @@ import {
   WhatsAppIcon,
 } from '../../components/icons'
 
-/** FR-6.1 — order history, balance and referred agents in one place. */
+/** FR-6.1, order history, balance and referred agents in one place. */
 export default function Dashboard() {
   const {
     session,
@@ -61,7 +61,7 @@ export default function Dashboard() {
    * for a link that no longer exists.
    *
    * `dismissed` closes it immediately on click, without waiting on the
-   * network call that records it — the request can only make this stay
+   * network call that records it, the request can only make this stay
    * closed on a later visit, never how it behaves on this one.
    */
   const [dismissed, setDismissed] = useState(false)
@@ -88,7 +88,7 @@ export default function Dashboard() {
 
   if (!session) return null
 
-  // NFR-2.5 — only what belongs to this user. Used for the recent-activity list,
+  // NFR-2.5, only what belongs to this user. Used for the recent-activity list,
   // which is genuinely a "latest few" view.
   const mine = isAgent
     ? orders.filter((o) => o.split?.shares.some((s) => s.userId === session.id))
@@ -98,7 +98,7 @@ export default function Dashboard() {
    * Totals come from the server, not from `orders`.
    *
    * The orders list is capped, so summing it undercounts as soon as an agent
-   * passes the cap — and it would do so silently, which is the worst kind of
+   * passes the cap, and it would do so silently, which is the worst kind of
    * wrong number on a page about money. Zeroes show only until the first load
    * lands.
    */
@@ -214,7 +214,7 @@ export default function Dashboard() {
         </Callout>
       )}
 
-      {/* ── Your own domain, once you have one — the payoff moment for setting it up. ── */}
+      {/* ── Your own domain, once you have one, the payoff moment for setting it up. ── */}
       {isAgent && domain && (
         <Callout
           tone={domain.allowed && domain.active ? 'success' : 'info'}
@@ -411,7 +411,7 @@ export default function Dashboard() {
           <Card>
             <CardHead title="Quick actions" />
             <div className="divide-y divide-slate-100">
-              {/* Keyed by label, not route — two agent actions deliberately
+              {/* Keyed by label, not route, two agent actions deliberately
                   point at the same page from different angles. */}
               {quickActions(isAgent, shopPath).map((action) => (
                 <Link
@@ -468,7 +468,7 @@ export default function Dashboard() {
 }
 
 /**
- * A tiny inline copy affordance for a value sitting inside a sentence — the
+ * A tiny inline copy affordance for a value sitting inside a sentence, the
  * full `CopyField` box (used for the sell link below) would be too heavy for
  * a one-line status message.
  */
@@ -532,9 +532,9 @@ function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
       {
         to: '/app/referrals',
         label: 'Invite an agent',
-        // Not "earn on their sales" — every agent earns from their own sales
+        // Not "earn on their sales", every agent earns from their own sales
         // only, at the same price no matter who is above them. See Referrals.tsx.
-        hint: 'Grow your chain — no cut of their sales',
+        hint: 'Grow your chain, no cut of their sales',
         icon: UsersIcon,
         accent: 'bg-violet-50 text-violet-700',
       },

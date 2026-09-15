@@ -12,7 +12,7 @@ export class HealthController {
   ) {}
 
   /**
-   * NFR-3.1 — includes a real database round trip, not just "the process is up".
+   * NFR-3.1, includes a real database round trip, not just "the process is up".
    *
    * Also reports whether the provider integration is live or simulated. During
    * acceptance testing that is the single most useful thing to be able to check

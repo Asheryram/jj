@@ -9,7 +9,7 @@ import type { Network } from '@prisma/client'
  *  · **Telecel is still VOD.** They renamed from Vodafone; Paystack did not. A
  *    reasonable guess of `TEL` fails every Telecel payout with an error that
  *    says nothing about why.
- *  · **It is used for money going out** — agent payouts and customer refunds —
+ *  · **It is used for money going out**, agent payouts and customer refunds,
  *    so a wrong code is a payment that bounces or, worse, one that lands on the
  *    wrong rail.
  */
@@ -25,7 +25,7 @@ export function momoCodeFor(network: Network | null | undefined): string | null 
 
 /**
  * The reverse direction: what Paystack calls the network on a completed
- * charge — `authorization.bank` — read back into our own names.
+ * charge (`authorization.bank`) read back into our own names.
  *
  * Money coming in uses different words than money going out: a mobile money
  * charge's authorization has reported "MTN" and "Vodafone" on this account,

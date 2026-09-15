@@ -30,7 +30,7 @@ interface DatahubWebhookBody {
  * Their webhook is **unauthenticated**. There is no signature and no shared
  * secret; their own guidance is to "validate the User-Agent header", which is a
  * single forgeable string and not a control at all. Anyone who learns this URL
- * could otherwise mark orders SUCCESSFUL — and in this system that completes an
+ * could otherwise mark orders SUCCESSFUL, and in this system that completes an
  * order and credits an agent, so it is a direct route to manufactured earnings.
  *
  * Three things stand in for the signature they do not send:
@@ -44,7 +44,7 @@ interface DatahubWebhookBody {
  *     settled order is a no-op, which their docs explicitly warn to expect.
  *
  * It is defence in depth around a provider weakness, not a substitute for a
- * signature — worth asking DataHub to add HMAC signing.
+ * signature, worth asking DataHub to add HMAC signing.
  *
  * Excluded from Swagger: publishing the shape of an unauthenticated write
  * endpoint helps nobody but an attacker.
@@ -101,7 +101,7 @@ export class DatahubWebhookController {
      * Deliberately not short-circuited on `order.status` here any more.
      *
      * A terminal order used to return early right above this comment, before
-     * ever calling `settleFromProvider` — "expected, not exceptional, they
+     * ever calling `settleFromProvider`, "expected, not exceptional, they
      * warn that duplicates happen" was true for a genuine replay, but the
      * same early return also silently swallowed the one case that matters: a
      * webhook reporting SUCCESSFUL for an order this platform had already
@@ -111,7 +111,7 @@ export class DatahubWebhookController {
      *
      * `settle()` is the single funnel every settlement source goes through,
      * and it already tells a boring exact-replay apart from a genuine
-     * conflict — see `FulfilmentService.flagConflict`. So the right amount of
+     * conflict, see `FulfilmentService.flagConflict`. So the right amount of
      * short-circuiting here is none: let it decide, every time.
      */
     const result = await this.fulfilment.settleFromProvider(
@@ -124,7 +124,7 @@ export class DatahubWebhookController {
       return {
         received: true,
         applied: false,
-        reason: result.conflict ? 'conflicts with an earlier settlement — flagged for review' : 'already settled',
+        reason: result.conflict ? 'conflicts with an earlier settlement, flagged for review' : 'already settled',
       }
     }
 

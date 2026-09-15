@@ -44,33 +44,33 @@ export default function AdminOrders() {
   const [filter, setFilter] = useState<Filter>('all')
   /**
    * `?ref=` links here from elsewhere (the Overview page's "Needs your
-   * attention" card, for one) — the same search box, just pre-filled, so
+   * attention" card, for one), the same search box, just pre-filled, so
    * landing here shows exactly the one order that was clicked through for.
    */
   const [query, setQuery] = useState(() => searchParams.get('ref') ?? '')
-  /** Table and CSV export only — the summary tiles above stay all-time, on purpose. */
+  /** Table and CSV export only, the summary tiles above stay all-time, on purpose. */
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
 
   /**
    * "Your profit" is deliberately the exact same number as the Reserve
-   * panel's "Actually free to spend" — not a separately computed figure that
+   * panel's "Actually free to spend", not a separately computed figure that
    * happens to agree with it.
    *
    * James's own definition: profit is only what he could take out today
-   * without touching money any pending order might still need — a refund
+   * without touching money any pending order might still need, a refund
    * that has not been decided yet, a bundle still processing, a customer's
    * wallet balance. The ledger's all-time revenue-less-costs figure does not
    * satisfy that: it counts a sale's revenue the moment payment is
    * confirmed, before knowing whether the order will actually complete. So
    * this reuses `freeToSpend` itself rather than reconciling two figures
-   * that answer different questions — see `SolvencyService.position`.
+   * that answer different questions, see `SolvencyService.position`.
    *
    * Deliberately not derived from `visible`/`done` below: that per-order sum
    * only ever looks at completed orders, so it silently drops real, settled
-   * costs — the Paystack fee lost on an order that got refunded is the one
+   * costs, the Paystack fee lost on an order that got refunded is the one
    * that actually surfaced this. Fetched once, unaffected by the
-   * filter/search above — a profit figure that changed depending on what you
+   * filter/search above, a profit figure that changed depending on what you
    * searched for would not be "your profit" any more.
    */
   const [takeableProfit, setTakeableProfit] = useState<number | null>(null)
@@ -86,11 +86,11 @@ export default function AdminOrders() {
   }, [])
 
   /**
-   * All-time totals for the top row, from the ledger — not summed from
+   * All-time totals for the top row, from the ledger, not summed from
    * `orders` below for the same reason `takeableProfit` isn't: that list is
    * both capped and, worse, whatever the filter and search box currently
    * show. A customer's payment is real the moment Paystack confirms it,
-   * whatever later happens to the order — "Customers paid" summing only
+   * whatever later happens to the order, "Customers paid" summing only
    * `status === 'completed'` orders was silently dropping every failed or
    * refunded sale's money, which is exactly why it read lower than the
    * Reserve panel's "Should be at Paystack" instead of higher.
@@ -109,7 +109,7 @@ export default function AdminOrders() {
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    // `toDate` is inclusive of the whole day, not just its midnight instant —
+    // `toDate` is inclusive of the whole day, not just its midnight instant,
     // picking "3 Sep" as the end and finding nothing from that day is the
     // classic off-by-one a date-range filter earns if this is left out.
     const from = fromDate ? new Date(fromDate) : null
@@ -132,7 +132,7 @@ export default function AdminOrders() {
     })
   }, [filter, orders, query, fromDate, toDate])
 
-  // Landed here via `?ref=` naming exactly one order — open it straight away
+  // Landed here via `?ref=` naming exactly one order, open it straight away
   // rather than making the click that brought you here do only half the job.
   //
   // Guarded on having already opened for this exact `refParam`: `orders` is
@@ -142,7 +142,7 @@ export default function AdminOrders() {
   // whole list every 1.5-5s) even when nothing about *this* order changed.
   // Without the guard, every one of those re-fired `setInspecting` with a
   // fresh-but-equal object, which `DispatchModal`'s own reset effect below
-  // reads as a genuinely different order and wipes its note field — an
+  // reads as a genuinely different order and wipes its note field, an
   // admin typing "why" mid-resolve would watch their own keystrokes vanish.
   const refParam = searchParams.get('ref')
   const autoOpenedFor = useRef<string | null>(null)
@@ -158,7 +158,7 @@ export default function AdminOrders() {
   /**
    * `split.supplierCost` is frozen at whatever the catalogue believed at
    * sale time. The supplier's own reply, once known, can say something
-   * different — `actualSupplierCost` — and that is what actually left the
+   * different (`actualSupplierCost`) and that is what actually left the
    * float, and what the ledger's all-time profit is already computed from.
    * Falling back to the estimate keeps every figure below correct even
    * before the supplier has reported back (still processing, or on a
@@ -171,7 +171,7 @@ export default function AdminOrders() {
   const adminMarginOf = (order: (typeof visible)[number]) =>
     order.split.shares.find((s) => s.role === 'admin')?.margin ?? 0
   /**
-   * What this order actually made, not what it was priced to make — the
+   * What this order actually made, not what it was priced to make, the
    * recorded split margin plus the catalogue gap. The two are only ever
    * different amounts when the supplier's real charge differs from the
    * estimate; otherwise this equals `adminMarginOf` exactly.
@@ -221,20 +221,20 @@ export default function AdminOrders() {
         (o.split.supplierCost / 100).toFixed(2),
         (actualCostOf(o) / 100).toFixed(2),
         // Blank, not a hypothetical figure, until the supplier's real charge
-        // is actually known — matches the table's own gate on
+        // is actually known, matches the table's own gate on
         // `actualSupplierCost` (a fresh order priced exactly at catalogue
         // and one nobody has heard back on yet must not read the same).
         o.actualSupplierCost == null ? '' : (catalogueDiffOf(o) / 100).toFixed(2),
         /**
          * Blank for anything short of `completed`. This used to be written
-         * unconditionally, so a failed order — one that was never delivered,
+         * unconditionally, so a failed order, one that was never delivered,
          * never paid an agent, and for many rows here never even collected
          * the customer's payment at all (see the blank Paystack fee on
-         * those same rows) — showed the exact same margin figure as a real
+         * those same rows), showed the exact same margin figure as a real
          * sale. `trueMarginOf`/`agentMarginOf` are the split *priced at
          * checkout*, not what actually landed; only a completed order ever
          * turned that price into real money. Matches the table's own gate
-         * exactly — this was the one place still showing the hypothetical
+         * exactly, this was the one place still showing the hypothetical
          * number as if it were real.
          */
         o.status === 'completed' ? (trueMarginOf(o) / 100).toFixed(2) : '',
@@ -281,29 +281,29 @@ export default function AdminOrders() {
         />
         <StatTile
           label="Customers paid"
-          value={allTime === null ? '—' : cedis(allTime.revenue)}
-          hint="All-time, every payment ever collected — not affected by the filter, dates or search below"
+          value={allTime === null ? '-' : cedis(allTime.revenue)}
+          hint="All-time, every payment ever collected, not affected by the filter, dates or search below"
           tone="brand"
         />
         <StatTile
           label="Paid to supplier"
-          value={allTime === null ? '—' : cedis(allTime.costs.supplier)}
+          value={allTime === null ? '-' : cedis(allTime.costs.supplier)}
           hint="All-time. What they actually charged, not the catalogue estimate"
         />
         <StatTile
           label="Paystack fees"
-          value={allTime === null ? '—' : cedis(allTime.costs.paymentFees)}
+          value={allTime === null ? '-' : cedis(allTime.costs.paymentFees)}
           hint="All-time. Their cut, paid on every sale"
         />
         <StatTile
           label="Paid to agents"
-          value={allTime === null ? '—' : cedis(allTime.costs.agentMargins)}
-          hint="All-time. Their commission — never counted as your profit"
+          value={allTime === null ? '-' : cedis(allTime.costs.agentMargins)}
+          hint="All-time. Their commission, never counted as your profit"
         />
         <StatTile
           label="Your profit"
-          value={takeableProfit === null ? '—' : cedis(takeableProfit)}
-          hint="What you could take out today without touching money a pending order might still need — the same figure as the Reserve panel's Actually free to spend, not affected by the filter, dates or search below"
+          value={takeableProfit === null ? '-' : cedis(takeableProfit)}
+          hint="What you could take out today without touching money a pending order might still need, the same figure as the Reserve panel's Actually free to spend, not affected by the filter, dates or search below"
           tone="success"
         />
       </div>
@@ -377,7 +377,7 @@ export default function AdminOrders() {
         ) : (
           <>
             {/* Reading one order's financials by scrolling column-by-column
-                doesn't work on a phone — below `sm` this renders the same
+                doesn't work on a phone, below `sm` this renders the same
                 rows as cards instead, financial figures stacked as
                 label/value pairs rather than columns. */}
             <div className="space-y-2 p-3 sm:hidden">
@@ -423,12 +423,12 @@ export default function AdminOrders() {
                     </div>
 
                     <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-slate-100 dark:border-slate-800 pt-2.5 text-sm">
-                      <FinancialFigure label="Paystack fee" value={order.paystackFee == null ? '—' : cedis(order.paystackFee)} />
+                      <FinancialFigure label="Paystack fee" value={order.paystackFee == null ? '-' : cedis(order.paystackFee)} />
                       <FinancialFigure label="Catalogue price" value={cedis(order.split.supplierCost)} />
                       <FinancialFigure label="Actual cost" value={cedis(actualCostOf(order))} />
                       <FinancialFigure
                         label="Catalogue P/L"
-                        value={order.actualSupplierCost == null ? '—' : cedis(catalogueDiffOf(order), { sign: true })}
+                        value={order.actualSupplierCost == null ? '-' : cedis(catalogueDiffOf(order), { sign: true })}
                         tone={
                           order.actualSupplierCost == null
                             ? 'neutral'
@@ -441,12 +441,12 @@ export default function AdminOrders() {
                       />
                       <FinancialFigure
                         label="Your profit"
-                        value={order.status === 'completed' ? cedis(trueMarginOf(order), { sign: true }) : '—'}
+                        value={order.status === 'completed' ? cedis(trueMarginOf(order), { sign: true }) : '-'}
                         tone="brand"
                       />
                       <FinancialFigure
                         label="Agents"
-                        value={order.status === 'completed' && agentShares.length > 0 ? cedis(agentMarginOf(order)) : '—'}
+                        value={order.status === 'completed' && agentShares.length > 0 ? cedis(agentMarginOf(order)) : '-'}
                       />
                     </div>
                   </div>
@@ -503,10 +503,10 @@ export default function AdminOrders() {
                       {cedis(order.salePrice)}
                     </Td>
                     <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
-                      {/* Null, not zero — either a wallet-paid order (no fresh
-                          fee — it was already paid once at top-up time) or one
+                      {/* Null, not zero, either a wallet-paid order (no fresh
+                          fee, it was already paid once at top-up time) or one
                           Paystack didn't report a fee for, never a free sale. */}
-                      {order.paystackFee == null ? '—' : cedis(order.paystackFee)}
+                      {order.paystackFee == null ? '-' : cedis(order.paystackFee)}
                     </Td>
                     <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
                       {cedis(order.split.supplierCost)}
@@ -528,20 +528,20 @@ export default function AdminOrders() {
                       )}
                     >
                       {/* Null, not zero, until the supplier's real charge is
-                          actually known — a fresh order priced exactly at
+                          actually known, a fresh order priced exactly at
                           catalogue and one nobody has heard back on yet must
                           not read the same. */}
                       {order.actualSupplierCost == null
-                        ? '—'
+                        ? '-'
                         : cedis(catalogueDiffOf(order), { sign: true })}
                     </Td>
                     <Td align="right" className="tabular font-semibold text-brand-700 dark:text-brand-300">
-                      {order.status === 'completed' ? cedis(trueMarginOf(order), { sign: true }) : '—'}
+                      {order.status === 'completed' ? cedis(trueMarginOf(order), { sign: true }) : '-'}
                     </Td>
                     <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                       {order.status === 'completed' && agentShares.length > 0
                         ? cedis(agentMarginOf(order))
-                        : '—'}
+                        : '-'}
                     </Td>
                   </tr>
                 )
@@ -558,7 +558,7 @@ export default function AdminOrders() {
   )
 }
 
-/** One label/value line in the mobile card fallback — the table's columns, stacked instead of scrolled. */
+/** One label/value line in the mobile card fallback, the table's columns, stacked instead of scrolled. */
 function FinancialFigure({
   label,
   value,
@@ -590,7 +590,7 @@ function FinancialFigure({
 }
 
 /**
- * Every badge/note about how an order settled — shared between the desktop
+ * Every badge/note about how an order settled, shared between the desktop
  * table's Status column and the mobile card fallback below, so the two never
  * drift out of sync with each other.
  */
@@ -601,7 +601,7 @@ function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void 
       {order.dispatchUnresolved && (
         <span
           className="ml-1.5 inline-block"
-          title="The delivery partner never answered at all — no reference exists for the automatic check to use. This will sit exactly like this until a person looks."
+          title="The delivery partner never answered at all, no reference exists for the automatic check to use. This will sit exactly like this until a person looks."
         >
           <Badge tone="warning">Unresolved</Badge>
         </span>
@@ -614,7 +614,7 @@ function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void 
       {order.refundStatus === 'pending' && (
         <span
           className="ml-1.5 inline-block"
-          title="This money is owed back and nobody has approved paying it yet — a person always decides a refund, so this is waiting on a click, not automation."
+          title="This money is owed back and nobody has approved paying it yet, a person always decides a refund, so this is waiting on a click, not automation."
         >
           <Badge tone="warning">Refund pending</Badge>
         </span>
@@ -622,27 +622,27 @@ function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void 
       {order.refundStatus === 'rejected' && (
         <span
           className="ml-1.5 inline-block"
-          title="An admin looked at this refund request and refused it — no money moved."
+          title="An admin looked at this refund request and refused it, no money moved."
         >
           <Badge tone="danger">Refund rejected</Badge>
         </span>
       )}
       {order.fulfilmentReference === 'manual' && (
         <span className="ml-1.5 inline-flex items-center gap-1">
-          {/* Deliberately not just "Manual" — this app also has
+          {/* Deliberately not just "Manual", this app also has
               "resolve manually" (an admin forcing a stuck order's
               outcome by hand), a completely different thing. A
               bare "Manual" badge here would read as that instead
               of what it actually means: DataHub routed this to
               one of their own staff, nobody on our side touched it. */}
           <span
-            title="DataHub routed this one to a person on their side to clear by hand, not their automated system — it can take much longer to settle than a normal order. Not the same thing as resolving an order manually here."
+            title="DataHub routed this one to a person on their side to clear by hand, not their automated system, it can take much longer to settle than a normal order. Not the same thing as resolving an order manually here."
           >
             <Badge tone="warning">
               DataHub manual{order.manualOrderNumber ? ` · ${order.manualOrderNumber}` : ''}
             </Badge>
           </span>
-          {/* DataHub's own ticket ID for this one — what to quote
+          {/* DataHub's own ticket ID for this one, what to quote
               back to their support if it needs chasing. */}
           {order.manualOrderNumber && <CopyIconButton value={order.manualOrderNumber} />}
         </span>
@@ -650,12 +650,12 @@ function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void 
       {order.fulfilmentReference === 'code' && (
         <span
           className="ml-1.5 inline-block"
-          title="DataHub's automated system handled this one — a plain reference, not routed to a person."
+          title="DataHub's automated system handled this one, a plain reference, not routed to a person."
         >
           <Badge tone="neutral">Code</Badge>
         </span>
       )}
-      {/* Who on OUR side decided this outcome — separate from,
+      {/* Who on OUR side decided this outcome, separate from,
           and shown next to, whatever DataHub's own badge above
           says. An admin clicking "mark as delivered/failed" and
           DataHub routing to their manual queue are unrelated
@@ -663,7 +663,7 @@ function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void 
       {order.resolvedManually && (
         <span
           className="ml-1.5 inline-block"
-          title="An admin forced this order's outcome by hand — DataHub's own webhook or polling never confirmed it."
+          title="An admin forced this order's outcome by hand, DataHub's own webhook or polling never confirmed it."
         >
           <Badge tone="info">Resolved by admin</Badge>
         </span>
@@ -681,8 +681,8 @@ function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void 
           Why?
         </button>
       )}
-      {/* When it actually finished, not just when it was placed
-          — `completedAt` is exact; a failed order has no
+      {/* When it actually finished, not just when it was placed,
+          `completedAt` is exact; a failed order has no
           dedicated column for this, so `failedAt` is read off
           the refund request settled in the same moment. */}
       {(order.completedAt || order.failedAt) && (
@@ -715,7 +715,7 @@ function CopyIconButton({ value }: { value: string }) {
       // The visible icon stays 20px so it doesn't dominate the row it sits in,
       // but the actual tap target is widened to the app's own 44px minimum
       // (`BUTTON_SIZES`, `ui.tsx`) via an invisible `::before` that doesn't
-      // affect layout — a small icon-only button is otherwise the easiest
+      // affect layout, a small icon-only button is otherwise the easiest
       // thing on the page to miss on a phone.
       className="relative inline-flex size-5 items-center justify-center rounded-md before:absolute before:-inset-3 before:content-[''] hover:bg-black/5 dark:hover:bg-white/10"
     >
@@ -729,8 +729,8 @@ function CopyIconButton({ value }: { value: string }) {
  *
  * He is not a developer, and `HTTP 400 {"success":false,"error":"Insufficient
  * balance"}` is not an instruction. Every failure here has exactly one sensible
- * next move — top up, get the number approved, fix the catalogue, call the
- * partner — and that move is the thing worth putting on screen.
+ * next move, top up, get the number approved, fix the catalogue, call the
+ * partner, and that move is the thing worth putting on screen.
  *
  * Matched on the provider's words rather than a code, because they send no
  * codes. An unrecognised reason falls through to their text verbatim: better a
@@ -747,7 +747,7 @@ function explain(attempt: DispatchAttempt): {
   if (attempt.simulated) {
     return {
       tone: 'info',
-      title: 'Test mode — nothing was sent',
+      title: 'Test mode, nothing was sent',
       detail: 'The delivery partner was not contacted. This order was simulated end to end.',
       action: null,
     }
@@ -765,7 +765,7 @@ function explain(attempt: DispatchAttempt): {
   if (attempt.outcome === 'pending') {
     return {
       tone: 'info',
-      title: 'Sent — waiting for confirmation',
+      title: 'Sent, waiting for confirmation',
       detail:
         'The delivery partner accepted the order and is working on it. They confirm separately, usually within a couple of minutes.',
       action: null,
@@ -775,12 +775,12 @@ function explain(attempt: DispatchAttempt): {
   if (attempt.outcome === 'unknown') {
     /**
      * "Checked automatically every minute" is only true when there is a
-     * `providerReference` to check *with* — the reconciler's sweep can only
+     * `providerReference` to check *with*, the reconciler's sweep can only
      * ask DataHub's `/order-status` for a reference they themselves handed
      * back. A purchase call that timed out before any reply arrived at all
      * never got one, so that order is invisible to the sweep forever, not
      * merely waiting on it. Telling an admin it's being handled automatically
-     * when it never will be is worse than saying nothing — it's exactly the
+     * when it never will be is worse than saying nothing, it's exactly the
      * kind of reassurance that delays the one manual check that will
      * actually resolve it.
      */
@@ -790,8 +790,8 @@ function explain(attempt: DispatchAttempt): {
       detail:
         'The connection broke before the partner answered, so the bundle may or may not have been sent.',
       action: attempt.providerReference
-        ? 'Do not re-send it manually — that risks paying twice. It is being checked automatically every minute.'
-        : 'This never got a reference back from the delivery partner, so it cannot be checked automatically. Check their own dashboard for this recipient below before doing anything — if nothing was actually sent, it can be retried safely; if you find out some other way what really happened, mark it delivered or failed instead.',
+        ? 'Do not re-send it manually, that risks paying twice. It is being checked automatically every minute.'
+        : 'This never got a reference back from the delivery partner, so it cannot be checked automatically. Check their own dashboard for this recipient below before doing anything, if nothing was actually sent, it can be retried safely; if you find out some other way what really happened, mark it delivered or failed instead.',
     }
   }
 
@@ -857,12 +857,12 @@ function explain(attempt: DispatchAttempt): {
  *
  * Exists because "failed" is not an answer anyone can act on. An empty float
  * means top up; an unapproved recipient means get the number added; a withdrawn
- * bundle means fix the catalogue — three different jobs behind one badge.
+ * bundle means fix the catalogue, three different jobs behind one badge.
  *
  * Written for James rather than for a developer: the plain reading leads, and
  * the provider's raw reply is folded away underneath. It is still there, because
  * our summary is lossy and when it is wrong the raw text is the only way to find
- * out — but it is not what he has to read first.
+ * out, but it is not what he has to read first.
  */
 function DispatchModal({ order, onClose }: { order: Order | null; onClose: () => void }) {
   const { pushToast, refresh } = useStore()
@@ -877,7 +877,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
   const [busy, setBusy] = useState(false)
 
   /**
-   * Keyed on `order?.id`, not `order` itself — a parent re-render can (and
+   * Keyed on `order?.id`, not `order` itself, a parent re-render can (and
    * does, via `watchOrder`'s polling refreshing the whole orders list) hand
    * this the *same* order as a fresh object every few seconds. Depending on
    * the object reference reset the note field being typed into below on
@@ -914,7 +914,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
   /**
    * Retry is only ever offered for the one case nothing automatic can ever
    * resolve: the *most recent* attempt timed out before any reply arrived,
-   * so it has no `providerReference` — see `FulfilmentService.retryDispatch`.
+   * so it has no `providerReference`, see `FulfilmentService.retryDispatch`.
    * `attempts` is oldest-first, so the last element is the latest one.
    */
   const latestAttempt = attempts && attempts.length > 0 ? attempts[attempts.length - 1] : null
@@ -1075,7 +1075,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
                           Ref {attempt.providerReference}
                           {attempt.providerReference.startsWith('manual_') && (
                             <span className="ml-1.5 font-sans font-semibold text-amber-700 dark:text-amber-400">
-                              (their manual queue — a person clears this, not their system)
+                              (their manual queue, a person clears this, not their system)
                             </span>
                           )}
                         </p>
@@ -1097,7 +1097,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
 
         {/* Only for the one case retrying is actually safe: no reference at
             all was ever obtained, so this can never be double-sent by both
-            a retry and a delayed real reply landing later — there is no
+            a retry and a delayed real reply landing later, there is no
             delayed reply coming, because DataHub never gave us anything to
             match one against. */}
         {canRetry && (
@@ -1108,7 +1108,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
                   Checked the delivery partner's own dashboard for this recipient?
                 </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Only retry once you've confirmed nothing was actually sent — otherwise this risks
+                  Only retry once you've confirmed nothing was actually sent, otherwise this risks
                   paying twice. If they show nothing for this number, it's safe to send it again.
                 </p>
                 <div className="mt-2.5">
@@ -1130,7 +1130,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
                 >
                   <TextInput
                     id="retry-note"
-                    placeholder="Checked DataHub's dashboard for this number — nothing on record"
+                    placeholder="Checked DataHub's dashboard for this number, nothing on record"
                     value={retryNote}
                     invalid={Boolean(retryNoteError)}
                     onChange={(event) => {
@@ -1174,7 +1174,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
                 </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   Only the delivery partner, the webhook, or the automatic check above normally
-                  settles an order. Use this only when you are certain — it is kept on the record.
+                  settles an order. Use this only when you are certain, it is kept on the record.
                 </p>
                 <div className="mt-2.5 flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => setResolving('delivered')}>
@@ -1190,7 +1190,7 @@ function DispatchModal({ order, onClose }: { order: Order | null; onClose: () =>
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                   {resolving === 'delivered'
                     ? 'Mark this as delivered'
-                    : 'Mark this as failed — a refund will be queued'}
+                    : 'Mark this as failed, a refund will be queued'}
                 </p>
                 <Field
                   label="How do you know?"

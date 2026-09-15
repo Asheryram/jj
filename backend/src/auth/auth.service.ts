@@ -29,7 +29,7 @@ export class AuthService {
      * Per-account lockout, checked before the password is ever compared.
      *
      * `LoginThrottleGuard` already limits by IP, but that bucket is keyed on
-     * where the request came from — an attacker who rotates IPs gets a fresh
+     * where the request came from, an attacker who rotates IPs gets a fresh
      * bucket every time, so cumulative guessing against one target account
      * faces no limit at all. This is the other dimension: keyed on the
      * account itself, in Postgres rather than memory, so it holds regardless
@@ -40,7 +40,7 @@ export class AuthService {
     /**
    * One credential per person, on whichever profile holds it.
    *
-   * An email is no longer unique on its own — a person may hold an admin profile
+   * An email is no longer unique on its own, a person may hold an admin profile
    * and an agent profile, and they share an address because they are the same
    * human. Exactly one of those rows carries a password, and it is the one you
    * sign in as; the others are reached by switching afterwards. So the password
@@ -51,7 +51,7 @@ export class AuthService {
     })
 
     // Same message and the same amount of work whether the address exists or the
-    // password is wrong — otherwise the response tells an attacker which email
+    // password is wrong, otherwise the response tells an attacker which email
     // addresses are registered.
     const hash = user?.passwordHash ?? NON_EXISTENT_HASH
     const ok = await bcrypt.compare(dto.password, hash)
@@ -80,7 +80,7 @@ export class AuthService {
     // being told their password is wrong would send them round in circles; they
     // are let in, and the app shows them what they are waiting for.
 
-    // A real, correct password clears whatever this account had built up —
+    // A real, correct password clears whatever this account had built up,
     // the account it belongs to just proved it isn't the one being guessed at.
     await this.prisma.loginAttempt.deleteMany({ where: { email } })
 
@@ -145,7 +145,7 @@ export class AuthService {
      * unique per role: without this a stranger could register an agent account on
      * somebody's address, and the two rows would then look like one person's two
      * profiles. A second profile is only ever created by the owner of an existing
-     * account — never here.
+     * account, never here.
      */
     const existing = await this.prisma.user.findFirst({
       where: { OR: [{ phone: dto.phone }, { email: dto.email.toLowerCase() }] },
@@ -178,7 +178,7 @@ export class AuthService {
          * The difference is what the account can do. A customer spends their own
          * money and represents nobody, so approving them would be a queue for
          * its own sake. An agent sells under the platform's name, sets prices
-         * customers pay, and accrues money the platform owes them — that is a
+         * customers pay, and accrues money the platform owes them, that is a
          * relationship somebody should agree to before it starts.
          *
          * Both places that resolve a seller already require `active`, so a
@@ -220,7 +220,7 @@ export class AuthService {
    * It has to be every profile, not just the one signed in: they share a number
    * because they are the same person, and leaving the others behind would mean a
    * payout going to whichever profile happened to be stale. The bootstrap seeds
-   * `0000000000`, which is a placeholder no Mobile Money transfer can ever reach —
+   * `0000000000`, which is a placeholder no Mobile Money transfer can ever reach,
    * so until this is set, an agent profile cannot be paid.
    */
   async updatePhone(userId: string, phone: string) {
@@ -254,7 +254,7 @@ export class AuthService {
    * Record that this profile has now seen the join-the-WhatsApp-channel popup
    * for whichever link is currently set.
    *
-   * Scoped to this one profile, unlike `updatePhone` — the popup is an agent
+   * Scoped to this one profile, unlike `updatePhone`, the popup is an agent
    * thing, and someone's admin profile never sees it in the first place, so
    * there is nothing to keep in sync across their other profiles.
    *
@@ -306,7 +306,7 @@ export class AuthService {
    * address that already exists, so nobody but the owner can reach this.
    *
    * Only downwards. An agent cannot grant themselves anything, and nobody grants
-   * themselves superadmin — the platform role is handed out by the bootstrap and
+   * themselves superadmin, the platform role is handed out by the bootstrap and
    * the team screen, never claimed.
    */
   async createProfile(userId: string, role: 'admin' | 'agent') {
@@ -334,7 +334,7 @@ export class AuthService {
         email: me.email,
         // The same number. Unique per role now, so their own profiles may share it.
         phone: me.phone,
-        // Never a password of its own — see the invariant above.
+        // Never a password of its own, see the invariant above.
         passwordHash: null,
         role,
         // An agent profile sells, so it needs a code somebody can read out. An
@@ -344,7 +344,7 @@ export class AuthService {
           role === 'agent'
             ? await this.freshReferralCode(me.name)
             : `ADM${Date.now().toString(36).toUpperCase().slice(-6)}`,
-        // Their own profile, added by them — there is nobody to approve it.
+        // Their own profile, added by them, there is nobody to approve it.
         status: 'active',
         markupPercent: 8,
         balance: 0,
@@ -361,7 +361,7 @@ export class AuthService {
    * Safe because both rows share an email, and an email only ever covers one
    * person: registration refuses an address already in use, and only the owner
    * can add a profile. So this cannot reach anybody else's account, and there is
-   * no password involved — the caller already proved who they are.
+   * no password involved, the caller already proved who they are.
    */
   async switchProfile(userId: string, targetId: string) {
     const [me, target] = await Promise.all([
@@ -400,7 +400,7 @@ export class AuthService {
   }
 
   /**
-   * FR-1.7 — a referral code is unique, and it is also a thing people read out
+   * FR-1.7, a referral code is unique, and it is also a thing people read out
    * over the phone. So: first name plus digits, no ambiguous characters, and a
    * uniqueness check rather than trusting entropy.
    */

@@ -20,7 +20,7 @@ export interface AuthUser {
   name: string
 }
 
-/** What we sign. Kept small — a JWT is not a cache. */
+/** What we sign. Kept small, a JWT is not a cache. */
 export interface TokenPayload {
   sub: string
   role: Role
@@ -34,13 +34,13 @@ export const ACTIVE_ONLY_KEY = 'jdc:activeOnly'
 
 /**
  * Require the caller's *current* status to be `active`, re-checked against
- * the database on every call — not just what a 12-hour JWT still claims.
+ * the database on every call, not just what a 12-hour JWT still claims.
  *
  * `@Roles()` alone only proves the token was valid when it was issued: a
  * suspended agent's existing token keeps passing every role check until it
  * naturally expires, because nothing re-reads `status` after `login()`. That
- * is fine for most routes — a suspended agent looking at their own account
- * is not a problem — but a route that moves real money on their say-so is a
+ * is fine for most routes, a suspended agent looking at their own account
+ * is not a problem, but a route that moves real money on their say-so is a
  * different matter (`WithdrawalsService.request`, for one, had no status
  * check at all). Apply this only to those, not globally: forcing every
  * request through a DB round trip would also wrongly log out a `pending`
@@ -53,7 +53,7 @@ export const RequireActive = () => SetMetadata(ACTIVE_ONLY_KEY, true)
  *
  * A superadmin passes every `admin` check. They run the platform the business
  * sits on, and an operator who can create the owner's account but not help them
- * when something breaks is not much use — the alternative is handing over the
+ * when something breaks is not much use, the alternative is handing over the
  * owner's password, which is exactly what the setup-link mechanism exists to
  * avoid.
  *
@@ -85,7 +85,7 @@ function satisfies(role: Role, required: Role[]): boolean {
  * Require a signed-in user, optionally in one of the listed roles.
  *
  * `@Roles()` with no arguments means "any authenticated user". A route with no
- * decorator at all is public — buying needs no account (FR-4.8), so public is
+ * decorator at all is public, buying needs no account (FR-4.8), so public is
  * the correct default here rather than an oversight.
  */
 export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles)

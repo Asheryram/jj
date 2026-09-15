@@ -31,7 +31,7 @@ const PASSWORD = process.env.SEED_PASSWORD ?? 'demo1234'
  *
  * The default is a clean slate: the price list and the accounts, and nothing
  * else. Every balance is zero, there are no orders, and no money has moved. That
- * is what you want when the question is "does this actually work" — a first sale
+ * is what you want when the question is "does this actually work", a first sale
  * you can watch land, against numbers you know started at nothing.
  *
  * `npm run seed:history` adds a month of generated trading instead, for when the
@@ -44,7 +44,7 @@ const WITH_HISTORY = process.argv.includes('--with-history')
  * Whether to create the demo people at all.
  *
  * Off by default, and that is the important part. This used to create an admin
- * and an agent sharing a password that is published in `.env.example` — fine on a
+ * and an agent sharing a password that is published in `.env.example`, fine on a
  * laptop, and in production a live credential for two accounts that can set the
  * prices customers pay and accrue money the platform owes.
  *
@@ -75,8 +75,8 @@ if (WITH_HISTORY && !WITH_DEMO_USERS) {
 //
 // There isn't one here any more, and that is the point.
 //
-// This file used to invent 36 SKUs — bundles, airtime, voice, SMS, AFA and
-// result checkers — with hand-written costs, so the app looked stocked before
+// This file used to invent 36 SKUs, bundles, airtime, voice, SMS, AFA and
+// result checkers, with hand-written costs, so the app looked stocked before
 // anyone had an API key. Once the key arrived, the fiction showed: DataHub GH's
 // real catalogue has no 500MB bundle, no Telecel under 10GB, and no airtime at
 // all through their API, and every cost we had invented was above their real
@@ -104,7 +104,7 @@ interface UserSeed {
 /**
  * Deliberately just two accounts: the platform owner and one agent.
  *
- * Everyone else — more agents, customers — is created by actually using the
+ * Everyone else (more agents, customers) is created by actually using the
  * product. Registering through Kwame's referral link is the only way to get a
  * second agent, which means the referral bonus gets exercised for real rather
  * than being pre-baked into the seed and assumed to work.
@@ -139,14 +139,14 @@ const USERS: UserSeed[] = [
 /**
  * Which seeded people actually exist. The history seeds below were written
  * against a fuller cast, so everything that names a person is filtered through
- * these — a trimmed USERS list quietly drops the rows that referenced someone
+ * these, a trimmed USERS list quietly drops the rows that referenced someone
  * who is no longer there, instead of failing halfway through.
  */
 const KNOWN = new Set(USERS.map((u) => u.key))
 const AGENT_KEYS = USERS.filter((u) => u.role === 'agent').map((u) => u.key)
 const CUSTOMER_KEYS = USERS.filter((u) => u.role === 'customer').map((u) => u.key)
 
-/** FR-3.4 — prices Kwame has set explicitly, overriding his 8% default. */
+/** FR-3.4, prices Kwame has set explicitly, overriding his 8% default. */
 const KWAME_PRICES: Record<string, number> = {
   'mtn-data-1gb': 700,
   'mtn-data-2gb': 1300,
@@ -164,7 +164,7 @@ const KWAME_PRICES: Record<string, number> = {
 interface OrderSeed {
   productId: string
   recipient: string
-  /** Fails are seeded too — the refund path must have history behind it. */
+  /** Fails are seeded too, the refund path must have history behind it. */
   outcome: 'completed' | 'failed'
   hoursAgo: number
   sellerKey: string | null
@@ -216,7 +216,7 @@ const ORDER_SEEDS: OrderSeed[] = [
  * exercise the payout flow. A real reseller has hundreds of orders behind them,
  * and the numbers on every dashboard only look right at that volume.
  *
- * Deterministic — a fixed-seed LCG rather than Math.random — so re-seeding gives
+ * Deterministic (a fixed-seed LCG rather than Math.random) so re-seeding gives
  * byte-identical data. A tester who reports "Kwame's earnings are wrong" must be
  * looking at the same database the next person reproduces it against.
  */
@@ -287,7 +287,7 @@ function generateBacklog(): OrderSeed[] {
 
     for (let n = 0; n < count; n++) {
       const recipient = `${pick(prefixes)}${Math.floor(1_000_000 + rnd() * 8_999_999)}`
-      // About 1 in 40 fails at the provider — roughly what a real network does,
+      // About 1 in 40 fails at the provider, roughly what a real network does,
       // and enough that the refund ledger has history without dominating it.
       const failed = rnd() < 0.025
 
@@ -322,7 +322,7 @@ const bump = (userId: string, delta: number): number => {
   const next = (balances.get(userId) ?? 0) + delta
   if (next < 0) {
     throw new Error(
-      `seed would drive ${userId} to a negative balance (${next}p) — reorder the seed rather than relaxing the constraint`,
+      `seed would drive ${userId} to a negative balance (${next}p), reorder the seed rather than relaxing the constraint`,
     )
   }
   balances.set(userId, next)
@@ -334,19 +334,19 @@ async function main(): Promise<void> {
 
   await wipe()
 
-  // 1 — no catalogue. Sign in as the admin and press Sync.
+  // 1, no catalogue. Sign in as the admin and press Sync.
   //
   // Nothing here knows what a supplier sells, and inventing it is what got us
   // into trouble: 36 fabricated SKUs with fabricated costs, of which DataHub
-  // really sells none. An empty catalogue is the honest starting state — the
+  // really sells none. An empty catalogue is the honest starting state, the
   // shop has nothing to sell until a supplier has been asked what is for sale.
-  console.log('  0 products — sync from the provider catalogue to populate')
+  console.log('  0 products, sync from the provider catalogue to populate')
 
-  // 3 — people. Only on request, and never in production. See WITH_DEMO_USERS.
+  // 3, people. Only on request, and never in production. See WITH_DEMO_USERS.
   const ids = new Map<string, string>()
 
   if (!WITH_DEMO_USERS) {
-    console.log('  0 users — the superadmin is created on boot from SUPERADMIN_EMAIL')
+    console.log('  0 users, the superadmin is created on boot from SUPERADMIN_EMAIL')
     console.log('           (pass --with-demo-users for local sample accounts)')
   }
 
@@ -374,15 +374,15 @@ async function main(): Promise<void> {
     balances.set(user.id, 0)
   }
   if (WITH_DEMO_USERS) {
-    console.log(`  ${USERS.length} demo users (password: ${PASSWORD}) — LOCAL ONLY`)
+    console.log(`  ${USERS.length} demo users (password: ${PASSWORD}), LOCAL ONLY`)
   }
 
-  // 4 — Kwame's explicit prices. Nothing to price against without the demo
+  // 4, Kwame's explicit prices. Nothing to price against without the demo
   // people, so the loop simply does not run.
   const kwameId = ids.get('kwame') ?? null
   for (const [productId, resalePrice] of kwameId === null ? [] : Object.entries(KWAME_PRICES)) {
     // The catalogue comes from DataHub now, so a hard-coded id here may simply
-    // not exist — they do not sell a 1GB Telecel bundle, for one. Skip rather
+    // not exist, they do not sell a 1GB Telecel bundle, for one. Skip rather
     // than fail: these are illustrative agent prices, not part of the contract.
     if (!(await prisma.product.findUnique({ where: { id: productId }, select: { id: true } }))) {
       continue
@@ -390,7 +390,7 @@ async function main(): Promise<void> {
     await prisma.agentPrice.create({ data: { userId: kwameId as string, productId, resalePrice } })
   }
 
-  // 5 — platform switches.
+  // 5, platform switches.
   await prisma.setting.createMany({
     data: [
       { key: 'referralEnabled', value: true },
@@ -400,32 +400,32 @@ async function main(): Promise<void> {
     ],
   })
 
-  // 6 — the pricing chain, read back exactly as the API will read it.
+  // 6, the pricing chain, read back exactly as the API will read it.
   //
   // Only meaningful with the demo people: `loadAdmin` reads the admin the sample
   // orders are priced against, and on a fresh production database there is no
-  // admin yet — the superadmin creates one through a one-time link after boot.
+  // admin yet, the superadmin creates one through a one-time link after boot.
   // Asking for one here threw P2025 and failed the whole seed.
   if (WITH_HISTORY) {
     const agents = await loadAgents()
     const admin = await loadAdmin()
 
-    // 7 — top the customers up before they spend, so no purchase ever lands the
+    // 7, top the customers up before they spend, so no purchase ever lands the
     // running balance below zero.
     await seedTopUps(ids)
 
-    // 8 — order history, oldest first, with every ledger consequence applied.
+    // 8, order history, oldest first, with every ledger consequence applied.
     await seedOrders(ids, agents, admin)
 
-    // 9 — withdrawals, sized against what each agent actually earned.
+    // 9, withdrawals, sized against what each agent actually earned.
     await seedWithdrawals(ids)
 
-    // 10 — write the accumulated balances onto the user rows.
+    // 10, write the accumulated balances onto the user rows.
     for (const [userId, balance] of balances) {
       await prisma.user.update({ where: { id: userId }, data: { balance } })
     }
   } else {
-    console.log('  no orders, no balances — clean slate')
+    console.log('  no orders, no balances, clean slate')
   }
 
   await report()
@@ -513,7 +513,7 @@ async function seedOrders(
   // Oldest first: a ledger only makes sense written forwards.
   // Which products actually exist. The history was written against a fabricated
   // catalogue, and the real one from DataHub has no airtime, no result checkers
-  // and no small Telecel bundles — so a seeded order can name something that is
+  // and no small Telecel bundles, so a seeded order can name something that is
   // no longer for sale.
   const live = new Set(
     (await prisma.product.findMany({ select: { id: true } })).map((p) => p.id),
@@ -527,7 +527,7 @@ async function seedOrders(
     .sort((a, b) => b.hoursAgo - a.hoursAgo)
   let sequence = 0
 
-  // Cache products — the backlog reuses the same few dozen ids hundreds of times.
+  // Cache products, the backlog reuses the same few dozen ids hundreds of times.
   const productCache = new Map<string, Awaited<ReturnType<typeof prisma.product.findUniqueOrThrow>>>()
 
   for (const seed of ordered) {
@@ -610,7 +610,7 @@ async function seedOrders(
 
     const agentShares = split.shares.filter((s) => s.role === 'agent' && s.margin > 0)
 
-    // Credit the chain. Every participant, not just the seller — that is what
+    // Credit the chain. Every participant, not just the seller, that is what
     // makes an upline's downline earnings appear.
     for (const share of agentShares) {
       const after = bump(share.userId, share.margin)
@@ -668,7 +668,7 @@ async function seedOrders(
         },
       })
     } else {
-      // NFR-3.3 — a Mobile Money payer has no wallet, so the money is held
+      // NFR-3.3, a Mobile Money payer has no wallet, so the money is held
       // against their number and claimable.
       await prisma.claimableCredit.create({
         data: {
@@ -689,7 +689,7 @@ async function seedOrders(
  * FR-2.6 history, sized against real balances.
  *
  * A pending or approved request has already been deducted, so each amount is
- * capped at a share of what the agent actually holds — otherwise the seed would
+ * capped at a share of what the agent actually holds, otherwise the seed would
  * hit `CHECK (balance >= 0)`, which would be the constraint doing its job.
  */
 async function seedWithdrawals(ids: Map<string, string>): Promise<void> {
@@ -753,7 +753,7 @@ async function seedWithdrawals(ids: Map<string, string>): Promise<void> {
           type: 'withdrawal',
           amount,
           balanceAfter: afterRelease,
-          description: 'Withdrawal rejected — amount returned to your balance',
+          description: 'Withdrawal rejected, amount returned to your balance',
           reference: `${reference}-R`,
           depth: 0,
           createdAt: new Date(requestedAt.getTime() + 3_600_000),

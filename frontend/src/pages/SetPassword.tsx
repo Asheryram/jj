@@ -6,7 +6,7 @@ import { useShopPath } from '../lib/shopPath'
 import { Button, Callout, Card, Field, Spinner, TextInput } from '../components/ui'
 import { AlertIcon, CheckIcon, ShieldIcon } from '../components/icons'
 
-/** Matches the server. Length only — see SetupTokensService for why. */
+/** Matches the server. Length only, see SetupTokensService for why. */
 const MIN_PASSWORD = 10
 
 /**

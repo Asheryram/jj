@@ -1,7 +1,7 @@
 {
   "name": "backend",
   "version": "0.0.1",
-  "description": "JamesDataConsult API — NestJS + Prisma + PostgreSQL",
+  "description": "JamesDataConsult API, NestJS + Prisma + PostgreSQL",
   "private": true,
   "scripts": {
     "db:up": "docker compose up -d",

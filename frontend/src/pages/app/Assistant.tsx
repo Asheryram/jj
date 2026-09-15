@@ -10,10 +10,10 @@ import { AlertIcon, ChevronRightIcon, HelpIcon } from '../../components/icons'
 /**
  * A few starting questions rather than a blank box. The people using this
  * are not developers, and an empty text field with no hint of what it can
- * even do is intimidating rather than inviting — these are the real
+ * even do is intimidating rather than inviting, these are the real
  * questions each role actually asks, not a feature tour. The backend picks
- * the matching tool set and voice from the caller's own role — see
- * `AssistantService.systemPrompt` — so these just have to match that split.
+ * the matching tool set and voice from the caller's own role, see
+ * `AssistantService.systemPrompt`, so these just have to match that split.
  */
 const AGENT_SUGGESTIONS = [
   'How much have I earned?',
@@ -33,7 +33,7 @@ const ADMIN_SUGGESTIONS = [
 /**
  * Shown as a normal assistant reply, in place, when a question fails outright
  * (a dropped connection, a slow free-tier model timing out, a 500). Kept in
- * `turns` rather than a page-level banner — a banner can be silently
+ * `turns` rather than a page-level banner, a banner can be silently
  * overwritten by whatever the *next* message does, so a question asked right
  * before one that fails used to just look ignored, with no trace of what
  * happened. Matched at render time (see the `turn.content ===` check below)
@@ -43,17 +43,17 @@ const CONNECTION_ERROR_REPLY = "Sorry, I couldn't reach the assistant just now. 
 
 /**
  * How many of the most recent turns go to the backend as conversation
- * context — not the whole session. The full history still stays on screen
+ * context, not the whole session. The full history still stays on screen
  * and in `sessionStorage`; only what's sent to the model on each new
  * question is capped, since every turn sent is billed as input tokens on
  * the free-tier model behind this, on every single question asked from
  * here on. Confirmed live: this backend's provider has a real daily token
- * ceiling, not just a per-minute one — see `AssistantService`.
+ * ceiling, not just a per-minute one, see `AssistantService`.
  */
 const HISTORY_TURNS_SENT = 12
 
 /**
- * Kept in `sessionStorage`, keyed by user id — so leaving the page (this is
+ * Kept in `sessionStorage`, keyed by user id, so leaving the page (this is
  * a nav item, not a modal; navigating away unmounts it) and coming back
  * still has the conversation, but a different person signing in on the same
  * browser tab never sees someone else's. Cleared automatically when the tab
@@ -77,7 +77,7 @@ function loadTurns(userId: string | undefined): ChatTurn[] {
 
 /**
  * Renders one line's worth of markup: `**bold**` for emphasis and
- * `[label](/path)` for a screen the assistant is pointing someone to — see
+ * `[label](/path)` for a screen the assistant is pointing someone to, see
  * `AssistantService.systemPrompt` on the backend for the instruction that
  * produces this shape. A link renders as an actual in-app button rather than
  * plain text, so "go to Refunds" is something to tap, not just read.
@@ -85,7 +85,7 @@ function loadTurns(userId: string | undefined): ChatTurn[] {
 function renderInline(text: string): ReactNode {
   const nodes: ReactNode[] = []
   // The link alternative comes first and optionally swallows a surrounding
-  // `**...**` — the model is told not to bold a link (it already stands out
+  // `**...**`, the model is told not to bold a link (it already stands out
   // as a button), but this stays correct even when it does anyway.
   const pattern = /(\*{0,2}\[[^\]]+\]\(\/[^)\s]*\)\*{0,2}|\*\*[^*]+\*\*)/g
   let lastIndex = 0
@@ -133,7 +133,7 @@ function splitTableRow(row: string): string[] {
  * Renders a whole reply: plain paragraphs through `renderInline`, plus real
  * `<table>` markup for any markdown table the model produced (asked for
  * explicitly, e.g. "as a table", or reached for on its own for naturally
- * tabular data like a per-bundle price/cost/profit breakdown) — wrapped in
+ * tabular data like a per-bundle price/cost/profit breakdown), wrapped in
  * its own horizontally-scrolling container so a wide table never forces the
  * whole page to scroll sideways on a narrow phone.
  */
@@ -208,9 +208,9 @@ function renderReply(text: string): ReactNode {
 }
 
 /**
- * " Assistant " — a plain-language chat grounded in the signed-in user's
+ * " Assistant ", a plain-language chat grounded in the signed-in user's
  * own real data, shared by every role. Read-only by design: it can look
- * things up, never act — see `AssistantService` on the backend for exactly
+ * things up, never act, see `AssistantService` on the backend for exactly
  * why and where that line is.
  */
 export default function Assistant() {
@@ -226,11 +226,11 @@ export default function Assistant() {
 
   /**
    * Measured, not guessed. A fixed `dvh`-based calc here has to know the exact
-   * height of everything above this page — the sticky header, and James's
+   * height of everything above this page, the sticky header, and James's
    * optional site-wide notice banner (`SiteNotice` in layout.tsx), which only
    * exists when he's set one and otherwise contributes nothing. A static
    * number is right until the day a notice is live, then it's short by
-   * however tall that banner is — confirmed live: with one set, the page
+   * however tall that banner is, confirmed live: with one set, the page
    * still had exactly that much of itself below the fold. Measuring this
    * element's own actual top avoids needing to track that at all; only the
    * bottom clearance below it is a real constant, because it exists purely to
@@ -242,7 +242,7 @@ export default function Assistant() {
     if (!el) return
     const recompute = () => {
       if (window.matchMedia('(min-width: 1024px)').matches) {
-        setFillHeight(null) // desktop has a sidebar, not a fixed bottom nav — no scroll-fighting to fix
+        setFillHeight(null) // desktop has a sidebar, not a fixed bottom nav, no scroll-fighting to fix
         return
       }
       const top = el.getBoundingClientRect().top
@@ -263,7 +263,7 @@ export default function Assistant() {
     try {
       sessionStorage.setItem(key, JSON.stringify(turns))
     } catch {
-      // Storage can be blocked (private browsing, quota) — the chat still
+      // Storage can be blocked (private browsing, quota), the chat still
       // works for this visit, it just won't survive leaving the page.
     }
   }, [turns, userId])
@@ -278,7 +278,7 @@ export default function Assistant() {
     setBusy(true)
 
     try {
-      // Capped, not the whole session — every turn sent here is billed as
+      // Capped, not the whole session, every turn sent here is billed as
       // input tokens on the free-tier model behind this on every single
       // question, and a chat left open for a long session otherwise resends
       // its entire history, growing without bound. The last few exchanges
@@ -286,7 +286,7 @@ export default function Assistant() {
       const { reply } = await api.askAssistant(text, history.slice(-HISTORY_TURNS_SENT))
       setTurns((current) => [...current, { role: 'assistant', content: reply }])
     } catch {
-      // Kept as a normal reply, not a page banner — see CONNECTION_ERROR_REPLY.
+      // Kept as a normal reply, not a page banner, see CONNECTION_ERROR_REPLY.
       setTurns((current) => [...current, { role: 'assistant', content: CONNECTION_ERROR_REPLY }])
     } finally {
       setBusy(false)

@@ -21,7 +21,7 @@ export default function Checkers() {
           BECE &amp; WASSCE Result Checkers
         </h1>
         <p className="mx-auto mt-2 max-w-xl text-slate-500 dark:text-slate-400">
-          Buy a voucher and get the serial number and PIN on screen straight away — plus an SMS copy
+          Buy a voucher and get the serial number and PIN on screen straight away, plus an SMS copy
           so you do not lose it.
         </p>
       </div>
@@ -60,7 +60,7 @@ export default function Checkers() {
         ))}
       </div>
 
-      {/* NFR-7.1 — prominent, not buried. */}
+      {/* NFR-7.1, prominent, not buried. */}
       <div className="mt-6 space-y-3">
         <Callout
           tone="warning"

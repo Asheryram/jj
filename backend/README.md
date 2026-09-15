@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL. Serves the React SPA in `../frontend`.
 
-The frontend has **no mock mode** — every price, balance and order on screen came
+The frontend has **no mock mode**, every price, balance and order on screen came
 out of Postgres. If this API is not running, the app says so instead of inventing
 data.
 
@@ -34,7 +34,7 @@ npm run dev                    # http://localhost:5173
 | API | http://localhost:3001/api |
 | Swagger | http://localhost:3001/api/docs |
 | Health | http://localhost:3001/api/health |
-| Database browser | http://localhost:8081 — server `db`, user `jdc`, password `jdc_dev_password` |
+| Database browser | http://localhost:8081: server `db`, user `jdc`, password `jdc_dev_password` |
 
 Postgres is published on **5433**, not 5432, so it cannot collide with a
 Postgres already installed on the machine. A silent connection to the wrong
@@ -57,8 +57,8 @@ database is a worse failure than a refused one.
 
 ## Test accounts
 
-**Login is by email address**, not phone number. A number changes hands in Ghana
-— SIMs get swapped and recycled — and an identifier that can end up belonging to
+**Login is by email address**, not phone number. A number changes hands in Ghana,
+SIMs get swapped and recycled, and an identifier that can end up belonging to
 someone else is the wrong thing to hang an account on. The phone number stays on
 the account for delivery and MoMo payout; it is just not the credential.
 
@@ -78,24 +78,24 @@ Kwame's bonus land. That exercises the path for real instead of trusting a
 pre-baked seed.
 
 To test the customer wallet, register a buyer account and top it up on the Wallet
-page. Guest order tracking uses **reference + phone number** — a guest has no
+page. Guest order tracking uses **reference + phone number**, a guest has no
 account to log in to.
 
-Buying needs **no account at all** (FR-4.8) — that is the main path through the
+Buying needs **no account at all** (FR-4.8), that is the main path through the
 site, and the one to put in front of testers first.
 
 ### Seeded state
 
-`npm run seed` gives a **clean slate** — the price list and the accounts, nothing
+`npm run seed` gives a **clean slate**, the price list and the accounts, nothing
 else. Every balance is zero, there are no orders, and no money has moved. That is
 what you want when the question is "does this actually work": a first sale you can
 watch land against numbers you know started at nothing.
 
 - 38 products across data, airtime, voice, SMS, AFA and result checkers
-- 2 accounts — James and Kwame. Nothing else.
+- 2 accounts, James and Kwame. Nothing else.
 
 `npm run seed:history` instead loads ~270 orders over 31 days, with balances,
-a withdrawal request, and unclaimed refund credits — for when the question is
+a withdrawal request, and unclaimed refund credits, for when the question is
 about charts, pagination, or a payout queue with something in it. It builds the
 history from whoever is in `USERS`, so trimming that list does not break it.
 
@@ -110,8 +110,8 @@ the rows on screen gets the number in the corner.
 ## What is simulated, and what is not
 
 There are no DataHub GH or Paystack credentials yet, so two things stand in.
-Everything else — auth, pricing, the ledger, the referral split, order state,
-refunds, withdrawals — is the real implementation running against real Postgres.
+Everything else, auth, pricing, the ledger, the referral split, order state,
+refunds, withdrawals, is the real implementation running against real Postgres.
 
 ### Fulfilment: the `supplier_products` table
 
@@ -121,7 +121,7 @@ it, never typed in by hand. When the real API keys arrive, that table becomes a
 cache of the price-list response and nothing downstream of `supplier_code`
 changes.
 
-Every fulfilment attempt is written to `supplier_dispatches` — what we asked for
+Every fulfilment attempt is written to `supplier_dispatches`, what we asked for
 and what came back, with `simulated = true`. When a tester says "my bundle never
 arrived", that table answers it without anyone reading application logs.
 
@@ -134,7 +134,7 @@ reason:
 
 ### Making an order fail on demand
 
-To exercise the refund path (FR-2.7) — money back to a wallet, or held as a
+To exercise the refund path (FR-2.7), money back to a wallet, or held as a
 claimable credit for a Mobile Money payer:
 
 **In the UI:** sign in as admin → **Settings → Provider catalogue** → switch a SKU
@@ -166,7 +166,7 @@ curl -X PATCH http://localhost:3001/api/admin/supplier/DH-MTN-DATA-2GB/availabil
 
 `POST /api/wallet/topup` credits the wallet directly. That is **not** the
 production flow. Live, the client initialises a Paystack transaction, the user
-pays, and the wallet is credited only from the verified webhook — the browser
+pays, and the wallet is credited only from the verified webhook, the browser
 saying "it worked" is never proof of payment. The seam is `WalletService.topUp`.
 
 Safety valve: if `PAYSTACK_SECRET_KEY` is ever set, direct crediting refuses
@@ -186,11 +186,11 @@ Four numbers per product, and only three of them are James's to set.
 | **What James pays** | The provider | `supplier_products.cost_price` → Settings → Provider catalogue |
 | What agents pay | James | Prices page |
 | James's own walk-up price | James | Prices page |
-| An agent's retail price | The agent | Their own "My prices" page — **uncapped** |
+| An agent's retail price | The agent | Their own "My prices" page: **uncapped** |
 
 `supplier_cost` is **read-only on the Prices page**, and `PATCH /admin/products/:id/tier`
 refuses that tier outright. It is what James is invoiced, and it is the baseline
-every margin in the platform is measured from — if it could be typed on a pricing
+every margin in the platform is measured from, if it could be typed on a pricing
 screen it would drift from the invoice, and every margin shown to every agent
 would quietly be wrong.
 
@@ -207,7 +207,7 @@ in the service and again by `products_tiers_ordered` in the database.
 
 **There is no ceiling.** An agent charges whatever they judge the market will bear
 above their own cost. A platform cap used to exist because prices cascaded down
-the chain and a deep network could price a bundle out of the market — that cascade
+the chain and a deep network could price a bundle out of the market, that cascade
 is gone, every agent buys at the same price, and an agent who overprices simply
 loses the sale to one who does not. Competition caps the price more reliably than
 a number James would have to maintain per product.
@@ -224,10 +224,10 @@ relative to what he charges agents is a commercial choice per product:
 
 The price dialog states which of the three he has picked, and both margins are
 shown against the provider cost. A cost rise lifts either selling price only as
-far as cost — never up to the agent price, which would silently overwrite his
+far as cost, never up to the agent price, which would silently overwrite his
 choice.
 
-Below James, **every agent pays the same price** — `admin_price` — no matter who
+Below James, **every agent pays the same price** (`admin_price`) no matter who
 referred them. There is no cascade. Being three referrals deep does not make your
 stock more expensive, and a customer never pays for the length of a chain.
 
@@ -235,7 +235,7 @@ stock more expensive, and a customer never pays for the length of a chain.
 
 An agent either registered directly or was referred by exactly one other agent.
 That is the whole structure: **one level, no chains.** A referred agent can refer
-others, but each sale pays exactly one referrer — the seller's own.
+others, but each sale pays exactly one referrer, the seller's own.
 
 When referral is on, a referred agent's sales pay their referrer a bonus: an
 admin-set percentage of **James's** margin on that sale, not the seller's.
@@ -248,7 +248,7 @@ admin-set percentage of **James's** margin on that sale, not the seller's.
 | The customer | pays the same price either way |
 
 Funding it from James is the part that matters. Take it from the seller and a
-referred agent earns less than a directly-registered one on an identical sale — so
+referred agent earns less than a directly-registered one on an identical sale, so
 nobody would ever use a referral link, and the feature would suppress the growth
 it exists to create. It also cannot overdraw: a share of James's own margin, at a
 rate capped at 100%, is always payable, where a share of the *seller's* margin can
@@ -275,7 +275,7 @@ away is on screen rather than inferred.
 
 `SplitShare.depth` is a fixed slot, not a chain position: `0` the seller, `1` the
 referrer, `2` the platform. Fixed because a stored split has to read the same
-forever — if the platform collapsed to `1` whenever there was no referrer, then
+forever, if the platform collapsed to `1` whenever there was no referrer, then
 `depth === 1` would mean different things on different orders.
 
 ## How the money works
@@ -285,7 +285,7 @@ Split-at-sale. Nobody pre-funds anything.
 DataHub GH sells to James at `supplier_cost`. James sells to his agents at
 `admin_price`. Each agent sells to the agent below them at their own resale
 price. The bottom agent sells to the customer. Everyone's margin is the gap
-between what they paid and what they charged — there is no commission to
+between what they paid and what they charged, there is no commission to
 calculate, because every upline's markup is already inside the price the seller
 paid.
 
@@ -298,7 +298,7 @@ salePrice === supplierCost + sum(shares.margin)
 If it does not hold the transaction rolls back rather than committing a
 plausible-looking wrong number.
 
-`src/domain/pricing.ts` holds this as pure functions — no NestJS, no Prisma, no
+`src/domain/pricing.ts` holds this as pure functions, no NestJS, no Prisma, no
 HTTP. `frontend/src/lib/pricing.ts` is a matching copy so the browser can render
 40 prices without a request each. **The browser's price is only ever a quote.**
 Every order is priced again here, server-side, from rows read inside the placing
@@ -310,7 +310,7 @@ transaction.
   not read-check-write. Twelve simultaneous purchases against GHS 45.00 at
   GHS 6.40 accept exactly 7 and refuse 5. `CHECK (balance >= 0)` backs it up.
 - **Idempotency.** Orders carry a client-generated key. Replaying it returns the
-  original order rather than charging twice — a double-tapped Confirm on a flaky
+  original order rather than charging twice, a double-tapped Confirm on a flaky
   connection cannot produce two debits or two deliveries.
 - **Ledger idempotency.** `UNIQUE (user_id, reference, type)` on both ledgers, so
   a replayed provider callback cannot credit an agent twice.
@@ -331,8 +331,8 @@ Worth knowing before this goes in front of anyone.
 1. **`/catalogue` ships the referral chain to the browser.** That is what lets a
    storefront render instantly on a slow connection, and it is how an agent sees
    the split they are part of (FR-5.8). The cost: an agent can read other agents'
-   markup percentages from that payload. James's `supplier_cost` — the one number
-   that reveals his own margin — is stripped for everyone but admin. Tightening
+   markup percentages from that payload. James's `supplier_cost`, the one number
+   that reveals his own margin, is stripped for everyone but admin. Tightening
    the rest means resolving prices per-request server-side and losing the instant
    render. Revisit before public launch.
 
@@ -343,18 +343,18 @@ Worth knowing before this goes in front of anyone.
 
 3. **Fulfilment is an in-process timer, not a queue.** Production wants BullMQ
    with retry and backoff (NFR-3.2, FR-4.6). `FulfilmentService.settle()` is
-   already the seam — only the transport changes.
+   already the seam, only the transport changes.
 
 4. **No rate limiting.** `@nestjs/throttler` belongs on login and top-up before
    this is public.
 
 5. **A sell link owns its session.** Once a buyer arrives through `/s/CODE`, every
    public page keeps that agent's prices and the wordmark returns to their
-   storefront — otherwise the platform would quietly poach customers the agent
+   storefront, otherwise the platform would quietly poach customers the agent
    brought, and agents would stop sharing links. There is no "use standard prices"
    escape. A fresh browser session is the platform shop again. Note that with the
    retail cap removed there is now no ceiling on what an agent may charge, so the
-   only check on an overpriced agent is that a buyer can compare and walk away —
+   only check on an overpriced agent is that a buyer can compare and walk away,
    worth watching during testing.
 
 6. **Withdrawal payout is manual.** Approving a withdrawal is bookkeeping; the

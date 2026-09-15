@@ -15,7 +15,7 @@ function stored(): Theme {
   try {
     return window.localStorage.getItem(KEY) === 'dark' ? 'dark' : 'light'
   } catch {
-    // Private browsing can block storage — default to light, same as a first visit.
+    // Private browsing can block storage, default to light, same as a first visit.
     return 'light'
   }
 }
@@ -28,11 +28,11 @@ interface ThemeValue {
 const ThemeContext = createContext<ThemeValue | null>(null)
 
 /**
- * The chosen theme, applied as `data-theme` on `<html>` — see the
+ * The chosen theme, applied as `data-theme` on `<html>`, see the
  * `@custom-variant dark` rule in index.css, which is what actually makes every
  * `dark:` utility respond to it.
  *
- * `index.html` sets the attribute once, synchronously, before this ever runs —
+ * `index.html` sets the attribute once, synchronously, before this ever runs,
  * that is what stops a returning dark-mode visitor seeing a flash of light on
  * load. This provider just keeps React's idea of the theme in sync with it.
  *
@@ -55,7 +55,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       try {
         window.localStorage.setItem(KEY, next)
       } catch {
-        // Choice just won't survive a reload — not worth failing over.
+        // Choice just won't survive a reload, not worth failing over.
       }
       return next
     })

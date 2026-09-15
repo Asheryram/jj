@@ -3,15 +3,15 @@ import type { Pesewas } from '../data/types'
 /**
  * Shown instead of a number that is not a number.
  *
- * An em dash, not `GHS 0.00`. A zero is a claim — it says the margin really is
- * nothing, or nobody has been paid — and if the value is actually unknown that
+ * An em dash, not `GHS 0.00`. A zero is a claim, it says the margin really is
+ * nothing, or nobody has been paid, and if the value is actually unknown that
  * claim is false. This says "no figure" and is the one honest thing to print
  * when the input is not a number.
  */
-const NO_VALUE = '—'
+const NO_VALUE = '-'
 
 /**
- * Money formatting. Input is always integer pesewas — see data/types.ts.
+ * Money formatting. Input is always integer pesewas, see data/types.ts.
  * Never do arithmetic on the formatted string.
  *
  * Guards against a non-finite input rather than trusting every caller. An
@@ -69,12 +69,12 @@ const MONTHS = [
  * Two failures, and the second is the dangerous one.
  *
  * `new Date('')` is an Invalid Date whose every getter is NaN, and
- * `MONTHS[NaN]` is `undefined` — so a missing timestamp used to render as the
+ * `MONTHS[NaN]` is `undefined`, so a missing timestamp used to render as the
  * literal text `NaN undefined, NaN:NaNam`.
  *
  * But `new Date(null)` is not invalid at all: it is midnight on 1 January 1970.
  * A null timestamp would have quietly displayed as `1 Jan, 12:00am`, which is
- * far worse than NaN — NaN is visibly broken, whereas a wrong date looks like a
+ * far worse than NaN, NaN is visibly broken, whereas a wrong date looks like a
  * fact and would be read as one. So the input is checked before it is parsed,
  * not just the result afterwards.
  *
@@ -110,11 +110,11 @@ export function longDate(iso: string): string {
 }
 
 /**
- * A trend fragment for a stat tile's hint — "+18% vs last period" or similar.
+ * A trend fragment for a stat tile's hint, "+18% vs last period" or similar.
  *
  * Silent (returns null) when the prior period was zero: a jump from GHS 0 to
  * anything is not a percentage, it is the first sale of the period, and
- * "+∞%"/"—" both read as a bug rather than good news.
+ * "+∞%"/"-" both read as a bug rather than good news.
  */
 export function trendText(thisPeriod: number, lastPeriod: number, label: string): string | null {
   if (lastPeriod === 0) return null

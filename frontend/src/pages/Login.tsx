@@ -9,7 +9,7 @@ import { isAdmin } from '../lib/roles'
 /**
  * FR-1.3.
  *
- * Logging in is for people who sell or administer, not for people who buy —
+ * Logging in is for people who sell or administer, not for people who buy,
  * buying needs no account (FR-4.8). The destination comes from the role inside
  * the token, so there is no role picker: the server decides what you are.
  */
@@ -68,8 +68,8 @@ export default function Login() {
         For agents and admin. If you just want to buy a bundle,{' '}
         <Link to={shopPath('/')} className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
           go straight to the shop
-        </Link>{' '}
-        — no account needed.
+        </Link>{' '},
+        no account needed.
       </p>
 
       <Card className="mt-6 p-5">
@@ -119,7 +119,7 @@ export default function Login() {
         </form>
 
         <div className="mt-4 flex items-center justify-between text-sm">
-          {/* FR-1.4. This was a button wired to nothing — it looked like a working
+          {/* FR-1.4. This was a button wired to nothing, it looked like a working
               reset and was the reason nobody noticed there was not one. */}
           <Link
             to={`${shopPath('/forgot-password')}${email.trim() ? `?email=${encodeURIComponent(email.trim())}` : ''}`}

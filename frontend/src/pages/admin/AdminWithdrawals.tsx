@@ -25,15 +25,15 @@ import { AlertIcon, CashIcon, CheckIcon, ClockIcon } from '../../components/icon
 type Filter = 'pending' | 'all'
 
 /**
- * FR-2.6, FR-6.4, FR-7.3 — the payout queue.
+ * FR-2.6, FR-6.4, FR-7.3, the payout queue.
  *
  * Approving sends the transfer through Paystack automatically once this
- * server has real, transfer-capable credentials configured — the balance is
+ * server has real, transfer-capable credentials configured, the balance is
  * checked first, so an agent is never told they have been paid out of money
  * that is not there. Until then, or if Paystack itself refuses every
  * third-party payout outright (a Starter Business account does this by
  * design, not as a bug), the row stays "Decided" with a "Paid another way?"
- * link — see `SettleManuallyModal` below — so a request never has no way
+ * link (see `SettleManuallyModal` below) so a request never has no way
  * forward at all.
  */
 export default function AdminWithdrawals() {
@@ -45,13 +45,13 @@ export default function AdminWithdrawals() {
   const [bulkBusy, setBulkBusy] = useState(false)
 
   /**
-   * Inline, not behind a review modal — every sibling queue (Refunds,
+   * Inline, not behind a review modal, every sibling queue (Refunds,
    * AgentApplications, BrandingReview, DomainRequests) decides in one click
    * from the row, and nothing here needs a modal to add: the network and
    * phone a withdrawal pays to are fixed at request time and already shown
    * in the row, unlike a refund, which sometimes still needs the network
    * chosen. The modal this replaced also told admins to send the Mobile
-   * Money themselves before approving — stale copy from before approving
+   * Money themselves before approving, stale copy from before approving
    * did that automatically (see the callout above the table); left in place,
    * it would have this a real risk of paying an agent twice.
    */
@@ -72,7 +72,7 @@ export default function AdminWithdrawals() {
   const pending = withdrawals.filter((w) => w.status === 'pending')
   const visible = filter === 'pending' ? pending : withdrawals
   /**
-   * `approved` is not delivered — it's a decision made, waiting on Paystack
+   * `approved` is not delivered, it's a decision made, waiting on Paystack
    * (or a manual send) to actually confirm it. In steady state a request
    * spends only seconds to minutes there before moving on to `paid` or
    * `failed`, so a tile built on `approved` alone reads close to GHS 0.00
@@ -81,7 +81,7 @@ export default function AdminWithdrawals() {
   const paidOut = withdrawals.filter((w) => w.status === 'paid')
 
   /**
-   * Whether the agent behind a request is currently suspended — a request
+   * Whether the agent behind a request is currently suspended, a request
    * queued before a suspension otherwise looks identical to any other, and
    * approving it still sends real money out. The server refuses it either
    * way; this is so the admin sees it before clicking Approve, not only
@@ -89,7 +89,7 @@ export default function AdminWithdrawals() {
    */
   const isSuspended = (userId: string) => users.find((u) => u.id === userId)?.status === 'suspended'
 
-  // Only a `pending` row is ever selectable — a decided one has nothing left
+  // Only a `pending` row is ever selectable, a decided one has nothing left
   // to bulk-act on.
   const selectableIds = pending.map((w) => w.id)
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id))
@@ -104,7 +104,7 @@ export default function AdminWithdrawals() {
 
   /**
    * A shortcut for clicking the same Approve/Reject button several times in
-   * a row, not a different flow — each request still goes through the exact
+   * a row, not a different flow, each request still goes through the exact
    * same `decideWithdrawal` (same toast, same state update, same server
    * check), one at a time rather than all at once so a busy Paystack rate
    * limit is not hit with N simultaneous transfer requests.
@@ -112,7 +112,7 @@ export default function AdminWithdrawals() {
   const bulkDecide = async (status: 'approved' | 'rejected') => {
     const ids = [...selected].filter((id) => {
       if (status !== 'approved') return true
-      // Matches the individual Approve button's own `disabled` — a
+      // Matches the individual Approve button's own `disabled`, a
       // suspended agent is skipped rather than attempted and refused.
       const row = pending.find((w) => w.id === id)
       return row && !isSuspended(row.userId)
@@ -161,7 +161,7 @@ export default function AdminWithdrawals() {
         <Callout tone="info" title="Approving sends the money" icon={<AlertIcon className="size-4" />}>
           Approving hands the transfer to Paystack, which pays the agent&apos;s Mobile Money
           directly. It is checked against your Paystack balance first, so nobody is marked paid
-          against money that is not there — and if a transfer is refused or reversed, the amount
+          against money that is not there, and if a transfer is refused or reversed, the amount
           goes straight back to their balance.
         </Callout>
       </div>
@@ -325,7 +325,7 @@ export default function AdminWithdrawals() {
                       /* Automatic sending either had nowhere to go yet (no
                          live Paystack key configured) or hit a wall it can't
                          get past on its own (an account that refuses every
-                         transfer, an OTP it can't answer) — offered here so
+                         transfer, an OTP it can't answer), offered here so
                          it never has no way forward at all. */
                       <div className="flex flex-col items-end gap-1">
                         <span className="text-xs text-slate-500 dark:text-slate-400">Decided</span>
@@ -361,7 +361,7 @@ export default function AdminWithdrawals() {
  * The mirror of Refunds.tsx's own version, one column over: created by
  * `SettleManuallyModal` below the moment a payout gets marked as sent by
  * hand instead of through Paystack. This is Paystack's money, not the
- * DataHub float — the agent's earnings were already debited when they
+ * DataHub float, the agent's earnings were already debited when they
  * requested it, and the ledger cost was already booked at approval; only
  * who actually paid it out is unresolved here.
  */
@@ -403,7 +403,7 @@ function ManualAdvancesCard() {
       <div className="p-4 sm:p-5">
         <Callout tone="warning" icon={<CashIcon className="size-4" />}>
           The agent's earnings for each of these are already debited and the payout is already
-          booked as a real cost — it was never sent back out through Paystack. Take the amount
+          booked as a real cost, it was never sent back out through Paystack. Take the amount
           back for yourself first, then mark it reimbursed below.
         </Callout>
 
@@ -435,7 +435,7 @@ function ManualAdvancesCard() {
 
 /**
  * The fallback for an account that cannot send Paystack transfers yet, or at
- * all — the mirror of Refunds.tsx's own version. No network picker here: the
+ * all, the mirror of Refunds.tsx's own version. No network picker here: the
  * agent already chose it when they asked to be paid, so there is nothing
  * left to confirm beyond how and where it actually went.
  */
@@ -487,7 +487,7 @@ function SettleManuallyModal({
 
         <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
           Only use this once the money has actually left your hands. This closes the request and
-          tells the agent it has been sent — there is no automatic transfer behind it this time.
+          tells the agent it has been sent, there is no automatic transfer behind it this time.
         </Callout>
 
         <Field label="How and where did you send it?" htmlFor="wd-settle-note" error={error}>

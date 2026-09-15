@@ -29,7 +29,7 @@ import { AuthGuard } from './common/auth'
     ConfigModule.forRoot({
       isGlobal: true,
       cache: true,
-      // NFR-2.4 — refuse to boot without the things that decide correctness,
+      // NFR-2.4, refuse to boot without the things that decide correctness,
       // rather than failing at the first request that needs one.
       validate: (env: Record<string, unknown>) => {
         const required = ['DATABASE_URL', 'JWT_SECRET']
@@ -51,7 +51,7 @@ import { AuthGuard } from './common/auth'
          * silently rather than loudly: the seed password is published in
          * .env.example, a wide-open CORS origin lets any site spend a logged-in
          * customer's wallet, and a missing PUBLIC_APP_URL sends every paying
-         * customer back to localhost after Paystack — where their receipt does
+         * customer back to localhost after Paystack, where their receipt does
          * not exist. Better to not start than to start wrong.
          */
         if (env.NODE_ENV === 'production') {
@@ -59,7 +59,7 @@ import { AuthGuard } from './common/auth'
 
           // SEED_PASSWORD is deliberately not checked any more. The seed refuses
           // to create demo users in production at all, so the variable has no
-          // effect there — and requiring it blocked a legitimate deploy over a
+          // effect there, and requiring it blocked a legitimate deploy over a
           // value nothing would read.
           if (String(env.JWT_SECRET).length < 32) {
             unsafe.push('JWT_SECRET should be at least 32 characters in production')
@@ -76,7 +76,7 @@ import { AuthGuard } from './common/auth'
             unsafe.push('SUPERADMIN_EMAIL must name the person who runs the platform')
           }
           if (env.PAYSTACK_SECRET_KEY && String(env.PAYSTACK_SECRET_KEY).startsWith('sk_test')) {
-            unsafe.push('PAYSTACK_SECRET_KEY is a test key — no real money would be collected')
+            unsafe.push('PAYSTACK_SECRET_KEY is a test key, no real money would be collected')
           }
 
           if (unsafe.length > 0) {

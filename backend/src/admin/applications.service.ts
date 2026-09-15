@@ -9,7 +9,7 @@ import { MailerService } from '../mail/mailer.service'
  * An agent sells under the platform's name, sets the prices customers pay, and
  * accrues money the platform owes them. That is a relationship somebody should
  * agree to before it starts, rather than one that begins the moment a form is
- * submitted — so registration creates the account and stops.
+ * submitted, so registration creates the account and stops.
  *
  * Nothing else had to be locked down for this to be safe: both places that
  * resolve a seller already required `active`, so a waiting agent's shop link does
@@ -29,7 +29,7 @@ export class ApplicationsService {
     private readonly mailer: MailerService,
   ) {}
 
-  /** Who is waiting, oldest first — the longest wait is the most urgent. */
+  /** Who is waiting, oldest first, the longest wait is the most urgent. */
   async pending() {
     const rows = await this.prisma.user.findMany({
       where: { role: 'agent', status: 'pending' },

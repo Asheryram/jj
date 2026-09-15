@@ -5,7 +5,7 @@ import { Button, Card, EmptyState } from '../components/ui'
 import { SearchIcon } from '../components/icons'
 
 /**
- * The agent-scoped branch of the public shop — everything under `/s/KWAME77`.
+ * The agent-scoped branch of the public shop, everything under `/s/KWAME77`.
  *
  * This is the channel that makes the reseller network work without the agent
  * handling money. A customer opens the link, buys at this agent's price, and the
@@ -14,7 +14,7 @@ import { SearchIcon } from '../components/icons'
  * selling to customers.
  *
  * It renders no chrome of its own. The pages beneath it are the same Home, Shop
- * and Checkers the platform serves, priced through this agent — the only
+ * and Checkers the platform serves, priced through this agent, the only
  * difference a buyer sees is the price and the URL. An earlier version put a
  * branded agent header above the catalogue and a "shopping with…" banner on every
  * page; both were removed as noise. The URL already says whose shop it is, and

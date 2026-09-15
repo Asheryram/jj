@@ -6,12 +6,12 @@ import { CheckIcon } from '../../components/icons'
 
 /**
  * Whether each product's catalogue cost still matches what the supplier
- * actually charged, going only by its most recent sale — see
+ * actually charged, going only by its most recent sale, see
  * `AdminService.catalogueAccuracy`.
  *
  * A dedicated page, not a card on Overview: this is a report to review, not
- * a queue to clear, but it is exactly the kind of thing that keeps growing —
- * one row per product ever sold — so it gets the same treatment as Refunds
+ * a queue to clear, but it is exactly the kind of thing that keeps growing,
+ * one row per product ever sold, so it gets the same treatment as Refunds
  * and Needs attention rather than living inline on the dashboard. Overview
  * only ever shows the worst current losses, with a link here for the rest.
  *
@@ -40,13 +40,13 @@ export default function CatalogueAccuracy() {
     <div>
       <PageHead
         title="Catalogue accuracy"
-        subtitle="Each product's most recent sale — what the catalogue said it would cost against what the supplier actually charged."
+        subtitle="Each product's most recent sale, what the catalogue said it would cost against what the supplier actually charged."
       />
 
       <Card className="mt-3">
         <CardHead
           title="Products sold at least once"
-          subtitle="Biggest loss first — those are the catalogue prices most worth fixing today"
+          subtitle="Biggest loss first, those are the catalogue prices most worth fixing today"
         />
         {rows === null ? (
           <div className="py-8 text-center">
@@ -105,8 +105,8 @@ export default function CatalogueAccuracy() {
         )}
         <p className="p-4 pt-0 text-xs text-slate-500 dark:text-slate-400 sm:px-5">
           A product sitting in the red here has a catalogue price that no longer matches what the
-          supplier charges — worth updating on the Cost prices page. This is already inside your
-          margin, not a separate cost — it only shows where a slice of it came from.
+          supplier charges, worth updating on the Cost prices page. This is already inside your
+          margin, not a separate cost, it only shows where a slice of it came from.
         </p>
       </Card>
     </div>

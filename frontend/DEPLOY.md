@@ -1,7 +1,7 @@
 # Deploying the front end to Vercel
 
 A static build. Vercel serves it; the API runs on a host that keeps a process
-alive — see `../backend/DEPLOY.md` for why it cannot be serverless.
+alive, see `../backend/DEPLOY.md` for why it cannot be serverless.
 
 ## Environment variables
 
@@ -13,14 +13,14 @@ the API lives in `vercel.json`.
 | `VITE_API_URL` | `https://your-api-host/api` |
 
 **The `/api` on the end is required.** Request paths in `src/lib/api.ts` are
-written as `/auth/login`, `/catalogue`, `/orders` — with no prefix — because the
+written as `/auth/login`, `/catalogue`, `/orders` (with no prefix) because the
 API mounts everything under `api` via `setGlobalPrefix('api')`. Leave it off and
 every single request 404s while the site itself loads perfectly, which is a
 confusing hour to spend. A trailing slash is stripped for you, so
 `https://host/api/` is also fine.
 
 These are **build-time** variables. Vite inlines `import.meta.env` values when it
-compiles, so changing one has no effect until you redeploy — it is not read at
+compiles, so changing one has no effect until you redeploy, it is not read at
 runtime.
 
 ## Settings in the Vercel dashboard
@@ -37,7 +37,7 @@ runtime.
 
 Because the browser now calls the API directly rather than through a proxy, every
 request is cross-origin and the API decides whether to answer. Set `CORS_ORIGINS`
-on the API to the Vercel domain, exactly — scheme included, no trailing slash:
+on the API to the Vercel domain, exactly, scheme included, no trailing slash:
 
 ```
 CORS_ORIGINS=https://jamesdataconsult.vercel.app
@@ -50,7 +50,7 @@ panel sits empty, and the only clue is a CORS message in the browser console.
 
 Vercel gives every branch and pull request its own hostname
 (`jdc-git-somebranch-you.vercel.app`), and none of those match `CORS_ORIGINS`, so
-previews cannot talk to production's API. That is a reasonable default — a
+previews cannot talk to production's API. That is a reasonable default, a
 half-finished branch pointed at live money is not something to enable by
 accident. If you want working previews, point them at a separate API instance
 rather than widening production's CORS.
@@ -61,7 +61,7 @@ Only two things now: the SPA fallback and response headers.
 
 The `/(.*)` → `/index.html` rewrite is what makes a refresh on `/admin/prices`
 work. Without it Vercel looks for a file at that path, finds none, and serves its
-own 404 — the classic single-page-app deploy failure.
+own 404, the classic single-page-app deploy failure.
 
 The headers set `nosniff`, deny framing, trim the referrer, and give hashed
 assets a one-year immutable cache. `index.html` is deliberately not cached, so a

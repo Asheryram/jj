@@ -5,7 +5,7 @@ import type { UserStatus } from '../data/types'
  *
  * Shared because it was written twice and wrong once. Every screen that renders a
  * status used `status === 'active' ? 'Active' : 'Suspended'`, which silently
- * reported the two states nobody had looked at yet — `pending` and `rejected` — as
+ * reported the two states nobody had looked at yet (`pending` and `rejected`) as
  * an account somebody had stopped. Telling an admin that a waiting applicant was
  * suspended is not a cosmetic problem: it is the difference between "approve this
  * person" and "somebody already turned them down".

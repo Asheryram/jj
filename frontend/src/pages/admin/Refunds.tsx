@@ -38,7 +38,7 @@ type Filter = 'pending' | 'approved' | 'rejected'
  * Money owed back to customers, waiting on a decision.
  *
  * Refunds are not automatic. A failed delivery records the debt and stops, so
- * this queue is the only way money goes back — which is the point: an outbound
+ * this queue is the only way money goes back, which is the point: an outbound
  * payment should have a person behind it. The cost of not having one was
  * demonstrated, when a rule that refunded every failed order paid eight customers
  * GHS 196 they had never paid.
@@ -99,7 +99,7 @@ export default function Refunds() {
     }
   }
 
-  // Only a `pending` row is ever selectable — a decided one has nothing left
+  // Only a `pending` row is ever selectable, a decided one has nothing left
   // to bulk-act on.
   const selectableIds = (rows ?? []).filter((r) => r.status === 'pending').map((r) => r.id)
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id))
@@ -115,7 +115,7 @@ export default function Refunds() {
   /**
    * A wallet refund, or a Mobile Money one whose network is already known
    * (Paystack reported it on the original payment), can be approved without
-   * asking anything more — same as the inline "Refund" button already does
+   * asking anything more, same as the inline "Refund" button already does
    * for those. One still genuinely needing a network choice is skipped
    * rather than guessed at, and the summary says so, so nothing here ever
    * picks a network nobody confirmed.
@@ -129,7 +129,7 @@ export default function Refunds() {
         pushToast({
           tone: 'info',
           title: `${skipped.length} need a network chosen first`,
-          detail: 'Open each one individually — nothing here guesses which Mobile Money network to use.',
+          detail: 'Open each one individually, nothing here guesses which Mobile Money network to use.',
         })
       }
       return
@@ -153,7 +153,7 @@ export default function Refunds() {
     pushToast({
       tone: failed === 0 ? 'success' : 'error',
       title: `${succeeded} refund${succeeded === 1 ? '' : 's'} sent${failed > 0 ? `, ${failed} failed` : ''}`,
-      detail: skipped.length > 0 ? `${skipped.length} skipped — they still need a network chosen individually.` : undefined,
+      detail: skipped.length > 0 ? `${skipped.length} skipped, they still need a network chosen individually.` : undefined,
     })
   }
 
@@ -177,7 +177,7 @@ export default function Refunds() {
           value={
             rows && rows.length > 0 && filter === 'pending'
               ? dateTime(rows[0].createdAt)
-              : '—'
+              : '-'
           }
           hint="Somebody has paid and received nothing"
           icon={<AlertIcon className="size-5" />}
@@ -334,8 +334,8 @@ export default function Refunds() {
                               Refuse
                             </Button>
                           </div>
-                          {/* For the case the failure itself was wrong — a catalogue
-                              mapping that's since been fixed, stock that's back — rather
+                          {/* For the case the failure itself was wrong, a catalogue
+                              mapping that's since been fixed, stock that's back, rather
                               than a genuine reason the order couldn't be filled. Cancels
                               this refund automatically if it delivers this time. */}
                           <button
@@ -345,7 +345,7 @@ export default function Refunds() {
                           >
                             Reorder instead?
                           </button>
-                          {/* Only offered once an automatic transfer has actually bounced —
+                          {/* Only offered once an automatic transfer has actually bounced,
                               a Starter Business Paystack account refuses every third-party
                               payout outright, and this is the way through that wall. Hidden
                               otherwise so the normal path stays the obvious one. */}
@@ -424,7 +424,7 @@ export default function Refunds() {
  * Refunds sent from someone's own pocket, not yet taken back out.
  *
  * Created by `SettleManuallyModal` above, the moment a Mobile Money transfer
- * gets marked as sent by hand instead of through Paystack — so this belongs
+ * gets marked as sent by hand instead of through Paystack, so this belongs
  * right here with the rest of the refund queue, not tucked into the Float
  * panel just because both happen to be tracked on the same capital ledger.
  * This is Paystack's money, not the DataHub float: the customer's original
@@ -472,7 +472,7 @@ function ManualAdvancesCard() {
       <div className="p-4 sm:p-5">
         <Callout tone="warning" icon={<CashIcon className="size-4" />}>
           The customer's original payment for each of these is still sitting wherever Paystack
-          settles to for you — it was never sent back out through them. Take the amount back for
+          settles to for you, it was never sent back out through them. Take the amount back for
           yourself from there first, then mark it reimbursed below. This is separate from your
           DataHub float.
         </Callout>
@@ -505,7 +505,7 @@ function ManualAdvancesCard() {
 
 /**
  * The toast for a reorder is built from the real, post-purchase answer, not
- * the preview shown before clicking — DataHub's actual charge is never
+ * the preview shown before clicking, DataHub's actual charge is never
  * knowable until the purchase has actually been placed.
  */
 function toastFor(orderRef: string, result: ReorderOutcome): { tone: 'success' | 'error' | 'info'; title: string; detail?: string } {
@@ -532,7 +532,7 @@ function toastFor(orderRef: string, result: ReorderOutcome): { tone: 'success' |
     return {
       tone: 'info',
       title: `${orderRef}: rejected again`,
-      detail: `${result.reason ?? 'No reason given.'} The refund is restored — still owed, nothing lost.`,
+      detail: `${result.reason ?? 'No reason given.'} The refund is restored, still owed, nothing lost.`,
     }
   }
 
@@ -552,19 +552,19 @@ function toastFor(orderRef: string, result: ReorderOutcome): { tone: 'success' |
     }
   }
 
-  // 'unknown' — timed out again, exactly as ambiguous as the very first attempt.
+  // 'unknown', timed out again, exactly as ambiguous as the very first attempt.
   return {
     tone: 'info',
     title: `${orderRef}: still unresolved`,
-    detail: 'Timed out again before answering. The refund stays on hold — this needs a person to check DataHub directly, same as before.',
+    detail: 'Timed out again before answering. The refund stays on hold, this needs a person to check DataHub directly, same as before.',
   }
 }
 
 /**
  * Refusing a refund needs a reason, and keeps it.
  *
- * This is a decision not to return money somebody paid. It has to be possible —
- * an order can fail on our side and still have been delivered — but it must not
+ * This is a decision not to return money somebody paid. It has to be possible,
+ * an order can fail on our side and still have been delivered, but it must not
  * be possible quietly, because the record is what answers the question months
  * later when the customer asks again.
  */
@@ -611,7 +611,7 @@ function RefuseModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Refuse refund — ${request.orderRef}`}>
+    <Modal open onClose={onClose} title={`Refuse refund, ${request.orderRef}`}>
       <form
         className="space-y-4"
         onSubmit={(event) => {
@@ -632,7 +632,7 @@ function RefuseModal({
         </Callout>
 
         <QuickReasons
-          options={['Bundle was delivered — confirmed with the customer', 'Payment never actually went through']}
+          options={['Bundle was delivered, confirmed with the customer', 'Payment never actually went through']}
           onPick={(text) => {
             setNote(text)
             setError('')
@@ -642,7 +642,7 @@ function RefuseModal({
         <Field label="Why are you refusing it?" htmlFor="refuse-note" error={error}>
           <TextInput
             id="refuse-note"
-            placeholder="Bundle was delivered — confirmed with the customer"
+            placeholder="Bundle was delivered, confirmed with the customer"
             value={note}
             invalid={Boolean(error)}
             onChange={(event) => {
@@ -666,7 +666,7 @@ function RefuseModal({
 }
 
 /**
- * The bulk version of `RefuseModal` — one reason applied to every selected
+ * The bulk version of `RefuseModal`, one reason applied to every selected
  * request, since a batch of refusals sharing a cause ("promo expired before
  * it was used", say) is exactly the case bulk-refusing exists for. Each one
  * still goes through the same `rejectRefund` individually, so a request that
@@ -745,7 +745,7 @@ function BulkRefuseModal({
         </Callout>
 
         <QuickReasons
-          options={['Promo period expired before it was used', 'Bundle was delivered — confirmed with the customer']}
+          options={['Promo period expired before it was used', 'Bundle was delivered, confirmed with the customer']}
           onPick={(text) => {
             setNote(text)
             setError('')
@@ -779,8 +779,8 @@ function BulkRefuseModal({
 }
 
 /**
- * For the case the failure was ours, not the customer's problem — a catalogue
- * mapping that's since been fixed, stock that's since come back — and the
+ * For the case the failure was ours, not the customer's problem, a catalogue
+ * mapping that's since been fixed, stock that's since come back, and the
  * order should just be filled instead of refunded.
  *
  * Only offered while the refund is still pending, and for good reason: a
@@ -791,8 +791,8 @@ function BulkRefuseModal({
  * that other retry does.
  */
 /**
- * For the case the failure was ours, not the customer's problem — a catalogue
- * mapping that's since been fixed, stock that's since come back — and the
+ * For the case the failure was ours, not the customer's problem, a catalogue
+ * mapping that's since been fixed, stock that's since come back, and the
  * order should just be filled instead of refunded.
  *
  * Only offered while the refund is still pending, and for good reason: a
@@ -803,7 +803,7 @@ function BulkRefuseModal({
  * that other retry does.
  *
  * The bundle is chosen here, live, rather than assumed from whatever the
- * order was originally sold against — that assumption is exactly what left
+ * order was originally sold against, that assumption is exactly what left
  * JDC-497709 unrecoverable: its own frozen mapping had gone stale for reasons
  * nobody at the counter caused. Picking it fresh also surfaces today's cost
  * next to what the customer already paid, so a price that moved since the
@@ -865,14 +865,14 @@ function ReorderModal({
 
   const selected = options?.find((row) => row.code === supplierCode) ?? null
   // What a real purchase of this SKU last actually cost, not the catalogue's
-  // synced estimate — see `SupplierSku.realCost`. Falls back to the estimate
+  // synced estimate, see `SupplierSku.realCost`. Falls back to the estimate
   // only when nothing real has ever been charged for this exact SKU yet.
   const effectiveCost = selected ? selected.realCost ?? selected.costPrice : null
   /**
    * The actual question a reorder asks: has anything changed since this
    * order was originally priced, not "what is the margin" in the abstract.
    * `agentMargin` and `paystackFee` are frozen and identical either way, so
-   * they cancel out of this comparison entirely — completing the order at
+   * they cancel out of this comparison entirely, completing the order at
    * the same cost it already assumed is not a gain, it is just completing
    * it, and this reads as exactly zero when that's true.
    */
@@ -905,7 +905,7 @@ function ReorderModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Reorder — ${request.orderRef}`}>
+    <Modal open onClose={onClose} title={`Reorder, ${request.orderRef}`}>
       <div className="space-y-4">
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
           <p className="font-semibold text-slate-900 dark:text-slate-50">
@@ -916,7 +916,7 @@ function ReorderModal({
 
         <Callout tone="info" icon={<AlertIcon className="size-4" />}>
           This places the order again instead of refunding it, against whichever bundle you choose
-          below — not necessarily the one this was originally sold as, since its mapping or price
+          below, not necessarily the one this was originally sold as, since its mapping or price
           may have changed since. If it delivers, this refund is cancelled automatically. If it
           fails again, the refund stays exactly as it is now, still owed.
         </Callout>
@@ -929,7 +929,7 @@ function ReorderModal({
           ) : options.length === 0 ? (
             <p className="text-sm text-red-700 dark:text-red-400">
               Nothing in the catalogue right now can fulfil a {request.network ?? ''}{' '}
-              {request.category} order — check Supplier catalogue before reordering this one.
+              {request.category} order, check Supplier catalogue before reordering this one.
             </p>
           ) : (
             <select
@@ -1057,8 +1057,8 @@ function ReorderModal({
  *
  * Pre-filled when it is already known: Paystack reports which network carried
  * the original payment, and that is read back here rather than asked again.
- * When it is not on file — a guest whose payment predates this, or one
- * Paystack did not report cleanly — this falls back to asking, because a
+ * When it is not on file, a guest whose payment predates this, or one
+ * Paystack did not report cleanly, this falls back to asking, because a
  * prefix cannot be trusted to say which network carries a line: Ghana's
  * number portability means a guess here once turned real customers away.
  *
@@ -1128,12 +1128,12 @@ function SendRefundModal({
 
         {known ? (
           <Callout tone="info" icon={<CheckIcon className="size-4" />}>
-            This is what they paid with, reported by Paystack — not a guess. Worth a glance before
+            This is what they paid with, reported by Paystack, not a guess. Worth a glance before
             sending, but you shouldn&apos;t need to change it.
           </Callout>
         ) : (
           <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
-            We cannot tell the network from the number — a Ghanaian line keeps its number when it
+            We cannot tell the network from the number, a Ghanaian line keeps its number when it
             moves. If you are not sure, ask them before sending.
           </Callout>
         )}
@@ -1154,14 +1154,14 @@ function SendRefundModal({
 /**
  * The fallback for a Paystack account that cannot send transfers at all.
  *
- * A Starter Business account refuses every third-party payout outright — not
+ * A Starter Business account refuses every third-party payout outright, not
  * a retry-able failure, an account-level wall. This records that the money
  * left some other way (the admin's own Mobile Money, cash) instead of
  * pretending the platform sent it, and closes the refund the same way a
  * confirmed transfer would: the order is marked refunded and the customer's
  * receipt reflects it.
  *
- * The note is required for the same reason a refusal's reason is required —
+ * The note is required for the same reason a refusal's reason is required,
  * nothing else here confirms the claim, so the record is what answers a
  * dispute later.
  */
@@ -1225,7 +1225,7 @@ function SettleManuallyModal({
 
         <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
           Only use this once the money has actually left your hands. This closes the refund and
-          tells the customer it has been sent — there is no automatic transfer behind it this time.
+          tells the customer it has been sent, there is no automatic transfer behind it this time.
         </Callout>
 
         <Field label="Which Mobile Money network did you send it on?" htmlFor="settle-network">

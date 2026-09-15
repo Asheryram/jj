@@ -2,7 +2,7 @@ import type { SVGProps } from 'react'
 
 /**
  * Hand-rolled inline icons. Zero dependencies keeps the bundle inside the
- * 3-second budget in NFR-1.1 — an icon font or a full icon package would be
+ * 3-second budget in NFR-1.1, an icon font or a full icon package would be
  * the single largest asset on the storefront.
  */
 type IconProps = SVGProps<SVGSVGElement>

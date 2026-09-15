@@ -1,16 +1,16 @@
-# User Flows — End to End
-## JamesDataConsult — Data Bundle & Reseller Platform
+# User Flows: End to End
+## JamesDataConsult: Data Bundle & Reseller Platform
 
 Prepared by: Asher Yram Tetteh-Abotsi
 Date: August 2026
-Version: 1.0 — matches requirements v1.1 and the frontend prototype in `frontend/`
+Version: 1.0, matches requirements v1.1 and the frontend prototype in `frontend/`
 
 ---
 
 ## 1. How to read this
 
 Every flow in this document is written from the actor's point of view, names the
-route it happens on, and states what the system does in response — including the
+route it happens on, and states what the system does in response, including the
 paths where things go wrong, which are usually the ones that get skipped.
 
 **Status column, used throughout:**
@@ -36,9 +36,9 @@ network call, not the design.
 | **Wallet holder** | Optional | Registers as a buyer | Everything a buyer can, plus a topped-up balance and saved history |
 | **Agent** | Required | Registers directly or via a referral link | Sells at their own prices, earns margin, recruits sub-agents, withdraws |
 | **Admin (James)** | Required | Login | Sets all four price tiers, approves withdrawals, suspends users, toggles referral depth |
-| **System** | — | Webhooks, cron | Confirms payment, fulfils orders, splits money, refunds, notifies |
+| **System** |: | Webhooks, cron | Confirms payment, fulfils orders, splits money, refunds, notifies |
 
-**A buyer is not a role.** There is no "Customer" account required to purchase —
+**A buyer is not a role.** There is no "Customer" account required to purchase,
 that was the single biggest change from requirements v1.0, and it is what makes
 agent sell links work at all (FR-4.8).
 
@@ -147,23 +147,23 @@ redirected to `/app`; an agent hitting `/app/wallet` is redirected to `/app`.
    pick bundle    number      confirm      pay
 ```
 
-1. Buyer lands on `/`. The catalogue is the first thing on the page — first
+1. Buyer lands on `/`. The catalogue is the first thing on the page, first
    product is 470px down on desktop, 521px on mobile, so prices are visible
    without scrolling.
 2. Picks a category tab (Data / Airtime / Voice / SMS / AFA / Checkers) and
    optionally filters by network. Prices shown are James's standard prices.
 3. Taps a product → `/buy/:productId`. **Step 1 of 4 is already satisfied** by
    arriving with a bundle chosen.
-4. **Step 2 — Number.** Enters the recipient number. The network is detected
+4. **Step 2, Number.** Enters the recipient number. The network is detected
    live from the prefix and shown as a chip. Copy states "No account needed".
-5. **Step 3 — Confirm.** The number is repeated back large and prettified
+5. **Step 3, Confirm.** The number is repeated back large and prettified
    (`024 411 8820`) with its detected network, above an explicit warning that a
-   bundle sent to a wrong number cannot be recovered. A checkbox — ticked by
-   default — sends the receipt to the same number, so most buyers never touch it.
+   bundle sent to a wrong number cannot be recovered. A checkbox, ticked by
+   default, sends the receipt to the same number, so most buyers never touch it.
    Payment options show Mobile Money only, because a guest has no wallet.
-6. Chooses their MoMo network and presses **Confirm and pay** (the yellow CTA —
+6. Chooses their MoMo network and presses **Confirm and pay** (the yellow CTA,
    the single highest-emphasis action in the product).
-7. **Step 4 — Done.** Pending state while the network confirms, then a receipt
+7. **Step 4, Done.** Pending state while the network confirms, then a receipt
    with reference, amount, time, and a prompt to keep the reference for `/track`.
 
 **Success:** bundle delivered, receipt on screen, SMS confirmation promised.
@@ -175,7 +175,7 @@ James keeps the whole spread above supplier cost.
 | Condition | Behaviour |
 |---|---|
 | Number is 9 digits | *"A Ghana number needs 10 digits."* |
-| Number is 11+ digits | *"That's more than 10 digits — check it again."* |
+| Number is 11+ digits | *"That's more than 10 digits: check it again."* |
 | Unknown prefix | *"073 isn't a network we recognise."* |
 | Telecel number, MTN bundle | *"That's a Telecel number, but you selected a MTN bundle."* |
 | Blank | *"Enter the number that should receive this bundle."* |
@@ -192,11 +192,11 @@ anywhere in the buyer flow (NFR-4.3).
 **Actor:** Buyer · **Status: Simulated** · FR-5.7, FR-3.5, FR-4.8
 
 1. Agent shares `https://jamesdataconsult.com/s/KWAME77`, usually on WhatsApp.
-2. Buyer opens it. A branded header names the agent — "Authorised
-   JamesDataConsult agent · Kwame Boateng" — with their code and a note that
+2. Buyer opens it. A branded header names the agent, "Authorised
+   JamesDataConsult agent · Kwame Boateng", with their code and a note that
    Paystack handles payment.
 3. The catalogue below is priced at **that agent's** prices. A banner states
-   "You are buying from Kwame Boateng — the prices here are theirs", with an
+   "You are buying from Kwame Boateng, the prices here are theirs", with an
    escape hatch to standard prices (**B-08**).
 4. The rest is identical to **B-01**. The confirm screen adds "Sold by Kwame
    Boateng, an authorised agent."
@@ -215,7 +215,7 @@ code quoted back and a button to the standard shop. No dead end.
 **Actor:** Buyer · **Status: Simulated** · FR-4.7, NFR-7.1
 
 1. Buyer reaches `/checkers` (nav, footer, or the Checkers category tab).
-2. Two products — BECE and WASSCE — each listing what it includes. **Two
+2. Two products (BECE and WASSCE) each listing what it includes. **Two
    disclaimers appear before the buy button:** that JamesDataConsult is an
    independent reseller not affiliated with WAEC, and that a revealed voucher
    cannot be refunded.
@@ -225,7 +225,7 @@ code quoted back and a button to the standard shop. No dead end.
    copy button, plus a note that they have also been sent by SMS.
 
 **Critical:** the voucher is a bearer secret. If the SMS fails and the buyer
-closes the page, **B-07** is the only way back to it — which is exactly why that
+closes the page, **B-07** is the only way back to it, which is exactly why that
 flow exists.
 
 ---
@@ -238,7 +238,7 @@ category:
 
 | Category | Note |
 |---|---|
-| Airtime | Thin margins by nature — face value is a fixed reference point, so the tier spread is deliberately narrow |
+| Airtime | Thin margins by nature: face value is a fixed reference point, so the tier spread is deliberately narrow |
 | Voice / SMS | Validity is stated on the card (7 or 30 days) |
 | AFA registration | MTN only, one-time, no recurring state |
 | Checkers | Not network-specific; the network chip reads "All networks" |
@@ -257,13 +257,13 @@ This is the flow that justifies the wallet existing: **no Mobile Money prompt.**
 3. Confirm → the wallet is debited as the order is created, in one step, and a
    `purchase` entry is written to the ledger with the running balance after it.
 
-**Result: four steps, no MoMo prompt** — the NFR-4.2 promise, and the only reason
+**Result: four steps, no MoMo prompt**: the NFR-4.2 promise, and the only reason
 a buyer would bother registering.
 
-**Alternate — insufficient balance (FR-2.5):**
-The wallet option is disabled and labelled with the shortfall ("Balance GHS 12.50
-— you need GHS 16.50 more"), and a callout offers both ways forward: pay Mobile
-Money now, or top up first. **The sale is never blocked outright** — that was a
+**Alternate, insufficient balance (FR-2.5):**
+The wallet option is disabled and labelled with the shortfall ("Balance GHS 12.50,
+you need GHS 16.50 more"), and a callout offers both ways forward: pay Mobile
+Money now, or top up first. **The sale is never blocked outright**, that was a
 deliberate change from a literal reading of FR-2.5, which would have dead-ended
 the buyer.
 
@@ -277,11 +277,11 @@ the buyer.
 3. Chooses MTN MoMo, Telecel Cash or AirtelTigo Money.
 4. Sees exactly what will be charged, then **Continue to Paystack**.
 5. A note states plainly: *"Your balance updates only after Paystack confirms the
-   payment — not when the prompt closes."*
+   payment, not when the prompt closes."*
 6. On confirmation the balance updates and a `topup` ledger entry is written.
 
 **This is the flow most likely to be built wrong.** The browser must never be the
-source of truth — see **S-01**. The UI already says so out loud, and the real
+source of truth, see **S-01**. The UI already says so out loud, and the real
 implementation has to keep that true.
 
 ---
@@ -291,7 +291,7 @@ implementation has to keep that true.
 
 1. `/track` (header, footer, or the link on a guest receipt).
 2. Enters the order reference (`JDC-884120`) and the phone number used.
-3. On a match: product, status, amount, recipient, time, payment method — and if
+3. On a match: product, status, amount, recipient, time, payment method, and if
    it was a checker, **the serial and PIN again**.
 4. On no match: *"We could not find that order"*, with a prompt to check both
    fields and a phone number to call.
@@ -318,8 +318,8 @@ silently locked into a higher price with no way out.
 
 From `/register`, two options with the framing reversed from v1.0:
 
-- **"An agent — I want to sell"** (default): own shop link, own prices, keeps margin.
-- **"A buyer — wallet only"**: explicitly optional. Keeps a balance to skip the
+- **"An agent, I want to sell"** (default): own shop link, own prices, keeps margin.
+- **"A buyer, wallet only"**: explicitly optional. Keeps a balance to skip the
   MoMo prompt and saves order history.
 
 Both require name, phone (validated and network-detected live), email, an
@@ -355,7 +355,7 @@ a toggle rather than a migration.
 3. **Edit** opens a dialog stating the floor and the ceiling, with live profit
    feedback as they type.
 
-**The floor is what *they* pay — their upline's price, not the supplier's cost.**
+**The floor is what *they* pay, their upline's price, not the supplier's cost.**
 For MTN 5GB an agent directly under James sees **You pay GHS 25.90**, not
 DataHub's GHS 24.00. That one number is the entire commercial model: because
 their floor already contains James's markup, James is paid on every sale
@@ -369,7 +369,7 @@ automatically.
 | Above the retail cap | *"James caps this product at GHS 34.80 so it stays competitive."* |
 | Non-numeric | *"Enter a price like 7.50."* |
 
-Agents never see `supplierCost` (FR-3.7). **These limits are UX only — the API
+Agents never see `supplierCost` (FR-3.7). **These limits are UX only, the API
 must re-enforce both (NFR-2.7).** An agent has a direct financial incentive to
 bypass them from the browser console.
 
@@ -390,7 +390,7 @@ labelled "default" in the table (FR-3.8).
 ### A-05 · Share the sell link
 **Actor:** Agent · **Status: Built** · FR-5.7, FR-1.7
 
-`/app/referrals` presents **two links doing two different jobs** — the single
+`/app/referrals` presents **two links doing two different jobs**, the single
 most confusable thing in the product, so they are visually separated:
 
 | | Sell link | Referral link |
@@ -413,7 +413,7 @@ appears on the agent dashboard, since that is where they will look for it.
    `sale` ledger entry naming the product and recipient.
 3. A toast confirms the amount earned.
 
-**The agent handles no money and holds no stock.** They never pre-fund anything —
+**The agent handles no money and holds no stock.** They never pre-fund anything,
 this is why `/app/earnings` has no top-up button anywhere on it.
 
 ---
@@ -425,7 +425,7 @@ When an agent below them sells, they earn too, because the downline agent's cost
 *is* their price. The ledger entry is typed `downline` and records how many
 levels down it came from.
 
-**Verified on a real 3-deep order** — a BECE checker sold by Naa Adjei, under
+**Verified on a real 3-deep order**: a BECE checker sold by Naa Adjei, under
 Abena Nyarko, under Kwame Boateng:
 
 ```
@@ -449,7 +449,7 @@ your chain" with orders, volume, and **what they have earned you**. Direct
 recruits are badged "You"; deeper ones are indented under their own recruiter.
 
 While multi-level is off, the page says so plainly: *"You can invite agents
-directly, and you earn on their sales. They cannot recruit their own agents yet —
+directly, and you earn on their sales. They cannot recruit their own agents yet,
 James can switch that on later without anything changing for you."*
 
 ---
@@ -459,10 +459,10 @@ James can switch that on later without anything changing for you."*
 
 `/app/earnings` shows available balance, split between own sales and downline,
 withdrawn to date, a 7-day chart, and every entry: `sale`, `downline`,
-`reversal`, `withdrawal` — each with amount, running balance and reference.
+`reversal`, `withdrawal`, each with amount, running balance and reference.
 
 Footer states: *"This ledger is append-only. Entries cannot be edited or deleted,
-by you or by us — a correction is always a new entry."* That is a trust signal
+by you or by us, a correction is always a new entry."* That is a trust signal
 and a real constraint on the backend (NFR-2.6).
 
 ---
@@ -524,7 +524,7 @@ reassuring that refunds were automatic.
 
 Then: 7-day revenue, James's own margin computed from recorded splits, active
 users, orders in flight. Then a daily revenue chart, revenue by category, top
-agents, latest orders, and **Where the money goes** — turnover divided between
+agents, latest orders, and **Where the money goes**, turnover divided between
 supplier, James and the agent network, drawn from the splits rather than
 estimated.
 
@@ -592,12 +592,12 @@ existing links keep working.
 
 The page states why this is safe: *"This is a setting, not a code change. Every
 account already stores who referred it, so switching this on immediately reveals
-the chains that were being recorded all along — nothing needs rebuilding or
+the chains that were being recorded all along, nothing needs rebuilding or
 backfilling."*
 
 **⚠ Commercial warning, measured:** each level adds its own markup, so retail
 prices inflate with depth. A BECE checker three agents deep costs **GHS 26.09**
-against James's standard **GHS 20.90** — **25% more for the identical product**.
+against James's standard **GHS 20.90**, **25% more for the identical product**.
 The per-product retail cap is the only brake, and James must set it deliberately.
 This is the strongest argument for launching with the toggle off.
 
@@ -629,7 +629,7 @@ Retry count (0 / 1 / 2, default 1) and minimum top-up are editable. Integration
 credentials are shown masked with the note that keys live as server secrets and
 can only be replaced, never revealed (NFR-2.4).
 
-Network prefixes are editable **data**, not code (NFR-5.1) — a newly allocated
+Network prefixes are editable **data**, not code (NFR-5.1), a newly allocated
 prefix can be added without a deployment. Flagged on screen: confirm current
 allocations with the NCA before launch.
 
@@ -690,7 +690,7 @@ Configurable in J-08; default 1.
 ### S-04 · Refund a failed order
 **Status: Simulated** · FR-2.7, FR-2.12, NFR-3.3
 
-The refund path depends on how the buyer paid — and the guest case is the one the
+The refund path depends on how the buyer paid, and the guest case is the one the
 requirements originally had no answer for:
 
 | Paid with | Refund |
@@ -700,7 +700,7 @@ requirements originally had no answer for:
 
 Reversing a MoMo collection through Paystack is neither instant nor guaranteed,
 which is why the guest case holds credit rather than attempting a reversal.
-**⚠ This approach needs James's confirmation** — the alternative is that he
+**⚠ This approach needs James's confirmation**: the alternative is that he
 returns the money by hand, which is simpler to build but makes NFR-3.3 depend on
 him remembering.
 
@@ -728,7 +728,7 @@ to move into the NestJS domain layer as-is: no framework, no I/O.
 `splitDiscrepancy()` is the invariant to assert **before committing**.
 
 **NFR-3.4:** crediting all participants and marking the order complete must be
-atomic. A partial split — some credited, some not — must be impossible.
+atomic. A partial split (some credited, some not) must be impossible.
 
 ---
 
@@ -775,21 +775,21 @@ atomic. A partial split — some credited, some not — must be impossible.
 
 ## 10. State machines
 
-**Order** — FR-4.4
+**Order**: FR-4.4
 
 | From | To | Trigger |
 |---|---|---|
-| — | `pending` | Order created, payment not yet confirmed |
+|: | `pending` | Order created, payment not yet confirmed |
 | `pending` | `processing` | Payment confirmed, submitted to provider |
 | `processing` | `completed` | Provider confirms delivery |
 | `processing` | `failed` | Provider rejects after the configured retries |
 | `failed` | `failed` + refunded | Refund written (a new entry, never a reversal of the old) |
 
-**Withdrawal** — FR-2.6
+**Withdrawal**: FR-2.6
 
 | From | To | Trigger |
 |---|---|---|
-| — | `pending` | Agent requests |
+|: | `pending` | Agent requests |
 | `pending` | `approved` | James approves after sending MoMo |
 | `pending` | `rejected` | James rejects |
 
@@ -823,12 +823,12 @@ Paystack is a 1.6-second pause; no SMS is sent.
 
 | # | Decision | Blocks |
 |---|---|---|
-| 1 | Guest refund method — claimable credit (built) or James refunds by hand | S-04 |
-| 2 | Who absorbs Paystack fees. On a GHS 26.09 sale where James's cut is GHS 1.40, a ~1.95% fee is ~GHS 0.51 — over a third of his margin on deep-chain sales | S-05 economics |
+| 1 | Guest refund method: claimable credit (built) or James refunds by hand | S-04 |
+| 2 | Who absorbs Paystack fees. On a GHS 26.09 sale where James's cut is GHS 1.40, a ~1.95% fee is ~GHS 0.51: over a third of his margin on deep-chain sales | S-05 economics |
 | 3 | Retail caps per product. Defaults are ~45% over supplier cost; J-05 is unsafe until James sets these deliberately | J-02, J-05 |
 | 4 | SMS gateway and per-message cost | S-07 |
 | 5 | Whether the optional wallet account survives at all, or Mobile Money becomes the only way anyone pays | B-05, B-06 |
-| 6 | DataHub GH API docs — webhook or polling for status | S-02 |
+| 6 | DataHub GH API docs: webhook or polling for status | S-02 |
 | 7 | Voucher supply: DataHub GH or a second supplier; pre-purchased inventory or on-demand | B-03 |
 | 8 | Multi-level referral on or off at launch | J-05, A-07 |
 

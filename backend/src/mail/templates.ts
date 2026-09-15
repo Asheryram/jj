@@ -5,7 +5,7 @@ import type { Mail } from './mailer.service'
  *
  * Kept together and kept plain. Every one is a transactional message that exists
  * to get somebody to do one thing, so each has a single obvious action and no
- * marketing around it — a password link buried under a banner reads like phishing,
+ * marketing around it, a password link buried under a banner reads like phishing,
  * which is exactly what a recipient should be suspicious of.
  *
  * Both a text and an HTML body every time. Text is not a fallback nobody sees: it
@@ -16,13 +16,13 @@ import type { Mail } from './mailer.service'
 /**
  * Inline styles only. Email clients strip stylesheets.
  *
- * Exported so other senders — the float alert, for one — get the same card,
+ * Exported so other senders (the float alert, for one) get the same card,
  * font and brand colour as a password email rather than inventing their own
  * look. One visual language for every platform email, not one per sender.
  */
 export function wrap(shopName: string, heading: string, body: string, footer?: string): string {
   const defaultFooter = `You are getting this because somebody with access to ${escape(shopName)} asked us to send it.
-      If that was not you, you can ignore it — nothing changes until the link is used.`
+      If that was not you, you can ignore it, nothing changes until the link is used.`
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:24px;background:#f8fafc;font-family:system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#1e293b">
@@ -85,7 +85,7 @@ export function setupMail(input: {
       input.shopName,
       heading,
       `<p style="margin:0 0 8px;font-size:15px;line-height:1.6">Hello ${escape(input.name)},</p>
-       <p style="margin:0 0 20px;font-size:15px;line-height:1.6">${escape(intro)} Choose your own password below — nobody else knows it, including whoever created the account.</p>
+       <p style="margin:0 0 20px;font-size:15px;line-height:1.6">${escape(intro)} Choose your own password below, nobody else knows it, including whoever created the account.</p>
        ${button(input.link, 'Set my password')}
        <p style="margin:0;font-size:13px;color:#64748b">The link works once and expires in 48 hours.</p>`,
     ),
@@ -94,7 +94,7 @@ export function setupMail(input: {
 
 /**
  * One agent's digest of every product whose price to them has moved since
- * the last one — consolidated by `PendingPriceChange`, so this is always
+ * the last one, consolidated by `PendingPriceChange`, so this is always
  * "here's what's different now," never one email per edit.
  */
 export function priceChangeMail(input: {
@@ -155,7 +155,7 @@ export function resetMail(input: { to: string; name: string; shopName: string; l
       '',
       input.link,
       '',
-      'The link works once and expires in one hour. If you did not ask for this, ignore it —',
+      'The link works once and expires in one hour. If you did not ask for this, ignore it -',
       'your current password keeps working and nothing changes until the link is used.',
     ].join('\n'),
     html: wrap(
@@ -164,7 +164,7 @@ export function resetMail(input: { to: string; name: string; shopName: string; l
       `<p style="margin:0 0 8px;font-size:15px;line-height:1.6">Hello ${escape(input.name)},</p>
        <p style="margin:0 0 20px;font-size:15px;line-height:1.6">Somebody asked to reset the password for this account.</p>
        ${button(input.link, 'Choose a new password')}
-       <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b">The link works once and expires in one hour. If you did not ask for this, ignore it — your current password keeps working and nothing changes until the link is used.</p>`,
+       <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b">The link works once and expires in one hour. If you did not ask for this, ignore it, your current password keeps working and nothing changes until the link is used.</p>`,
     ),
   }
 }

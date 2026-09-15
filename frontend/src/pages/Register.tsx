@@ -11,7 +11,7 @@ import { AlertIcon, CheckIcon, StoreIcon, UsersIcon } from '../components/icons'
  *
  * A buyer needs no account: they enter a number, pay with Mobile Money, and the
  * bundle goes where they said. The buyer option existed to hold a wallet, and a
- * wallet is somebody else's money parked on the platform — a balance to top up,
+ * wallet is somebody else's money parked on the platform, a balance to top up,
  * reconcile and refund, in exchange for skipping one Mobile Money prompt.
  * Deferred, not deleted: the role and its ledger are still in the schema.
  */
@@ -31,11 +31,11 @@ export default function Register() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   /**
-   * FR-1.2 — a referral link pre-fills this and it stays editable.
+   * FR-1.2, a referral link pre-fills this and it stays editable.
    *
    * Two sources, checked in order: an explicit `?ref=` (an already-shared link
    * in the old shape), then the sell link this page was reached through
-   * (`/s/<code>/register`) — the code in the path is the referrer once there
+   * (`/s/<code>/register`), the code in the path is the referrer once there
    * is no query string carrying one.
    */
   const [referral, setReferral] = useState(params.get('ref') ?? sellerCode ?? '')
@@ -101,7 +101,7 @@ export default function Register() {
     <div className="mx-auto w-full max-w-lg px-4 py-12 sm:py-16">
       <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">Create your account</h1>
       <p className="mt-1.5 text-slate-500 dark:text-slate-400">
-        Takes under a minute. You do not need an account to buy —{' '}
+        Takes under a minute. You do not need an account to buy -{' '}
         <Link to={shopPath('/')} className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
           the shop is open to everyone
         </Link>
@@ -134,7 +134,7 @@ export default function Register() {
               link, set your own prices, and keep the margin on every sale.
             </p>
             <p className="mt-1.5">
-              Just buying a bundle? You do not need an account —{' '}
+              Just buying a bundle? You do not need an account -{' '}
               <Link to={shopPath('/shop')} className="font-semibold underline">
                 go straight to the shop
               </Link>{' '}

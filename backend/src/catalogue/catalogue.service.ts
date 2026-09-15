@@ -11,14 +11,14 @@ import { isAdminRole } from '../common/auth'
  * a round trip per product: the catalogue, the referral chain, and the platform
  * switches.
  *
- * Why ship the chain to the client at all — the frontend keeps a copy of the
+ * Why ship the chain to the client at all, the frontend keeps a copy of the
  * pricing domain and resolves prices locally, which is what lets a sell-link
  * storefront render 40 products instantly on a slow Ghana connection (NFR-1.1).
  * The server still prices every order itself and trusts nothing that comes back.
  *
  * Trade-off, deliberate and worth revisiting before public launch: an agent can
  * read other agents' markup percentages from this payload. James's `supplierCost`
- * — the one genuinely sensitive number, because it reveals his own margin — is
+ * (the one genuinely sensitive number, because it reveals his own margin) is
  * stripped for everyone but admin. Tightening the rest means resolving prices
  * per-request server-side, which costs the instant render above.
  */
@@ -42,7 +42,7 @@ export class CatalogueService {
       this.pricing.agents(),
       // Tolerant on purpose: a fresh deployment has no admin until the
       // superadmin creates one, and the shop still has to render for them to be
-      // able to do it. Placing an order still refuses — see pricing.admin().
+      // able to do it. Placing an order still refuses, see pricing.admin().
       this.pricing.adminOrNull(),
       this.settings.all(),
     ])
@@ -56,7 +56,7 @@ export class CatalogueService {
         // business branching on it, and telling everyone would be odd.
         ...(isAdminRole(role) ? { simulateFailure: settings.simulateFailure } : {}),
         /**
-         * Sent to everyone, unlike the switch above — it is a rate, not a
+         * Sent to everyone, unlike the switch above, it is a rate, not a
          * secret, and the browser needs it to preview a price the same way the
          * server will actually charge it. An agent's own default markup is
          * computed live in the browser from this exact number (see
@@ -67,13 +67,13 @@ export class CatalogueService {
         /**
          * The admin's WhatsApp channel invite, for agents to join.
          *
-         * Sent only to an agent or admin session — a customer or guest browsing
+         * Sent only to an agent or admin session, a customer or guest browsing
          * the shop has no use for it, and there is no reason to advertise it
          * more widely than the audience it is actually for.
          */
         ...(role === 'agent' || isAdminRole(role) ? { whatsappChannelUrl: settings.whatsappChannelUrl } : {}),
         /**
-         * A warning banner for the whole site — unlike the WhatsApp link
+         * A warning banner for the whole site, unlike the WhatsApp link
          * above, sent to every role, guests included: this is exactly the
          * audience James wants it seen by, right down to a customer landing
          * on an agent's own storefront (this same snapshot is what renders

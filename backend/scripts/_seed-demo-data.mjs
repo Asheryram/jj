@@ -15,7 +15,7 @@ const daysAgo = (n) => new Date(Date.now() - n * 86_400_000)
 const key = (...parts) => parts.filter(Boolean).join(':')
 
 async function main() {
-  console.log('Seeding demo transactions — leaves the users table untouched.')
+  console.log('Seeding demo transactions, leaves the users table untouched.')
 
   // ── Order 2: direct sale, MTN 2GB, clean (no catalogue diff) ──────────────
   await directSale({
@@ -89,7 +89,7 @@ async function main() {
     createdAt: daysAgo(3),
   })
 
-  // ── Order 7: paid, then DataHub rejected — pending refund, network already known ──
+  // ── Order 7: paid, then DataHub rejected, pending refund, network already known ──
   await failedOrder({
     ref: 'JDC-829140',
     productId: 'mtn-data-8gb',
@@ -509,7 +509,7 @@ async function failedOrder({
   })
 
   // Revenue and the Paystack fee are booked the moment the payment is
-  // confirmed — before fulfilment is even attempted — the same as the live
+  // confirmed (before fulfilment is even attempted) the same as the live
   // code does. No supplier_cost or agent_margin: nothing was actually
   // delivered.
   await prisma.ledgerEntry.createMany({

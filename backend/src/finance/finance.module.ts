@@ -4,8 +4,8 @@ import { SolvencyService } from './solvency.service'
 import { PaystackClient } from '../payments/paystack.client'
 
 /**
- * Global because money moves in several modules — payments, fulfilment,
- * withdrawals — and each of them has to be able to record it without every
+ * Global because money moves in several modules, payments, fulfilment,
+ * withdrawals, and each of them has to be able to record it without every
  * module growing an import for the privilege. There is exactly one ledger.
  */
 @Global()

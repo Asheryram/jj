@@ -24,7 +24,7 @@ type Range = '7d' | '30d' | 'custom'
 const isoDate = (date: Date) => date.toISOString().slice(0, 10)
 const daysAgo = (days: number) => isoDate(new Date(Date.now() - days * 86_400_000))
 
-/** FR-8.2 — an agent's own sales summary for a chosen date range. */
+/** FR-8.2, an agent's own sales summary for a chosen date range. */
 export default function Reports() {
   const { orders, session, myShareOf, agentEarningsByDay } = useStore()
   const isAgent = session?.role === 'agent'
@@ -36,7 +36,7 @@ export default function Reports() {
   const windowTo = range === 'custom' ? to : isoDate(new Date())
 
   /**
-   * The headline figures — revenue, profit, failed count, category split —
+   * The headline figures, revenue, profit, failed count, category split,
    * come from the backend, aggregated over the real `windowFrom`/`windowTo`
    * range. This used to be derived from whatever orders were already sitting
    * in the client store (capped at 500, and only the most recent of those),
@@ -58,7 +58,7 @@ export default function Reports() {
     }
   }, [windowFrom, windowTo])
 
-  // NFR-2.5 — this report covers only the signed-in user's own book.
+  // NFR-2.5, this report covers only the signed-in user's own book.
   const mine = useMemo(() => {
     if (!session) return []
     return isAgent
@@ -66,7 +66,7 @@ export default function Reports() {
       : orders.filter((o) => o.buyer === session.name)
   }, [isAgent, orders, session])
 
-  // Only feeds the CSV export below — the on-screen figures come from `summary`.
+  // Only feeds the CSV export below, the on-screen figures come from `summary`.
   const filtered = useMemo(
     () => mine.filter((o) => o.createdAt >= windowFrom && o.createdAt <= `${windowTo}T23:59:59`),
     [mine, windowFrom, windowTo],

@@ -39,7 +39,7 @@ const TX_META: Record<TxType, { label: string; tone: 'success' | 'neutral' | 'in
 }
 
 /**
- * FR-2.1, FR-2.2, FR-2.4 — the customer wallet.
+ * FR-2.1, FR-2.2, FR-2.4, the customer wallet.
  *
  * Agents do not have one of these; their money lives in an earnings account
  * they withdraw from (see Earnings.tsx). This page is what makes NFR-4.2's
@@ -88,7 +88,7 @@ export default function Wallet() {
         />
       </div>
 
-      {/* NFR-2.3 — say plainly who handles the money. */}
+      {/* NFR-2.3, say plainly who handles the money. */}
       <div className="mt-3">
         <Callout tone="info" icon={<ShieldIcon className="size-4" />}>
           Top-ups are processed by <strong className="font-semibold">Paystack</strong>. MTN MoMo,
@@ -97,7 +97,7 @@ export default function Wallet() {
         </Callout>
       </div>
 
-      {/* FR-2.4 — every movement of money, with a reference. */}
+      {/* FR-2.4, every movement of money, with a reference. */}
       <Card className="mt-3">
         <CardHead
           title="Transaction history"
@@ -154,9 +154,9 @@ export default function Wallet() {
             ))}
           </tbody>
         </TableWrap>
-        {/* NFR-2.6 — tell the user the ledger is immutable; it is a trust signal. */}
+        {/* NFR-2.6, tell the user the ledger is immutable; it is a trust signal. */}
         <p className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-          This ledger is append-only. Entries cannot be edited or deleted, by you or by us — a
+          This ledger is append-only. Entries cannot be edited or deleted, by you or by us, a
           correction is always a new entry.
         </p>
       </Card>
@@ -320,7 +320,7 @@ function TopUpModal({
           <div className="flex items-baseline justify-between rounded-xl bg-slate-50 dark:bg-slate-800 px-3.5 py-3">
             <span className="text-sm text-slate-600 dark:text-slate-300">You will be charged</span>
             <span className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">
-              {chosen === null ? '—' : cedis(chosen)}
+              {chosen === null ? '-' : cedis(chosen)}
             </span>
           </div>
 
@@ -330,7 +330,7 @@ function TopUpModal({
 
           <p className="flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
             <AlertIcon className="mt-0.5 size-3.5 shrink-0" />
-            Your balance updates only after Paystack confirms the payment — not when the prompt
+            Your balance updates only after Paystack confirms the payment, not when the prompt
             closes.
           </p>
         </div>

@@ -6,10 +6,10 @@ import { WithdrawalsService } from './withdrawals.service'
 
 export class RequestWithdrawalDto {
   /**
-   * Only sanity-checked here — a positive whole number of pesewas. The real
+   * Only sanity-checked here, a positive whole number of pesewas. The real
    * floor is `SettingsService`'s `minWithdrawal`, admin-configurable and
    * enforced in `WithdrawalsService.request()`. A `@Min` here used to hardcode
-   * GHS 10.00 regardless of what the admin set — since NestJS's validation
+   * GHS 10.00 regardless of what the admin set, since NestJS's validation
    * pipe runs before the controller method body, that fired *first* and with
    * the wrong, frozen message whenever the admin configured anything else,
    * silently overriding a lower minimum and misreporting a higher one.
@@ -26,8 +26,8 @@ export class RequestWithdrawalDto {
    *
    * Asked for rather than taken from the account, because the two are not always
    * the same: the number somebody signs in with is not necessarily the wallet they
-   * want their earnings in, and a placeholder on the account — the bootstrap seeds
-   * `0000000000` — would send a real transfer nowhere. Stored on the withdrawal, so
+   * want their earnings in, and a placeholder on the account, the bootstrap seeds
+   * `0000000000`, would send a real transfer nowhere. Stored on the withdrawal, so
    * the record shows where the money was sent rather than where the account
    * happened to point later.
    */
@@ -62,7 +62,7 @@ export class WithdrawalsController {
 
   /**
    * `@RequireActive()` because this debits the agent's held balance into a
-   * pending payout the moment it's called — an existing JWT survives a
+   * pending payout the moment it's called, an existing JWT survives a
    * suspension for up to 12 hours otherwise, and nothing else here re-checks
    * `status` at all.
    */
@@ -87,7 +87,7 @@ export class WithdrawalsController {
   }
 
   /**
-   * Confirm a payout was sent by hand — see `WithdrawalsService.settleManually`.
+   * Confirm a payout was sent by hand, see `WithdrawalsService.settleManually`.
    * For an account that cannot send Paystack transfers yet, or at all.
    */
   @Post(':id/settle-manually')

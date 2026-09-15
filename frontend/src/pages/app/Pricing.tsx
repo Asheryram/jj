@@ -27,14 +27,14 @@ import {
 import { AlertIcon, TagIcon, TrendUpIcon } from '../../components/icons'
 
 /**
- * FR-3.4, FR-6.2 — an agent sets their own resale price.
+ * FR-3.4, FR-6.2, an agent sets their own resale price.
  *
- * The floor is what they pay James — the same price for every agent, whoever
+ * The floor is what they pay James, the same price for every agent, whoever
  * referred them. Below it they would be selling at a loss, so it is enforced
  * server-side as well as here.
  *
  * There is no ceiling. An agent charges whatever they judge the market will bear,
- * and an agent who overprices loses the sale to one who does not — competition is
+ * and an agent who overprices loses the sale to one who does not, competition is
  * a better cap than a number James would have to maintain per product.
  */
 export default function Pricing() {
@@ -96,13 +96,13 @@ export default function Pricing() {
 
       <div className="mt-4 space-y-3">
         <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-          Your cost is what your upline charges you — it already includes their margin and James&apos;s.
+          Your cost is what your upline charges you, it already includes their margin and James&apos;s.
           You can never price below it, so everyone above you is paid automatically on every sale
           you make.
         </Callout>
       </div>
 
-      {/* -mx-3/px-3 cancels AppShell's own px-3 on mobile — not px-4, which
+      {/* -mx-3/px-3 cancels AppShell's own px-3 on mobile, not px-4, which
           overshoots the viewport by the 4px difference. */}
       <div className="mt-4 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
         <Segmented<Category>
@@ -113,7 +113,7 @@ export default function Pricing() {
       </div>
 
       {/* Jump straight to one network instead of scrolling past the other two
-          to find it — the same filter the public shop uses for the same reason. */}
+          to find it, the same filter the public shop uses for the same reason. */}
       {networksInCategory.length > 1 && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Network</span>
@@ -323,7 +323,7 @@ function EditPriceModal({
               You keep
             </p>
             <p className="tabular mt-0.5 font-bold text-brand-800 dark:text-brand-300">
-              {margin === null ? '—' : cedis(margin, { sign: margin > 0 })}
+              {margin === null ? '-' : cedis(margin, { sign: margin > 0 })}
             </p>
           </div>
         </div>
@@ -332,7 +332,7 @@ function EditPriceModal({
           label="Your resale price"
           htmlFor="price-input"
           error={error}
-          hint={`Anything from ${cedis(band.floor)} upwards — there is no maximum.`}
+          hint={`Anything from ${cedis(band.floor)} upwards, there is no maximum.`}
         >
           <div className="relative">
             <span className="absolute inset-y-0 left-3.5 flex items-center text-sm font-semibold text-slate-500 dark:text-slate-400">
@@ -391,7 +391,7 @@ function BulkMarkupModal({
     <Modal open={open} onClose={onClose} title="Apply a markup to every product">
       <div className="space-y-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Sets each of your prices to your own cost plus this percentage. There is no ceiling — the
+          Sets each of your prices to your own cost plus this percentage. There is no ceiling, the
           only floor is what you pay. You can still edit individual products afterwards.
         </p>
 

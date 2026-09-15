@@ -22,7 +22,7 @@ import { AlertIcon, CheckIcon, ClockIcon, GlobeIcon, StoreIcon } from '../../com
  * An agent making their shop look like theirs.
  *
  * Nothing here applies immediately. What they submit is reviewed first, and the
- * screen says so in as many words — an agent who changes their logo and sees no
+ * screen says so in as many words, an agent who changes their logo and sees no
  * change would reasonably assume it was broken and do it again.
  *
  * The review exists because an agent shop takes payment details, so a shop
@@ -45,7 +45,7 @@ export default function ShopBranding() {
   const fileInput = useRef<HTMLInputElement>(null)
 
   /**
-   * What the form last matched the server — so an edit can be told apart
+   * What the form last matched the server, so an edit can be told apart
    * from a form that just finished loading. Reset every time `load()` runs,
    * including right after a successful submit, so "sent" doesn't keep
    * reading as "still has unsaved changes."
@@ -81,7 +81,7 @@ export default function ShopBranding() {
     }
   }, [])
 
-  // A picked-but-unsent logo counts as dirty too — there is no "baseline" file to compare against.
+  // A picked-but-unsent logo counts as dirty too, there is no "baseline" file to compare against.
   const isDirty =
     baseline !== null &&
     (shopName !== baseline.shopName ||
@@ -93,7 +93,7 @@ export default function ShopBranding() {
   /**
    * Warn before an accidental refresh/close throws away an edit nothing has
    * saved yet. This only catches leaving the tab, not clicking to another
-   * page inside the app — the app's router (`BrowserRouter` + `Routes`, not
+   * page inside the app, the app's router (`BrowserRouter` + `Routes`, not
    * a data router) has no in-app navigation-blocking hook to catch that half
    * without a bigger routing change; this is the contained fix for the
    * costlier half of the same problem.
@@ -164,7 +164,7 @@ export default function ShopBranding() {
     }
   }
 
-  // Resolved against the API origin — see apiAsset. A bare path works on one
+  // Resolved against the API origin, see apiAsset. A bare path works on one
   // host and silently returns the app's HTML on two.
   const liveLogoUrl = state?.live?.hasLogo
     ? apiAsset(`/api/branding/logo/${encodeURIComponent(session?.referralCode ?? '')}`)
@@ -258,7 +258,7 @@ export default function ShopBranding() {
                       className="size-12 rounded-xl border border-slate-200 dark:border-slate-700 object-contain"
                     />
                     <span className="text-xs text-slate-500 dark:text-slate-400">
-                      {logoPreview ? 'New — not live yet' : 'Live now'}
+                      {logoPreview ? 'New, not live yet' : 'Live now'}
                     </span>
                   </div>
                 )}
@@ -313,7 +313,7 @@ export default function ShopBranding() {
               </div>
               {!darkEnabled && (
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Off means your light colour is reused for dark mode too — chosen automatically so
+                  Off means your light colour is reused for dark mode too, chosen automatically so
                   text stays readable. Turn this on for full control over both.
                 </p>
               )}
@@ -365,11 +365,11 @@ export default function ShopBranding() {
                       How it will look
                     </p>
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      Customers can read your shop in either theme — a mock of the same bundle card
+                      Customers can read your shop in either theme, a mock of the same bundle card
                       shown both ways, so you can check your colour works in both.
                     </p>
 
-                    {/* Two fixed swatches, not `dark:` classes — this shows both
+                    {/* Two fixed swatches, not `dark:` classes, this shows both
                         themes at once regardless of which one you are viewing
                         the page in yourself. */}
                     <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
@@ -437,13 +437,13 @@ export default function ShopBranding() {
 
               <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
                 Changes are checked before they go live. A name or logo that looks like a bank, a
-                mobile network or another company will be refused — your shop takes payment
+                mobile network or another company will be refused, your shop takes payment
                 details, and customers have to be able to tell who they are paying.
               </Callout>
 
               {isDirty && (
                 <p className="text-center text-xs text-slate-500 dark:text-slate-400">
-                  Unsaved changes — leaving this page or closing the tab loses them.
+                  Unsaved changes, leaving this page or closing the tab loses them.
                 </p>
               )}
 
@@ -558,8 +558,8 @@ function CustomDomainCard() {
               </Callout>
             )}
             {approvedNotLive && (
-              <Callout tone="info" title="Approved — not live yet" icon={<ClockIcon className="size-4" />}>
-                Approved. It goes live once we can see it pointed at us — that can take a little
+              <Callout tone="info" title="Approved, not live yet" icon={<ClockIcon className="size-4" />}>
+                Approved. It goes live once we can see it pointed at us, that can take a little
                 while after you update your domain's DNS settings.
               </Callout>
             )}
@@ -577,7 +577,7 @@ function CustomDomainCard() {
             <Field
               label="Domain"
               htmlFor="shop-domain"
-              hint="Just the domain, like yourshop.com — no https:// or www."
+              hint="Just the domain, like yourshop.com, no https:// or www."
               error={error}
             >
               <TextInput
@@ -593,7 +593,7 @@ function CustomDomainCard() {
             </Field>
 
             <Callout tone="info" icon={<GlobeIcon className="size-4" />}>
-              Asking for a different domain than the one above replaces it — only one can be live
+              Asking for a different domain than the one above replaces it, only one can be live
               for your shop at a time.
             </Callout>
 

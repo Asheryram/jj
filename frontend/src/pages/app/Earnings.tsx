@@ -37,7 +37,7 @@ const TYPE_META: Record<
 
 /**
  * An agent's earnings account. Money arrives here automatically as each sale
- * in their chain completes — they never pre-fund anything, so there is no
+ * in their chain completes, they never pre-fund anything, so there is no
  * top-up on this page by design.
  */
 export default function Earnings() {
@@ -54,11 +54,11 @@ export default function Earnings() {
     .filter((e) => e.type === 'reversal')
     .reduce((s, e) => s + Math.abs(e.amount), 0)
   /**
-   * Only `paid` — Paystack (or a manual send) has actually confirmed the
+   * Only `paid`, Paystack (or a manual send) has actually confirmed the
    * money arrived. Not derived from the Earning ledger: a request holds the
    * balance with a negative row the moment it's made, and a rejection,
    * cancellation or failed transfer reverses it with a *second*, positive
-   * `withdrawal`-type row — `Math.abs()`-ing and summing both used to add
+   * `withdrawal`-type row, `Math.abs()`-ing and summing both used to add
    * them instead of letting them net to zero, so a withdrawal that was
    * requested and then fully reversed still counted as money paid out that
    * never actually left the platform.
@@ -105,7 +105,7 @@ export default function Earnings() {
         <Callout tone="info" icon={<AlertIcon className="size-4" />} title="How this works">
           You do not buy stock or hold a float. When someone buys through your sell link, the
           platform takes the payment and credits you the difference between your price and what you
-          pay — instantly. Referring another agent does not add to this; you only earn from your own
+          pay, instantly. Referring another agent does not add to this; you only earn from your own
           sales.
         </Callout>
       </div>
@@ -177,7 +177,7 @@ export default function Earnings() {
         </TableWrap>
         {/* NFR-2.6 */}
         <p className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-          This ledger is append-only. Entries cannot be edited or deleted, by you or by us — a
+          This ledger is append-only. Entries cannot be edited or deleted, by you or by us, a
           correction is always a new entry.
         </p>
       </Card>

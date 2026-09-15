@@ -1,6 +1,6 @@
 # The API needs a process that stays alive.
 #
-# Not a preference — the platform schedules work on timers. Orders are dispatched
+# Not a preference, the platform schedules work on timers. Orders are dispatched
 # by a `setTimeout` in fulfilment.service.ts, and reconciler.service.ts sweeps
 # every 60 seconds for payments whose webhook never arrived and approval holds
 # that have expired. A serverless function is frozen the moment it returns a

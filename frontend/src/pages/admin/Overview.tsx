@@ -65,14 +65,14 @@ function MoneyBand({
   )
 }
 
-/** FR-6.3 — all orders, all users, total revenue, system-wide statistics. */
+/** FR-6.3, all orders, all users, total revenue, system-wide statistics. */
 export default function Overview() {
   const { orders, users, withdrawals, revenueByDay, adminOverview: overview } = useStore()
 
   /**
-   * By volume sold, all-time — from the same per-user figures the Users page
+   * By volume sold, all-time, from the same per-user figures the Users page
    * shows. This used to read from `subAgents`, which is only ever populated
-   * when *you* are signed in as an agent looking at your own downline — on
+   * when *you* are signed in as an agent looking at your own downline, on
    * an admin session it stays empty forever, so this card silently showed
    * nothing no matter how much agents had actually sold.
    */
@@ -83,7 +83,7 @@ export default function Overview() {
 
   const [statement, setStatement] = useState<FinanceStatement | null>(null)
   const [health, setHealth] = useState<Awaited<ReturnType<typeof api.health>> | null>(null)
-  /** The window behind the "Where the money goes" breakdown further down — independent of the fixed 7-day header tiles above it. */
+  /** The window behind the "Where the money goes" breakdown further down, independent of the fixed 7-day header tiles above it. */
   const [range, setRange] = useState<'7' | '30' | 'all'>('7')
 
   useEffect(() => {
@@ -114,7 +114,7 @@ export default function Overview() {
     * Both numbers count the same population.
     *
     * The tile used to show active users with a breakdown of *every* user, so two
-    * active accounts were annotated "2 agents · 2 others" — a headline of 2 over
+    * active accounts were annotated "2 agents · 2 others", a headline of 2 over
     * a hint summing to 4. Pending agents were the difference.
     */
   const active = users.filter((u) => u.status === 'active')
@@ -125,14 +125,14 @@ export default function Overview() {
   const inFlight = orders.filter((o) => o.status === 'processing' || o.status === 'pending')
 
   /**
-   * FR-6.3 — James's own margin, read from the ledger rather than recomputed
+   * FR-6.3, James's own margin, read from the ledger rather than recomputed
    * from the orders list.
    *
    * The orders list is capped (the same 100 rows the "Latest orders" table
    * uses), so a reduce over it silently undercounts once the platform does more
    * than a page of business. The ledger has no such cap, and it is the only
    * place that knows what the supplier actually charged and what Paystack
-   * actually kept — both of which can differ from the price quoted at sale
+   * actually kept, both of which can differ from the price quoted at sale
    * time. `profit` is revenue less every real cost: supplier, Paystack's fee,
    * agent margins, and anything else that ever hits the books.
    */
@@ -141,7 +141,7 @@ export default function Overview() {
   const paystackFee = statement?.costs.paymentFees ?? 0
   const agentShare = statement?.costs.agentMargins ?? 0
   const refunds = statement?.costs.refunds ?? 0
-  /** referralBonuses and payoutFees are both historical-only kinds — nothing live writes either; agentMarginWriteoffs is the rare uncollectable-clawback case. */
+  /** referralBonuses and payoutFees are both historical-only kinds, nothing live writes either; agentMarginWriteoffs is the rare uncollectable-clawback case. */
   const otherCosts =
     (statement?.costs.referralBonuses ?? 0) +
     (statement?.costs.payoutFees ?? 0) +
@@ -171,12 +171,12 @@ export default function Overview() {
         }
       />
 
-      {/* Before anything else — a shop that cannot fulfil an order or pay
+      {/* Before anything else, a shop that cannot fulfil an order or pay
           itself out yet needs to know that before the rest of this page's
           numbers mean anything. Disappears for good once every step is done. */}
       <GettingStartedCard />
 
-      {/* Things needing attention come before the vanity numbers — informational
+      {/* Things needing attention come before the vanity numbers, informational
           only, though: each one links to the dedicated page that actually acts
           on it, rather than doing the work here. */}
       <div className="mb-3 grid gap-3 sm:grid-cols-2">
@@ -197,7 +197,7 @@ export default function Overview() {
         {failedOrders.length > 0 && (
           <Callout tone="info" title="Failed orders, all refunded" icon={<AlertIcon className="size-4" />}>
             {failedOrders.length} order{failedOrders.length === 1 ? '' : 's'} failed at the
-            provider. Wallets were credited back automatically — no action needed.
+            provider. Wallets were credited back automatically, no action needed.
           </Callout>
         )}
       </div>
@@ -242,7 +242,7 @@ export default function Overview() {
             <StatTile
               label="Refund rate"
               value={`${(overview.refundRate * 100).toFixed(1)}%`}
-              hint="All-time — of every order that ever finished, one way or the other"
+              hint="All-time, of every order that ever finished, one way or the other"
               tone={overview.refundRate > 0.1 ? 'warning' : 'neutral'}
               icon={<AlertIcon className="size-5" />}
             />
@@ -384,7 +384,7 @@ export default function Overview() {
         </Card>
       </div>
 
-      {/* FR-6.6 — where every cedi that came in actually went. */}
+      {/* FR-6.6, where every cedi that came in actually went. */}
       <Card className="mt-3">
         <CardHead
           title="Where the money goes"
@@ -438,7 +438,7 @@ export default function Overview() {
             )}
           </dl>
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            From the ledger, not the price you were quoted at sale time — so it reflects what
+            From the ledger, not the price you were quoted at sale time, so it reflects what
             DataHub actually charged and what Paystack actually kept, not the catalogue estimate.
           </p>
         </div>
@@ -446,7 +446,7 @@ export default function Overview() {
 
       <CatalogueAccuracyCallout />
 
-      {/* Provider health — NFR-3.1, NFR-3.2 made visible. Read from /health, not
+      {/* Provider health, NFR-3.1, NFR-3.2 made visible. Read from /health, not
           hardcoded: a badge that always says "Operational" answers nothing. */}
       <Card className="mt-3">
         <CardHead title="Integrations" subtitle="What's actually live right now, not what's configured" />
@@ -457,7 +457,7 @@ export default function Overview() {
               detail: 'Bundle fulfilment',
               label:
                 health?.providers.datahub === 'live'
-                  ? 'Live — real orders'
+                  ? 'Live, real orders'
                   : health?.providers.datahub === 'live-requested-no-key'
                     ? 'Misconfigured'
                     : health
@@ -511,23 +511,23 @@ export default function Overview() {
  *
  * DataHub debits a prepaid float on every order, so a shop that has never
  * logged a top-up can still take a customer's payment and then fail to
- * deliver — the money and the mistake both land after the fact. A banner
+ * deliver, the money and the mistake both land after the fact. A banner
  * that only nags on day one would be missed the moment it is dismissed, so
  * this reads the platform's own state instead: still incomplete, it stays
  * here; complete, it renders nothing and never comes back.
  *
  * Deliberately not a hard gate on the rest of the app. This shop has one
- * admin, not a stream of strangers onboarding themselves — a route guard
+ * admin, not a stream of strangers onboarding themselves, a route guard
  * would add a real maintenance burden (see `RequireAuth`'s pending-agent
  * gate for what that costs) to solve a problem an unmissable checklist
  * already solves just as well.
  */
 
 /**
- * Orders nobody can resolve automatically — see `ReconcilerService.needsAttention`.
+ * Orders nobody can resolve automatically, see `ReconcilerService.needsAttention`.
  *
  * Informational only, on purpose: Overview says how many, and links to the
- * dedicated page that actually resolves them — the same split every other
+ * dedicated page that actually resolves them, the same split every other
  * queue on this page already uses (Withdrawals, Refunds), rather than one
  * card being the odd one out with an action embedded in it.
  */
@@ -545,7 +545,7 @@ function NeedsAttentionCallout() {
 
   return (
     <Callout tone="warning" title="Needs your attention" icon={<AlertIcon className="size-4" />}>
-      {count} order{count === 1 ? '' : 's'} stuck at the provider — the reconciler will not guess at these.{' '}
+      {count} order{count === 1 ? '' : 's'} stuck at the provider, the reconciler will not guess at these.{' '}
       <Link to="/admin/needs-attention" className="font-semibold underline">
         Review now
       </Link>
@@ -553,7 +553,7 @@ function NeedsAttentionCallout() {
   )
 }
 
-/** Active agents who have sold before and gone quiet — not brand-new ones still finding their feet. */
+/** Active agents who have sold before and gone quiet, not brand-new ones still finding their feet. */
 function GoingQuietCard({
   agents,
 }: {
@@ -599,7 +599,7 @@ function GettingStartedCard() {
       done: floatLogged,
       label: 'Add money to your DataHub float, then log it here',
       detail:
-        'Every order spends from this prepaid balance — without it, a paid order can still fail to deliver.',
+        'Every order spends from this prepaid balance, without it, a paid order can still fail to deliver.',
       to: '#float-panel',
       cta: 'Log it below',
     },
@@ -669,12 +669,12 @@ function GettingStartedCard() {
 
 /**
  * The worst catalogue-vs-actual gaps, going only by each product's most
- * recent sale — see `AdminService.catalogueAccuracy`.
+ * recent sale, see `AdminService.catalogueAccuracy`.
  *
  * Informational only, same as the rest of Overview: this says how many
  * catalogue prices are currently wrong and by how much, nothing more. The
  * full list, and the ability to act on it, lives on the dedicated Catalogue
- * accuracy page — this only ever shows the losses worth worrying about,
+ * accuracy page, this only ever shows the losses worth worrying about,
  * biggest first, with a link out.
  */
 function CatalogueAccuracyCallout() {

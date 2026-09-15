@@ -22,12 +22,12 @@ import { CheckIcon } from '../../components/icons'
  * than the float can currently cover, and what's sitting inactive that might
  * be worth a second look.
  *
- * A suggestion, not a queue — nothing here ever flips a product's `active`
+ * A suggestion, not a queue, nothing here ever flips a product's `active`
  * flag on its own. Turning one off or back on is still the same deliberate
  * click it always was (see Cost prices); this page just puts the right
  * products in front of that click at the right moment.
  *
- * The inactive list makes no claim about *why* each product is off — nothing
+ * The inactive list makes no claim about *why* each product is off, nothing
  * today records that, so a product turned off for an unrelated reason
  * (discontinued, mismapped, never priced) sits here too. It's context to
  * weigh against the float, not a promise that any given row is safe to
@@ -73,16 +73,16 @@ export default function FloatRisk() {
             </div>
           ) : data.floatReference === null ? (
             <Callout tone="info" title="Nothing logged yet">
-              This is judged against your tracked capital — once you've logged at least one top-up on
+              This is judged against your tracked capital, once you've logged at least one top-up on
               the Float panel, this page can compare it against your catalogue.
             </Callout>
           ) : (
             <p className="text-sm text-slate-600 dark:text-slate-300">
               Judged against <strong className="tabular font-semibold">{cedis(data.floatReference)}</strong>
-              {' '}— what your logged top-ups and costs say the float should hold right now
+              {' '}- what your logged top-ups and costs say the float should hold right now
               {data.trackedSince && <>, tracked since {dateTime(data.trackedSince)}</>}. Deliberately not
               the live reading from DataHub, which only refreshes on an order and can sit stale for
-              days — this instead moves the moment you log a top-up or a sale books its real cost.
+              days, this instead moves the moment you log a top-up or a sale books its real cost.
             </p>
           )}
         </div>
@@ -91,7 +91,7 @@ export default function FloatRisk() {
       <Card className="mt-3">
         <CardHead
           title="Priced above the float"
-          subtitle="On sale right now, but costs more than the float can currently cover — an order is likely to fail"
+          subtitle="On sale right now, but costs more than the float can currently cover, an order is likely to fail"
         />
         {data === null ? (
           <div className="py-8 text-center">
@@ -141,7 +141,7 @@ export default function FloatRisk() {
           </TableWrap>
         )}
         <p className="p-4 pt-0 text-xs text-slate-500 dark:text-slate-400 sm:px-5">
-          Turning one off here is exactly the same switch as on Cost prices — it stops showing to
+          Turning one off here is exactly the same switch as on Cost prices, it stops showing to
           customers immediately, and nothing stops you turning it back on the moment the float
           recovers.
         </p>
@@ -198,7 +198,7 @@ export default function FloatRisk() {
                         loading={busyId === product.id}
                         title={
                           flatOrLoss
-                            ? 'Priced at or below cost — set a price above cost on Cost prices first.'
+                            ? 'Priced at or below cost, set a price above cost on Cost prices first.'
                             : 'Put it back on sale'
                         }
                         onClick={() => void toggle(product.id, true)}
@@ -213,7 +213,7 @@ export default function FloatRisk() {
           </TableWrap>
         )}
         <p className="p-4 pt-0 text-xs text-slate-500 dark:text-slate-400 sm:px-5">
-          This list doesn't try to guess why a product is off — some never had a real price set, some
+          This list doesn't try to guess why a product is off, some never had a real price set, some
           were discontinued on purpose. It's here so you can weigh each one against the float yourself,
           not a claim that any particular row is safe to turn back on.
         </p>

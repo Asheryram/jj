@@ -32,7 +32,7 @@ type Filter = 'pending' | 'approved' | 'rejected'
  * The queue is the reason agent branding is not self-serve. An agent shop
  * collects card and Mobile Money details, so one convincingly named and badged as
  * a bank is a fraud risk carried by the platform. The review screen therefore
- * shows the submitted logo at a real size and the proposed name in full — the two
+ * shows the submitted logo at a real size and the proposed name in full, the two
  * things that would be used to impersonate somebody.
  */
 export default function BrandingReview() {
@@ -40,7 +40,7 @@ export default function BrandingReview() {
     <div>
       <PageHead
         title="Branding"
-        subtitle="Your own shop's name, logo and colour — and the changes your agents have asked for."
+        subtitle="Your own shop's name, logo and colour, and the changes your agents have asked for."
       />
       <PlatformBranding />
       <AgentQueue />
@@ -48,7 +48,7 @@ export default function BrandingReview() {
   )
 }
 
-/** James's own branding. No queue — it is his platform. */
+/** James's own branding. No queue, it is his platform. */
 function PlatformBranding() {
   const { pushToast } = useStore()
   const [shopName, setShopName] = useState('')
@@ -66,9 +66,9 @@ function PlatformBranding() {
       .then((b) => {
         setShopName(b.shopName)
         setColor(b.brandColor)
-        // `brandColorDark` always resolves to something — it falls back to the
+        // `brandColorDark` always resolves to something, it falls back to the
         // light colour when nothing was chosen. Equal to it means "unset", not
-        // a genuine, deliberately identical pair — the one case that reads
+        // a genuine, deliberately identical pair, the one case that reads
         // wrong here changes nothing visually either way.
         setDarkEnabled(Boolean(b.brandColorDark && b.brandColorDark !== b.brandColor))
         setColorDark(b.brandColorDark)
@@ -197,7 +197,7 @@ function PlatformBranding() {
             <Field
               label="Logo"
               htmlFor="platform-logo"
-              hint="PNG, JPEG or WebP under 100KB. SVG is refused — it can carry scripts."
+              hint="PNG, JPEG or WebP under 100KB. SVG is refused, it can carry scripts."
             >
               <input
                 ref={fileInput}
@@ -234,11 +234,11 @@ function PlatformBranding() {
                     How it will look
                   </p>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    Visitors can read the platform in either theme — a mock of the same bundle card
+                    Visitors can read the platform in either theme, a mock of the same bundle card
                     shown both ways, so you can check this colour works in both before saving.
                   </p>
 
-                  {/* Two fixed swatches, not `dark:` classes — shows both themes
+                  {/* Two fixed swatches, not `dark:` classes, shows both themes
                       at once regardless of which one you are viewing this page in. */}
                   <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
                     <div className="rounded-xl border border-slate-200 bg-white p-3.5">
@@ -332,7 +332,7 @@ function AgentQueue() {
       <Card className="mt-3">
         <CardHead
           title="Agent requests"
-          subtitle="Nothing here is live yet. Look at the name and logo before approving — a shop that looks like a bank is your liability."
+          subtitle="Nothing here is live yet. Look at the name and logo before approving, a shop that looks like a bank is your liability."
           action={
             <Segmented<Filter>
               options={[
@@ -510,7 +510,7 @@ function RefuseModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Refuse — ${request.agentCode}`}>
+    <Modal open onClose={onClose} title={`Refuse, ${request.agentCode}`}>
       <form
         className="space-y-4"
         onSubmit={(event) => {
@@ -537,7 +537,7 @@ function RefuseModal({
         <Field label="Why are you refusing it?" htmlFor="refuse-branding" error={error}>
           <TextInput
             id="refuse-branding"
-            placeholder="The logo is MTN's — use your own mark"
+            placeholder="The logo is MTN's, use your own mark"
             value={note}
             invalid={Boolean(error)}
             onChange={(event) => {

@@ -1,7 +1,7 @@
 /**
  * Domain types for the JamesDataConsult platform.
  *
- * Money is ALWAYS an integer number of pesewas — never a float. GHS 12.50 is
+ * Money is ALWAYS an integer number of pesewas, never a float. GHS 12.50 is
  * 1250. This mirrors the rule in skills-breakdown.md §2 and keeps the mock
  * layer honest about how the real API will behave.
  */
@@ -11,7 +11,7 @@ export type Network = 'MTN' | 'Telecel' | 'AirtelTigo'
 
 export type Category = 'data' | 'airtime' | 'voice' | 'sms' | 'afa' | 'checker'
 
-/** FR-4.4 — the only legal order states. */
+/** FR-4.4, the only legal order states. */
 export type OrderStatus =
   /** Placed, but the customer has not paid yet. Nothing is delivered from here. */
   | 'awaiting_payment'
@@ -22,7 +22,7 @@ export type OrderStatus =
   | 'completed'
   | 'failed'
 
-/** FR-1.5 — Customer and Agent, with Admin as a separate elevated role. */
+/** FR-1.5, Customer and Agent, with Admin as a separate elevated role. */
 export type Role =
   | 'customer'
   | 'agent'
@@ -30,7 +30,7 @@ export type Role =
   /**
    * Runs the platform, as opposed to the business on it.
    *
-   * Passes every admin check — see `satisfies` in the server's auth guard — so a
+   * Passes every admin check (see `satisfies` in the server's auth guard) so a
    * superadmin sees the admin screens plus the platform team page. The reverse is
    * never true: an admin cannot create accounts or change roles.
    */
@@ -43,7 +43,7 @@ export type TxType = 'topup' | 'purchase' | 'refund'
 export type EarningType = 'sale' | 'downline' | 'reversal' | 'withdrawal'
 
 /**
- * `approved` is not delivered — Paystack (or a manual send) still has to
+ * `approved` is not delivered, Paystack (or a manual send) still has to
  * confirm it, landing on `paid` or `failed`. Was missing those two entirely
  * until the frontend had any way to reach them: `paid` only ever came from a
  * live Paystack transfer webhook before `WithdrawalsService.settleManually`
@@ -52,7 +52,7 @@ export type EarningType = 'sale' | 'downline' | 'reversal' | 'withdrawal'
 export type WithdrawalStatus = 'pending' | 'approved' | 'paid' | 'failed' | 'rejected'
 
 /**
- * Mirrors `UserStatus` in the Prisma schema — all four states, not two.
+ * Mirrors `UserStatus` in the Prisma schema, all four states, not two.
  *
  * Declaring only `active | suspended` made every `status === 'active' ? a : b`
  * in the admin screens render a *pending* agent as "Suspended", and offer a
@@ -63,7 +63,7 @@ export type UserStatus = 'pending' | 'active' | 'rejected' | 'suspended'
 
 /**
  * Three prices per product: what James pays, what he charges agents, and what he
- * charges a walk-up customer himself. There is no ceiling — an agent sets their
+ * charges a walk-up customer himself. There is no ceiling, an agent sets their
  * own retail price anywhere above what they pay.
  */
 export interface Product {
@@ -77,7 +77,7 @@ export interface Product {
   /** What James pays DataHub GH / the voucher supplier. Admin-only. */
   supplierCost: Pesewas
   /**
-   * When the catalogue's belief about `supplierCost` last changed — a sync,
+   * When the catalogue's belief about `supplierCost` last changed, a sync,
    * not necessarily a real delivery. Null once when nothing has ever synced
    * this row. See `catalogueAccuracy`'s `lastSoldAt` for the other clock: how
    * recent the *real* charge being compared against is, which is a different
@@ -96,7 +96,7 @@ export interface Product {
    * server strips both together.
    *
    * Purely a record of intent, shown next to a price and used when applying a
-   * bulk markup — a catalogue sync moves `supplierCost` alone and never
+   * bulk markup, a catalogue sync moves `supplierCost` alone and never
    * touches a price James already set, so these don't "keep a margin alive"
    * across a sync the way they once did; see `AdminService.syncSupplierCosts`.
    */
@@ -120,7 +120,7 @@ export interface Product {
    * Which supplier fulfils this, when one is linked. Admin-only.
    *
    * Null while nothing is linked, rather than defaulting to the one supplier we
-   * happen to have — an unfulfillable product naming a provider would be a claim
+   * happen to have, an unfulfillable product naming a provider would be a claim
    * nobody checked. Matters once the catalogue is mixed: DataHub sells data only,
    * so airtime, voice, SMS and AFA must come from elsewhere.
    */
@@ -153,7 +153,7 @@ export interface SplitShare {
 export interface OrderSplit {
   supplierCost: Pesewas
   shares: SplitShare[]
-  /** Paystack's fee, passed on to the buyer as its own line — never a margin. */
+  /** Paystack's fee, passed on to the buyer as its own line, never a margin. */
   processingFee: Pesewas
 }
 
@@ -179,7 +179,7 @@ export interface Order {
   completedAt: string | null
   /**
    * Admin only: when a failed order actually failed. There is no dedicated
-   * column for this the way `completedAt` is one — it is read off the refund
+   * column for this the way `completedAt` is one, it is read off the refund
    * request created in the same transaction that settled the order, so it is
    * null for the rare failed order that never collected any money at all
    * (nothing to refund, nothing to time it against).
@@ -191,34 +191,34 @@ export interface Order {
   refunded?: boolean
   /**
    * Only meaningful when `status === 'failed'`, undefined otherwise. `false`
-   * means a Mobile Money charge never actually went through — nothing was
+   * means a Mobile Money charge never actually went through, nothing was
    * ever taken, so there is nothing owed back and nothing to retry except the
    * payment itself. `true` means the payment succeeded and the delivery
    * failed afterward, the case `refunded`/refund language actually applies
    * to. The two read identically as "failed" without this.
    */
   paymentCollected?: boolean
-  /** How the buyer paid — a wallet, or Mobile Money at checkout. */
+  /** How the buyer paid, a wallet, or Mobile Money at checkout. */
   paidWith: 'wallet' | 'momo'
   /** Display name of the buyer; 'Guest' for an account-less purchase. */
   buyer: string
   buyerPhone: string
   /**
-   * Admin only: what the supplier actually charged, when known — can differ
+   * Admin only: what the supplier actually charged, when known, can differ
    * from `split.supplierCost`, the estimate frozen in at sale time. Null for
    * anyone else, and for an order the supplier has not yet reported a real
    * charge for.
    */
   actualSupplierCost?: number | null
   /**
-   * What Paystack actually kept, from their own reply — admin only, and null
+   * What Paystack actually kept, from their own reply, admin only, and null
    * for a wallet-paid order (the fee was already paid once at top-up time).
    * Not the same as `split.processingFee`, which is only the estimate shown
    * to the buyer at checkout.
    */
   paystackFee?: number | null
   /**
-   * Admin only: how DataHub routed this order's fulfilment — 'manual' when
+   * Admin only: how DataHub routed this order's fulfilment, 'manual' when
    * their own reference is `manual_`-prefixed (a person on their side has to
    * clear it by hand), 'code' when it went through their automated path
    * instead, or null when DataHub hasn't replied with a reference yet. Not
@@ -229,7 +229,7 @@ export interface Order {
   fulfilmentReference?: 'manual' | 'code' | null
   /**
    * Admin only: DataHub's own numeric ticket ID for a manual-routed order,
-   * pulled from the reference they gave us — null unless `fulfilmentReference`
+   * pulled from the reference they gave us, null unless `fulfilmentReference`
    * is 'manual'. What admin would quote to DataHub's support when chasing one.
    */
   manualOrderNumber?: string | null
@@ -242,16 +242,16 @@ export interface Order {
   resolvedManually?: boolean
   /**
    * Admin only: true when this order's most recent dispatch attempt came
-   * back `unknown` (the delivery partner never answered at all — no
+   * back `unknown` (the delivery partner never answered at all, no
    * reference exists to check with) and the order is still `pending` or
    * `processing`. Without this, a genuinely stuck order looks identical to
-   * a normal, healthy in-flight one everywhere the plain `status` is shown —
+   * a normal, healthy in-flight one everywhere the plain `status` is shown,
    * an admin had to open every order to find out which was which.
    */
   dispatchUnresolved?: boolean
   /**
    * Admin only: where a failed order's refund actually stands, when it isn't
-   * already `approved` (that case is `refunded` instead — see above). A
+   * already `approved` (that case is `refunded` instead, see above). A
    * person always decides a refund, so `pending` means one is genuinely
    * waiting on a click; `rejected` means an admin refused it. Null when
    * nothing was ever owed back.
@@ -321,7 +321,7 @@ export interface PlatformUser {
   orders: number
   /** Agents only: total GHS sold on completed orders, all-time. Zero for anyone else. */
   salesVolume: Pesewas
-  /** Agents only: lifetime profit earned, before any withdrawal — not the same as `balance`. Zero for anyone else. */
+  /** Agents only: lifetime profit earned, before any withdrawal, not the same as `balance`. Zero for anyone else. */
   totalEarned: Pesewas
   referredBy: string | null
   joinedAt: string
@@ -357,8 +357,8 @@ export interface Session {
    * Whether this account may trade yet.
    *
    * An agent applies rather than simply signing up, so a new one is `pending`
-   * until approved. They are allowed to sign in — telling them their password is
-   * wrong would send them round in circles — so the app has to know not to offer
+   * until approved. They are allowed to sign in, telling them their password is
+   * wrong would send them round in circles, so the app has to know not to offer
    * selling tools that cannot work.
    */
   status: 'pending' | 'active' | 'rejected' | 'suspended'
@@ -366,7 +366,7 @@ export interface Session {
   statusNote: string | null
   /**
    * Which `whatsappChannelUrl` this profile has already been shown the join
-   * popup for. Compare against the current setting, not just truthy/falsy — a
+   * popup for. Compare against the current setting, not just truthy/falsy, a
    * channel James replaces later should be shown again, once.
    */
   whatsappChannelSeenUrl: string | null

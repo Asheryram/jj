@@ -45,7 +45,7 @@ export class RejectBrandingDto {
 /**
  * How a shop identifies itself: name, logo and colour.
  *
- * The read endpoint is unauthenticated on purpose — a guest shopping through an
+ * The read endpoint is unauthenticated on purpose, a guest shopping through an
  * agent's link has no account, and the shop has to render for them. Nothing here
  * exposes anything private: a shop's name, mark and colour are what every visitor
  * sees anyway.
@@ -65,7 +65,7 @@ export class BrandingController {
    * A shop's logo.
    *
    * Cached for a day: a logo changes rarely, and this is fetched on every cold
-   * page load. `must-revalidate` is deliberately absent — a stale mark for a few
+   * page load. `must-revalidate` is deliberately absent, a stale mark for a few
    * hours is a far better trade than a database round trip per visitor.
    */
   @Get('logo/:key')
@@ -116,7 +116,7 @@ export class BrandingController {
 /**
  * The platform owner's side: their own branding, and the agents' review queue.
  *
- * Separate controller so `@Roles('admin')` covers all of it — an agent must not
+ * Separate controller so `@Roles('admin')` covers all of it, an agent must not
  * be able to approve their own submission.
  */
 @ApiTags('admin')

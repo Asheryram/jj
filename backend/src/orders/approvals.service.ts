@@ -8,8 +8,8 @@ import { claimTransition } from '../common/alert-flag'
  * Orders paid for and held because DataHub has not approved the recipient.
  *
  * DataHub will not deliver an MTN bundle to a number that is not on their
- * beneficiary list. Rather than refuse the sale — which turned every first-time
- * MTN customer away — the order is taken and parked in `awaiting_approval`, and
+ * beneficiary list. Rather than refuse the sale, which turned every first-time
+ * MTN customer away, the order is taken and parked in `awaiting_approval`, and
  * this is where it gets resolved.
  *
  * Their `/beneficiaries` submission endpoint answers 502 on every valid request
@@ -20,13 +20,13 @@ import { claimTransition } from '../common/alert-flag'
  *
  * Three operations:
  *
- *  · **pending** — who is waiting, how many orders each is holding up, and how
+ *  · **pending**, who is waiting, how many orders each is holding up, and how
  *    much of the customers' money is parked against them.
- *  · **recheck** — ask `/verify` which numbers have been approved since, and
+ *  · **recheck**, ask `/verify` which numbers have been approved since, and
  *    immediately re-dispatch the orders waiting on the ones that have. This is
  *    the one-click retry; approval is DataHub's to grant, so their answer is the
  *    only thing that may release an order.
- *  · **submit** — try their API anyway. It will start working the day they fix
+ *  · **submit**, try their API anyway. It will start working the day they fix
  *    it, and until then it reports the failure rather than pretending.
  */
 /** Where the last recheck time is kept, so the automatic call can be rate-limited. */
@@ -99,7 +99,7 @@ export class ApprovalsService {
      * Most rows now have no held order at all, and that is the point.
      *
      * A sale to an unapproved number is refused before it is created, so nothing
-     * is charged and nothing is held — which means `ordersHeld` and `valueHeld`
+     * is charged and nothing is held, which means `ordersHeld` and `valueHeld`
      * are zero for every number refused that way. The demand shows up as
      * `attempts` instead: how many times somebody tried and was turned away. That
      * is the number worth sorting by, because it is the sales this is costing.
@@ -144,7 +144,7 @@ export class ApprovalsService {
         waitingSince: row.oldest.toISOString(),
         /**
          * Last time this specific number was copied to hand to DataHub, or
-         * null if it never has been — the checkpoint `markCopied` sets. Not a
+         * null if it never has been, the checkpoint `markCopied` sets. Not a
          * claim DataHub received it, only that it was handed over; DataHub's
          * own answer still only ever arrives through `recheck`.
          */
@@ -159,12 +159,12 @@ export class ApprovalsService {
    * The actual problem this solves: a batch copied five minutes ago and a
    * number that just showed up look identical in the list otherwise, and a
    * few numbers in either direction is enough to lose track of which is
-   * which by memory alone. This is the checkpoint — not a claim about
+   * which by memory alone. This is the checkpoint, not a claim about
    * DataHub's side, just "this one was handed over, and when."
    *
    * A plain `updateMany`, not an upsert: every phone shown on the approvals
    * screen already has a `BeneficiaryRequest` row from the moment a sale to
-   * it was first refused or held, so there is nothing to create here — bar
+   * it was first refused or held, so there is nothing to create here, bar
    * a handful of pre-existing held orders older than that tracking itself,
    * which this silently no-ops on rather than inventing a row with no real
    * `networkKey` or attempt count behind it.
@@ -198,7 +198,7 @@ export class ApprovalsService {
         data: { status: 'processing' },
       })
       this.fulfilment.scheduleFor(order.id)
-      this.log.log(`${order.reference} released — ${phone} approved`)
+      this.log.log(`${order.reference} released, ${phone} approved`)
     }
 
     return held.length
@@ -222,7 +222,7 @@ export class ApprovalsService {
      * One pass a minute, however often it is asked for.
      *
      * The approvals screen runs this on load so the list is current without
-     * anybody pressing anything — which means a few refreshes would otherwise
+     * anybody pressing anything, which means a few refreshes would otherwise
      * fire a verify call per pending number each time, against a provider that
      * allows thirty a minute. The cooldown makes the automatic call safe and
      * leaves the manual button honest: it either checks, or says when it last did.
@@ -242,10 +242,10 @@ export class ApprovalsService {
 
     /**
      * Claimed atomically, not just read-then-written: the approvals screen
-     * runs this on every load, so two admins with it open at once — or one
-     * admin with two tabs — is the ordinary case, not a rare one. Without
+     * runs this on every load, so two admins with it open at once, or one
+     * admin with two tabs, is the ordinary case, not a rare one. Without
      * this, both could read the cooldown as expired before either wrote a
-     * fresh marker, and both would call DataHub at once — exactly the
+     * fresh marker, and both would call DataHub at once, exactly the
      * thirty-a-minute rate limit this cooldown exists to protect. Losing the
      * race is treated the same as the cooldown itself firing: a recheck just
      * started elsewhere, so this call has nothing to add.

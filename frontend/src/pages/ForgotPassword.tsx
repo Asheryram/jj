@@ -10,7 +10,7 @@ import { AlertIcon, CheckIcon } from '../components/icons'
  *
  * The confirmation deliberately does not say whether the address has an account.
  * Anything that distinguished "sent" from "no such account" would make this a way
- * to find out who has access to the platform — and this is a form anybody on the
+ * to find out who has access to the platform, and this is a form anybody on the
  * internet can submit.
  *
  * That means the wording has to be honest about its own vagueness rather than
@@ -20,7 +20,7 @@ import { AlertIcon, CheckIcon } from '../components/icons'
 export default function ForgotPassword() {
   const shopPath = useShopPath()
   const [params] = useSearchParams()
-  // Carried over from Login, same pattern as `?ref=` into Track — retyping
+  // Carried over from Login, same pattern as `?ref=` into Track, retyping
   // an address just entered a moment ago is friction with no purpose.
   const [email, setEmail] = useState(() => params.get('email') ?? '')
   const [sent, setSent] = useState(false)
@@ -58,11 +58,11 @@ export default function ForgotPassword() {
               reset link is on its way to it. The link works once and expires in an hour.
             </p>
             <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
-              Don't see it in a minute or two? Check your spam or junk folder — it sometimes lands
+              Don't see it in a minute or two? Check your spam or junk folder, it sometimes lands
               there the first time.
             </p>
             <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
-              Nothing has changed yet — your current password keeps working until you use the link.
+              Nothing has changed yet, your current password keeps working until you use the link.
             </p>
             <Link to={shopPath('/login')} className="mt-5 block">
               <Button block variant="outline">
@@ -95,7 +95,7 @@ export default function ForgotPassword() {
               </Field>
 
               <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-                Buying with Mobile Money needs no account, so there is nothing to reset — this is
+                Buying with Mobile Money needs no account, so there is nothing to reset, this is
                 for agents and admins.
               </Callout>
 

@@ -46,7 +46,7 @@ const THROUGH_TUNNEL =
       try {
         return new URL(API_URL).hostname
       } catch {
-        return '' // a relative '/api' — same origin, no tunnel involved
+        return '' // a relative '/api', same origin, no tunnel involved
       }
     })(),
   )
@@ -54,15 +54,15 @@ const THROUGH_TUNNEL =
 /**
  * Resolve a path the API gave us against the API's own origin.
  *
- * The server returns logo paths as `/api/branding/logo/:key` — relative, because
+ * The server returns logo paths as `/api/branding/logo/:key`, relative, because
  * it has no business knowing its public address. That is correct same-origin, and
  * wrong the moment the app and the API are on different hosts: the browser asks
  * Vercel for it, the single-page-app catch-all answers with `index.html`, and an
  * `<img>` receives HTML. It fails as a blank logo with a 200 status, which is why
  * it looked like the upload had not worked.
  *
- * Used for anything the browser fetches *by URL* rather than through `request` —
- * images, downloads — since those never pass through the client that already knows
+ * Used for anything the browser fetches *by URL* rather than through `request`:
+ * images, downloads, since those never pass through the client that already knows
  * where the API lives.
  */
 export function apiAsset(path: string | null): string | null {
@@ -83,7 +83,7 @@ export const token = {
 
 /**
  * An error carrying the API's stable code alongside the sentence meant for the
- * user. NFR-4.3 — components show `message` and never build copy from `code`.
+ * user. NFR-4.3, components show `message` and never build copy from `code`.
  */
 export class ApiError extends Error {
   // Declared as fields rather than constructor parameter properties: the app
@@ -105,7 +105,7 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
   body?: unknown
   /**
-   * A multipart upload, for the one thing that needs it — a logo.
+   * A multipart upload, for the one thing that needs it, a logo.
    *
    * Mutually exclusive with `body`. The Content-Type header is deliberately NOT
    * set: the browser has to add its own multipart boundary, and setting the type
@@ -153,7 +153,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
    *
    * The specific way this happens: with `VITE_API_URL` unset the base falls back
    * to a relative `/api`, and on a static host the single-page-app catch-all
-   * rewrite answers `/api/anything` with `index.html` — a perfectly successful
+   * rewrite answers `/api/anything` with `index.html`, a perfectly successful
    * 200 full of HTML. Parsing it yields null, and the app used to report "check
    * your connection", which blames the reader's network for a deployment
    * setting. Worth its own message because the fix is precise and nothing else
@@ -163,7 +163,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (response.ok && contentType.includes('html')) {
     throw new ApiError(
       'API_NOT_CONFIGURED',
-      'This app is not pointed at its API — it is reaching the website instead. ' +
+      'This app is not pointed at its API, it is reaching the website instead. ' +
         'Set VITE_API_URL to the API address ending in /api, then redeploy.',
       response.status,
     )
@@ -174,7 +174,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   if (!response.ok) {
     const envelope = (payload ?? {}) as { code?: string; message?: string; detail?: Record<string, unknown> }
 
-    // An expired token is not an error the user can act on — drop it so the app
+    // An expired token is not an error the user can act on, drop it so the app
     // falls back to a signed-out state rather than looping on 401s.
     if (response.status === 401) token.clear()
 
@@ -194,7 +194,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 /**
  * One hat this person can wear.
  *
- * A profile is a separate account that happens to belong to the same human — the
+ * A profile is a separate account that happens to belong to the same human, the
  * platform owner selling as an agent needs a real agent account, because an agent
  * owns a balance and a referral code that must never mix with the platform's own
  * margin. They share an email; only one of them has a password.
@@ -224,7 +224,7 @@ export interface CatalogueSnapshot {
   pricingAgents: PricingAgent[]
   /**
    * Who holds the supplier margin. Null on a fresh deployment, before the
-   * superadmin has created an admin — the shop still has to render so they can.
+   * superadmin has created an admin, the shop still has to render so they can.
    */
   admin: { userId: string; name: string } | null
   settings: {
@@ -233,7 +233,7 @@ export interface CatalogueSnapshot {
     /**
      * What Paystack keeps on a Mobile Money payment, in basis points.
      *
-     * Sent to everyone — it is a rate, not a secret — so the browser can preview
+     * Sent to everyone (it is a rate, not a secret) so the browser can preview
      * a price exactly as the server will actually charge it. Used wherever a
      * price is derived from a markup locally: an agent's own default markup, in
      * particular, is computed here rather than looked up.
@@ -242,14 +242,14 @@ export interface CatalogueSnapshot {
     /**
      * The admin's WhatsApp channel invite, for agents to join.
      *
-     * Absent (not just null) for a customer or guest session — an agent-only
+     * Absent (not just null) for a customer or guest session, an agent-only
      * page reading it optionally is a much smaller risk than reading `null` and
      * mistaking that for "sent, but empty."
      */
     whatsappChannelUrl?: string | null
     /**
      * A warning banner for the whole site. Sent to every role, guests
-     * included — unlike the WhatsApp link above, this is exactly the
+     * included, unlike the WhatsApp link above, this is exactly the
      * audience it's for. Null means nothing is set, so no banner shows.
      */
     siteNotice: string | null
@@ -286,7 +286,7 @@ export interface AdminOverview {
   pendingWithdrawals: { count: number; amount: number }
   unclaimedCredits: { count: number; amount: number }
   revenueTrend: { thisWeek: number; lastWeek: number }
-  /** All-time — see AdminService.overview for why. */
+  /** All-time, see AdminService.overview for why. */
   refundRate: number
   checkoutFunnel: { started: number; completed: number; failed: number }
   goingQuietAgents: { name: string; referralCode: string; lastSaleAt: string }[]
@@ -310,20 +310,20 @@ export interface MySummary {
   ordersCompleted: number
   ordersTotal: number
   activeSubAgents: number
-  /** Agents only — this 7-day window vs the one before it. */
+  /** Agents only, this 7-day window vs the one before it. */
   earnedTrend?: { thisWeek: number; lastWeek: number }
 }
 
 /**
  * `Reports.tsx`'s date-range summary, aggregated server-side over the actual
- * `from`/`to` window — same "don't derive it from the capped client list"
+ * `from`/`to` window, same "don't derive it from the capped client list"
  * reasoning as `MySummary` above, just for a chosen range instead of a fixed one.
  */
 export interface MyReportSummary {
   revenue: number
   completedCount: number
   failedCount: number
-  /** Zero for a customer — there is no margin on their own spend. */
+  /** Zero for a customer, there is no margin on their own spend. */
   profit: number
   byCategory: { category: string; revenue: number; orders: number }[]
 }
@@ -339,7 +339,7 @@ export interface NeedsAttentionOrder {
   createdAt: string
   reason: string
   /**
-   * True when this order is already settled but flagged — a later signal
+   * True when this order is already settled but flagged, a later signal
    * disagreed with the outcome it was already given. False for the ordinary
    * "still stuck, needs a delivered/rejected decision" case.
    */
@@ -347,7 +347,7 @@ export interface NeedsAttentionOrder {
 }
 
 /**
- * A withdrawal or refund stuck on `otp`/`unknown` — Paystack transfer states
+ * A withdrawal or refund stuck on `otp`/`unknown`, Paystack transfer states
  * that never resolve themselves. See `SolvencyService.stuckTransfers`.
  */
 export interface StuckTransfer {
@@ -381,7 +381,7 @@ export interface SupplierFloat {
     observedAt: string
     orderRef: string | null
     level: FloatLevel
-    /** What actually decided `level` — the lower of `balance` and tracked capital. Equal to `balance` unless tracked capital is more pessimistic. */
+    /** What actually decided `level`, the lower of `balance` and tracked capital. Equal to `balance` unless tracked capital is more pessimistic. */
     reference: number
   } | null
   /** Pesewas. Zero means the alert is switched off. */
@@ -402,7 +402,7 @@ export interface SupplierFloat {
     observed: number
     shortfall: number
     flagged: boolean
-    /** The live reading predates the last logged move, so it can't confirm it yet — only the next order can. */
+    /** The live reading predates the last logged move, so it can't confirm it yet, only the next order can. */
     pending: boolean
   } | null
 }
@@ -410,7 +410,7 @@ export interface SupplierFloat {
 /**
  * One manual refund sent from someone's own pocket because Paystack refused
  * the transfer, not yet taken back out of the business. This is Paystack
- * money, not the DataHub float — it lives with the refund queue that created
+ * money, not the DataHub float, it lives with the refund queue that created
  * it, on the Refunds page, not the Float panel.
  */
 export interface ManualRefundAdvance {
@@ -441,7 +441,7 @@ export interface PlatformSettings {
   paystackFeeBp: number
   /**
    * Whether Paystack's live balance is actually being watched for a real
-   * shortfall. Off by default — does not change what "Should be at Paystack"
+   * shortfall. Off by default, does not change what "Should be at Paystack"
    * means on the Reserve panel (always all-time, from this platform's own
    * records); it only decides whether the background check ever calls
    * Paystack's live balance at all, and so whether an email can ever fire.
@@ -464,7 +464,7 @@ export interface DispatchAttempt {
   costPrice: number
   outcome: 'delivered' | 'rejected' | 'pending' | 'unknown'
   reason: string | null
-  /** True when nothing left the building — the provider was stubbed. */
+  /** True when nothing left the building, the provider was stubbed. */
   simulated: boolean
   attempt: number
   createdAt: string
@@ -484,7 +484,7 @@ export interface AgentApplication {
   email: string
   phone: string
   referralCode: string
-  /** The agent who referred them, if any — a different proposition. */
+  /** The agent who referred them, if any, a different proposition. */
   referredBy: string | null
   appliedAt: string
 }
@@ -495,7 +495,7 @@ export interface TeamMember {
   email: string
   role: 'admin' | 'superadmin'
   status: string
-  /** No password chosen yet — their setup link is still outstanding. */
+  /** No password chosen yet, their setup link is still outstanding. */
   pendingSetup: boolean
   joinedAt: string
 }
@@ -506,7 +506,7 @@ export interface PublicBranding {
   brandColor: string
   /** Every Tailwind step, keyed '50' through '900'. */
   ramp: BrandRamp
-  /** Used on a dark background — equal to brandColor/ramp when none was chosen. */
+  /** Used on a dark background, equal to brandColor/ramp when none was chosen. */
   brandColorDark: string
   rampDark: BrandRamp
   logoUrl: string | null
@@ -593,7 +593,7 @@ export interface MyAnnouncement {
   readAt: string | null
 }
 
-export type AnnouncementAudience = 'all' | 'selected'
+export type AnnouncementAudience = 'all' | 'agents' | 'admins' | 'selected'
 
 export interface AnnouncementHistoryRow {
   id: string
@@ -624,7 +624,7 @@ export interface ServiceSubscription {
 
 export interface RefundRequest {
   id: string
-  /** For the "Reorder" action — see `api.reorderOrder`. */
+  /** For the "Reorder" action, see `api.reorderOrder`. */
   orderId: string
   /** The failed order's own network and category, so the Reorder picker can
    * filter the catalogue to bundles that could actually fulfil it. */
@@ -640,12 +640,12 @@ export interface RefundRequest {
   /**
    * Pesewas this order was originally priced against. Reordering at the same
    * cost the sale already assumed is not a gain, it is this order finally
-   * completing — the "Reorder" preview compares the chosen bundle's cost
+   * completing, the "Reorder" preview compares the chosen bundle's cost
    * today to this, not to zero.
    */
   originalCost: number
   /**
-   * Pesewas Paystack actually kept from the original payment — already
+   * Pesewas Paystack actually kept from the original payment, already
    * spent, not something a reorder redoes or gets back. Null for a
    * wallet-paid order, whose fee (if any) was already paid once at top-up
    * time, not against this sale.
@@ -654,7 +654,7 @@ export interface RefundRequest {
   /** Whether this was sold through an agent's own link. */
   soldByAgent: boolean
   /**
-   * Pesewas: today's price for this same product — for an agent sale, that
+   * Pesewas: today's price for this same product, for an agent sale, that
    * specific agent's own current price (explicit, or their default markup,
    * priced exactly as a live checkout would); for a direct sale, the standard
    * walk-up price. A sanity check next to `amount`, not part of the
@@ -669,7 +669,7 @@ export interface RefundRequest {
   /**
    * How the money goes back.
    *
-   * `transfer` sends it to the number that paid — the normal case now that
+   * `transfer` sends it to the number that paid, the normal case now that
    * wallets are closed. `wallet` credits an account that predates that.
    * `claimable` is historical only: nothing ever implemented claiming.
    */
@@ -696,14 +696,14 @@ export interface RefundRequest {
 }
 
 /**
- * What actually happened on a reorder attempt — the real answer, not the
+ * What actually happened on a reorder attempt, the real answer, not the
  * preview shown before clicking. DataHub's real charge is never knowable in
  * advance, only after the purchase is actually placed.
  */
 export interface ReorderOutcome {
   outcome: 'delivered' | 'rejected' | 'pending' | 'unknown' | 'needs_approval'
   reason?: string
-  /** Pesewas DataHub actually charged this attempt. Null when nothing was — a clean pre-flight refusal, a timeout, or an accepted order still awaiting their webhook. */
+  /** Pesewas DataHub actually charged this attempt. Null when nothing was, a clean pre-flight refusal, a timeout, or an accepted order still awaiting their webhook. */
   actualCost: number | null
   /** What this order was originally priced against, for the real number to be compared to. */
   originalCost: number
@@ -714,7 +714,7 @@ export interface ReservePosition {
    * Pesewas our own records say should be sitting at Paystack right now:
    * everything ever collected, net of Paystack's fee, less every payout and
    * refund transfer this platform has actually sent. Always all-time, and
-   * always from this platform's own records — never Paystack's own live
+   * always from this platform's own records, never Paystack's own live
    * balance; that comparison happens only in the background (when
    * `paystackBusinessAccount` is on), and a real shortfall goes to an
    * admin's inbox, not this panel.
@@ -722,13 +722,13 @@ export interface ReservePosition {
   expectedAtPaystack: number
   /**
    * Every bundle ever bought, all-time. That money came out of the DataHub
-   * float, not Paystack directly, but the float doesn't refill itself —
+   * float, not Paystack directly, but the float doesn't refill itself:
    * keeping it funded means moving Paystack money across sooner or later, so
    * this is subtracted from `freeToSpend` even though it never physically
    * left Paystack.
    */
   spentOnBundles: number
-  /** `expectedAtPaystack` less every claim already on it and everything spent on bundles — what's actually free to spend. */
+  /** `expectedAtPaystack` less every claim already on it and everything spent on bundles, what's actually free to spend. */
   freeToSpend: number
   liabilities: {
     agentEarnings: number
@@ -743,10 +743,10 @@ export interface ReservePosition {
     total: number
   }
   /**
-   * The DataHub float's current reading, alongside Paystack's side — not a
+   * The DataHub float's current reading, alongside Paystack's side, not a
    * claim on `expectedAtPaystack`, just the business's other pot of money,
    * shown here so both are visible in one place. Null before any purchase
-   * has ever reported a balance — see `FloatPanel` for the full picture
+   * has ever reported a balance, see `FloatPanel` for the full picture
    * (thresholds, capital tracking, reconciliation).
    */
   floatBalance: number | null
@@ -781,7 +781,7 @@ export interface PendingApproval {
    * Paid orders parked against this number, waiting to be delivered.
    *
    * Usually zero now. A sale to an unapproved number is refused before an order
-   * exists, so nothing is charged and nothing is held — the demand shows up as
+   * exists, so nothing is charged and nothing is held, the demand shows up as
    * `attempts` instead. Non-zero rows are orders that predate the block, or ones
    * whose dispatch came back needing approval after payment.
    */
@@ -796,7 +796,7 @@ export interface PendingApproval {
   waitingSince: string
   /**
    * Last time this number was copied to hand to DataHub, by hand. Null means
-   * never — the one worth noticing, since a batch copied minutes ago and a
+   * never, the one worth noticing, since a batch copied minutes ago and a
    * number that just showed up otherwise look identical in the list. Not a
    * claim DataHub received it, only that it was handed over.
    */
@@ -810,7 +810,7 @@ export interface SupplierSku {
   network: Network | null
   name: string
   validity: string
-  /** The last catalogue sync's word — informational for admin, not a receipt. */
+  /** The last catalogue sync's word, informational for admin, not a receipt. */
   costPrice: number
   /**
    * What a real purchase of this exact SKU most recently actually cost. Null
@@ -873,7 +873,7 @@ export const api = {
 
   me: () => request<{ user: Session; balance: number; profiles?: Profile[] }>('/auth/me'),
 
-  // Catalogue — one call for products, the referral chain and platform switches.
+  // Catalogue, one call for products, the referral chain and platform switches.
   catalogue: () => request<CatalogueSnapshot>('/catalogue', { auth: true }),
 
   seller: (code: string) =>
@@ -888,13 +888,13 @@ export const api = {
       auth: false,
     }),
 
-  // Custom domains — an agent's own request, and its status
+  // Custom domains, an agent's own request, and its status
   myDomain: () => request<MyDomainStatus | null>('/domains/mine'),
 
   requestDomain: (domain: string) =>
     request<MyDomainStatus>('/domains/request', { method: 'POST', body: { domain } }),
 
-  // Custom domains — superadmin review queue
+  // Custom domains, superadmin review queue
   adminDomains: (pending: boolean) =>
     request<AdminDomainRow[]>(`/admin/domains?pending=${pending}`),
 
@@ -937,10 +937,11 @@ export const api = {
     request<AdminFeedbackReport>(`/admin/feedback/${encodeURIComponent(id)}/escalate`, { method: 'POST' }),
 
   // Announcements: admin/superadmin composing and sending
-  announcementAgents: () => request<{ id: string; name: string; referralCode: string }[]>('/announcements/agents'),
+  announcementRecipients: () =>
+    request<{ id: string; name: string; referralCode: string; role: 'agent' | 'admin' }[]>('/announcements/recipients'),
 
-  sendAnnouncement: (title: string, message: string, agentIds?: string[]) =>
-    request<AnnouncementHistoryRow>('/announcements', { method: 'POST', body: { title, message, agentIds } }),
+  sendAnnouncement: (title: string, message: string, audience: AnnouncementAudience, agentIds?: string[]) =>
+    request<AnnouncementHistoryRow>('/announcements', { method: 'POST', body: { title, message, audience, agentIds } }),
 
   announcementHistory: () => request<AnnouncementHistoryRow[]>('/announcements/history'),
 
@@ -985,7 +986,7 @@ export const api = {
    * Place an order.
    *
    * With Paystack collecting the money the reply carries `paymentUrl` and the
-   * order is `awaiting_payment` — the caller must send the customer there, not
+   * order is `awaiting_payment`, the caller must send the customer there, not
    * show them a receipt.
    */
   placeOrder: (body: PlaceOrderBody) =>
@@ -1007,7 +1008,7 @@ export const api = {
 
   /**
    * Ask the provider whether they will deliver to this number, before paying.
-   * `checked: false` means the question did not apply — simulated fulfilment, or
+   * `checked: false` means the question did not apply, simulated fulfilment, or
    * a network their check does not cover.
    */
   verifyRecipient: (productId: string, recipient: string) =>
@@ -1031,7 +1032,7 @@ export const api = {
   orderDispatches: (id: string) => request<DispatchAttempt[]>(`/orders/${id}/dispatches`),
 
   /**
-   * Settle a stuck order by hand — for the rare case the delivery partner's
+   * Settle a stuck order by hand, for the rare case the delivery partner's
    * own status never reaches a word the reconciler recognises as final, even
    * though the real outcome (delivered or not) is already known.
    */
@@ -1039,36 +1040,36 @@ export const api = {
     request<void>(`/orders/${id}/resolve`, { method: 'POST', body: { outcome, note } }),
 
   /**
-   * Retry dispatch by hand — only valid when the last attempt timed out
+   * Retry dispatch by hand, only valid when the last attempt timed out
    * before the delivery partner ever answered (no reference exists for the
    * automatic check to use). `note` is the record of what was checked before
-   * retrying — see `FulfilmentService.retryDispatch`.
+   * retrying, see `FulfilmentService.retryDispatch`.
    */
   retryDispatch: (id: string, note: string) =>
     request<void>(`/orders/${id}/retry-dispatch`, { method: 'POST', body: { note } }),
 
   /**
-   * Reorder a failed order whose refund has not been paid yet — see
+   * Reorder a failed order whose refund has not been paid yet, see
    * `FulfilmentService.reorder`. `supplierCode` is chosen from the live
    * catalogue (`api.supplierCatalogue`), not assumed from the order's own
    * frozen mapping. Cancels the pending refund automatically if this
    * delivers; otherwise the refund is untouched and still owed.
    *
-   * Returns what actually happened, not a preview — DataHub's real charge is
+   * Returns what actually happened, not a preview, DataHub's real charge is
    * only ever known after the purchase is placed, never before.
    */
   reorderOrder: (id: string, note: string, supplierCode: string) =>
     request<ReorderOutcome>(`/orders/${id}/reorder`, { method: 'POST', body: { note, supplierCode } }),
 
   /**
-   * Clear a flagged conflict once a human has actually checked what happened
-   * — see ReconcilerService.acknowledgeConflict. Never resolves any money by
+   * Clear a flagged conflict once a human has actually checked what happened,
+   * see ReconcilerService.acknowledgeConflict. Never resolves any money by
    * itself; it only closes out the flag.
    */
   acknowledgeOrderConflict: (id: string, note: string) =>
     request<void>(`/orders/${id}/acknowledge-conflict`, { method: 'POST', body: { note } }),
 
-  /** Orders nobody can resolve automatically — see ReconcilerService.needsAttention. */
+  /** Orders nobody can resolve automatically, see ReconcilerService.needsAttention. */
   needsAttentionOrders: () => request<NeedsAttentionOrder[]>('/admin/orders/needs-attention'),
 
   stuckTransfers: () => request<StuckTransfer[]>('/admin/finance/stuck-transfers'),
@@ -1118,7 +1119,7 @@ export const api = {
     ),
 
   /**
-   * " Assistant " — plain-language, read-only, grounded in real account or
+   * " Assistant ", plain-language, read-only, grounded in real account or
    * platform data. Shared across roles: the backend picks the tool set and
    * voice from the caller's own role, an agent and an admin asking the same
    * question get different, correctly-scoped answers.
@@ -1143,7 +1144,7 @@ export const api = {
     request<WithdrawalRequest>(`/withdrawals/${id}`, { method: 'PATCH', body: { status } }),
 
   /**
-   * Confirm a payout was sent by hand — for an account that cannot send
+   * Confirm a payout was sent by hand, for an account that cannot send
    * Paystack transfers yet, or at all. See WithdrawalsService.settleManually.
    */
   settleWithdrawalManually: (id: string, note: string) =>
@@ -1205,7 +1206,7 @@ export const api = {
 
   // ── Platform access ──────────────────────────────────────────────────────
 
-  /** Is this one-time setup link still good? Public — the holder is not signed in. */
+  /** Is this one-time setup link still good? Public, the holder is not signed in. */
   checkSetupLink: (token: string) =>
     request<{ valid: boolean; name?: string; purpose?: string }>(
       `/auth/set-password?token=${encodeURIComponent(token)}`,
@@ -1223,7 +1224,7 @@ export const api = {
   /**
    * Ask for a reset link.
    *
-   * Always resolves the same way whether or not the address has an account — the
+   * Always resolves the same way whether or not the address has an account, the
    * server will not say, and neither should the UI.
    */
   forgotPassword: (email: string) =>
@@ -1299,7 +1300,7 @@ export const api = {
    * Approve a refund and send it.
    *
    * `momoNetwork` is needed for a Mobile Money refund whenever it is not
-   * already on file — the payer has no account, so the money goes back to
+   * already on file, the payer has no account, so the money goes back to
    * their number, and a prefix cannot say which network carries it.
    */
   approveRefund: (id: string, momoNetwork?: 'MTN' | 'Telecel' | 'AirtelTigo') =>
@@ -1316,7 +1317,7 @@ export const api = {
     }),
 
   /**
-   * Mark a refund as paid outside Paystack — a Starter Business account
+   * Mark a refund as paid outside Paystack, a Starter Business account
    * cannot initiate third-party payouts at all, and this is the way through
    * that wall. `note` says how and where it was sent, and is required for the
    * same reason a refusal's reason is: nothing else confirms the claim.
@@ -1327,14 +1328,14 @@ export const api = {
       body: { note, momoNetwork },
     }),
 
-  /** Profit and loss from the ledger, over a window of days — or every entry ever recorded. */
+  /** Profit and loss from the ledger, over a window of days, or every entry ever recorded. */
   financeStatement: (days: number | 'all' = 30) =>
     request<FinanceStatement>(`/admin/finance/statement?days=${days}`),
 
   /**
    * Whether the catalogue's believed cost still matches what the supplier
    * actually charges, per product, going only by each product's most recent
-   * sale — see `AdminService.catalogueAccuracy`. Already inside the profit
+   * sale, see `AdminService.catalogueAccuracy`. Already inside the profit
    * total on `financeStatement`; this only shows where a slice of it came
    * from, and which catalogue entries need a price update right now.
    */
@@ -1349,7 +1350,7 @@ export const api = {
         believed: number
         /** Pesewas the supplier actually charged. */
         charged: number
-        /** Pesewas. Positive means the catalogue overstated cost — net extra profit. Negative means a loss. */
+        /** Pesewas. Positive means the catalogue overstated cost, net extra profit. Negative means a loss. */
         diff: number
         lastSoldAt: string
       }[]
@@ -1357,18 +1358,18 @@ export const api = {
 
   /**
    * Active products priced above what the float can currently cover, plus
-   * everything inactive for context — see `AdminService.floatRisk`. Purely
+   * everything inactive for context, see `AdminService.floatRisk`. Purely
    * informational: nothing here changes a product's `active` flag itself,
    * that's still `setProductActive`.
    */
   floatRisk: () =>
     request<{
-      /** Pesewas — what tracked capital says the float should hold right
+      /** Pesewas, what tracked capital says the float should hold right
        *  now, deliberately not the live reading (which only refreshes on an
        *  order and can sit stale for days). Null until a capital move has
        *  ever been logged. */
       floatReference: number | null
-      /** When capital tracking itself began, not how fresh this figure is —
+      /** When capital tracking itself began, not how fresh this figure is:
        *  `floatReference` is recomputed from every logged move up to now. */
       trackedSince: string | null
       atRisk: Product[]
@@ -1386,7 +1387,7 @@ export const api = {
   agentSummary: () =>
     request<{ totalEarned: number; totalVolume: number; agentCount: number }>('/admin/agents/summary'),
 
-  /** One agent's own earnings ledger — the drill-down behind a row on the Users page. */
+  /** One agent's own earnings ledger, the drill-down behind a row on the Users page. */
   agentEarnings: (id: string) =>
     request<{ balance: number; earnings: Earning[] }>(`/admin/agents/${id}/earnings`),
 
@@ -1435,7 +1436,7 @@ export const api = {
    * James saying he moved his own money into or out of the DataHub float.
    * `source` only matters for a top-up: 'reimbursement' means this is money
    * already collected from customers for DataHub's charge, moved across from
-   * Paystack to settle it — not fresh capital. Only that kind reduces
+   * Paystack to settle it, not fresh capital. Only that kind reduces
    * "already spent on bundles" on the Reserve panel.
    */
   logFloatCapital: (
@@ -1449,7 +1450,7 @@ export const api = {
       body: { direction, amount, note, source, idempotencyKey: newIdempotencyKey() },
     }),
 
-  /** Refunds sent from someone's own pocket, not yet taken back out — see the Refunds page. */
+  /** Refunds sent from someone's own pocket, not yet taken back out, see the Refunds page. */
   manualRefundAdvances: () => request<ManualRefundAdvance[]>('/admin/refunds/manual-advances'),
 
   /** Whoever fronted a manual refund has taken that exact amount back out. */
@@ -1510,7 +1511,7 @@ export const api = {
    * Re-read every configured supplier's catalogue and make ours match.
    *
    * Each supplier is reported separately, and one that cannot be reached carries
-   * an `error` while its rows are left exactly as they were — an outage at one
+   * an `error` while its rows are left exactly as they were, an outage at one
    * must not withdraw a catalogue that is fine.
    */
   syncSuppliers: () =>
@@ -1548,7 +1549,7 @@ export const api = {
   }) => request<{ updated: number }>('/admin/products/markup', { method: 'POST', body: input }),
 
   /**
-   * What's waiting to be told to agents — consolidated, one row per product,
+   * What's waiting to be told to agents, consolidated, one row per product,
    * not one per edit. See `PendingPriceChange` on the server.
    */
   pendingPriceChanges: () =>
@@ -1557,11 +1558,11 @@ export const api = {
         productId: string
         name: string
         network: Network | null
-        /** Pesewas agents last knew about — what a round-tripping edit collapses back to. */
+        /** Pesewas agents last knew about, what a round-tripping edit collapses back to. */
         baselinePrice: number
         /** Pesewas right now, after however many edits happened since. */
         currentPrice: number
-        /** Currently-active agents who actually stock this — computed live, not frozen. */
+        /** Currently-active agents who actually stock this, computed live, not frozen. */
         affectedAgents: number
         firstChangedAt: string
       }[]

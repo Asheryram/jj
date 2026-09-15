@@ -14,7 +14,7 @@ import { DomainsService } from '../domains/domains.service'
  * The single rule everything here serves: **an order is not fulfilled and a
  * wallet is not credited until Paystack has told our server the money arrived.**
  * Before this existed, `payWith: 'momo'` created an order and dispatched it
- * immediately — nothing was ever charged, which was the right stand-in while
+ * immediately, nothing was ever charged, which was the right stand-in while
  * there were no keys and is free bundles the moment there are.
  *
  * Two things can report a payment, and neither is the browser:
@@ -24,7 +24,7 @@ import { DomainsService } from '../domains/domains.service'
  *  · our own `verify` call, made when the customer returns to the app and again
  *    by the reconciler for anything left hanging.
  *
- * Both funnel into `applyPaid`, which is idempotent — Paystack retries, and a
+ * Both funnel into `applyPaid`, which is idempotent, Paystack retries, and a
  * customer refreshing the return page is normal.
  */
 @Injectable()
@@ -49,19 +49,19 @@ export class PaymentsService {
    *
    * `agentCode` routes it through that agent's own shop path
    * (`/s/<code>/pay/return`) instead of the bare platform path, so a buyer who
-   * paid from inside an agent's shop lands back inside it — same reasoning,
+   * paid from inside an agent's shop lands back inside it, same reasoning,
    * and same rule of only ever using a code the order already carries, as
    * `SetupTokensService.link`.
    *
    * That was still wrong for an agent's own custom domain: a buyer checking
-   * out on `agentshop.com` got sent back to `PUBLIC_APP_URL/s/<code>/pay/return`
-   * — bounced clean off the agent's own domain onto the platform's, the exact
+   * out on `agentshop.com` got sent back to `PUBLIC_APP_URL/s/<code>/pay/return`,
+   * bounced clean off the agent's own domain onto the platform's, the exact
    * white-labelling the custom-domain feature exists to avoid breaking.
    *
    * `checkoutOrigin` is the browser's own `Origin` header from the checkout
-   * request — never trusted on its own, since a client can send any value
-   * there. It only ever wins here when `DomainsService.resolve` — the same
-   * check CORS itself uses to decide whether to trust an origin at all —
+   * request, never trusted on its own, since a client can send any value
+   * there. It only ever wins here when `DomainsService.resolve`, the same
+   * check CORS itself uses to decide whether to trust an origin at all,
    * says that exact hostname is *this specific* agent's own live, approved
    * domain. Anything else (no origin, a mismatch, a domain that resolves to
    * a different agent) falls through to the existing platform-path behaviour
@@ -102,7 +102,7 @@ export class PaymentsService {
   /**
    * Paystack requires an email address. A guest paying with Mobile Money does
    * not have one, so it is derived from their phone rather than sharing one
-   * inbox across every guest — which would make their dashboard unreadable and
+   * inbox across every guest, which would make their dashboard unreadable and
    * every receipt go to the same place.
    */
   private emailFor(phone: string, real: string | null | undefined): string {
@@ -126,7 +126,7 @@ export class PaymentsService {
     recipient: string
     buyerUserId: string | null
     sellerCode: string | null
-    /** The checkout request's own `Origin` header — see `callbackUrl`. */
+    /** The checkout request's own `Origin` header, see `callbackUrl`. */
     origin?: string
   }): Promise<{ paymentUrl: string }> {
     const email = await this.prisma.user
@@ -188,7 +188,7 @@ export class PaymentsService {
    *
    * Used when a customer reloads or replays checkout. Paystack refuses a second
    * initialise on the same reference, so the stored link is the only way to send
-   * them back to the same payment — handing back a receipt for an unpaid order
+   * them back to the same payment, handing back a receipt for an unpaid order
    * would lose the sale and confuse them about whether they owe anything.
    */
   async paymentUrlForOrder(orderId: string): Promise<string | null> {
@@ -238,8 +238,8 @@ export class PaymentsService {
    * Ask Paystack about a reference and apply whatever they say.
    *
    * This is what the return-from-Paystack page calls, and it is deliberately the
-   * same path the webhook takes. The browser only supplies a reference — a public
-   * string — and everything decided from here comes from Paystack directly.
+   * same path the webhook takes. The browser only supplies a reference, a public
+   * string, and everything decided from here comes from Paystack directly.
    */
   async confirm(reference: string): Promise<{ status: 'paid' | 'pending' | 'failed' }> {
     const payment = await this.prisma.payment.findUnique({ where: { reference } })
@@ -272,7 +272,7 @@ export class PaymentsService {
       return { status: 'paid' }
     }
 
-    // Their terminal failures. Anything else — pending, ongoing — is still in
+    // Their terminal failures. Anything else (pending, ongoing) is still in
     // flight and must not close the order.
     if (['failed', 'abandoned', 'reversed'].includes(result.status)) {
       await this.applyFailed(reference, result.raw)
@@ -288,7 +288,7 @@ export class PaymentsService {
    * The amount is checked against what we asked for, because Paystack will
    * happily report a part payment as a successful charge and an order half paid
    * for must not ship. A mismatch is left pending and shouted about rather than
-   * quietly accepted or quietly dropped — somebody's money is involved either
+   * quietly accepted or quietly dropped, somebody's money is involved either
    * way.
    */
   private async applyPaid(
@@ -311,14 +311,14 @@ export class PaymentsService {
 
       if (detail.currency && detail.currency !== 'GHS') {
         this.log.error(
-          `${reference}: paid in ${detail.currency}, expected GHS — NOT applied, needs a human`,
+          `${reference}: paid in ${detail.currency}, expected GHS, NOT applied, needs a human`,
         )
         return null
       }
 
       if (detail.amount < payment.amount) {
         this.log.error(
-          `${reference}: only ${detail.amount}p of ${payment.amount}p arrived — NOT applied, needs a human`,
+          `${reference}: only ${detail.amount}p of ${payment.amount}p arrived, NOT applied, needs a human`,
         )
         return null
       }
@@ -329,13 +329,13 @@ export class PaymentsService {
        * The webhook and the browser's own return-trip call both land here for
        * the same reference, commonly within the same second, and the read
        * above proves nothing about what is still true by the time this write
-       * runs. `updateMany`'s `WHERE status = 'pending'` is the actual guard —
+       * runs. `updateMany`'s `WHERE status = 'pending'` is the actual guard,
        * Postgres serializes two concurrent claims on the same row, and only
        * the one that lands first actually flips it; the second sees `count:
        * 0` and stops here, before ever crediting a wallet or scheduling a
        * dispatch a second time. A plain `update` (no `WHERE` on `status`)
        * lets both callers "succeed" and both fall through to the credit
-       * below — a double top-up, or a second live DataHub purchase for one
+       * below, a double top-up, or a second live DataHub purchase for one
        * paid order.
        */
       const claim = await tx.payment.updateMany({
@@ -361,7 +361,7 @@ export class PaymentsService {
             idempotencyKey: LedgerService.key('payment', reference, 'fee'),
             kind: 'payment_fee',
             // Negative: this is money Paystack kept out of what the customer
-            // paid. Null when they did not report it, which is not zero — a
+            // paid. Null when they did not report it, which is not zero, a
             // missing figure must not read as a free transaction.
             amount: detail.fee != null ? -detail.fee : 0,
             description: `Paystack fee · ${detail.channel ?? 'unknown channel'}`,
@@ -376,11 +376,11 @@ export class PaymentsService {
       /**
        * Overpaid. Some Mobile Money authorisation prompts let the amount be
        * edited before confirming, so this is a real charge, not just a test
-       * scenario — underpayment gets its own check above and is left for a
+       * scenario, underpayment gets its own check above and is left for a
        * human, but nothing here ever checked the other direction. Every
        * downstream credit below still uses `payment.amount`, which is
        * correct (that is what the top-up or the order sale price actually
-       * is) — but that means the surplus was previously never recorded
+       * is), but that means the surplus was previously never recorded
        * anywhere at all: no ledger entry, no transaction row, no log line,
        * just silently absorbed into whatever Paystack balance holds it.
        */
@@ -400,7 +400,7 @@ export class PaymentsService {
           ],
           tx,
         )
-        this.log.warn(`${reference}: GHS ${(surplus / 100).toFixed(2)} more arrived than requested — booked as surplus`)
+        this.log.warn(`${reference}: GHS ${(surplus / 100).toFixed(2)} more arrived than requested, booked as surplus`)
       }
 
       if (payment.purpose === 'topup' && payment.userId) {
@@ -475,7 +475,7 @@ export class PaymentsService {
     // Outside the transaction, deliberately: dispatch makes an outbound HTTP
     // call, and a transaction must never be held open across one.
     if (orderIdToDispatch) {
-      this.log.log(`${reference} paid — dispatching`)
+      this.log.log(`${reference} paid, dispatching`)
       this.fulfilment.scheduleFor(orderIdToDispatch)
     }
   }
@@ -499,7 +499,7 @@ export class PaymentsService {
       })
     }
 
-    this.log.log(`${reference} not paid — closed`)
+    this.log.log(`${reference} not paid, closed`)
   }
 
   /**
@@ -542,7 +542,7 @@ export class PaymentsService {
   /**
    * Settle a payout from Paystack's own report.
    *
-   * `reference` is the one we sent — `WDR-<withdrawal id>` — so the withdrawal is
+   * `reference` is the one we sent (`WDR-<withdrawal id>`) so the withdrawal is
    * found without trusting anything else in the payload.
    *
    * A failure or reversal returns the money to the agent, because it never
@@ -557,7 +557,7 @@ export class PaymentsService {
    * rather than that it arrived, which would not be.
    *
    * A failure puts the refund back in the queue rather than losing it. The
-   * customer is still owed, so it belongs with the other people waiting — and the
+   * customer is still owed, so it belongs with the other people waiting, and the
    * ledger entry comes off, because nothing left the business.
    */
   private async applyRefundTransfer(
@@ -573,7 +573,7 @@ export class PaymentsService {
     /**
      * Paystack retries, so an exact repeat of an already-applied event must be
      * a no-op. But "already `success`" is not the same claim as "this exact
-     * event already happened" — Paystack can genuinely reverse a transfer
+     * event already happened", Paystack can genuinely reverse a transfer
      * *after* it succeeded (the recipient's Mobile Money account closing is a
      * real case of this), and that `transfer.reversed` is a new event, not a
      * duplicate. Treating every event as settled once `transferStatus` ever
@@ -583,11 +583,11 @@ export class PaymentsService {
     /**
      * A refund an admin already paid by hand (`RefundsService.settleManually`)
      * must never be touched by a real Paystack transfer event for the same
-     * reference arriving later — in *either* direction. `transferStatus` alone
+     * reference arriving later, in *either* direction. `transferStatus` alone
      * cannot tell the two apart: a manual settlement writes `'success'` too,
      * which already excludes a later genuine `transfer.success` below, but
-     * nothing about `'success'` excludes a later `transfer.failed`/`reversed`
-     * — that combination used to flip the refund back to `pending`, delete
+     * nothing about `'success'` excludes a later `transfer.failed`/`reversed`,
+     * that combination used to flip the refund back to `pending`, delete
      * its ledger cost, and leave it sitting in the queue to be paid a real
      * second time, on top of what already went out by hand.
      */
@@ -613,10 +613,10 @@ export class PaymentsService {
 
     await this.prisma.$transaction(async (tx) => {
       /**
-       * Claimed atomically, not read-then-branched — same reasoning as
+       * Claimed atomically, not read-then-branched, same reasoning as
        * `applyTransfer`'s equivalent claim below, verified live the same way.
        * `transferStatus` IS nullable here (never attempted yet), so unlike
-       * the withdrawal side this cannot be a plain `{ not: ... }` — that
+       * the withdrawal side this cannot be a plain `{ not: ... }`, that
        * silently excludes null under SQL's three-valued logic, which was
        * caught once already this session. Verified directly against the
        * database that this explicit form correctly claims from every
@@ -624,7 +624,7 @@ export class PaymentsService {
        * refuses to reclaim from `reversed`/`failed`.
        *
        * `resolvedManually: false` repeats the guard above inside the same
-       * transaction that actually writes — the `alreadyApplied` read a
+       * transaction that actually writes, the `alreadyApplied` read a
        * moment ago proves nothing about what is still true by the time this
        * commits.
        */
@@ -646,7 +646,7 @@ export class PaymentsService {
       if (claim.count === 0) return
 
       // A reversal can arrive after the receipt already said the money was
-      // back — that claim is no longer true, so it is withdrawn here too.
+      // back, that claim is no longer true, so it is withdrawn here too.
       // Harmless when it was never true in the first place (a plain failure).
       await tx.order.update({ where: { id: row.orderId }, data: { refunded: false } })
       // Nothing left the business, so it must not sit on the books as a cost.
@@ -655,7 +655,7 @@ export class PaymentsService {
       })
     })
 
-    this.log.warn(`refund ${row.orderRef} ${event} — back in the queue`)
+    this.log.warn(`refund ${row.orderRef} ${event}, back in the queue`)
     return { applied: true }
   }
 
@@ -683,7 +683,7 @@ export class PaymentsService {
     }
 
     /**
-     * Paystack retries, so a repeat of the exact same event must be a no-op —
+     * Paystack retries, so a repeat of the exact same event must be a no-op,
      * but `paid` is not permanent proof nothing more can happen. A transfer
      * can be reversed *after* landing (the agent's Mobile Money account
      * closing is a real case of this), and that is a new event, not a replay
@@ -695,10 +695,10 @@ export class PaymentsService {
     /**
      * A payout an admin already sent by hand (`WithdrawalsService.settleManually`)
      * must never be touched by a real Paystack transfer event for the same
-     * reference arriving later — in *either* direction. That manual
+     * reference arriving later, in *either* direction. That manual
      * settlement writes `status: 'paid'` too, which already excludes a later
      * genuine `transfer.success` below, but nothing about `status: 'paid'`
-     * excludes a later `transfer.failed`/`reversed` — that combination used
+     * excludes a later `transfer.failed`/`reversed`, that combination used
      * to flip the withdrawal to `failed` and re-credit the agent's balance,
      * on top of whatever was already paid out by hand.
      */
@@ -720,23 +720,23 @@ export class PaymentsService {
       return { applied: true }
     }
 
-    // failed or reversed — the money is back with us, so it goes back to them.
+    // failed or reversed, the money is back with us, so it goes back to them.
     await this.prisma.$transaction(async (tx) => {
       /**
-       * Claimed atomically, not read-then-branched — the same fix `settle()`
+       * Claimed atomically, not read-then-branched, the same fix `settle()`
        * needed for order settlement. The `alreadyApplied` check above reads
        * outside any transaction, so two genuinely concurrent duplicate
        * webhooks (Paystack redelivering the same event) can both pass it and
        * both reach here. Verified live against the database: without this
        * claim, both transactions credited the agent's balance, and the
-       * second one was stopped only by accident — it tripped the unrelated
+       * second one was stopped only by accident, it tripped the unrelated
        * `Earning(userId, reference, type)` unique constraint and rolled back.
        * That is not a real guard; a future change to that constraint would
        * silently remove the only thing preventing a double-credit.
        * `WithdrawalStatus` is a required, non-nullable enum, so a plain
-       * `{ not: 'failed' }` is safe here — no null-exclusion trap.
+       * `{ not: 'failed' }` is safe here, no null-exclusion trap.
        * `resolvedManually: false` repeats the guard above inside the same
-       * transaction that actually writes — the read a moment ago proves
+       * transaction that actually writes, the read a moment ago proves
        * nothing about what is still true by the time this commits.
        */
       const claim = await tx.withdrawal.updateMany({
@@ -764,7 +764,7 @@ export class PaymentsService {
           type: 'withdrawal',
           amount: row.amount,
           balanceAfter: after.balance,
-          description: 'Payout did not reach you — amount returned to your balance',
+          description: 'Payout did not reach you, amount returned to your balance',
           reference: `WDR-${id.slice(0, 8).toUpperCase()}-R`,
           depth: 0,
         },
@@ -776,7 +776,7 @@ export class PaymentsService {
       })
     })
 
-    this.log.warn(`payout ${id} ${event} — GHS ${(row.amount / 100).toFixed(2)} returned to the agent`)
+    this.log.warn(`payout ${id} ${event}, GHS ${(row.amount / 100).toFixed(2)} returned to the agent`)
     return { applied: true }
   }
 }

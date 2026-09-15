@@ -19,7 +19,7 @@ export const NETWORKS: Network[] = ['MTN', 'Telecel', 'AirtelTigo']
  *
  * Deliverability is now decided by the only parties who actually know: the
  * supplier, who refuses what it cannot send, and the network itself. An order
- * that cannot be delivered fails and the money goes back — which is a worse
+ * that cannot be delivered fails and the money goes back, which is a worse
  * outcome than a correct up-front check and a much better one than refusing
  * customers we could have served.
  *
@@ -34,7 +34,7 @@ export const NETWORKS: Network[] = ['MTN', 'Telecel', 'AirtelTigo']
  * The platform's own palette is Deep Blue + Golden Yellow, and both collide with
  * a carrier: our yellow is effectively MTN's, and our blue is close to
  * AirtelTigo's. If chips stayed filled, a yellow pill would read as "MTN" on a
- * page where yellow also means "press this" — so saturated fills belong to the
+ * page where yellow also means "press this", so saturated fills belong to the
  * brand, and carriers keep the dot.
  */
 export const NETWORK_STYLES: Record<Network, { chip: string; dot: string; label: string }> = {
@@ -64,13 +64,13 @@ export type PhoneCheck = { ok: true; phone: string } | { ok: false; reason: stri
  * the only claim this side can make correctly. Which carrier the number is on,
  * and whether a bundle can reach it, are questions for the supplier.
  *
- * NFR-4.3 — the reasons returned here are the exact words shown to the user.
+ * NFR-4.3, the reasons returned here are the exact words shown to the user.
  */
 export function checkPhone(input: string): PhoneCheck {
   const phone = normalisePhone(input)
   if (!phone) return { ok: false, reason: 'Enter the number that should receive this bundle.' }
   if (phone.length < 10) return { ok: false, reason: 'A Ghana number needs 10 digits.' }
-  if (phone.length > 10) return { ok: false, reason: "That's more than 10 digits — check it again." }
+  if (phone.length > 10) return { ok: false, reason: "That's more than 10 digits, check it again." }
   return { ok: true, phone }
 }
 

@@ -29,7 +29,7 @@ export interface ImportResult {
  *
  * Everything in `supplier_products` used to be seeded by hand, which meant the
  * table asserted two things it had no basis for: that a SKU exists, and that it
- * costs a particular amount. Both were wrong in practice — we listed a 500MB MTN
+ * costs a particular amount. Both were wrong in practice, we listed a 500MB MTN
  * bundle and three small Telecel bundles that DataHub does not sell at all,
  * every price we had invented was above the real one, and airtime was
  * attributed to a provider whose API sells data only.
@@ -158,7 +158,7 @@ export class CatalogueImportService {
       if (await this.upsertProduct(sku)) unpriced++
     }
 
-    // Anything from this source that it no longer lists. Not deleted — orders
+    // Anything from this source that it no longer lists. Not deleted, orders
     // and dispatches point at these rows, and a sale that happened still
     // happened. Withdrawn from sale is the whole of what we can honestly say.
     const gone = await this.prisma.supplierProduct.findMany({
@@ -177,7 +177,7 @@ export class CatalogueImportService {
         data: { active: false },
       })
       this.log.warn(
-        `${source.label} no longer lists ${goneCodes.length} SKU(s) — withdrawn: ` +
+        `${source.label} no longer lists ${goneCodes.length} SKU(s), withdrawn: ` +
           goneCodes.join(', '),
       )
     }
@@ -232,7 +232,7 @@ export class CatalogueImportService {
     // up to meet a risen cost.
     //
     // That was `max(price, cost)`, which kept the sale legal and made the margin
-    // exactly zero — quietly, on every affected SKU. A markup is the thing he
+    // exactly zero, quietly, on every affected SKU. A markup is the thing he
     // actually decided; the price is downstream of it and of a cost that moves.
     await this.prisma.product.update({
       where: { id: sku.productId },

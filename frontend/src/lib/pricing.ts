@@ -19,16 +19,16 @@
  *
  * That flat base is the point. Under a cascading model each level added its
  * markup to the next level's cost, so a deep network priced the product out of
- * the market — the customer paid for the length of the chain. Here the customer
+ * the market, the customer paid for the length of the chain. Here the customer
  * pays what their seller chose, and depth is invisible to them.
  *
  * **There is no price ceiling.** An agent sets whatever they like above their own
  * cost. The cascade was the only reason a cap was ever needed, and with it gone
- * an overpriced agent just loses the sale to a cheaper one — competition caps the
+ * an overpriced agent just loses the sale to a cheaper one, competition caps the
  * price more reliably than a number James has to maintain per product.
  *
- * **Referring earns nothing.** An agent can still record who referred them —
- * `uplineCode` below — and see that chain on their own Referrals page, but it is
+ * **Referring earns nothing.** An agent can still record who referred them,
+ * `uplineCode` below, and see that chain on their own Referrals page, but it is
  * purely informational now. A referrer used to be paid a share of James's
  * margin on their recruit's sales; that was removed at the client's request
  * (see `splitFor`), so a sale now splits exactly two ways: the seller and
@@ -87,9 +87,9 @@ export interface SplitShare {
   /**
    * Which slot in the sale this participant occupies:
    *
-   *   0 — the seller
-   *   1 — the seller's referrer
-   *   2 — the platform (James), on any sale made through an agent
+   *   0, the seller
+   *   1, the seller's referrer
+   *   2, the platform (James), on any sale made through an agent
    *
    * A fixed slot, not a position in a chain. It has to be fixed: if James
    * collapsed to 1 whenever there was no referrer, then `depth === 1` would mean
@@ -113,7 +113,7 @@ export interface OrderSplit {
   shares: SplitShare[]
   /**
    * Paystack's processing fee, passed on to the buyer as its own line rather
-   * than folded invisibly into the price — see `checkoutTotal`. Never anyone's
+   * than folded invisibly into the price, see `checkoutTotal`. Never anyone's
    * margin: `salePriceOf` adds it on top of what the seller charged.
    */
   processingFee: Pesewas
@@ -133,13 +133,13 @@ export function costForAgent(_agent: PricingAgent, product: PricedProduct): Pese
 /**
  * What this agent charges. An explicit price wins; otherwise their default
  * markup is applied to the agent price, through the same `priceFromMarkup`
- * James's own prices use — one rule for what a percentage markup means,
+ * James's own prices use, one rule for what a percentage markup means,
  * wherever it is set. Always clamped into the legal band.
  *
  * Not fee-adjusted, on either branch: the price an agent sets is exactly what
  * they mean to charge. Paystack's cut is added on top of the final sale price
  * as its own visible line at checkout (`checkoutTotal`) rather than folded in
- * here, so nothing about what the seller charges — typed or from a markup —
+ * here, so nothing about what the seller charges, typed or from a markup,
  * has to account for it.
  */
 export function resalePriceFor(agent: PricingAgent, product: PricedProduct): Pesewas {
@@ -158,7 +158,7 @@ export function resalePriceFor(agent: PricingAgent, product: PricedProduct): Pes
  * overprices simply loses to the agent who does not. Competition is the ceiling,
  * and it is a better one than a number James has to maintain per product.
  *
- * Selling below cost is still refused — that destroys money on every order and is
+ * Selling below cost is still refused, that destroys money on every order and is
  * never a pricing strategy.
  */
 export function floorAtCost(price: Pesewas, cost: Pesewas): Pesewas {
@@ -181,7 +181,7 @@ export function retailPriceFor(
 }
 
 /**
- * Divide one sale between the supplier, James, and the seller — plus, on top,
+ * Divide one sale between the supplier, James, and the seller, plus, on top,
  * what the buyer pays to cover Paystack's cut.
  *
  * Guarantees `salePrice === supplierCost + sum(shares.margin) + processingFee`,
@@ -189,8 +189,8 @@ export function retailPriceFor(
  *
  * A referrer used to take a slice of James's margin on the people they signed up.
  * That was removed at the client's request: an agent earns from what they sell and
- * nothing else. Who invited whom is still recorded — it is how an agent sees the
- * people they brought in — it simply no longer moves money.
+ * nothing else. Who invited whom is still recorded, it is how an agent sees the
+ * people they brought in, it simply no longer moves money.
  */
 export function splitFor(
   product: PricedProduct,
@@ -248,7 +248,7 @@ export function splitFor(
     name: admin.name,
     role: 'admin',
     // Still slot 2, not slot 1. The numbering is fixed so a split stored while
-    // referrers were paid keeps meaning what it meant — see SplitShare.depth.
+    // referrers were paid keeps meaning what it meant, see SplitShare.depth.
     depth: ADMIN_DEPTH,
     paid: product.supplierCost,
     charged: product.adminPrice,
@@ -262,7 +262,7 @@ export function splitFor(
  * Layers the checkout surcharge onto an otherwise-complete split.
  *
  * Kept separate from the rest of `splitFor` so what the seller and James
- * actually earn is computed exactly the same regardless of the fee rate — the
+ * actually earn is computed exactly the same regardless of the fee rate, the
  * surcharge is added afterward, on the total they charged, and is never
  * counted as anyone's margin.
  */
@@ -300,7 +300,7 @@ export function splitDiscrepancy(salePrice: Pesewas, split: OrderSplit): Pesewas
 // ─── Price editing rules (FR-3.4) ───────────────────────────────────────────
 
 /**
- * The legal window for an agent's price. Open-ended upwards — only the floor is
+ * The legal window for an agent's price. Open-ended upwards, only the floor is
  * enforced, so this is a floor with a name rather than a band. Kept as an object
  * because callers pass it around and read `.floor`.
  */
@@ -309,7 +309,7 @@ export interface PriceBand {
 }
 
 /**
- * The legal window for an agent's own price. The floor is James's agent price —
+ * The legal window for an agent's own price. The floor is James's agent price,
  * the same for every agent, however they joined.
  */
 export function priceBandFor(_agent: PricingAgent, product: PricedProduct): PriceBand {
@@ -317,7 +317,7 @@ export function priceBandFor(_agent: PricingAgent, product: PricedProduct): Pric
 }
 
 /**
- * NFR-4.3 — the returned string is shown to the agent verbatim, so it explains
+ * NFR-4.3, the returned string is shown to the agent verbatim, so it explains
  * the rule rather than naming it.
  */
 export function validateResalePrice(price: Pesewas | null, band: PriceBand): string | null {
@@ -336,7 +336,7 @@ export function validateResalePrice(price: Pesewas | null, band: PriceBand): str
 /**
  * Basis points, not percent. 1500 = 15.00%.
  *
- * Percent as an integer is too coarse — a price typed as GHS 6.40 against a cost
+ * Percent as an integer is too coarse, a price typed as GHS 6.40 against a cost
  * of GHS 4.70 is a markup of 36.17%, and rounding that to 36% moves the price by
  * a pesewa every time the cost is refreshed. Basis points hold it still.
  */
@@ -345,7 +345,7 @@ export type BasisPoints = number
 /**
  * A fee rate is a fraction between 0 and (just under) 100%. Clamped rather than
  * trusted, because these are pure functions and 10,000 or more basis points
- * would divide by zero or go negative — a data problem, not something either
+ * would divide by zero or go negative, a data problem, not something either
  * caller should have to guard against before calling in.
  */
 function clampFeeBp(feeBp: BasisPoints): BasisPoints {
@@ -357,7 +357,7 @@ function clampFeeBp(feeBp: BasisPoints): BasisPoints {
  * The price a markup implies, floored at cost.
  *
  * Not fee-aware. Paystack's cut is added afterward, as its own visible line at
- * checkout (`checkoutTotal`) rather than baked into this number — so a price
+ * checkout (`checkoutTotal`) rather than baked into this number, so a price
  * set here means exactly what it says, and this is the plain markup with
  * nothing gone missing into a processor's fee.
  *
@@ -395,18 +395,18 @@ export interface CheckoutTotal {
  * What the buyer pays: the listed price, plus Paystack's cut shown as its own
  * line and added on top.
  *
- * Deliberately simple and additive — `subtotal + subtotal × feeBp` — not the
+ * Deliberately simple and additive (`subtotal + subtotal × feeBp`) not the
  * gross-up division this used to be. The point of a visible fee line is that a
  * buyer can see exactly what it costs; recalculating the price to hide the fee
  * inside one number defeats that, however precisely it protects the margin.
  *
  * Because nothing about the seller's price changes any more, their margin is
- * never eroded by the fee in the first place — the buyer's surcharge covers it
+ * never eroded by the fee in the first place, the buyer's surcharge covers it
  * instead, which is the whole reason to add this line rather than adjust that
  * price.
  *
  * Rounds up, so the fee collected never falls short of what the processor
- * actually charges — any rounding slack belongs to the platform, never taken
+ * actually charges, any rounding slack belongs to the platform, never taken
  * from the buyer's short.
  */
 export function checkoutTotal(subtotal: Pesewas, feeBp: BasisPoints = 0): CheckoutTotal {
@@ -418,7 +418,7 @@ export function checkoutTotal(subtotal: Pesewas, feeBp: BasisPoints = 0): Checko
 /** For display: 1517 → "15.17%", 1500 → "15%". */
 export function formatMarkup(markupBp: BasisPoints): string {
   // A non-finite markup would render as the literal text "NaN%" on a price row.
-  if (!Number.isFinite(markupBp)) return '—'
+  if (!Number.isFinite(markupBp)) return '-'
   const percent = markupBp / 100
   return `${Number.isInteger(percent) ? percent : percent.toFixed(2)}%`
 }

@@ -3,15 +3,15 @@ import type { Category, Network } from '@prisma/client'
 /**
  * One SKU as a supplier offers it, normalised.
  *
- * Every source speaks its own dialect — DataHub returns networks with nested
+ * Every source speaks its own dialect, DataHub returns networks with nested
  * bundles keyed by `sizeInMB`, an airtime wholesaler will return something else
- * entirely — so translation happens inside each source and the importer only
+ * entirely, so translation happens inside each source and the importer only
  * ever sees this shape.
  */
 export interface SourceSku {
   /** Unique across all sources. Namespace it with the provider. */
   code: string
-  /** Our product id. Stable across syncs — it is what order history points at. */
+  /** Our product id. Stable across syncs, it is what order history points at. */
   productId: string
   category: Category
   network: Network | null
@@ -32,7 +32,7 @@ export interface SourceSku {
 /**
  * Somewhere we buy from.
  *
- * DataHub GH is the only one implemented, and it sells data bundles only — so
+ * DataHub GH is the only one implemented, and it sells data bundles only, so
  * airtime, voice and SMS will have to come from somewhere else, and this is the
  * seam they arrive through. A source owns its own vocabulary, its own network
  * mapping and its own idea of what a SKU is called; the importer owns what
@@ -43,7 +43,7 @@ export interface CatalogueSource {
   readonly provider: string
   /** For log lines and admin screens. */
   readonly label: string
-  /** False when credentials are missing — the source is skipped, not failed. */
+  /** False when credentials are missing, the source is skipped, not failed. */
   readonly configured: boolean
   /** Throws with a human-readable reason if the supplier cannot be reached. */
   fetch(): Promise<SourceSku[]>

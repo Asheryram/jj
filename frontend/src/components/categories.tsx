@@ -9,7 +9,7 @@ import {
   VoiceIcon,
 } from './icons'
 
-/** FR-3.1 — the six categories, described once and reused everywhere. */
+/** FR-3.1, the six categories, described once and reused everywhere. */
 export const CATEGORY_META: Record<
   Category,
   { label: string; short: string; blurb: string; icon: (p: { className?: string }) => ReactNode; accent: string }

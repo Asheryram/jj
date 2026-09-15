@@ -22,7 +22,7 @@ export interface PlatformSettings {
   /**
    * Whether a new agent can start selling immediately.
    *
-   * On, and signing up is enough — which is what most of the day looks like, and
+   * On, and signing up is enough, which is what most of the day looks like, and
    * saves an agent waiting on somebody to notice them. Off, and every application
    * waits in the queue for a decision, which is what you want when you are being
    * signed up by people you do not recognise.
@@ -39,7 +39,7 @@ export interface PlatformSettings {
    * email: `floatWatchAt` while there is still time to top up calmly,
    * `floatRiskAt` when the next few orders are at stake.
    *
-   * Both default to zero — off — because a made-up threshold would either cry
+   * Both default to zero (off) because a made-up threshold would either cry
    * wolf or say nothing, and only James knows a day's normal volume.
    */
   floatWatchAt: number
@@ -48,14 +48,14 @@ export interface PlatformSettings {
    * What Paystack keeps on a Mobile Money payment, in basis points.
    *
    * Shown to the buyer as its own line at checkout and added on top of the
-   * listed price — see `checkoutTotal` in the pricing domain — rather than
+   * listed price (see `checkoutTotal` in the pricing domain) rather than
    * folded invisibly into it. Basis points rather than a whole percent,
    * because Paystack's real rate is not always a round number and this is
    * meant to track it, not approximate it.
    *
    * Defaults to 200 (2%), which is what their Mobile Money transactions have
    * shown so far. `scripts/money-audit.ts` reports the *observed* rate from
-   * real payments once there are any — check it occasionally and nudge this to
+   * real payments once there are any, check it occasionally and nudge this to
    * match, rather than trusting the default forever.
    */
   paystackFeeBp: number
@@ -64,19 +64,19 @@ export interface PlatformSettings {
    * shortfall.
    *
    * Off by default. This does not change what "should be at Paystack" means
-   * anywhere — that is always all-time, from this platform's own records,
+   * anywhere, that is always all-time, from this platform's own records,
    * everywhere, regardless of this setting (see `SolvencyService`). All this
    * decides is whether the background check ever calls Paystack's live
    * balance at all: off, and it never does, and no email can ever fire. On,
    * and every 30 minutes the live balance is compared against that same
-   * all-time figure, and a real shortfall — the live balance reading lower
-   * than expected — reaches an admin's inbox.
+   * all-time figure, and a real shortfall, the live balance reading lower
+   * than expected, reaches an admin's inbox.
    */
   paystackBusinessAccount: boolean
   /**
    * The smallest amount worth a manual MoMo transfer, in pesewas (FR-2.6).
    *
-   * Was a hardcoded constant on `WithdrawalsService` — moved here so it is
+   * Was a hardcoded constant on `WithdrawalsService`, moved here so it is
    * actually the admin's to set, rather than a number nobody but a developer
    * could change.
    */
@@ -84,19 +84,19 @@ export interface PlatformSettings {
   /**
    * The admin's WhatsApp channel invite link, shown to agents.
    *
-   * Null means nothing is set — no banner, no popup. Not validated beyond
+   * Null means nothing is set, no banner, no popup. Not validated beyond
    * "looks like a link": this only ever opens in a new tab, so a bad value is
    * merely a dead link, never a place money or a password could go.
    */
   whatsappChannelUrl: string | null
   /**
-   * A warning banner shown across the whole site — agents, customers and
-   * guests alike — for something like "MTN is running slow, orders are still
+   * A warning banner shown across the whole site, agents, customers and
+   * guests alike, for something like "MTN is running slow, orders are still
    * going through." Null means nothing is set, so no banner shows at all.
    *
    * Deliberately not a popup: this is meant to sit passively in view for as
-   * long as the situation lasts, not interrupt anyone once and be dismissed
-   * — a visitor who comes back an hour into an ongoing issue should still
+   * long as the situation lasts, not interrupt anyone once and be dismissed,
+   * a visitor who comes back an hour into an ongoing issue should still
    * see it. It stays until James clears it himself; nothing here expires it
    * on its own.
    */
@@ -127,7 +127,7 @@ const NUMERIC_KEYS = [] as readonly string[]
 /** Keys holding an amount of money in pesewas, which has no upper bound. */
 const MONEY_KEYS = ['floatWatchAt', 'floatRiskAt', 'minWithdrawal'] as const
 
-/** Keys holding a fee rate in basis points — bounded, unlike a plain amount. */
+/** Keys holding a fee rate in basis points, bounded, unlike a plain amount. */
 const FEE_BP_KEYS = ['paystackFeeBp'] as const
 
 /** Keys holding free text rather than a number or a switch. */
@@ -161,11 +161,11 @@ export class SettingsService {
    * Read one setting by key, parsed the same way `all()` parses it.
    *
    * This used to only distinguish `NUMERIC_KEYS` (percent) from everything
-   * else (bool) — silently wrong for `MONEY_KEYS`/`FEE_BP_KEYS`, since a
+   * else (bool), silently wrong for `MONEY_KEYS`/`FEE_BP_KEYS`, since a
    * stored pesewa amount or basis-point rate is neither a percent nor a
    * boolean, and `bool()` would fall back to the hardcoded default every
    * time. Dormant only because nothing outside `all()` has called `get()` on
-   * one of those keys yet — a landmine, not a live bug, but exactly the kind
+   * one of those keys yet, a landmine, not a live bug, but exactly the kind
    * of thing that fails silently the day something does.
    */
   async get<K extends keyof PlatformSettings>(
@@ -201,10 +201,10 @@ export class SettingsService {
       }
       if (text.length > 300) {
         throw new ValidationError(
-          `That's too long — keep it to 300 characters or fewer${text.length ? ` (currently ${text.length})` : ''}.`,
+          `That's too long, keep it to 300 characters or fewer${text.length ? ` (currently ${text.length})` : ''}.`,
         )
       }
-      // An empty string clears it — stored as such rather than deleting the row,
+      // An empty string clears it, stored as such rather than deleting the row,
       // matching how every other setting here is always upserted, never removed.
       await this.prisma.setting.upsert({
         where: { key },
@@ -226,7 +226,7 @@ export class SettingsService {
        * The two describe a falling balance passing two marks, so a risk level
        * above the watch level would fire the severe alert first and the mild one
        * never. Checked against whichever value is already stored, because they
-       * are set one at a time. Scoped to these two keys specifically — folding
+       * are set one at a time. Scoped to these two keys specifically, folding
        * every `MONEY_KEYS` write through this check would make setting, say,
        * `minWithdrawal` fail on a stale float-threshold combination that has
        * nothing to do with it.
@@ -237,7 +237,7 @@ export class SettingsService {
         const risk = key === 'floatRiskAt' ? amount : current.floatRiskAt
         if (watch > 0 && risk > 0 && risk > watch) {
           throw new ValidationError(
-            'The at-risk amount has to be lower than the watch amount — it is the more urgent of the two.',
+            'The at-risk amount has to be lower than the watch amount, it is the more urgent of the two.',
           )
         }
       }
@@ -252,12 +252,12 @@ export class SettingsService {
 
     if ((FEE_BP_KEYS as readonly string[]).includes(key)) {
       const bp = Number(value)
-      // 10,000 basis points is the whole price — a fee rate that size or larger
+      // 10,000 basis points is the whole price, a fee rate that size or larger
       // divides by zero or goes negative in `priceFromMarkup`, so it is refused
       // here rather than left to produce a nonsense price later.
       if (!Number.isInteger(bp) || bp < 0 || bp >= 10_000) {
         throw new ValidationError(
-          'A fee rate is a whole number of basis points, from 0 up to (not including) 10,000 — 200 is 2%.',
+          'A fee rate is a whole number of basis points, from 0 up to (not including) 10,000, 200 is 2%.',
         )
       }
       await this.prisma.setting.upsert({
@@ -296,7 +296,7 @@ export class SettingsService {
  * A stored amount in pesewas, or the default.
  *
  * Anything not a whole number at or above zero falls back rather than being
- * rounded into something plausible — a corrupted threshold that silently became
+ * rounded into something plausible, a corrupted threshold that silently became
  * a real number would either alert constantly or never, and both are worse than
  * the feature being off.
  */
@@ -326,7 +326,7 @@ function feeBp(value: unknown, fallback: number): number {
   return Math.round(parsed)
 }
 
-/** Free text, or null for "not set" — an empty string means the same thing. */
+/** Free text, or null for "not set", an empty string means the same thing. */
 function str(value: unknown, fallback: string | null): string | null {
   if (typeof value !== 'string') return fallback
   const trimmed = value.trim()

@@ -28,7 +28,7 @@ export default function Catalogue() {
    * Only categories that actually have something on sale get a tab.
    *
    * The six were hard-coded when the catalogue was seed data and every category
-   * was guaranteed to be full. It is supplier-driven now — DataHub GH sells data
+   * was guaranteed to be full. It is supplier-driven now, DataHub GH sells data
    * bundles, so airtime, voice, SMS, AFA and result checkers have nothing behind
    * them, and a tab leading to an empty grid reads as a broken shop rather than
    * as a service James does not currently offer. Wire up a supplier for one and
@@ -52,7 +52,7 @@ export default function Catalogue() {
 
   /**
    * Switching category without clearing `network` left a filter active that
-   * has nothing to do with the tab just opened — a customer on "Data,
+   * has nothing to do with the tab just opened, a customer on "Data,
    * AirtelTigo" tapping "Airtime" got an empty grid with no visible filter
    * to explain why, since AirtelTigo airtime may not exist while the network
    * pill itself was gone from view for a category with only one network.
@@ -91,7 +91,7 @@ export default function Catalogue() {
 
   return (
     <>
-      {/* Category tabs — horizontally scrollable on phones. Hidden entirely when
+      {/* Category tabs, horizontally scrollable on phones. Hidden entirely when
           only one category is on sale: a lone tab is a label, not a choice. */}
       {categories.length > 1 && (
       <div className="-mx-4 mb-4 overflow-x-auto px-4 pb-1">
@@ -157,7 +157,7 @@ export default function Catalogue() {
         </div>
       )}
 
-      {/* NFR-7.1 — the disclaimer sits with the product, not only in the footer */}
+      {/* NFR-7.1, the disclaimer sits with the product, not only in the footer */}
       {isChecker && (
         <div className="mb-5">
           <Callout
@@ -243,7 +243,7 @@ function ProductCard({
               </p>
             )}
           </div>
-          {/* Golden Yellow marks the action on the card — the one thing the
+          {/* Golden Yellow marks the action on the card, the one thing the
               buyer is here to press. */}
           <Badge tone="accent" className="gap-0.5">
             Buy <ChevronRightIcon className="size-3.5" />

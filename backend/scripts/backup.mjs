@@ -4,7 +4,7 @@
  * This exists because the free tier of every managed Postgres either keeps no
  * restorable history or keeps a few hours of it, and this database is not the
  * kind you can shrug about losing. It holds the ledger, every agent's balance
- * and every payment reference — the only record of who is owed what. Losing it
+ * and every payment reference, the only record of who is owed what. Losing it
  * does not mean re-entering data, it means not knowing.
  *
  * Runs pg_dump inside a throwaway Postgres container, so no client tools need to
@@ -58,13 +58,13 @@ const outDir = (() => {
 })()
 mkdirSync(outDir, { recursive: true })
 
-// Sortable, filename-safe, and no colons — Windows rejects those in a filename.
+// Sortable, filename-safe, and no colons, Windows rejects those in a filename.
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 19)
 const outFile = join(outDir, `jdc-${stamp}.sql.gz`)
 
 /**
  * A local database is reached through the host, not through the container's own
- * loopback — inside the container `localhost` is the container.
+ * loopback, inside the container `localhost` is the container.
  */
 const hostAdjusted = url
   .replace('@localhost:', '@host.docker.internal:')
@@ -74,8 +74,8 @@ const hostAdjusted = url
  * Strip the parameters Prisma understands and libpq does not.
  *
  * `?schema=public` is Prisma's own; pg_dump refuses the whole connection string
- * over it. The pooling ones are equally meaningless to pg_dump. Anything left —
- * `sslmode` in particular, which every hosted provider needs — is passed
+ * over it. The pooling ones are equally meaningless to pg_dump. Anything left,
+ * `sslmode` in particular, which every hosted provider needs, is passed
  * through untouched.
  */
 const PRISMA_ONLY = ['schema', 'connection_limit', 'pool_timeout', 'pgbouncer', 'socket_timeout']
@@ -142,7 +142,7 @@ if (code !== 0) {
 
 const { size } = statSync(outFile)
 if (size < 1024) {
-  console.error(`\nThe file is only ${size} bytes. That is not a real backup — treat it as failed.`)
+  console.error(`\nThe file is only ${size} bytes. That is not a real backup, treat it as failed.`)
   process.exit(1)
 }
 

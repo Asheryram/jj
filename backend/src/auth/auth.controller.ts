@@ -4,7 +4,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
  * `@SkipThrottle()` takes the throttler names, and must.
  *
  * With no argument it defaults to `{ default: true }`, which matches nothing here
- * because the throttlers are named `burst` and `grind` — so the decorator was
+ * because the throttlers are named `burst` and `grind`, so the decorator was
  * silently doing nothing. The route it was protecting is `/auth/me`, which the app
  * calls on every page load, and the store clears the token whenever that call
  * fails: about ten page views in a minute quietly signed the user out and dropped
@@ -107,7 +107,7 @@ export class AuthController {
    * Low, because the cost of abuse here lands on someone else.
    *
    * Every call sends mail to a real inbox. Unlimited, it is a way to bury a
-   * person's email under reset links they did not ask for — and to burn the
+   * person's email under reset links they did not ask for, and to burn the
    * daily send quota so the ones that matter never arrive. There is already a
    * per-address wait inside `requestReset`; this is the per-caller half.
    */
@@ -150,7 +150,7 @@ export class AuthController {
    * Swap the session for another of this person's profiles.
    *
    * No password: the caller already proved who they are, and every profile under
-   * one email belongs to one person by construction — registration refuses an
+   * one email belongs to one person by construction, registration refuses an
    * address that already exists, and only the owner can add a profile.
    *
    * Not throttled with the sign-in routes. It cannot be used to guess anything,
@@ -189,7 +189,7 @@ export class AuthController {
   }
 
   /**
-   * Give yourself another profile — an agent one to see what agents see, or a
+   * Give yourself another profile, an agent one to see what agents see, or a
    * second admin one if you run the platform.
    *
    * Creates no password and sends no link: this account already has both.
@@ -206,7 +206,7 @@ export class AuthController {
    * Called on page load to turn a stored token back into a session.
    *
    * Not counted. This runs on every page load and every tab, so a shared office
-   * address doing ordinary work would trip a limit meant for someone guessing —
+   * address doing ordinary work would trip a limit meant for someone guessing,
    * and the failure mode is the platform locking out the people running it. There
    * is nothing to guess here anyway: it validates a token it was handed.
    */

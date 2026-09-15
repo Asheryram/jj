@@ -1,12 +1,12 @@
 /**
- * Clears every transactional record — orders, payments, dispatches, ledger
- * entries, earnings, withdrawals, refunds — and resets agent/customer wallet
+ * Clears every transactional record, orders, payments, dispatches, ledger
+ * entries, earnings, withdrawals, refunds, and resets agent/customer wallet
  * balances and float/solvency tracking state back to a blank slate.
  *
- * Deliberately leaves untouched: the users table (rows, roles, phones — per
+ * Deliberately leaves untouched: the users table (rows, roles, phones, per
  * instruction), the product/supplier catalogue, agent custom prices,
  * branding, and every configuration setting (paystackFeeBp, minWithdrawal,
- * paystackBusinessAccount, floatWatchAt/RiskAt, agentsAutoApprove, etc.) —
+ * paystackBusinessAccount, floatWatchAt/RiskAt, agentsAutoApprove, etc.),
  * those are deliberate configuration, not transaction history.
  */
 import 'dotenv/config'

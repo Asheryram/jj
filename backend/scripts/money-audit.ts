@@ -1,7 +1,7 @@
 /**
  * Audit every place money is recorded, and report where the books disagree.
  *
- * Not a test of the code paths — those can be right and the data still wrong,
+ * Not a test of the code paths, those can be right and the data still wrong,
  * because a bug that has already run leaves its damage behind after the fix.
  * This reads the ledgers as they stand and checks the claims the system makes
  * about them.
@@ -35,7 +35,7 @@ function report(check: string, ok: boolean, detail: string) {
 }
 
 /**
- * 1 — The split invariant.
+ * 1, The split invariant.
  *
  * Every order carries a snapshot of who earned what. The customer's money must
  * equal the supplier's cost plus every margin, exactly. A mismatch means money
@@ -58,10 +58,10 @@ async function splitsBalance() {
 }
 
 /**
- * 2 — Agent balances match their ledgers.
+ * 2, Agent balances match their ledgers.
  *
  * A balance is a cached total. The ledger is the truth. If they disagree, either
- * a credit was applied twice or one went missing — and the balance is what an
+ * a credit was applied twice or one went missing, and the balance is what an
  * agent gets paid from.
  */
 async function balancesMatchLedgers() {
@@ -93,10 +93,10 @@ async function balancesMatchLedgers() {
 }
 
 /**
- * 2b — Every agent credit traces to a real, completed order that actually
+ * 2b, Every agent credit traces to a real, completed order that actually
  * shares with them, and every such order produced exactly one.
  *
- * The check above can only ever say a balance matches its OWN ledger rows —
+ * The check above can only ever say a balance matches its OWN ledger rows,
  * `creditAgent`/`reverseAgent` always pair a balance change with its own
  * Earning row in the same transaction, so a duplicated or fabricated event
  * (two settlements racing the same order, or a reversal running against an
@@ -153,7 +153,7 @@ async function agentCreditsMatchOrders() {
 }
 
 /**
- * 3 — Nothing was delivered without being paid for.
+ * 3, Nothing was delivered without being paid for.
  *
  * The bug this exists for actually happened: unpaid orders were parked in
  * `pending`, and the restart-recovery sweep treated that as "never dispatched"
@@ -184,10 +184,10 @@ async function nothingDeliveredUnpaid() {
 }
 
 /**
- * 4 — Every failed order that took money has been dealt with.
+ * 4, Every failed order that took money has been dealt with.
  *
  * Refunds are authorised by a person rather than paid automatically, so "not yet
- * refunded" is a legitimate state — but "neither refunded nor queued nor refused"
+ * refunded" is a legitimate state, but "neither refunded nor queued nor refused"
  * is not. That is money taken from somebody with nothing at all standing against
  * it, and nothing would ever surface it.
  */
@@ -232,9 +232,9 @@ async function failedOrdersAccountedFor() {
 }
 
 /**
- * 5 — Paid payments are matched to something.
+ * 5, Paid payments are matched to something.
  *
- * A paid payment with no order and no top-up is money received against nothing —
+ * A paid payment with no order and no top-up is money received against nothing,
  * the customer is owed either a bundle or a refund.
  */
 async function paymentsAreAttributed() {
@@ -251,9 +251,9 @@ async function paymentsAreAttributed() {
 }
 
 /**
- * 6 — What the platform owes, against what it holds.
+ * 6, What the platform owes, against what it holds.
  *
- * Not an invariant — a solvency reading, and the number James most needs.
+ * Not an invariant, a solvency reading, and the number James most needs.
  * Agent balances and unclaimed refunds are liabilities: real money owed to other
  * people. If they exceed the Paystack balance, a payout run cannot be honoured.
  */
@@ -278,14 +278,14 @@ async function solvency() {
     // A withdrawal debits the agent's balance the moment it is requested (see
     // WithdrawalsService.request), so it has already left `owedToAgents` below
     // by the time it shows up here. It stays owed for as long as the actual
-    // Paystack transfer hasn't landed — not just while `status` reads
+    // Paystack transfer hasn't landed, not just while `status` reads
     // `pending`. Once approved, `status` moves on, but the transfer can still
     // be stuck on `otp`, `unknown`, `manual`, or simply not attempted yet
-    // (`transferStatus` null) for a real stretch of time — matching
+    // (`transferStatus` null) for a real stretch of time, matching
     // `SolvencyService.position()`. The explicit `transferStatus: null` arm
     // is deliberate: `NOT: { transferStatus: 'success' }` alone silently
-    // excludes null under SQL's three-valued logic — verified directly
-    // against the database — which would undercount every withdrawal not yet
+    // excludes null under SQL's three-valued logic, verified directly
+    // against the database, which would undercount every withdrawal not yet
     // attempted.
     prisma.withdrawal.aggregate({
       where: {
@@ -299,14 +299,14 @@ async function solvency() {
       },
       _sum: { amount: true },
     }),
-    // Paid for and not yet delivered — either a bundle or a refund is still
+    // Paid for and not yet delivered, either a bundle or a refund is still
     // owed, either way it is not free to spend.
     prisma.order.aggregate({
       where: { status: { in: ['awaiting_approval', 'processing'] } },
       _sum: { salePrice: true },
     }),
     // Same "still owed until the transfer actually lands" reasoning as
-    // withdrawals above, scoped to `method: 'transfer'` — a wallet or
+    // withdrawals above, scoped to `method: 'transfer'`, a wallet or
     // claimable refund already moved the money at approval. Same explicit
     // null handling, for the same reason.
     prisma.refundRequest.aggregate({
@@ -323,7 +323,7 @@ async function solvency() {
       _sum: { amount: true },
     }),
     // A refund someone paid out of their own pocket because Paystack refused
-    // the transfer — see RefundsService.settleManually and
+    // the transfer, see RefundsService.settleManually and
     // FloatMonitorService.outstandingManualRefunds.
     prisma.ledgerEntry.findMany({
       where: { kind: 'capital_in', orderRef: { not: null } },
@@ -333,7 +333,7 @@ async function solvency() {
       where: { kind: 'capital_out', orderRef: { not: null } },
       select: { orderRef: true },
     }),
-    // The identical pattern, one column over — see WithdrawalsService.settleManually
+    // The identical pattern, one column over, see WithdrawalsService.settleManually
     // and WithdrawalsService.outstandingManualAdvances. A payout settled this
     // way moves to `status: 'paid'` and so drops out of the "stuck payouts"
     // query above; what's still owed is to whoever personally covered it,
@@ -393,27 +393,27 @@ async function solvency() {
   if (totalOwed > 0) {
     notes.push(
       `${ghs(totalOwed)} is owed to agents, customers, and whoever fronted a manual refund. That ` +
-        'money is not segregated — it sits in the same Paystack balance as float and profit, so ' +
+        'money is not segregated, it sits in the same Paystack balance as float and profit, so ' +
         'spending the balance down can leave a payout unpayable.',
     )
   }
   if (feesPaid > 0 && collected > 0) {
     notes.push(
       `Paystack fees run at ${((feesPaid / collected) * 100).toFixed(2)}% of collections. Charged ` +
-        'to the buyer as a checkout surcharge, not out of any margin here — see `checkoutTotal`.',
+        'to the buyer as a checkout surcharge, not out of any margin here, see `checkoutTotal`.',
     )
   }
 }
 
 /**
- * 7 — Prices that cannot cover their own cost.
+ * 7, Prices that cannot cover their own cost.
  *
- * Paystack's fee no longer comes out of this margin — it is charged to the
+ * Paystack's fee no longer comes out of this margin, it is charged to the
  * buyer as a separate checkout surcharge (`checkoutTotal`) and never touches
  * what a price has to clear. So the only real question left is the plain one:
  * does the price beat what the bundle actually costs.
  *
- * "Actually costs" is not always the catalogue's `supplierCost` — a price is
+ * "Actually costs" is not always the catalogue's `supplierCost`, a price is
  * allowed to sit below catalogue as long as it still clears the last real
  * charge a completed order actually paid (`AdminService.setTier`'s floor).
  * Falls back to `supplierCost` for a product with no real charge on record
@@ -456,7 +456,7 @@ async function pricesCoverCost() {
 }
 
 /**
- * 8 — The ledger agrees with the tables it was derived from.
+ * 8, The ledger agrees with the tables it was derived from.
  *
  * The ledger is the reporting surface, so a gap in it misstates profit while
  * every underlying record looks fine. This checks it against the sources rather
@@ -472,16 +472,16 @@ async function ledgerMatchesSources() {
   const [completedOrders, paidPayments, approvedOrPaidPayouts, rejectedWithCharge] = await Promise.all([
     prisma.order.count({ where: { status: 'completed' } }),
     prisma.payment.count({ where: { status: 'paid', purpose: 'order' } }),
-    // Not `status: 'approved'` alone — a payout that's since confirmed `paid`
+    // Not `status: 'approved'` alone, a payout that's since confirmed `paid`
     // still carries its `payout` ledger line (booked once, at approval, and
     // never touched again unless the transfer later fails and is reversed,
     // which deletes it). Counting only `approved` undercounts the moment any
-    // payout actually completes — dormant while nothing had reached `paid`,
+    // payout actually completes, dormant while nothing had reached `paid`,
     // real the moment one does. See `WithdrawalsService.decide`/`failPayout`.
     prisma.withdrawal.count({ where: { status: { in: ['approved', 'paid'] } } }),
     // `FulfilmentService.settle`'s rejected branch books a supplier_cost line
     // too, whenever DataHub had already accepted the purchase and deducted
-    // the float before the final answer turned out to be a rejection — real
+    // the float before the final answer turned out to be a rejection, real
     // money spent on an order that did not complete. One line per *order*
     // (the ledger key is `order:<ref>:supplier_cost`, not per dispatch
     // attempt), so this counts orders, not SupplierDispatch rows.
@@ -511,7 +511,7 @@ async function ledgerMatchesSources() {
   report(
     'revenue lines match paid orders and wallet sales',
     got('revenue') === paidPayments + walletSales,
-    `${got('revenue')} revenue lines vs ${paidPayments + walletSales} paid sales — more means ` +
+    `${got('revenue')} revenue lines vs ${paidPayments + walletSales} paid sales, more means ` +
       'double-counting, fewer means a sale with no revenue booked (a wallet order settling ' +
       "without FulfilmentService.recordDelivered's wallet branch running is exactly this)",
   )
@@ -522,7 +522,7 @@ async function ledgerMatchesSources() {
   )
 
   // Duplicate keys are impossible by index, but a wrongly *derived* key would let
-  // two events collapse into one — the opposite failure, and invisible to the
+  // two events collapse into one, the opposite failure, and invisible to the
   // unique constraint.
   const distinct = await prisma.ledgerEntry.findMany({ select: { idempotencyKey: true } })
   const unique = new Set(distinct.map((row) => row.idempotencyKey))
@@ -534,7 +534,7 @@ async function ledgerMatchesSources() {
 }
 
 /**
- * 9 — What the business actually made.
+ * 9, What the business actually made.
  *
  * Not a check. The reason the rest of this file exists.
  */

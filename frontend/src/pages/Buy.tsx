@@ -40,7 +40,7 @@ import {
 const STEPS = ['Bundle', 'Number', 'Confirm', 'Done']
 
 /**
- * NFR-4.2 — four steps, and the stepper says so out loud. Step 1 is already
+ * NFR-4.2, four steps, and the stepper says so out loud. Step 1 is already
  * satisfied by arriving here with a product chosen.
  *
  * Works signed in or as a guest (FR-4.8): a customer arriving on an agent's
@@ -72,7 +72,7 @@ export default function Buy() {
   const [step, setStep] = useState(1)
   /**
    * Prefilled from `?recipient=`, when "Order again" or a similar link
-   * carries the number the app already knows about — otherwise blank, same
+   * carries the number the app already knows about, otherwise blank, same
    * as before.
    */
   const [recipient, setRecipient] = useState(() => params.get('recipient') ?? '')
@@ -88,7 +88,7 @@ export default function Buy() {
    * receive anything.
    *
    * Informational, never a block. It used to stop the sale outright, on the
-   * reasoning that DataHub refuses to deliver to an unapproved number — true,
+   * reasoning that DataHub refuses to deliver to an unapproved number, true,
    * but the wrong response to it: it turned away every first-time MTN customer
    * with a message about somebody else's approved list. The order is taken and
    * held instead, and this just sets the expectation before they pay.
@@ -105,7 +105,7 @@ export default function Buy() {
    * Re-enter at the receipt: /buy/:productId?order=<id>.
    *
    * Used by the return trip from Paystack, so a paid order lands on the same
-   * receipt — with the same delivery watching and the same wording — as one paid
+   * receipt (with the same delivery watching and the same wording) as one paid
    * from the wallet. The alternative was a second copy of this screen on the
    * payment page, which would drift out of step with this one.
    */
@@ -144,12 +144,12 @@ export default function Buy() {
   const myShare = split.shares.find((s) => s.userId === session?.id)
   /**
    * What Paystack keeps, passed on as its own line rather than folded into the
-   * listed price — see `checkoutTotal` in the pricing domain.
+   * listed price, see `checkoutTotal` in the pricing domain.
    *
    * Computed straight from `price`, not read off `split.processingFee`: the
    * split's other numbers come from `product.supplierCost`, which the server
-   * strips for anyone who is not James (FR-6.x) — a guest or customer buying
-   * here would otherwise see every fee line as "—", NaN having travelled
+   * strips for anyone who is not James (FR-6.x), a guest or customer buying
+   * here would otherwise see every fee line as "-", NaN having travelled
    * through a subtraction against a field that was never sent to them.
    */
   const fee = checkoutTotal(price, paystackFeeBp)
@@ -165,13 +165,13 @@ export default function Buy() {
    *
    * Kept as a constant rather than deleting the branch below: the payment step is
    * the highest-stakes screen in the product, and a one-line switch is far easier
-   * to review — and to reverse — than surgery on it.
+   * to review (and to reverse) than surgery on it.
    */
   const canUseWallet = false
   const meta = CATEGORY_META[product.category]
   const isChecker = product.category === 'checker'
 
-  // The wallet is the default whenever it can cover the order — that is the
+  // The wallet is the default whenever it can cover the order, that is the
   // whole point of NFR-4.2. Derived rather than stored, so it stays correct if
   // the price or the balance changes underneath.
   const payWith = payChoice ?? (canUseWallet ? 'wallet' : 'momo')
@@ -198,7 +198,7 @@ export default function Buy() {
       if (order.paymentUrl) {
         // Off to Paystack to actually pay. `replace` rather than `assign` so the
         // back button does not land them on a confirm screen for an order that
-        // already exists — they would place a second one.
+        // already exists, they would place a second one.
         //
         // The reference is remembered because the return trip carries only that,
         // and the receipt has to be findable again afterwards.
@@ -213,7 +213,7 @@ export default function Buy() {
       setOrderId(order.id)
       setStep(3)
     } catch (caught) {
-      // Nothing was charged — the server places the order and debits inside one
+      // Nothing was charged, the server places the order and debits inside one
       // transaction. Stay on the confirm screen so the buyer can adjust and retry.
       setFailure(
         caught instanceof Error
@@ -232,7 +232,7 @@ export default function Buy() {
           engines without competing with it on screen. */}
       <h1 className="sr-only">
         Buy {product.name}
-        {product.network ? ` on ${product.network}` : ''} — checkout
+        {product.network ? ` on ${product.network}` : ''}, checkout
       </h1>
       <button
         type="button"
@@ -306,7 +306,7 @@ export default function Buy() {
           </Field>
 
           {/* A signed-in buyer typing their own number in every time is the
-              common case, not the exception — one tap beats re-typing it. */}
+              common case, not the exception, one tap beats re-typing it. */}
           {session?.phone && recipient !== session.phone && (
             <button
               type="button"
@@ -326,7 +326,7 @@ export default function Buy() {
             className="mt-4"
             loading={checking}
             disabled={checking || !check?.ok}
-            /* This button only advances to the confirm step — the check runs on
+            /* This button only advances to the confirm step, the check runs on
                the way through, and its result gates the pay button there. Nothing
                is charged between here and there. */
             onClick={() => {
@@ -387,7 +387,7 @@ export default function Buy() {
           {/* Said before they pay, not after.
               A first purchase to a number needs a one-time setup with the
               delivery partner, and it is not instant. Nobody should find that
-              out from a receipt — but it is also not a reason to stop them, so
+              out from a receipt, but it is also not a reason to stop them, so
               it sits here as something to know, with the refund promise
               attached. */}
           {needsSetup && (
@@ -398,7 +398,7 @@ export default function Buy() {
               icon={<ClockIcon className="size-4" />}
             >
               {prettyPhone(check.phone)} has to be set up with our delivery partner before a bundle
-              can reach it, and that has not happened yet. We have passed the number on to be added —
+              can reach it, and that has not happened yet. We have passed the number on to be added,
               it usually takes a few hours.
               <span className="mt-1.5 block font-semibold">
                 Nothing has been charged. Try again later, or use a number that has bought before.
@@ -407,7 +407,7 @@ export default function Buy() {
           )}
 
           {/* Where the receipt goes. Defaults to the recipient so most buyers
-              never touch this — it keeps the flow inside its step budget. */}
+              never touch this, it keeps the flow inside its step budget. */}
           <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-4">
             <button
               type="button"
@@ -462,8 +462,8 @@ export default function Buy() {
                   title="From my wallet"
                   detail={
                     canUseWallet
-                      ? `Balance ${cedis(customerBalance)} — no Mobile Money prompt.`
-                      : `Balance ${cedis(customerBalance)} — you need ${cedis(total - customerBalance)} more.`
+                      ? `Balance ${cedis(customerBalance)}, no Mobile Money prompt.`
+                      : `Balance ${cedis(customerBalance)}, you need ${cedis(total - customerBalance)} more.`
                   }
                 />
               )}
@@ -481,7 +481,7 @@ export default function Buy() {
             <Line label="Product" value={product.name} />
             <Line label="Bundle price" value={cedis(price)} />
             {/* Shown as its own line rather than folded into the price, so a
-                buyer can see exactly what it costs — see `checkoutTotal`. */}
+                buyer can see exactly what it costs, see `checkoutTotal`. */}
             <Line label="Processing fee" value={cedis(fee.processingFee)} />
             <Line label="You pay" value={cedis(total)} strong />
             {payWith === 'wallet' && (
@@ -500,7 +500,7 @@ export default function Buy() {
             )}
           </dl>
 
-          {/* FR-2.5 + NFR-4.3 — the wallet cannot cover this, said plainly, with
+          {/* FR-2.5 + NFR-4.3, the wallet cannot cover this, said plainly, with
               both ways forward rather than a dead end. */}
           {walletShort && (
             <Callout
@@ -514,7 +514,7 @@ export default function Buy() {
             </Callout>
           )}
 
-          {/* The order was refused before any money moved — an empty wallet, or a
+          {/* The order was refused before any money moved, an empty wallet, or a
               bundle that went off sale while this screen was open. */}
           {failure && (
             <Callout tone="danger" className="mt-4" icon={<AlertIcon className="size-4" />}>
@@ -531,7 +531,7 @@ export default function Buy() {
               loading={placing}
               /* `needsSetup` blocks this now. The server refuses the order for an
                  unapproved number, so letting the button through would take the
-                 customer to a Mobile Money prompt and then a refusal — the worst
+                 customer to a Mobile Money prompt and then a refusal, the worst
                  possible order of events. Better to stop here, where nothing has
                  been asked of them yet. */
               disabled={placing || needsSetup || (!ownNumber && !receiptCheck?.ok)}
@@ -574,7 +574,7 @@ export default function Buy() {
               </p>
               <p className="mt-3 text-sm font-medium text-slate-800 dark:text-slate-100">
                 Your {cedis(placed.salePrice)} is safe. If the setup does not complete, it comes
-                back to you automatically — you do not need to ask.
+                back to you automatically, you do not need to ask.
               </p>
               <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
                 You can close this page. We will text {prettyPhone(placed.buyerPhone)} when it is
@@ -588,7 +588,7 @@ export default function Buy() {
                Two separate facts, said as two separate things: the payment is
                already done (that is why this screen exists at all), and the
                bundle is still on its way. Leading with a spinner and no
-               confirmation read as "did my payment even go through?" — this
+               confirmation read as "did my payment even go through?", this
                leads with the answer to that question first. */
             <Card className="mt-3 overflow-hidden" role="status" aria-live="polite">
               <div className="p-8 text-center">
@@ -598,7 +598,7 @@ export default function Buy() {
                 <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">Payment received</p>
                 <p className="mt-1.5 flex items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                   <Spinner className="size-3.5 text-brand-600 dark:text-brand-300" />
-                  Sending your bundle now — this usually takes a few seconds.
+                  Sending your bundle now, this usually takes a few seconds.
                 </p>
               </div>
 
@@ -633,7 +633,7 @@ export default function Buy() {
               </div>
 
               <div className="space-y-4 p-5">
-                {/* FR-4.7 — voucher on screen and by SMS, immediately. */}
+                {/* FR-4.7, voucher on screen and by SMS, immediately. */}
                 {isChecker && placed.voucher && (
                   <div className="space-y-3">
                     <Callout
@@ -641,7 +641,7 @@ export default function Buy() {
                       title="Your voucher"
                       icon={<CertificateIcon className="size-4" />}
                     >
-                      Keep these safe — a checker voucher can only be used a limited number of
+                      Keep these safe, a checker voucher can only be used a limited number of
                       times. We have also sent them by SMS.
                     </Callout>
                     <CopyField label="Serial number" value={placed.voucher.serial} mono />
@@ -689,7 +689,7 @@ export default function Buy() {
             </Card>
           ) : placed.paymentCollected === false ? (
             /*
-             * The Mobile Money charge itself never went through — declined PIN,
+             * The Mobile Money charge itself never went through, declined PIN,
              * insufficient funds, the prompt timed out. Nothing was ever taken,
              * so refund language here would be a lie, and this is the single
              * most common failure in MoMo checkout, not the rare "paid but
@@ -732,7 +732,7 @@ export default function Buy() {
               </div>
             </Card>
           ) : (
-            /* FR-2.7 + NFR-3.3 — a visible failure, with the money already moving back. */
+            /* FR-2.7 + NFR-3.3, a visible failure, with the money already moving back. */
             <Card className="mt-3 overflow-hidden">
               <div className="bg-red-600 px-5 py-6 text-center text-white">
                 <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-white/15">
@@ -743,18 +743,18 @@ export default function Buy() {
                     network rejected it after two attempts", which was invented
                     copy: most failures never reach the network, and there is no
                     retry. Claiming a specific reason we do not have sends the
-                    buyer chasing the wrong thing — and sent us chasing it too.
+                    buyer chasing the wrong thing, and sent us chasing it too.
                     The real reason is on the order's dispatch log, for admin. */}
                 <p className="mt-0.5 text-sm text-red-100">
                   {placed.refunded
-                    ? 'Nothing was lost — your money has been returned.'
-                    : 'Nothing was lost — your money is owed back to you.'}
+                    ? 'Nothing was lost, your money has been returned.'
+                    : 'Nothing was lost, your money is owed back to you.'}
                 </p>
               </div>
               <div className="space-y-4 p-5">
                 {/* Two different truths, and saying the wrong one is the problem.
                     A refund is authorised by a person now, so until that happens
-                    the money is *owed*, not returned — and telling a customer it
+                    the money is *owed*, not returned, and telling a customer it
                     is already back when it is not is the fastest way to lose
                     their trust twice. */}
                 {!placed.refunded ? (
@@ -765,7 +765,7 @@ export default function Buy() {
                   >
                     {cedis(placed.salePrice)} is owed back to you and has been logged for approval.
                     Refunds are checked by a person rather than sent automatically, so this usually
-                    takes a few hours. You do not need to ask — we will text{' '}
+                    takes a few hours. You do not need to ask, we will text{' '}
                     <strong className="tabular font-bold">{placed.buyerPhone}</strong> when it is
                     done.
                   </Callout>
@@ -785,7 +785,7 @@ export default function Buy() {
                     icon={<CheckIcon className="size-4" />}
                   >
                     {cedis(placed.salePrice)} has been sent to{' '}
-                    <strong className="tabular font-bold">{placed.buyerPhone}</strong> — the same
+                    <strong className="tabular font-bold">{placed.buyerPhone}</strong>, the same
                     number you paid from. Mobile Money usually lands within a few minutes.
                   </Callout>
                 )}
@@ -908,7 +908,7 @@ function SplitBreakdown({
               </span>
             </li>
           ))}
-        {/* Neither a cost nor anyone's margin — the buyer's own surcharge,
+        {/* Neither a cost nor anyone's margin, the buyer's own surcharge,
             passed straight to Paystack. Listed so the shares above still add
             up to the full amount charged. */}
         <li className="flex items-baseline justify-between gap-3">

@@ -2,7 +2,7 @@
  * Remove everything the platform was selling that no supplier actually provides.
  *
  * The catalogue began as seed data: 36 SKUs invented to make the app look
- * populated, of which DataHub GH really sells none — their prices were wrong on
+ * populated, of which DataHub GH really sells none, their prices were wrong on
  * every row, five bundles did not exist at all, and airtime, voice, SMS, AFA and
  * result checkers were attributed to a provider whose API sells data only.
  *
@@ -11,7 +11,7 @@
  *
  *  · A product an order touched is deactivated, never deleted. The sale happened
  *    and the receipt has to keep resolving.
- *  · A supplier SKU is only removed once nothing points at it — no product, no
+ *  · A supplier SKU is only removed once nothing points at it, no product, no
  *    dispatch record.
  *
  * Run with: npx tsx scripts/purge-unsupplied.ts
@@ -36,7 +36,7 @@ async function main() {
     (p) => !p.supplierCode || !suppliedCodes.has(p.supplierCode),
   )
   if (doomed.length === 0) {
-    console.log('Nothing to purge — every product is backed by a listed SKU.')
+    console.log('Nothing to purge, every product is backed by a listed SKU.')
     return
   }
 

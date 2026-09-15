@@ -13,7 +13,7 @@ import { DomainError } from './domain-errors'
  * One error envelope for the whole API: `{ code, message, detail? }`.
  *
  * The frontend reads `message` and shows it verbatim (NFR-4.3), so anything
- * that reaches here without a human-readable message gets a generic one — a
+ * that reaches here without a human-readable message gets a generic one, a
  * Postgres constraint name must never surface in the UI.
  */
 @Catch()
@@ -24,7 +24,7 @@ export class DomainExceptionFilter implements ExceptionFilter {
     const res = host.switchToHttp().getResponse<Response>()
 
     if (exception instanceof DomainError) {
-      // Server-side domain failures (a broken invariant) are our bug — log them.
+      // Server-side domain failures (a broken invariant) are our bug, log them.
       if (exception.status >= 500) this.log.error(exception.message, exception.detail)
       res.status(exception.status).json({
         code: exception.code,
@@ -52,7 +52,7 @@ export class DomainExceptionFilter implements ExceptionFilter {
     }
 
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
-      // P2002 unique violation — almost always a duplicate registration or a
+      // P2002 unique violation, almost always a duplicate registration or a
       // replayed idempotency key. Both have friendly readings.
       if (exception.code === 'P2002') {
         const target = String((exception.meta as { target?: string[] })?.target ?? '')

@@ -93,14 +93,14 @@ export default function Users() {
         />
         <StatTile
           label="Paid to agents, all-time"
-          value={agentSummary ? cedis(agentSummary.totalEarned) : '—'}
+          value={agentSummary ? cedis(agentSummary.totalEarned) : '-'}
           hint={agentSummary ? `across ${agentSummary.agentCount} agent${agentSummary.agentCount === 1 ? '' : 's'}` : undefined}
           tone="success"
           icon={<CashIcon className="size-5" />}
         />
       </div>
 
-      {/* NFR-3.3 framing — the float is a liability, not revenue. */}
+      {/* NFR-3.3 framing, the float is a liability, not revenue. */}
       <div className="mt-3">
         <Callout tone="info" icon={<ShieldIcon className="size-4" />}>
           Wallet float is money that belongs to your users, not income. It only becomes revenue when
@@ -174,12 +174,12 @@ export default function Users() {
                       {user.role}
                     </Badge>
                   </Td>
-                  <Td className="text-slate-600 dark:text-slate-300">{user.referredBy ?? '—'}</Td>
+                  <Td className="text-slate-600 dark:text-slate-300">{user.referredBy ?? '-'}</Td>
                   <Td align="right" className="tabular">
                     {user.orders}
                   </Td>
                   <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
-                    {user.role === 'agent' ? cedis(user.salesVolume) : '—'}
+                    {user.role === 'agent' ? cedis(user.salesVolume) : '-'}
                   </Td>
                   <Td align="right" className="tabular">
                     {user.role === 'agent' ? (
@@ -191,7 +191,7 @@ export default function Users() {
                         {cedis(user.totalEarned)}
                       </button>
                     ) : (
-                      '—'
+                      '-'
                     )}
                   </Td>
                   <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
@@ -204,7 +204,7 @@ export default function Users() {
                     {/* Neither an admin nor the platform owner is suspendable here;
                         the server refuses both, so offering the button would only
                         produce an error. Platform team is where that lives, with the
-                        guards this screen does not have — no suspending yourself, and
+                        guards this screen does not have, no suspending yourself, and
                         never the last active superadmin. Saying so beats an empty
                         cell that reads as a missing feature. */}
                     {isAdmin(user.role) ? (
@@ -218,7 +218,7 @@ export default function Users() {
                       )
                     ) : user.status === 'pending' || user.status === 'rejected' ? (
                       /* An undecided application is not a suspended account, so it gets
-                         no Suspend button — deciding it belongs in the applications
+                         no Suspend button, deciding it belongs in the applications
                          queue above, which records who decided and emails the agent.
                          Neither of which this button does, and the server refuses it.
 
@@ -244,7 +244,7 @@ export default function Users() {
           </TableWrap>
         )}
         <p className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-          Suspending an account blocks new orders and withdrawals. Nothing is deleted — order history
+          Suspending an account blocks new orders and withdrawals. Nothing is deleted, order history
           and the wallet ledger stay intact.
         </p>
       </Card>
@@ -314,9 +314,9 @@ export default function Users() {
 /**
  * One agent's own earnings ledger, for the "Total earned" drill-down.
  *
- * Reuses the exact same data an agent sees on their own Earnings page —
+ * Reuses the exact same data an agent sees on their own Earnings page,
  * `AgentsService.earnings`, called here from an admin-gated route instead of
- * the agent's own — so there is nothing here that disagrees with what the
+ * the agent's own, so there is nothing here that disagrees with what the
  * agent themselves would see.
  */
 function AgentEarningsModal({ agent, onClose }: { agent: PlatformUser | null; onClose: () => void }) {

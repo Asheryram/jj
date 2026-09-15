@@ -1,4 +1,4 @@
-# JamesDataConsult — Frontend Prototype
+# JamesDataConsult: Frontend Prototype
 
 A working, clickable prototype of the JamesDataConsult platform, built to show
 what the product will look like **before** any integration work starts.
@@ -37,7 +37,7 @@ ngrok http 5173
 `vite.config.ts` already allows `.ngrok-free.app`, `.ngrok.app`, `.ngrok.io`,
 `.trycloudflare.com`, `.loca.lt` and `.serveo.net` **by wildcard**, so the link
 keeps working when ngrok hands you a different subdomain next session. Any other
-host is still refused, which is Vite's DNS-rebinding protection doing its job —
+host is still refused, which is Vite's DNS-rebinding protection doing its job,
 don't replace it with `allowedHosts: true`. For a provider not on that list:
 
 ```bash
@@ -59,12 +59,12 @@ $env:DEMO_TUNNEL='1'; npm run dev    # routes the HMR socket over wss:443
 ## Presenting it
 
 A dark **DEMO** bar sits at the top of every screen. It is not part of the
-product — it exists so the whole platform can be walked through in one sitting.
+product, it exists so the whole platform can be walked through in one sitting.
 
 | Control | What it does |
 |---|---|
 | **View as: customer / agent / admin** | Switches role instantly. Changes the menus, the prices shown, and which pages are reachable (FR-1.5, NFR-2.5). Choose **guest** by logging out. |
-| **Simulate upstream failure** | The next order fails at the provider and the money is returned — to the wallet if one was used, or held as a claimable credit for a Mobile Money payer. The FR-2.7 / FR-2.12 / NFR-3.3 path, and the reassurance James will be asked about most. |
+| **Simulate upstream failure** | The next order fails at the provider and the money is returned: to the wallet if one was used, or held as a claimable credit for a Mobile Money payer. The FR-2.7 / FR-2.12 / NFR-3.3 path, and the reassurance James will be asked about most. |
 
 ### The money model
 
@@ -82,38 +82,38 @@ The customer pays **26.09**, and that is exactly `18.00 + 1.40 + 3.60 + 1.61 +
 actually charged.
 
 Note the cost of depth: three agents deep prices a BECE checker at **26.09**
-against James's own standard price of **20.90** — 25% more. The per-product
+against James's own standard price of **20.90**, 25% more. The per-product
 **retail cap** (FR-3.3, FR-5.9) is the control for that, and James has to set it
 deliberately.
 
 ### A twelve-minute walkthrough
 
-1. **Landing page** — categories, the four-step promise, the agent margin pitch
+1. **Landing page**, categories, the four-step promise, the agent margin pitch
    (driven by real catalogue data), the WAEC disclaimer.
 2. **Open an agent's sell link:** `/s/KWAME77`. The header names Kwame, and
    every price on the page is his (FR-5.7).
-3. **Buy → MTN 5GB as a guest** — no login. On the number screen type a
+3. **Buy → MTN 5GB as a guest**, no login. On the number screen type a
    **Telecel** number (`0201889340`) to show the network mismatch caught in plain
    language, then correct it to `0244118820`.
 4. **Confirm screen.** The number is repeated back large with its detected
-   network, and there is no wallet option because a guest has no wallet — just
+   network, and there is no wallet option because a guest has no wallet, just
    Mobile Money (FR-4.8).
 5. **Confirm and pay.** Watch the pending state, then delivery. The guest is
    told to keep their reference.
-6. **`/track`** — paste that reference plus `0244118820` and the order comes
+6. **`/track`**, paste that reference plus `0244118820` and the order comes
    back, voucher included (FR-4.9).
-7. **Turn on "Simulate upstream failure"** and buy again — the money is held as a
+7. **Turn on "Simulate upstream failure"** and buy again, the money is held as a
    claimable credit against the buyer's number, with no wallet involved.
 8. **Switch to agent.** The dashboard leads with **earnings**, not a balance to
    spend, and the sell link is right there. There is no top-up anywhere.
-9. **My prices** — note "You pay GHS 25.90" for MTN 5GB: that is *James's price
+9. **My prices**, note "You pay GHS 25.90" for MTN 5GB: that is *James's price
    to Kwame*, not DataHub's 24.00. Try 1.00 to see the floor, and 999.00 to see
    the cap (FR-3.4).
-10. **Sales → open the BECE order** — the full split, four participants deep,
+10. **Sales → open the BECE order**, the full split, four participants deep,
     with "you" marked (FR-5.8).
-11. **Sell & refer** — two links doing two different jobs, and what each agent in
+11. **Sell & refer**, two links doing two different jobs, and what each agent in
     the chain has earned you.
-12. **Switch to admin** — pending withdrawals first, then **Where the money
+12. **Switch to admin**, pending withdrawals first, then **Where the money
     goes** (turnover split three ways from the recorded splits, not estimated),
     all orders with the chain per order, **Prices** with all four tiers and
     out-of-order rejection, and **Settings → multi-level referral** as a toggle
@@ -126,7 +126,7 @@ deliberately.
 **Real:** every screen, every flow, every state (loading, empty, error,
 pending, refunded), all validation and error copy, role-based navigation and
 route guards, network detection from the phone prefix, money as integer pesewas
-throughout, CSV export, mobile layout — and **all of the chain arithmetic**. The
+throughout, CSV export, mobile layout, and **all of the chain arithmetic**. The
 price bands, the split, the cap and the reversal on failure are computed by
 [`src/lib/pricing.ts`](src/lib/pricing.ts), which is the real domain logic and has no
 dependency on React, HTTP or a database.
@@ -147,7 +147,7 @@ one-to-one onto the planned NestJS use cases:
 | Store function | Backend use case |
 |---|---|
 | `topUpWallet` | `TopUpWallet` (+ the Paystack webhook that actually credits) |
-| `placeOrder` | `PlaceOrder` — including the split and every participant's credit |
+| `placeOrder` | `PlaceOrder`: including the split and every participant's credit |
 | `findOrder` | `LookUpOrderByReference` |
 | `setAgentPrice` | `SetAgentPrice` |
 | `updateProductTier` | `UpdateProductPricing` |
@@ -172,7 +172,7 @@ Three things to keep honest when the API arrives:
    both from the browser console, and they have a direct financial incentive to
    try (NFR-2.7).
 2. **Payment truth is the webhook, never the client.** The top-up flow already
-   models this — the UI says so out loud — and the real implementation must keep
+   models this (the UI says so out loud) and the real implementation must keep
    it that way.
 3. **The split must be atomic.** Crediting four participants and marking the
    order complete has to happen in one transaction, or you get a partially-paid
@@ -186,7 +186,7 @@ Three things to keep honest when the API arrives:
 ```
 src/
   data/         types + all mock data
-  lib/          pricing.ts (the chain, tiers, split, caps — pure domain logic)
+  lib/          pricing.ts (the chain, tiers, split, caps, pure domain logic)
                 format.ts (money as integer pesewas), networks.ts (MSISDN + prefixes)
   state/        the in-memory store that becomes the API client
   components/   ui primitives, icons, hand-rolled SVG charts, app shell

@@ -20,23 +20,23 @@ import {
 import { AlertIcon, CheckIcon } from '../../components/icons'
 
 /**
- * Orders nobody can resolve automatically — see `ReconcilerService.needsAttention`.
+ * Orders nobody can resolve automatically, see `ReconcilerService.needsAttention`.
  *
  * Two different shapes of "nobody can resolve this" show up here:
  *
  *  · **Stuck.** DataHub occasionally gives back a reference whose status check
  *    gets stuck reporting "processing" forever, and the reconciler correctly
- *    refuses to guess at closing it out — settling it wrong risks either
+ *    refuses to guess at closing it out, settling it wrong risks either
  *    crediting an agent for a sale that never happened, or refunding a
  *    customer who already received their bundle.
- *  · **Flagged.** An order was already settled one way, and a later signal —
- *    the provider's own webhook, another admin, or the reconciler's own sweep
- *    — disagreed with that. Nothing here ever undoes that automatically; see
+ *  · **Flagged.** An order was already settled one way, and a later signal,
+ *    the provider's own webhook, another admin, or the reconciler's own sweep,
+ *    disagreed with that. Nothing here ever undoes that automatically; see
  *    `FulfilmentService.settle`'s conflict detection. This only makes sure a
  *    human finds out, which is the whole point of this page existing.
  *
- * A dedicated page, not a card on Overview: this is an operational queue —
- * something to act on — and every other queue like it (Refunds, Withdrawals,
+ * A dedicated page, not a card on Overview: this is an operational queue,
+ * something to act on, and every other queue like it (Refunds, Withdrawals,
  * Number approvals) already lives on its own page rather than inline on the
  * dashboard. Overview only ever says how many are waiting.
  */
@@ -109,14 +109,14 @@ export default function NeedsAttention() {
     <div>
       <PageHead
         title="Needs your attention"
-        subtitle="Stuck at the provider, or flagged after settling one way and then hearing another — the reconciler will not guess at either."
+        subtitle="Stuck at the provider, or flagged after settling one way and then hearing another, the reconciler will not guess at either."
       />
 
       {rows !== null && conflicts.length > 0 && (
         <Card className="mt-3 border-red-200 dark:border-red-800">
           <CardHead
             title="Flagged for review"
-            subtitle="Already settled one way, then told another — check nothing was paid out twice"
+            subtitle="Already settled one way, then told another, check nothing was paid out twice"
           />
           <div className="space-y-2 p-4 sm:p-5">
             {conflicts.map((row) => (
@@ -154,7 +154,7 @@ export default function NeedsAttention() {
       <Card className="mt-3">
         <CardHead
           title="Stuck orders"
-          subtitle="Oldest first — the longest wait is the most urgent thing here, not the largest amount."
+          subtitle="Oldest first, the longest wait is the most urgent thing here, not the largest amount."
         />
         <div className="space-y-2 p-4 sm:p-5">
           {rows === null ? (
@@ -204,7 +204,7 @@ export default function NeedsAttention() {
         <Card className="mt-3">
           <CardHead
             title="Stuck transfers"
-            subtitle="Sitting on an OTP challenge or an unresolved reply from Paystack — check their dashboard before doing anything from here."
+            subtitle="Sitting on an OTP challenge or an unresolved reply from Paystack, check their dashboard before doing anything from here."
           />
           <div className="space-y-2 p-4 sm:p-5">
             {transfers.map((row) => (
@@ -246,7 +246,7 @@ export default function NeedsAttention() {
             }}
           >
             <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-              This runs through the same settlement path a real confirmation would — the agent is credited (or the
+              This runs through the same settlement path a real confirmation would, the agent is credited (or the
               refund queued) exactly as if DataHub or Paystack had reported it themselves.
             </Callout>
             <Segmented<'delivered' | 'rejected'>
@@ -296,7 +296,7 @@ export default function NeedsAttention() {
               {acknowledging.reason}
             </Callout>
             <Callout tone="info">
-              This does not change the order or move any money — it only clears the flag once you have
+              This does not change the order or move any money, it only clears the flag once you have
               checked what actually happened, against Paystack's or DataHub's own dashboard, or the
               customer directly. If anything needs fixing (a refund clawed back, an extra one issued),
               do that separately first.
@@ -304,7 +304,7 @@ export default function NeedsAttention() {
             <Field label="What did you check?" htmlFor="ack-note">
               <TextInput
                 id="ack-note"
-                placeholder="Checked DataHub's dashboard — the bundle was never actually sent"
+                placeholder="Checked DataHub's dashboard, the bundle was never actually sent"
                 value={ackNote}
                 onChange={(event) => setAckNote(event.target.value)}
               />

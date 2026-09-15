@@ -35,7 +35,7 @@ type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice'
  * `supplierCost` is deliberately not one of them: it is what the provider
  * charges, it arrives from the provider catalogue, and it is the baseline every
  * margin on this page is measured against. Typing it here would let our idea of
- * the cost drift from the invoice — so it is shown, not edited.
+ * the cost drift from the invoice, so it is shown, not edited.
  *
  * There is no retail cap any more either. Agents price their own stock above
  * their cost, however they like.
@@ -48,7 +48,7 @@ type AccuracyRow = Awaited<ReturnType<typeof api.catalogueAccuracy>>[number]
 
 /**
  * `catalogueAccuracy()` and the product catalogue come from two different
- * queries with no shared id between them — the accuracy row is keyed off the
+ * queries with no shared id between them, the accuracy row is keyed off the
  * *supplier's* product code, which never reaches the frontend's own `Product`
  * type. Both do carry `name` + `network` already, though, and that pair is
  * unique in practice (no two bundles on the same network share a name), so
@@ -69,12 +69,12 @@ const TIER_LABELS: Record<Tier, { label: string; help: string }> = {
   },
   standardPrice: {
     label: 'Your own walk-up price',
-    help: 'What a customer pays buying direct from you, with no agent link. You keep the whole spread. It can sit below what agents pay if you would rather make your margin on agent volume — the only floor is your own cost.',
+    help: 'What a customer pays buying direct from you, with no agent link. You keep the whole spread. It can sit below what agents pay if you would rather make your margin on agent volume, the only floor is your own cost.',
   },
 }
 
 /**
- * FR-3.3, FR-3.6, FR-6.4 — James sets the two prices he charges.
+ * FR-3.3, FR-3.6, FR-6.4, James sets the two prices he charges.
  *
  * The third number, what he pays the provider, is shown here but edited on the
  * provider catalogue under Settings. Agents set their own retail price and are
@@ -88,7 +88,7 @@ export default function CostPrices() {
   const [marking, setMarking] = useState(false)
 
   /**
-   * Fetched once here rather than only living on its own dedicated page —
+   * Fetched once here rather than only living on its own dedicated page,
    * the point of this data is to inform a price *before* it's set, not just
    * to be read about afterwards. See `accuracyKey` for why the join is by
    * name + network rather than an id.
@@ -110,7 +110,7 @@ export default function CostPrices() {
   )
 
   /**
-   * Prices waiting to be told to agents — consolidated on the server, one
+   * Prices waiting to be told to agents, consolidated on the server, one
    * row per product no matter how many edits produced it. Refetched after
    * anything that could change it: an edit, a bulk markup, or sending the
    * digest itself.
@@ -129,11 +129,11 @@ export default function CostPrices() {
 
   /**
    * Has James actually looked at this price since the real cost last changed?
-   * Not "is the catalogue right" — this is "did I review this price against
+   * Not "is the catalogue right", this is "did I review this price against
    * the real number, and is that number still the one that's current."
    * Compared by value against `drift.charged`, not by date: a fresh delivery
    * repeating the same real cost he already priced against is not something
-   * new to review. `none` means there is nothing to review yet — no real
+   * new to review. `none` means there is nothing to review yet, no real
    * delivery has been recorded for this bundle at all.
    */
   const reviewStatusOf = (p: Product): 'none' | 'outdated' | 'current' => {
@@ -144,12 +144,12 @@ export default function CostPrices() {
   const [reviewFilter, setReviewFilter] = useState<'all' | 'outdated' | 'current' | 'none'>('all')
 
   const categoryProducts = products.filter((p) => p.category === category)
-  // Counted against the whole category, not the filter already applied — so
+  // Counted against the whole category, not the filter already applied, so
   // picking "Up to date" doesn't make the "Outdated" count vanish along with
   // the rows, which would make it look like there was nothing left to find.
   const outdatedInCategory = categoryProducts.filter((p) => reviewStatusOf(p) === 'outdated').length
   const currentInCategory = categoryProducts.filter((p) => reviewStatusOf(p) === 'current').length
-  // Nobody has ever actually bought this — there is no real delivery on
+  // Nobody has ever actually bought this, there is no real delivery on
   // record to price against at all, so it is neither outdated nor up to
   // date, it is simply unproven. Worth its own bucket rather than folding it
   // into "Outdated": a bundle that's never sold isn't wrong, it's untested.
@@ -168,7 +168,7 @@ export default function CostPrices() {
    * customer sees them in.
    *
    * Airtime and anything else without a carrier falls into a final group rather
-   * than being dropped — a product missing from this screen is a product nobody
+   * than being dropped, a product missing from this screen is a product nobody
    * can price.
    */
   const groups = useMemo(() => {
@@ -192,7 +192,7 @@ export default function CostPrices() {
        * null is a product with no supplier linked, which is worth flagging;
        * undefined is an API that did not send the field at all, which says nothing
        * about the product. Treating the second as the first labelled every bundle
-       * "no supplier" against an older server — a claim the client had no basis
+       * "no supplier" against an older server, a claim the client had no basis
        * for. When nothing is known, nothing is shown.
        */
       const known = items.filter((p) => p.provider !== undefined)
@@ -209,7 +209,7 @@ export default function CostPrices() {
     })
   }, [visible])
   /**
-   * The catalogue's supplier cost is only ever as fresh as the last sync — the
+   * The catalogue's supplier cost is only ever as fresh as the last sync, the
    * real per-unit cost is whatever the provider actually charged on the most
    * recent delivery, from `catalogueAccuracy()`. Falling back to the catalogue
    * figure when there's no delivery to compare against yet, rather than
@@ -217,7 +217,7 @@ export default function CostPrices() {
    */
   const realCostOf = (p: Product) => accuracyByKey.get(accuracyKey(p.name, p.network))?.charged ?? p.supplierCost
 
-  // Both of these are James's own margin, never the agent's — one per channel
+  // Both of these are James's own margin, never the agent's, one per channel
   // he sells through. Catalogue-based, matching the per-row "Your margin"
   // column below; see `realAgentMargin`/`realDirectMargin` for the same two
   // numbers against what delivery actually cost most recently.
@@ -230,7 +230,7 @@ export default function CostPrices() {
    * An average needs something to average.
    *
    * The catalogue is empty until it has been synced from the provider, and until
-   * then dividing by `products.length` is 0/0 — which reached the stat tiles as
+   * then dividing by `products.length` is 0/0, which reached the stat tiles as
    * the literal text `GHS NaN`. `null` rather than 0 because the average margin
    * on no products is not zero, it is nothing, and a tile reading GHS 0.00 would
    * be telling James he makes no margin.
@@ -254,7 +254,7 @@ export default function CostPrices() {
   const directAverage = averageOf(directMargin)
   const realAgentAverage = averageOf(realAgentMargin)
   const realDirectAverage = averageOf(realDirectMargin)
-  // Only worth a second line when it would actually say something different —
+  // Only worth a second line when it would actually say something different,
   // most products have no delivery to compare against yet, and repeating the
   // same number under a "real" label would read as a glitch, not a fact.
   const agentAverageDiffers = agentAverage !== null && realAgentAverage !== null && realAgentAverage !== agentAverage
@@ -263,22 +263,22 @@ export default function CostPrices() {
   /**
    * Freshly imported bundles are real, priced at cost, and not on sale.
    *
-   * That is deliberate on the server's side — a made-up default markup would
-   * appear as James's own price — but until now nothing on this screen said so.
+   * That is deliberate on the server's side, a made-up default markup would
+   * appear as James's own price, but until now nothing on this screen said so.
    * A sync reported "46 new", the table listed all 46, and the shop stayed empty
    * with no explanation anywhere. The rule is only honest if the person who has
    * to act on it can see it.
    */
   const notOnSale = products.filter((p) => !p.active)
   /**
-   * The real floor, not the catalogue one — same rule as the table row and
+   * The real floor, not the catalogue one, same rule as the table row and
    * `EditPricesModal`. A price sitting below catalogue but at or above the
    * last real charge is deliberately allowed, so flagging it here against
    * catalogue alone would call a correctly "Up to date" price broken.
    */
   const floorOf = (p: Product) => accuracyByKey.get(accuracyKey(p.name, p.network))?.charged ?? p.supplierCost
   // Both selling prices must clear cost. Walk-up vs agent price is deliberately
-  // not checked, and there is no ceiling to check — see EDITABLE_TIERS.
+  // not checked, and there is no ceiling to check, see EDITABLE_TIERS.
   const broken = products.filter((p) => p.adminPrice < floorOf(p) || p.standardPrice < floorOf(p))
 
   return (
@@ -295,26 +295,26 @@ export default function CostPrices() {
           icon={<TagIcon className="size-5" />}
         />
         <StatTile
-          label="Your margin — selling to agents"
-          value={realAgentAverage === null ? '—' : cedis(realAgentAverage)}
+          label="Your margin, selling to agents"
+          value={realAgentAverage === null ? '-' : cedis(realAgentAverage)}
           hint={
             products.length > 0
               ? agentAverageDiffers
-                ? `Your price to agents, less what it actually cost to deliver last time — catalogue estimate: ${cedis(agentAverage as number)}`
-                : 'Your price to agents, less what it actually costs to deliver — never the agent\'s own cut'
+                ? `Your price to agents, less what it actually cost to deliver last time, catalogue estimate: ${cedis(agentAverage as number)}`
+                : 'Your price to agents, less what it actually costs to deliver, never the agent\'s own cut'
               : 'Sync the provider catalogue to see this'
           }
           tone="brand"
           icon={<TrendUpIcon className="size-5" />}
         />
         <StatTile
-          label="Your margin — selling direct"
-          value={realDirectAverage === null ? '—' : cedis(realDirectAverage)}
+          label="Your margin, selling direct"
+          value={realDirectAverage === null ? '-' : cedis(realDirectAverage)}
           hint={
             products.length > 0
               ? directAverageDiffers
-                ? `Your walk-up price, less what it actually cost to deliver last time — catalogue estimate: ${cedis(directAverage as number)}`
-                : 'Your walk-up price, less what it actually costs to deliver — what you keep selling direct'
+                ? `Your walk-up price, less what it actually cost to deliver last time, catalogue estimate: ${cedis(directAverage as number)}`
+                : 'Your walk-up price, less what it actually costs to deliver, what you keep selling direct'
               : 'Sync the provider catalogue to see this'
           }
           tone="success"
@@ -329,7 +329,7 @@ export default function CostPrices() {
             icon={<AlertIcon className="size-4" />}
           >
             <p>
-              Consolidated across every edit since the last digest — an agent sees only the net
+              Consolidated across every edit since the last digest, an agent sees only the net
               change, not each edit along the way, and a price that's back where it started never
               shows up at all.
             </p>
@@ -346,7 +346,7 @@ export default function CostPrices() {
             icon={<AlertIcon className="size-4" />}
           >
             A bundle arrives from the provider priced at cost, and stays out of the shop until you
-            say what it sells for — otherwise it would sell at no margin. Set a markup below and
+            say what it sells for, otherwise it would sell at no margin. Set a markup below and
             they go on sale straight away.
           </Callout>
         )}
@@ -358,7 +358,7 @@ export default function CostPrices() {
             icon={<AlertIcon className="size-4" />}
           >
             A selling price is below what you pay the provider once Paystack's cut on the sale is
-            taken out, so every one of those sales loses money — even where the price alone looks
+            taken out, so every one of those sales loses money, even where the price alone looks
             fine. Fix these before they sell.
           </Callout>
         )}
@@ -368,11 +368,11 @@ export default function CostPrices() {
           icon={<AlertIcon className="size-4" />}
         >
           Every order stores the split it was actually sold at. Past reports, agent earnings and
-          your own margin stay exactly as they were — only future orders use the new price.
+          your own margin stay exactly as they were, only future orders use the new price.
         </Callout>
       </div>
 
-      {/* -mx-3/px-3 cancels AppShell's own px-3 on mobile — not px-4, which
+      {/* -mx-3/px-3 cancels AppShell's own px-3 on mobile, not px-4, which
           overshoots the viewport by the 4px difference. */}
       <div className="mt-4 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
         <Segmented<Category>
@@ -385,7 +385,7 @@ export default function CostPrices() {
             setCategory(next)
             // A filter that made sense in the old category can silently hide
             // everything in the new one with no visible control left to
-            // explain why — see the gate below.
+            // explain why, see the gate below.
             setReviewFilter('all')
           }}
         />
@@ -444,7 +444,7 @@ export default function CostPrices() {
                           : reviewFilter === 'current'
                             ? 'up to date'
                             : 'unbought'
-                      } here — try "All".`}
+                      } here, try "All".`}
                 </td>
               </tr>
             )}
@@ -500,7 +500,7 @@ export default function CostPrices() {
                * Whether the last real delivery is still telling us something
                * the catalogue doesn't already know. `drift.diff` compares
                * against what the catalogue believed back when that order was
-               * placed, not against today's `product.supplierCost` — so a
+               * placed, not against today's `product.supplierCost`, so a
                * catalogue that has since been corrected to match the real
                * charge would still show a leftover "different!" flag from
                * before the fix. Comparing the live cost directly is what
@@ -509,13 +509,13 @@ export default function CostPrices() {
               const realCostIsCurrent = drift != null && drift.charged !== product.supplierCost
               const reviewStatus = reviewStatusOf(product)
 
-              // Two margins, not one — what James keeps selling to an agent,
+              // Two margins, not one, what James keeps selling to an agent,
               // and what he keeps selling direct, at today's catalogue cost.
               // Neither of these is ever the agent's own cut of a resale.
               const rowAgentMargin = product.adminPrice - product.supplierCost
               const rowDirectMargin = product.standardPrice - product.supplierCost
               /**
-               * The real floor, not the catalogue one — mirrors
+               * The real floor, not the catalogue one, mirrors
                * `EditPricesModal` and the server's own check in
                * `AdminService.setTier`. A price sitting below catalogue but
                * at or above the last real charge is not wrong, it's exactly
@@ -527,9 +527,9 @@ export default function CostPrices() {
               const floor = drift?.charged ?? product.supplierCost
               const invalid = product.adminPrice < floor || product.standardPrice < floor
               // Publishing needs a margin on both channels, not merely a legal
-              // price — matches the server's own guard.
+              // price, matches the server's own guard.
               const invalidToPublish = product.adminPrice <= floor || product.standardPrice <= floor
-              // What James actually keeps at today's real cost — the number
+              // What James actually keeps at today's real cost, the number
               // to price against, since it's what genuinely lands in his
               // pocket, not what the catalogue assumes. Same two figures
               // `EditPricesModal` offers to protect when suggesting a new
@@ -549,7 +549,7 @@ export default function CostPrices() {
                   </Td>
                   <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                     {/* Whether James has actually reviewed this price against
-                        the real cost currently on record — not whether the
+                        the real cost currently on record, not whether the
                         catalogue is fresh, whether he's reviewed it. Silent
                         when there's no real cost to review against at all. */}
                     {reviewStatus !== 'none' && (
@@ -557,7 +557,7 @@ export default function CostPrices() {
                         {reviewStatus === 'outdated' ? 'Outdated' : 'Up to date'}
                       </Badge>
                     )}
-                    {/* "Up to date as of when" — confirmed once, six months
+                    {/* "Up to date as of when", confirmed once, six months
                         ago, and confirmed this morning are not equally worth
                         trusting even though both count as current. */}
                     {reviewStatus === 'current' && product.pricedAgainstRealCostAt && (
@@ -567,7 +567,7 @@ export default function CostPrices() {
                     )}
                     <br />
                     {cedis(product.supplierCost)}
-                    {/* How stale the number above actually is — the catalogue
+                    {/* How stale the number above actually is, the catalogue
                         only ever knows what it was last told, and "synced
                         today" and "synced three months ago" are not the same
                         level of trust in it. */}
@@ -578,7 +578,7 @@ export default function CostPrices() {
                     )}
                     {/* The number above is only as fresh as the last provider
                         catalogue sync. This is what it actually cost on the
-                        last real delivery, and when — worth seeing right where
+                        last real delivery, and when, worth seeing right where
                         the price gets set, not only on its own report page.
                         Gated on `realCostIsCurrent`, not `drift.diff`, so a
                         catalogue already corrected to match the real charge
@@ -602,7 +602,7 @@ export default function CostPrices() {
                   </Td>
                   <Td align="right">
                     {/* Leads with what actually lands in James's pocket, not
-                        what the catalogue assumes — that's the number to price
+                        what the catalogue assumes, that's the number to price
                         against. Catalogue drops to a smaller line underneath
                         only when the real charge says something different, so
                         he can see exactly how much a price needs to move to
@@ -649,7 +649,7 @@ export default function CostPrices() {
                         change, so it is worth seeing next to the prices. */}
                     <span className="tabular text-xs text-slate-500 dark:text-slate-400">
                       {product.agentMarkupBp === undefined
-                        ? '—'
+                        ? '-'
                         : `${formatMarkup(product.agentMarkupBp)} / ${formatMarkup(product.walkupMarkupBp ?? 0)}`}
                     </span>
                   </Td>
@@ -657,7 +657,7 @@ export default function CostPrices() {
                     {/* The one place a bundle can be withdrawn from the shop without
                         touching its price. Publishing is refused server-side while a
                         price still sits at cost, so the control is disabled rather
-                        than left to fail — with the reason on hover. */}
+                        than left to fail, with the reason on hover. */}
                     <Button
                       size="sm"
                       variant={product.active ? 'outline' : 'secondary'}
@@ -729,7 +729,7 @@ export default function CostPrices() {
             title: `Notified ${result.agentsEmailed} agent${result.agentsEmailed === 1 ? '' : 's'} about ${result.productsNotified} price${result.productsNotified === 1 ? '' : 's'}`,
             detail:
               result.agentsFailed > 0
-                ? `${result.agentsFailed} email${result.agentsFailed === 1 ? '' : 's'} failed to send — check the server log.`
+                ? `${result.agentsFailed} email${result.agentsFailed === 1 ? '' : 's'} failed to send, check the server log.`
                 : undefined,
           })
         }}
@@ -774,7 +774,7 @@ function EditPricesModal({
   }
 
   /**
-   * The real floor, not the catalogue one — mirrors `AdminService.setTier` on
+   * The real floor, not the catalogue one, mirrors `AdminService.setTier` on
    * the backend, which is the authoritative check. The catalogue's cost is
    * only ever as fresh as the last sync; the last real delivery is the honest
    * number to price against, whichever direction it moved. A price between
@@ -798,7 +798,7 @@ function EditPricesModal({
       setError(`Your price to agents cannot be below the ${cedis(floor)} you pay for it.`)
       return
     }
-    // Only floored at cost. The walk-up price may sit below what agents pay —
+    // Only floored at cost. The walk-up price may sit below what agents pay,
     // that is a channel decision, not an error. See EDITABLE_TIERS above.
     if (standard < floor) {
       setError(`You pay ${cedis(floor)} for this, so you cannot sell it for less.`)
@@ -809,7 +809,7 @@ function EditPricesModal({
     onClose()
   }
 
-  // Measured against the real floor above, not the catalogue figure — a
+  // Measured against the real floor above, not the catalogue figure, a
   // margin over a number the catalogue hasn't caught up to yet would just be
   // a margin over the app's own optimism, not James's.
   const agentMargin = parsed.adminPrice !== null ? parsed.adminPrice - floor : null
@@ -817,7 +817,7 @@ function EditPricesModal({
 
   /**
    * The gap between today's catalogue cost and what the last real delivery
-   * actually charged — compared against the *live* cost, not `drift.diff`,
+   * actually charged, compared against the *live* cost, not `drift.diff`,
    * which is frozen to whatever the catalogue believed back when that order
    * was placed. A catalogue already corrected since would still show a
    * leftover gap from `drift.diff` that has since closed; this hasn't.
@@ -827,13 +827,13 @@ function EditPricesModal({
   const realCostGap = drift ? product.supplierCost - drift.charged : 0
   const realCostIsCurrent = drift != null && realCostGap !== 0
 
-  // Same status as the row this modal was opened from — see its own comment
+  // Same status as the row this modal was opened from, see its own comment
   // on the table cell for why this is a value comparison, not a date one.
   const reviewStatus: 'none' | 'outdated' | 'current' =
     drift == null ? 'none' : product.pricedAgainstRealCost === drift.charged ? 'current' : 'outdated'
 
   return (
-    <Modal open onClose={onClose} title={`Prices — ${product.name}`}>
+    <Modal open onClose={onClose} title={`Prices, ${product.name}`}>
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <NetworkChip network={product.network} />
@@ -855,7 +855,7 @@ function EditPricesModal({
                 {cedis(product.supplierCost)}
               </p>
               {/* The number that actually matters, right next to the one that
-                  doesn't any more — repeated from the Callout below so it's
+                  doesn't any more, repeated from the Callout below so it's
                   visible without reading the whole paragraph. Same colour
                   rule as the table row: green when the real charge is lower,
                   red when it's higher. */}
@@ -873,19 +873,19 @@ function EditPricesModal({
           </div>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
             {/* "Always matches what you are actually invoiced" is only true
-                absent a known real-cost gap — asserting it while the gap
+                absent a known real-cost gap, asserting it while the gap
                 above is on screen would be telling you the opposite of what
                 you're looking at. */}
             {realCostIsCurrent ? (
               <>
                 Comes from the supplier catalogue further down this page
-                {product.supplierCostSyncedAt && <> · last synced {dateTime(product.supplierCostSyncedAt)}</>} — but
+                {product.supplierCostSyncedAt && <> · last synced {dateTime(product.supplierCostSyncedAt)}</>}, but
                 the last real delivery, above, actually paid a different amount. See below.
               </>
             ) : (
               <>
                 Comes from the supplier catalogue further down this page, so it always matches what you
-                are actually invoiced — sync it there and it flows up here
+                are actually invoiced, sync it there and it flows up here
                 {product.supplierCostSyncedAt && <> · last synced {dateTime(product.supplierCostSyncedAt)}</>}.
               </>
             )}
@@ -895,7 +895,7 @@ function EditPricesModal({
         </div>
 
         {/* The raw real-vs-catalogue fact already lives on the "Last real"
-            line in the box above — repeating "on {date} this actually cost
+            line in the box above, repeating "on {date} this actually cost
             {X}, not {Y}" here would just be the same fact twice. This is for
             the part that isn't shown anywhere else: what that gap actually
             does to your margin, and what to do about it. See
@@ -909,7 +909,7 @@ function EditPricesModal({
           >
             <p>
               Priced against the real cost, your margin is {cedis(product.adminPrice - drift.charged)} on
-              an agent sale and {cedis(product.standardPrice - drift.charged)} on a walk-up sale — not
+              an agent sale and {cedis(product.standardPrice - drift.charged)} on a walk-up sale, not
               the {cedis(product.adminPrice - product.supplierCost)} /{' '}
               {cedis(product.standardPrice - product.supplierCost)} the catalogue would suggest.
             </p>
@@ -917,12 +917,12 @@ function EditPricesModal({
               {reviewStatus === 'outdated'
                 ? /**
                    * Only makes sense while the price still reflects the OLD
-                   * belief (catalogue cost) rather than this real charge —
+                   * belief (catalogue cost) rather than this real charge,
                    * "pass on the saving"/"protect the margin" is relative to
                    * a price that hasn't reacted to the real number yet.
                    *
                    * Once `reviewStatus` is `current`, the price was already
-                   * set knowing this exact real cost — it may deliberately
+                   * set knowing this exact real cost, it may deliberately
                    * sit nowhere near a catalogue-derived margin (thinner,
                    * because James chose to pass most of a saving on to
                    * agents, say), and subtracting the gap from it a second
@@ -931,9 +931,9 @@ function EditPricesModal({
                    * one sentence later.
                    */
                   realCostGap > 0
-                  ? `If you'd rather pass the saving on and keep the same margin, agents could pay ${cedis(product.adminPrice - realCostGap)} and walk-up ${cedis(product.standardPrice - realCostGap)} — the fields below will let you go as low as ${cedis(drift.charged)}, since that's genuinely what this costs now.`
-                  : `To protect the same margin at today's real cost, agents would need to pay ${cedis(product.adminPrice - realCostGap)} and walk-up ${cedis(product.standardPrice - realCostGap)} — the fields below won't accept anything under ${cedis(drift.charged)} any more, so a sale never quietly runs at a loss.`
-                : `You've already priced this against the real cost — the fields below won't accept anything under ${cedis(drift.charged)}.`}
+                  ? `If you'd rather pass the saving on and keep the same margin, agents could pay ${cedis(product.adminPrice - realCostGap)} and walk-up ${cedis(product.standardPrice - realCostGap)}, the fields below will let you go as low as ${cedis(drift.charged)}, since that's genuinely what this costs now.`
+                  : `To protect the same margin at today's real cost, agents would need to pay ${cedis(product.adminPrice - realCostGap)} and walk-up ${cedis(product.standardPrice - realCostGap)}, the fields below won't accept anything under ${cedis(drift.charged)} any more, so a sale never quietly runs at a loss.`
+                : `You've already priced this against the real cost, the fields below won't accept anything under ${cedis(drift.charged)}.`}
             </p>
           </Callout>
         )}
@@ -1015,7 +1015,7 @@ function EditPricesModal({
             {directMargin > agentMargin
               ? 'You earn more selling this yourself than through an agent.'
               : directMargin < agentMargin
-                ? 'You earn more when an agent sells this than when you sell it yourself — your margin comes from agent volume.'
+                ? 'You earn more when an agent sells this than when you sell it yourself, your margin comes from agent volume.'
                 : 'You earn the same whether you sell this yourself or an agent does.'}
           </p>
         )}
@@ -1042,13 +1042,13 @@ function EditPricesModal({
 /**
  * One markup across a whole category, set as two separate percentages.
  *
- * Separate because they answer different questions — what an agent buys at, and
- * what a stranger pays at the counter — and James is free to set the walk-up one
+ * Separate because they answer different questions, what an agent buys at, and
+ * what a stranger pays at the counter, and James is free to set the walk-up one
  * lower if he would rather earn from agent volume than from his own sales.
  *
  * Setting a markup here is also what protects the margin. Prices are re-derived
  * from it whenever DataHub changes a cost, so a supplier price rise moves the
- * shelf price — rather than the price being nudged up to meet the new cost and
+ * shelf price, rather than the price being nudged up to meet the new cost and
  * the margin quietly going to nothing.
  */
 function MarkupModal({
@@ -1112,7 +1112,7 @@ function MarkupModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Set markup — ${CATEGORY_META[category].label}`}>
+    <Modal open onClose={onClose} title={`Set markup, ${CATEGORY_META[category].label}`}>
       <div className="space-y-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
           Reprices all {count} product{count === 1 ? '' : 's'} in this category from what the
@@ -1197,7 +1197,7 @@ function MarkupModal({
 /**
  * The consolidated list, reviewed once before it goes anywhere.
  *
- * Nothing here is per-edit — each row is already the net change since agents
+ * Nothing here is per-edit, each row is already the net change since agents
  * were last told (see `PendingPriceChange`), so what's shown is exactly what
  * would be emailed, not a history of how it got there.
  */
@@ -1217,7 +1217,7 @@ function NotifyAgentsModal({
 
   if (!open) return null
 
-  // An upper bound, not an exact count — an agent stocking three of these
+  // An upper bound, not an exact count, an agent stocking three of these
   // products is counted three times here, but only ever emailed once (the
   // server consolidates per agent when it actually sends).
   const maxAgents = changes.reduce((sum, c) => sum + c.affectedAgents, 0)
@@ -1247,7 +1247,7 @@ function NotifyAgentsModal({
         {nobodyToTell && (
           <Callout tone="info" icon={<AlertIcon className="size-4" />}>
             None of these products currently have an agent stocking them, so sending now would reach
-            nobody. The list still clears once you send — that's fine, there's nothing left to tell
+            nobody. The list still clears once you send, that's fine, there's nothing left to tell
             anyone about.
           </Callout>
         )}

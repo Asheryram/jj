@@ -8,7 +8,7 @@
  *
  * ── Why a ramp at all ────────────────────────────────────────────────────────
  *
- * The UI does not use one brand colour, it uses ten steps of one — 50 for tinted
+ * The UI does not use one brand colour, it uses ten steps of one, 50 for tinted
  * backgrounds, 200 for borders, 700 for filled buttons and the header, 900 for
  * pressed states. Tailwind v4 compiles each of those to `var(--color-brand-N)`,
  * so overriding the variables re-themes the whole application at runtime. But
@@ -17,7 +17,7 @@
  * ── Why contrast is enforced rather than trusted ─────────────────────────────
  *
  * Step 700 carries white text on every primary button in the product. A cheerful
- * yellow at that step gives roughly 1.9:1 against white, which is illegible —
+ * yellow at that step gives roughly 1.9:1 against white, which is illegible,
  * this is not hypothetical, it is why the platform's own Golden Yellow is
  * documented as a surface colour that must never sit behind white text.
  *
@@ -191,12 +191,12 @@ export function deriveBrand(input: string): DerivedBrand | null {
   const ramp = {} as BrandRamp
   for (const [step, lightness] of LIGHTNESS) {
     // Only the darker half moves. Shifting the pale tints too would turn a light
-    // background muddy for no benefit — nothing puts white text on step 50.
+    // background muddy for no benefit, nothing puts white text on step 50.
     const adjusted = step >= 500 ? Math.max(0.08, lightness - shift) : lightness
     ramp[step] = toHex(hslToRgb({ h, s: saturation, l: adjusted }))
   }
 
-  // `ramp[700]` was just written from a valid hex, so this cannot be null — but
+  // `ramp[700]` was just written from a valid hex, so this cannot be null, but
   // asserting that with `!` would be a claim the compiler cannot check, and a
   // wrong one here would report a contrast figure of NaN as a pass.
   const seven = parseHex(ramp[700]) ?? rgb

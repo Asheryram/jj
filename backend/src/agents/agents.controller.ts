@@ -5,7 +5,7 @@ import { AgentsService } from './agents.service'
 import { SetMarkupDto, SetPriceDto } from './agents.dto'
 
 /**
- * Everything scoped to "me". There is deliberately no `/agents/:id/earnings` —
+ * Everything scoped to "me". There is deliberately no `/agents/:id/earnings`,
  * NFR-2.5 is easier to hold when the only readable identity is the token's.
  */
 @ApiTags('agents')

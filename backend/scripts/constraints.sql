@@ -1,13 +1,13 @@
 -- Constraints as correctness, not decoration (skills-breakdown.md §5).
 --
 -- Prisma's schema language cannot express CHECK, so these are applied after
--- migration. Every statement is idempotent — `npm run setup` may run repeatedly.
+-- migration. Every statement is idempotent, `npm run setup` may run repeatedly.
 --
 -- These are the last line of defence. The application already refuses to
 -- overdraw a wallet inside a transaction; this makes an application bug a failed
 -- statement instead of lost money.
 
--- FR-2.5 / NFR-3.3 — a balance can never go negative, whatever the code does.
+-- FR-2.5 / NFR-3.3, a balance can never go negative, whatever the code does.
 ALTER TABLE users DROP CONSTRAINT IF EXISTS users_balance_non_negative;
 ALTER TABLE users ADD CONSTRAINT users_balance_non_negative CHECK (balance >= 0);
 
@@ -16,13 +16,13 @@ ALTER TABLE users DROP CONSTRAINT IF EXISTS users_markup_sane;
 ALTER TABLE users ADD CONSTRAINT users_markup_sane
   CHECK (markup_percent >= 0 AND markup_percent <= 200);
 
--- Prices. Just non-negative here — neither selling price is pinned to
+-- Prices. Just non-negative here, neither selling price is pinned to
 -- `supplier_cost` at the row level any more.
 --
 -- The real rule ("never sell below what this actually costs") still holds,
--- but it is checked in `AdminService.setTier` against the *real* floor — the
+-- but it is checked in `AdminService.setTier` against the *real* floor, the
 -- last real delivery's charge when one exists, which can honestly sit above
--- or below this row's own `supplier_cost` — not against this single stored
+-- or below this row's own `supplier_cost`, not against this single stored
 -- column. Pinning the CHECK to `supplier_cost` would either block a price
 -- that is genuinely fine against a cheaper real cost, or wave through one
 -- that is genuinely underwater against a real cost the catalogue hasn't
@@ -43,7 +43,7 @@ ALTER TABLE products ADD CONSTRAINT products_tiers_ordered
      AND admin_price >= 0
      AND standard_price >= 0);
 
--- FR-3.4 — an agent's resale price is never negative. The real floor is their
+-- FR-3.4, an agent's resale price is never negative. The real floor is their
 -- own cost, which depends on the chain and so cannot be a row-level CHECK; that
 -- rule is enforced in the pricing domain and asserted in the service.
 ALTER TABLE agent_prices DROP CONSTRAINT IF EXISTS agent_prices_positive;
@@ -91,7 +91,7 @@ ALTER TABLE earnings ADD CONSTRAINT earnings_sign_matches_type
 
 -- A payment for an order must ask for exactly what that order sold for. Not
 -- expressible as a plain CHECK (it reaches across tables), so it is a
--- trigger instead — the same shape as a foreign key, for an invariant a
+-- trigger instead, the same shape as a foreign key, for an invariant a
 -- foreign key can't state. `amount` is set once, at payment creation, from
 -- the order's own `sale_price` at that moment (`PaymentsService.startOrderPayment`)
 -- and neither ever changes after; a mismatch here means application code

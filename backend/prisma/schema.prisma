@@ -1,4 +1,4 @@
-// JamesDataConsult — persistence model.
+// JamesDataConsult, persistence model.
 //
 // Money is ALWAYS an integer number of pesewas, never a float and never
 // Decimal-with-scale-2 pretending to be money. GHS 12.50 is 1250. This mirrors
@@ -12,11 +12,11 @@
 // One invariant that reads like it belongs there does not: `sale_price =
 // supplier_cost + Σ margins` on `orders.split`. A CHECK constraint cannot
 // walk a jsonb array without a set-returning function, and Postgres refuses
-// one of those in a CHECK at all — so this is enforced by staying correct at
+// one of those in a CHECK at all, so this is enforced by staying correct at
 // the one place `split` is ever written (`domain/pricing.ts`), and watched
 // for drift two other ways instead: on demand by `scripts/money-audit.ts`,
 // and automatically, every 30 minutes, over recent orders, by
-// `SolvencyService`'s own periodic check — see its own comment for why that
+// `SolvencyService`'s own periodic check, see its own comment for why that
 // one is scoped to a recent window rather than every order ever.
 
 generator client {
@@ -27,13 +27,13 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
   // Neon's pooled endpoint (the `-pooler` hostname) multiplexes connections
-  // through PgBouncer, which does not preserve session state — `migrate
+  // through PgBouncer, which does not preserve session state, `migrate
   // deploy` takes a `pg_advisory_lock` to stop two deploys racing each
   // other, and through the pooler that lock can be granted on one physical
   // backend connection while a later query in the same "session" lands on
   // another, so it never sees itself as already holding it and just times
   // out waiting. `directUrl` is Neon's un-pooled connection string instead,
-  // used only by Migrate (`deploy`/`dev`/`db push`) — the running app still
+  // used only by Migrate (`deploy`/`dev`/`db push`), the running app still
   // connects through `url` above, where pooling is exactly what you want.
   directUrl = env("DIRECT_URL")
 }
@@ -48,7 +48,7 @@ enum Role {
   /// account and passes on a one-time setup link; the admin chooses their own
   /// password and the superadmin never learns it. Before this, the only way an
   /// admin existed was the seed creating one with a password published in
-  /// .env.example — fine on a laptop, and not something to put in production.
+  /// .env.example, fine on a laptop, and not something to put in production.
   ///
   /// A superadmin passes every `admin` check too. Splitting the powers would mean
   /// the operator could create the business owner's account but not help them
@@ -86,7 +86,7 @@ enum Network {
   AirtelTigo
 }
 
-/// FR-4.4 — the only legal order states.
+/// FR-4.4, the only legal order states.
 enum OrderStatus {
   /// Placed, but the customer has not paid yet.
   ///
@@ -146,7 +146,7 @@ enum WithdrawalStatus {
   rejected
 }
 
-/// Per-account login lockout — the dimension `LoginThrottleGuard` cannot
+/// Per-account login lockout, the dimension `LoginThrottleGuard` cannot
 /// cover, since that guard is keyed on source IP and kept in memory: a fresh
 /// IP gets a fresh bucket, so cumulative credential-stuffing against one
 /// target account faces no limit at all, and a redeploy wipes every counter
@@ -173,7 +173,7 @@ model LoginAttempt {
 model User {
   id           String     @id @default(uuid())
   name         String
-  /// Unique per role, not globally — see the @@unique blocks at the end of this
+  /// Unique per role, not globally, see the @@unique blocks at the end of this
   /// model. One person may hold more than one profile, and they share a phone
   /// and an email because they are the same person.
   phone        String
@@ -189,7 +189,7 @@ model User {
   decidedAt  DateTime? @map("decided_at")
   decidedBy  String?   @map("decided_by")
 
-  /// FR-1.7 — unique per user, and the handle a sell link is built from.
+  /// FR-1.7, unique per user, and the handle a sell link is built from.
   referralCode String  @unique @map("referral_code")
   /// null means this agent sits directly under James (the admin root).
   uplineCode   String? @map("upline_code")
@@ -200,7 +200,7 @@ model User {
 
   /// The platform's `whatsappChannelUrl` setting, as it stood the last time this
   /// agent was shown the join popup. Compared against the *current* setting
-  /// value, not stored as a plain boolean — so a channel James replaces later is
+  /// value, not stored as a plain boolean, so a channel James replaces later is
   /// shown again, once, rather than staying dismissed forever for a link that no
   /// longer exists.
   whatsappChannelSeenUrl String? @map("whatsapp_channel_seen_url")
@@ -234,7 +234,7 @@ model User {
    * mixed with. So they are separate users who happen to be the same human.
    *
    * Uniqueness moved from the column to the pair. What stops a stranger claiming
-   * somebody's address is now application code — registration rejects an email
+   * somebody's address is now application code, registration rejects an email
    * already present under any role, and only the account's owner can add a
    * profile to it. See the invariant in AuthService.createProfile: at most one
    * row per email carries a password, and every other row with that email was
@@ -253,7 +253,7 @@ model User {
 ///
 /// This is the provider's data, not ours: their SKU code, their price, and
 /// whether they currently have the bundle. Keeping it in its own table means the
-/// seam is honest — when the live keys land, this table becomes a cache of the
+/// seam is honest, when the live keys land, this table becomes a cache of the
 /// API response and nothing downstream of `supplierCode` has to change.
 ///
 /// During acceptance testing it is also the lever that makes the failure path
@@ -269,7 +269,7 @@ model SupplierProduct {
   name     String
   validity String
 
-  /// What James pays the provider. The single source of truth for cost —
+  /// What James pays the provider. The single source of truth for cost:
   /// `products.supplier_cost` is synced from here, never typed in by hand.
   costPrice Int @map("cost_price")
 
@@ -277,7 +277,7 @@ model SupplierProduct {
   ///
   /// Their API takes `{ networkKey, capacity }` rather than a SKU code, so these
   /// two columns are what an order is actually placed with. Both null means the
-  /// SKU has no automated fulfilment — airtime, voice, SMS, AFA and result
+  /// SKU has no automated fulfilment, airtime, voice, SMS, AFA and result
   /// checkers all sit in that category, because DataHub sells data only.
   networkKey String? @map("network_key")
   /// Data size in GB, as their API expects it: "1", "2", "5".
@@ -355,7 +355,7 @@ model SupplierDispatch {
   @@index([orderId])
   @@index([outcome])
   /// The fastest-growing table in the schema, and a good first candidate for
-  /// a retention/archival policy — this at least keeps a date-scoped query
+  /// a retention/archival policy, this at least keeps a date-scoped query
   /// (or a future archival sweep) off a full scan in the meantime.
   @@index([createdAt])
   @@map("supplier_dispatches")
@@ -377,19 +377,19 @@ model Product {
   /// What James pays DataHub GH / the voucher supplier. Admin-only.
   /// Synced from `supplier_products.cost_price`.
   supplierCost  Int @map("supplier_cost")
-  /// What James charges agents — a top-level agent's cost floor.
+  /// What James charges agents, a top-level agent's cost floor.
   adminPrice    Int @map("admin_price")
   /// What a walk-up customer pays with no agent link (FR-3.5).
   standardPrice Int @map("standard_price")
 
   /// The intent behind the two prices above, in basis points over cost
-  /// (1500 = 15.00%) — a record for the Prices screen, not a live formula.
+  /// (1500 = 15.00%), a record for the Prices screen, not a live formula.
   ///
   /// Used when James applies a markup across a category (`AdminService.applyMarkup`)
   /// and re-derived whenever he types a price in directly, so the number shown
   /// stays honest about what markup that price actually represents. It does
   /// NOT move a price on its own: when the provider's cost changes
-  /// (`AdminService.syncSupplierCosts`), only `supplierCost` moves — the two
+  /// (`AdminService.syncSupplierCosts`), only `supplierCost` moves, the two
   /// selling prices are James's own decision and never change under him as a
   /// side effect of the catalogue changing. A cost that has moved past a price
   /// he already set shows up as "priced wrong" on the Prices screen for him to
@@ -398,21 +398,21 @@ model Product {
   walkupMarkupBp Int @map("walkup_markup_bp")
 
   /// What the last real delivery had charged, at the moment a price on this
-  /// product was last saved — null until the first save that had a real
+  /// product was last saved, null until the first save that had a real
   /// figure to check against (`AdminService.setTier`).
   ///
   /// This is what "up to date" actually means here: not that `supplierCost`
   /// is fresh, and not that the price merely clears cost, but that nothing
   /// has *changed* about the real cost since James last looked at this price
   /// with that real figure in front of him. A fresh real charge that happens
-  /// to repeat the same number he already priced against changes nothing —
-  /// there was nothing new to review — so this is compared by value, not by
+  /// to repeat the same number he already priced against changes nothing:
+  /// there was nothing new to review, so this is compared by value, not by
   /// timestamp: `CostPrices.tsx` flags a product "outdated" only when the
   /// current real charge (`AdminService.catalogueAccuracy`) differs from
   /// this, not merely because a sale happened more recently than this save.
   pricedAgainstRealCost   Int?      @map("priced_against_real_cost")
   /// When that save happened. Shown next to the outdated/up-to-date status
-  /// so "up to date" can also say "as of when" — a price confirmed against
+  /// so "up to date" can also say "as of when", a price confirmed against
   /// today's real cost six months ago and a price confirmed against it
   /// yesterday are both technically "up to date," but not equally worth
   /// trusting without a second look.
@@ -429,15 +429,15 @@ model Product {
   @@map("products")
 }
 
-/// One product's `adminPrice` waiting to be told to agents — consolidated,
+/// One product's `adminPrice` waiting to be told to agents, consolidated,
 /// not a log. `AdminService.setTier`/`applyMarkup` upsert this row on every
 /// change so a product edited five times before anyone hits "notify" still
 /// appears once, and delete it outright the moment `currentPrice` lands back
-/// on `baselinePrice` — a price that round-tripped is not news to anyone who
+/// on `baselinePrice`, a price that round-tripped is not news to anyone who
 /// never saw the middle of it. Cleared entirely once the digest is sent;
 /// the next edit starts a fresh row from whatever the price is by then.
 model PendingPriceChange {
-  /// One row per product, never one per edit — the upsert key.
+  /// One row per product, never one per edit, the upsert key.
   productId String @id @map("product_id")
 
   /// `adminPrice` as agents last knew it: either when this row was first
@@ -460,7 +460,7 @@ model AgentPrice {
   productId   String @map("product_id")
   resalePrice Int    @map("resale_price")
 
-  /// Not a cascade — see `LedgerEntry`'s comment on why deleting a user must
+  /// Not a cascade, see `LedgerEntry`'s comment on why deleting a user must
   /// never silently take financial-audit-adjacent rows down with it. Nothing
   /// deletes a user today; `UserStatus.suspended` is the real, non-destructive
   /// alternative already in use.
@@ -494,7 +494,7 @@ model Order {
   split     Json
 
   /// Which provider SKU this order was actually priced and sold against,
-  /// frozen at the same moment as `salePrice`/`split` — null for a product
+  /// frozen at the same moment as `salePrice`/`split`, null for a product
   /// with none mapped yet (a checker, say). `SupplierService` used to
   /// re-resolve `Product.supplierCode` live at dispatch time instead of
   /// reading this, which could be minutes later, or the multi-hour
@@ -508,7 +508,7 @@ model Order {
   /// Referral code of the agent whose sell link was used, if any.
   soldByCode String? @map("sold_by_code")
 
-  /// The agent's name at the moment of sale, frozen alongside `soldByCode` —
+  /// The agent's name at the moment of sale, frozen alongside `soldByCode`,
   /// same reasoning as `productName`/`buyerPhone` below. `soldByCode` alone
   /// depends on a live join to `User.name` for every commission/attribution
   /// report; if that agent row is ever renamed or deleted, history would
@@ -537,21 +537,21 @@ model Order {
   /// `ReconcilerService.resolveManually`) rather than DataHub's own webhook or
   /// the reconciler's polling ever confirming it. Distinct from a `manual_`
   /// provider reference, which is DataHub routing an order to their own
-  /// staff — this is about who on OUR side decided the outcome, not theirs.
+  /// staff, this is about who on OUR side decided the outcome, not theirs.
   resolvedManually Boolean @default(false) @map("resolved_manually")
 
   /// The compare-and-swap for `FulfilmentService.run`'s one real purchase
-  /// call — set the moment a call wins the race to actually dispatch this
+  /// call, set the moment a call wins the race to actually dispatch this
   /// order, before DataHub is ever contacted. DataHub's API has no
   /// idempotency key of its own ("a retry can deliver twice"), and nothing
-  /// before this stopped two callers — a webhook and the restart-recovery
-  /// sweep, say, on two different instances — from both placing a real
+  /// before this stopped two callers, a webhook and the restart-recovery
+  /// sweep, say, on two different instances, from both placing a real
   /// purchase for the same order. Left set afterward rather than cleared:
   /// `dispatch` is meant to be attempted at most once per order, ever,
   /// whatever it answers is settled from there by `settle()`/the reconciler,
   /// never by calling `dispatch` again. The one exception `run` allows back
   /// in is a claim old enough that whoever made it must have crashed before
-  /// `dispatch` ever answered (no `SupplierDispatch` row exists at all) —
+  /// `dispatch` ever answered (no `SupplierDispatch` row exists at all),
   /// see `run`'s own comment for the window.
   dispatchClaimedAt DateTime? @map("dispatch_claimed_at")
 
@@ -567,10 +567,10 @@ model Order {
 
   /// Set when a settlement source (webhook, reconciler sweep, or a manual
   /// resolution) disagrees with an outcome this order was already settled
-  /// with — see `FulfilmentService.settle`'s conflict detection. Null the
+  /// with, see `FulfilmentService.settle`'s conflict detection. Null the
   /// rest of the time; surfaced on the Needs Attention page until an admin
   /// has checked it and cleared it via `ReconcilerService.acknowledgeConflict`.
-  /// This is never auto-resolved — the money may already be wrong in a way
+  /// This is never auto-resolved, the money may already be wrong in a way
   /// nothing here can safely guess how to fix.
   conflictNote String? @map("conflict_note")
 
@@ -584,7 +584,7 @@ model Order {
   /// Money owed back on this order, once a human has authorised it.
   refundRequest RefundRequest?
 
-  /// Every ledger line about this order, by its `reference` — not an id FK,
+  /// Every ledger line about this order, by its `reference`, not an id FK,
   /// since the ledger denormalises the reference string itself.
   ledgerEntries LedgerEntry[]
 
@@ -602,7 +602,7 @@ model Order {
   /// scoped to one seller's orders over time.
   @@index([soldByCode, createdAt])
   /// Every customer's order-history load, and the admin Users page's
-  /// `boughtCounts` groupBy — both filter on this with no index today.
+  /// `boughtCounts` groupBy, both filter on this with no index today.
   @@index([buyerUserId])
   /// Queried all-time on every Overview load; a small-minority boolean is
   /// exactly what an index (or, later, a partial one on `refunded = true`)
@@ -624,7 +624,7 @@ model Transaction {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  /// Not a cascade — same reasoning as `AgentPrice.user`: a customer's wallet
+  /// Not a cascade, same reasoning as `AgentPrice.user`: a customer's wallet
   /// history is financial-audit-adjacent, and must not silently vanish just
   /// because nothing stops a future delete of the user row.
   user User @relation(fields: [userId], references: [id], onDelete: Restrict)
@@ -651,7 +651,7 @@ model Earning {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  /// Not a cascade — an agent's earnings ledger is exactly the audit trail
+  /// Not a cascade, an agent's earnings ledger is exactly the audit trail
   /// this whole change protects; see `AgentPrice.user`'s comment.
   user User @relation(fields: [userId], references: [id], onDelete: Restrict)
 
@@ -674,7 +674,7 @@ model Withdrawal {
   status      WithdrawalStatus @default(pending)
 
   /// Paystack's recipient handle for this agent's Mobile Money number. Reused
-  /// across payouts — creating one per withdrawal would litter their dashboard.
+  /// across payouts, creating one per withdrawal would litter their dashboard.
   recipientCode  String?   @map("recipient_code")
   /// Paystack's handle for the transfer itself, for looking a dispute up.
   transferCode   String?   @map("transfer_code")
@@ -686,7 +686,7 @@ model Withdrawal {
   paidAt         DateTime? @map("paid_at")
 
   /// Set when an admin paid this out by hand (`WithdrawalsService.settleManually`)
-  /// rather than Paystack ever confirming a transfer — see the identical field
+  /// rather than Paystack ever confirming a transfer, see the identical field
   /// on `RefundRequest` for why `transferCode` staying null isn't enough on
   /// its own to mean the same thing. Checked by the same webhook handler so a
   /// payout already sent by hand can never also be re-credited or re-marked
@@ -696,7 +696,7 @@ model Withdrawal {
   requestedAt DateTime  @default(now()) @map("requested_at")
   decidedAt   DateTime? @map("decided_at")
 
-  /// Not a cascade — see `LedgerEntry`'s own comment on why a payout with
+  /// Not a cascade, see `LedgerEntry`'s own comment on why a payout with
   /// ledger history must block the agent's own row from ever being deleted,
   /// same reasoning as the User relation below, changed alongside it.
   user User @relation(fields: [userId], references: [id], onDelete: Restrict)
@@ -716,7 +716,7 @@ model Withdrawal {
   @@map("withdrawals")
 }
 
-/// NFR-3.3 — money owed back to a Mobile Money payer whose order failed.
+/// NFR-3.3, money owed back to a Mobile Money payer whose order failed.
 ///
 /// Reversing a MoMo collection is neither instant nor guaranteed, and a guest
 /// has no wallet to credit. So the amount is held against their number and they
@@ -747,7 +747,7 @@ model Setting {
 ///
 /// DataHub will not deliver to a number that is not on their beneficiary list,
 /// and their `/beneficiaries` submission endpoint has been returning 502 since
-/// we integrated — so the only way to get a number approved is for James to do
+/// we integrated, so the only way to get a number approved is for James to do
 /// it by hand in their dashboard.
 ///
 /// He cannot do that if he does not know who tried. Without this table a refused
@@ -757,7 +757,7 @@ model Setting {
 model BeneficiaryRequest {
   /// The recipient number. One row per number, however many times it is tried.
   phone      String @id
-  /// Which DataHub network it needs approving on — YELLO or mtn_xpress.
+  /// Which DataHub network it needs approving on, YELLO or mtn_xpress.
   networkKey String @map("network_key")
 
   /// How many purchases this number has cost so far. A high count is a customer
@@ -765,7 +765,7 @@ model BeneficiaryRequest {
   attempts    Int     @default(1)
   /// The bundle most recently attempted, for context on the admin screen.
   lastProduct String? @map("last_product")
-  /// Pesewas of the most recent attempt — the value of the sale being lost.
+  /// Pesewas of the most recent attempt, the value of the sale being lost.
   lastValue   Int?    @map("last_value")
 
   firstSeenAt DateTime  @default(now()) @map("first_seen_at")
@@ -774,10 +774,10 @@ model BeneficiaryRequest {
   /// the same number is not re-submitted on a later attempt.
   approvedAt  DateTime? @map("approved_at")
   /// The last time an admin copied this number to paste into DataHub's own
-  /// dashboard, by hand — not confirmation DataHub received or actioned it,
+  /// dashboard, by hand, not confirmation DataHub received or actioned it,
   /// only that it was handed over. Null means never copied at all, which is
   /// exactly the number that's easy to lose track of once a few more have
-  /// come in since the last copy — see `ApprovalsService.pending`.
+  /// come in since the last copy, see `ApprovalsService.pending`.
   copiedAt    DateTime? @map("copied_at")
 
   @@index([approvedAt])
@@ -809,7 +809,7 @@ enum PaymentStatus {
 ///
 /// The rule this table exists to enforce: nothing is delivered and no wallet is
 /// credited until a row here says `paid`, and a row only says `paid` because
-/// Paystack told our server so — either through a signed webhook or through our
+/// Paystack told our server so, either through a signed webhook or through our
 /// own verify call. A browser reporting success is not evidence; it is the one
 /// party in the exchange with a motive to lie.
 model Payment {
@@ -835,7 +835,7 @@ model Payment {
   channel String?
 
   /// Which Mobile Money network actually carried this, read from Paystack's
-  /// own `authorization.bank` — not guessed from the number. Null for a card
+  /// own `authorization.bank`, not guessed from the number. Null for a card
   /// payment, or when Paystack reported a name this platform does not
   /// recognise (see `networkFromPaystackBank`).
   network Network?
@@ -850,7 +850,7 @@ model Payment {
   /// This is James's cost, not the customer's and not the agents'. The customer
   /// paid `amount`; agents are credited their margin in full; what Paystack takes
   /// comes out of what is left, which is his. So it is deliberately NOT part of
-  /// the order split — that records the sale, and the invariant
+  /// the order split, that records the sale, and the invariant
   /// `salePrice = supplierCost + Σ margins` must keep holding.
   fee Int?
 
@@ -866,7 +866,7 @@ model Payment {
   authorizationUrl String? @map("authorization_url")
 
   /// Their reply verbatim, truncated. The provider's own words survive our
-  /// reading of them — the same reason supplier_dispatches keeps one.
+  /// reading of them, the same reason supplier_dispatches keeps one.
   providerResponse String? @map("provider_response")
 
   paidAt    DateTime? @map("paid_at")
@@ -892,18 +892,18 @@ enum LedgerKind {
   supplier_cost
   /// An agent's margin on a sale, accrued the moment it completes.
   agent_margin
-  /// Historical only — nothing writes this any more. A referrer used to be
+  /// Historical only, nothing writes this any more. A referrer used to be
   /// paid a bonus out of James's margin on their recruit's sales; multi-level
   /// referral sharing was removed at the client's request. Kept so old rows
   /// still read correctly, not because a sale can produce one today.
   referral_bonus
   /// Money given back for an order that could not be delivered.
   refund
-  /// Money sent to an agent. Settles an accrued margin — not a new cost.
+  /// Money sent to an agent. Settles an accrued margin, not a new cost.
   payout
   /// Reserved, not yet live: nothing currently reads a transfer fee out of
   /// Paystack's payout response, so this has never been written. If Paystack
-  /// ever charges one, it belongs here — until then, do not treat "always
+  /// ever charges one, it belongs here, until then, do not treat "always
   /// zero" as proof no fee is being charged; it only proves none is captured.
   payout_fee
   /// A customer adding money to their wallet. Cash in, but theirs, not revenue.
@@ -911,7 +911,7 @@ enum LedgerKind {
   /// James adding his own money to the DataHub float. Capital, not revenue.
   capital_in
   /// A top-up that specifically moves money already collected from customers
-  /// for a bundle's cost — sitting in Paystack, not DataHub — across to where
+  /// for a bundle's cost (sitting in Paystack, not DataHub) across to where
   /// it was always meant to end up. Not fresh capital and not profit: this is
   /// completing a transfer that was already owed, which is exactly why it is
   /// the one thing that reduces `SolvencyService`'s "already spent on
@@ -921,7 +921,7 @@ enum LedgerKind {
   capital_out
   /// A wrongly-credited agent margin that could not be fully clawed back
   /// because the agent had already withdrawn it. A real, permanent cost to
-  /// the business — distinct from `agent_margin`, which is the cost of a
+  /// the business, distinct from `agent_margin`, which is the cost of a
   /// margin actually earned. See `FulfilmentService.reverseAgent`.
   agent_margin_writeoff
   /// Paystack reported more than we asked for on a payment. Some Mobile
@@ -936,15 +936,15 @@ enum LedgerKind {
 /// Every movement of money, once.
 ///
 /// The books were previously spread across three tables that each knew part of
-/// the story — `orders.split` for margins, `payments.fee` for processor charges,
-/// `supplier_dispatches.provider_charged` for cost — so "what did this business
+/// the story, `orders.split` for margins, `payments.fee` for processor charges,
+/// `supplier_dispatches.provider_charged` for cost, so "what did this business
 /// actually make" required joining all three and getting the accrual rules right
 /// by hand, every time. This is the one place that answers it.
 ///
 /// Two properties make it trustworthy:
 ///
 ///  · **Idempotent by construction.** `idempotencyKey` is unique and derived from
-///    the event, not from when it was written — `order:JDC-1:supplier_cost` can
+///    the event, not from when it was written, `order:JDC-1:supplier_cost` can
 ///    only exist once. Paystack retries webhooks, the reconciler re-checks
 ///    orders, and a settlement can be attempted twice; none of that can
 ///    double-count, because the second write collides and is dropped.
@@ -952,7 +952,7 @@ enum LedgerKind {
 ///  · **Cash and profit are separated.** `amount` is the cash movement; a payout
 ///    or a top-up moves cash without being a profit or loss, so `affectsProfit`
 ///    marks the lines that belong in a P&L. Summing the wrong one is the classic
-///    way to double-count an agent's margin — once when it is earned and again
+///    way to double-count an agent's margin, once when it is earned and again
 ///    when it is paid.
 model LedgerEntry {
   id String @id @default(uuid())
@@ -969,7 +969,7 @@ model LedgerEntry {
   /// Whether this line belongs in profit and loss.
   ///
   /// False for movements that settle an existing obligation or hold someone
-  /// else's money — a payout against an already-accrued margin, a wallet top-up.
+  /// else's money, a payout against an already-accrued margin, a wallet top-up.
   /// Counting those as costs would charge the same margin twice.
   affectsProfit Boolean @default(true) @map("affects_profit")
 
@@ -979,7 +979,7 @@ model LedgerEntry {
   /// What this entry is about. All optional: a top-up has no order, a supplier
   /// cost has no payment.
   ///
-  /// All four are real, enforced foreign keys, `onDelete: Restrict` — nothing
+  /// All four are real, enforced foreign keys, `onDelete: Restrict`, nothing
   /// deletes an Order, Payment, Withdrawal or User today, but "the one place
   /// that answers what this business actually made" is exactly the row that
   /// must never point at a typo or a since-vanished record with nothing to
@@ -996,7 +996,7 @@ model LedgerEntry {
   userId       String?     @map("user_id")
   user         User?       @relation(fields: [userId], references: [id], onDelete: Restrict)
 
-  /// When the money actually moved, which is not always when this was written —
+  /// When the money actually moved, which is not always when this was written:
   /// a backfilled or reconciled entry is dated by its event.
   occurredAt DateTime @map("occurred_at")
   createdAt  DateTime @default(now()) @map("created_at")
@@ -1005,7 +1005,7 @@ model LedgerEntry {
   @@index([occurredAt])
   @@index([orderRef])
   @@index([userId])
-  /// A real foreign key still benefits from its own index — Postgres does
+  /// A real foreign key still benefits from its own index, Postgres does
   /// not create one automatically, and a payout's own ledger trail (among
   /// other lookups) filters directly on these two.
   @@index([paymentRef])
@@ -1029,7 +1029,7 @@ enum RefundMethod {
   /// Sent back to the number that paid, as a Mobile Money transfer.
   ///
   /// The normal case, and the only one now that wallets are closed. The payer's
-  /// number is the identity — they have no account, and it is where the money
+  /// number is the identity, they have no account, and it is where the money
   /// came from.
   transfer
   /// Straight back into a customer wallet. Kept for accounts that predate
@@ -1039,7 +1039,7 @@ enum RefundMethod {
   ///
   /// Retained only so historical rows still read. Never chosen now: nothing in
   /// the platform ever implemented claiming, so money parked here could be
-  /// listed and never collected — a promise on a receipt with nothing behind it.
+  /// listed and never collected, a promise on a receipt with nothing behind it.
   claimable
 }
 
@@ -1048,19 +1048,19 @@ enum RefundMethod {
 /// Refunds used to happen automatically the moment a delivery failed. That is
 /// kinder to the customer and it removes the one control that matters on an
 /// outbound payment: a person deciding it is owed. The cost of not having it was
-/// not hypothetical — a rule that credited every failed order handed eight
+/// not hypothetical, a rule that credited every failed order handed eight
 /// customers GHS 196 they had never paid, and nothing stood between that bug and
 /// the money.
 ///
 /// So a failure now records a debt and stops. The money is still owed from the
 /// moment it is written, which is why `SolvencyService` counts pending requests
-/// as a liability — the delay is in paying, not in owing.
+/// as a liability, the delay is in paying, not in owing.
 model RefundRequest {
   id String @id @default(uuid())
 
   /// One per order. A second failure on the same order does not owe twice.
   orderId String @unique @map("order_id")
-  /// Not a cascade — inconsistent with `Payment.orderId`'s `SET NULL` on the
+  /// Not a cascade, inconsistent with `Payment.orderId`'s `SET NULL` on the
   /// same event was the actual bug: a cascade here would silently destroy
   /// proof that a real payout was authorised and sent, the one thing this
   /// table exists to keep. Nothing deletes an order today.
@@ -1087,8 +1087,8 @@ model RefundRequest {
   /// Which Mobile Money network to pay back on.
   ///
   /// Chosen by whoever approves, not derived from the number. Ghana's number
-  /// portability means a prefix cannot tell you which network carries a line —
-  /// the platform used to guess and turned real customers away for it — so the
+  /// portability means a prefix cannot tell you which network carries a line:
+  /// the platform used to guess and turned real customers away for it, so the
   /// person with the order in front of them picks the rail.
   momoNetwork Network? @map("momo_network")
 
@@ -1104,10 +1104,10 @@ model RefundRequest {
 
   /// Set when an admin paid this back by hand (`RefundsService.settleManually`)
   /// rather than Paystack ever confirming a transfer. `transferCode` staying
-  /// null doesn't say this — a transfer whose outcome came back `unknown` also
+  /// null doesn't say this, a transfer whose outcome came back `unknown` also
   /// has no code, but may still be real. This is the one thing a later
   /// genuine `transfer.success`/`transfer.failed`/`transfer.reversed` webhook
-  /// for the same reference can check to refuse acting a second time — a
+  /// for the same reference can check to refuse acting a second time, a
   /// customer already paid by hand must never also be credited or re-queued
   /// by that webhook arriving days later.
   resolvedManually Boolean @default(false) @map("resolved_manually")
@@ -1137,7 +1137,7 @@ enum BrandingStatus {
 ///
 /// This table holds only what is **live**. An agent's proposed change lives in
 /// `BrandingRequest` until it is approved, so a shop can never display something
-/// nobody has looked at — which matters because this is a page that asks for
+/// nobody has looked at, which matters because this is a page that asks for
 /// money, and a convincing bank logo on it is somebody else's liability.
 model Branding {
   id String @id @default(uuid())
@@ -1155,7 +1155,7 @@ model Branding {
   brandColor String? @map("brand_color")
 
   /// The colour used instead, on a dark background. Null means the shop has not
-  /// chosen a separate one, and `brandColor`'s own ramp is reused for both — so
+  /// chosen a separate one, and `brandColor`'s own ramp is reused for both, so
   /// nobody is forced to pick two colours to get a working dark theme.
   brandColorDark String? @map("brand_color_dark")
 
@@ -1216,14 +1216,14 @@ model BrandingRequest {
 
 /// An agent's own domain, pointed at their `/s/<code>` shop.
 ///
-/// One row per agent, like `Branding` — a second request for a different
+/// One row per agent, like `Branding`, a second request for a different
 /// domain replaces this one rather than piling up a history, since only one
 /// domain can ever be live for a shop at a time. Two independent booleans
 /// rather than a single status: `allowed` is the superadmin's approval of
 /// this specific domain string (rarely revisited once granted), `active` is
 /// the day-to-day live switch (DNS confirmed, or a domain suspended without
 /// losing that approval record). Collapsing them into one status would lose
-/// the ability to suspend a domain — a support action that should not also
+/// the ability to suspend a domain, a support action that should not also
 /// erase the fact it was once vetted and approved.
 ///
 /// The reason for the review at all is the same one `BrandingRequest`
@@ -1238,19 +1238,19 @@ model CustomDomain {
 
   domain String @unique
 
-  /// Superadmin approval gate — is this agent permitted to use this domain
+  /// Superadmin approval gate, is this agent permitted to use this domain
   /// at all. Never true on creation; only a review can set it.
   allowed Boolean @default(false)
-  /// Live switch — DNS confirmed and the domain currently serving traffic.
+  /// Live switch, DNS confirmed and the domain currently serving traffic.
   /// Meaningless without `allowed`; the public resolve endpoint requires
   /// both.
   active Boolean @default(false)
 
   requestedAt DateTime  @default(now()) @map("requested_at")
-  /// Set whenever `allowed` is decided — approved or refused.
+  /// Set whenever `allowed` is decided, approved or refused.
   reviewedAt DateTime? @map("reviewed_at")
   reviewedBy String?   @map("reviewed_by")
-  /// Kept on a refusal, the same pattern as `BrandingRequest.note` — the
+  /// Kept on a refusal, the same pattern as `BrandingRequest.note`, the
   /// agent is told why, and the record survives being asked about later.
   reason String?
 
@@ -1326,8 +1326,12 @@ model FeedbackReport {
 }
 
 enum AnnouncementAudience {
-  /// Every active agent at the moment this was sent.
+  /// Every active agent and admin at the moment this was sent.
   all
+  /// Every active agent, nobody else.
+  agents
+  /// Every active admin, nobody else.
+  admins
   /// A specific list, chosen by whoever sent it.
   selected
 }

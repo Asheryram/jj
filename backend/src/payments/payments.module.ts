@@ -10,10 +10,10 @@ import { DomainsModule } from '../domains/domains.module'
  *
  * Imports FulfilmentModule rather than OrdersModule: a confirmed payment is what
  * releases an order for fulfilment, and reaching for the whole orders module
- * would make the two mutually dependent — Orders needs this one to start a
+ * would make the two mutually dependent, Orders needs this one to start a
  * charge. Settlement still has exactly one owner.
  *
- * Also imports DomainsModule — `PaymentsService.callbackUrl` checks a
+ * Also imports DomainsModule, `PaymentsService.callbackUrl` checks a
  * checkout's own custom domain against `DomainsService.resolve` before ever
  * sending Paystack there.
  */

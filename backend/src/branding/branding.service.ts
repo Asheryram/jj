@@ -10,7 +10,7 @@ export interface PublicBranding {
   ramp: BrandRamp
   /**
    * The colour and ramp used on a dark background. Equal to `brandColor`/`ramp`
-   * when nobody has chosen a separate one — same colour, applied through
+   * when nobody has chosen a separate one, same colour, applied through
    * whichever ramp step a dark surface calls for.
    */
   brandColorDark: string
@@ -29,7 +29,7 @@ const DEFAULT_COLOR = '#0B3B8F'
  * A logo is capped at 100KB.
  *
  * Generous for a shop mark and small enough that holding it in a row costs
- * nothing. The cap is not about disk — it is about a 6MB phone photo being
+ * nothing. The cap is not about disk, it is about a 6MB phone photo being
  * uploaded as a logo, served on every page load, and read by the whole country on
  * mobile data.
  */
@@ -42,7 +42,7 @@ const MAX_LOGO_BYTES = 100 * 1024
  * is uploading, so neither is evidence. This checks the signature.
  *
  * SVG is deliberately absent. It is XML that may contain `<script>`, and serving
- * one from our own origin would run it with our cookies — a stored XSS on a page
+ * one from our own origin would run it with our cookies, a stored XSS on a page
  * where customers type card details. A raster logo is a small price for that not
  * being possible.
  */
@@ -65,7 +65,7 @@ function detectImage(bytes: Buffer): string | null {
  * `BrandingRequest` until the platform owner approves it. The queue exists
  * because an agent shop collects payment details, so a shop convincingly named
  * and badged as a bank or a network is a fraud risk the platform carries. The
- * owner's own branding needs no approval — it is their platform.
+ * owner's own branding needs no approval, it is their platform.
  *
  * **The colour ramp is derived on read, never stored.** `deriveBrand` includes a
  * contrast correction that keeps white button text readable, and freezing its
@@ -86,7 +86,7 @@ export class BrandingService {
    * a name keeps the platform's colour, which is almost always what they meant.
    */
   async forShop(sellerCode?: string | null): Promise<PublicBranding> {
-    // Never `logoBytes` here — this runs on every storefront render, for both
+    // Never `logoBytes` here, this runs on every storefront render, for both
     // platform and agent branding, and everything below only ever needs to
     // know whether a logo exists (`logoMime !== null`), not the up-to-100KB
     // blob itself. `logo()` above is the endpoint whose actual job is serving
@@ -121,7 +121,7 @@ export class BrandingService {
     const color = agent?.brandColor ?? platform?.brandColor ?? DEFAULT_COLOR
     const derived = deriveBrand(color) ?? deriveBrand(DEFAULT_COLOR)!
 
-    // Falls all the way back to the light colour, not just to a default — a
+    // Falls all the way back to the light colour, not just to a default, a
     // shop that has not picked a dark variant still gets a working dark theme,
     // built from the one colour it does have.
     const colorDark = agent?.brandColorDark ?? platform?.brandColorDark ?? color
@@ -166,7 +166,7 @@ export class BrandingService {
 
   /** What an agent currently has live, plus anything they have submitted. */
   async mine(userId: string) {
-    // `hasLogo` below only ever needs `logoMime !== null` — never the blob.
+    // `hasLogo` below only ever needs `logoMime !== null`, never the blob.
     const [live, pending] = await Promise.all([
       this.prisma.branding.findUnique({
         where: { userId },
@@ -300,7 +300,7 @@ export class BrandingService {
 
     // Prisma's `Bytes` column takes a Uint8Array over a plain ArrayBuffer. A
     // Buffer may sit on a SharedArrayBuffer, which the types will not accept, so
-    // this copies into a freshly allocated one — a few kilobytes, once per
+    // this copies into a freshly allocated one, a few kilobytes, once per
     // upload, in exchange for not casting the type away.
     const bytes = new Uint8Array(new ArrayBuffer(buffer.byteLength))
     bytes.set(buffer)
@@ -311,7 +311,7 @@ export class BrandingService {
 
   /** Everything waiting to be reviewed, oldest first. */
   async queue(status: 'pending' | 'approved' | 'rejected' = 'pending') {
-    // Never `logoBytes` here — up to 100 rows, and only `requestLogo` below
+    // Never `logoBytes` here, up to 100 rows, and only `requestLogo` below
     // (the endpoint whose actual job is serving the image) needs the blob.
     const rows = await this.prisma.brandingRequest.findMany({
       where: { status },
@@ -339,7 +339,7 @@ export class BrandingService {
       shopName: row.shopName,
       brandColor: row.brandColor,
       brandColorDark: row.brandColorDark,
-      /** Preview URL for the submitted logo — the pending one, not the live one. */
+      /** Preview URL for the submitted logo, the pending one, not the live one. */
       logoUrl: row.logoMime ? `/api/admin/branding/requests/${row.id}/logo` : null,
       status: row.status,
       note: row.note,

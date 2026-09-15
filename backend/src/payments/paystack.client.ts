@@ -16,8 +16,8 @@ import { networkFromPaystackBank } from './momo'
  *
  *  2. **The webhook is signed, the redirect is not.** `x-paystack-signature` is
  *     an HMAC-SHA512 of the raw request body keyed with the secret key. The
- *     browser coming back to `callback_url` carries no proof of anything — it is
- *     the one party in the exchange with a motive to lie about having paid — so a
+ *     browser coming back to `callback_url` carries no proof of anything, it is
+ *     the one party in the exchange with a motive to lie about having paid, so a
  *     return trip triggers a server-side `verify` call rather than being trusted.
  *
  *  3. **`charge.success` can arrive more than once.** Retries and duplicates are
@@ -38,7 +38,7 @@ export class PaystackClient {
     return Boolean(this.secretKey)
   }
 
-  /** True for a `sk_test_` key — useful for saying so on screen. */
+  /** True for a `sk_test_` key, useful for saying so on screen. */
   get isTestMode(): boolean {
     return this.secretKey?.startsWith('sk_test') ?? false
   }
@@ -46,7 +46,7 @@ export class PaystackClient {
   /**
    * Start a payment and get the URL to send the customer to.
    *
-   * `reference` is ours, and for an order it IS the order reference — so a
+   * `reference` is ours, and for an order it IS the order reference, so a
    * payment can never be matched to the wrong order. Paystack rejects a
    * duplicate reference, which doubles as protection against charging twice for
    * one order.
@@ -111,7 +111,7 @@ export class PaystackClient {
    *
    * Used both when the customer returns to the app and when a webhook arrives,
    * because a signature proves who sent a message but not that its contents are
-   * current — and this call costs nothing.
+   * current, and this call costs nothing.
    */
   async verify(reference: string): Promise<VerifyOutcome> {
     const key = this.secretKey
@@ -146,7 +146,7 @@ export class PaystackClient {
       amount: Number(body.data.amount ?? 0),
       currency: String(body.data.currency ?? ''),
       channel: body.data.channel ?? null,
-      // Which network actually carried a mobile money charge — theirs to
+      // Which network actually carried a mobile money charge, theirs to
       // know, since they are the one who charged it. Null for a card payment,
       // or a bank name this platform does not recognise; see `momo.ts`.
       network: networkFromPaystackBank(body.data.authorization?.bank),
@@ -162,7 +162,7 @@ export class PaystackClient {
    * The only figure that says whether an obligation can actually be met. Our own
    * ledger knows what is owed; it has no idea what is left to pay it with, and a
    * payout approved against money that is not there fails at the worst possible
-   * moment — after the agent has been told it is coming.
+   * moment, after the agent has been told it is coming.
    */
   async balance(): Promise<{ ok: true; balance: number } | { ok: false; reason: string }> {
     const key = this.secretKey
@@ -195,7 +195,7 @@ export class PaystackClient {
   /**
    * When money last actually left the balance for our bank account.
    *
-   * `balance()` only ever answers "right now" — it cannot say whether a fresh
+   * `balance()` only ever answers "right now", it cannot say whether a fresh
    * sale is still in transit or genuinely missing. Knowing the last settlement
    * date lets a caller draw the line: anything paid after it is still on its way,
    * not lost. Null with no error means the account has never settled anything yet.
@@ -228,7 +228,7 @@ export class PaystackClient {
    * A Mobile Money recipient, created once per agent number and reused.
    *
    * Ghana pays out to Mobile Money rather than a bank account, so `type` is
-   * `mobile_money` and `bank_code` is the network — MTN, VOD or ATL, exactly as
+   * `mobile_money` and `bank_code` is the network, MTN, VOD or ATL, exactly as
    * `GET /bank?currency=GHS&type=mobile_money` returns them. `account_number` is
    * the phone number.
    *
@@ -278,15 +278,15 @@ export class PaystackClient {
    *
    * ── The three answers that matter ──────────────────────────────────────────
    *
-   * `sent` — accepted, and Paystack will confirm the outcome by webhook. Not yet
+   * `sent`, accepted, and Paystack will confirm the outcome by webhook. Not yet
    * delivered; a transfer can still fail or be reversed afterwards.
    *
-   * `otp` — the account requires an OTP per transfer, so this cannot complete
+   * `otp`, the account requires an OTP per transfer, so this cannot complete
    * without a human typing a code. Automated payouts are impossible until it is
    * switched off in Paystack's dashboard, and saying so plainly beats leaving
    * every payout mysteriously stuck.
    *
-   * `failed` — refused outright, most often for want of balance. Nothing left the
+   * `failed`, refused outright, most often for want of balance. Nothing left the
    * account, so the caller must give the agent their money back.
    *
    * `reference` is ours and Paystack rejects a duplicate, which is what makes
@@ -320,7 +320,7 @@ export class PaystackClient {
       })
     } catch (error) {
       // Ambiguous: the transfer may or may not have been created. Never retried
-      // blindly — the reference makes a deliberate retry safe, but a caller has
+      // blindly, the reference makes a deliberate retry safe, but a caller has
       // to decide that, and the reconciler can ask what happened.
       return {
         kind: 'unknown',
@@ -351,7 +351,7 @@ export class PaystackClient {
     const status = body.data?.status ?? 'pending'
     if (status === 'otp') {
       this.log.error(
-        `transfer ${input.reference} is waiting for an OTP — automated payouts need ` +
+        `transfer ${input.reference} is waiting for an OTP, automated payouts need ` +
           'transfer OTP disabled in the Paystack dashboard.',
       )
       return { kind: 'otp', transferCode: body.data?.transfer_code ?? null }
@@ -367,7 +367,7 @@ export class PaystackClient {
   /**
    * Whether this request really came from Paystack.
    *
-   * HMAC-SHA512 of the **raw** body — a re-serialised object will not match,
+   * HMAC-SHA512 of the **raw** body, a re-serialised object will not match,
    * which is why `main.ts` enables `rawBody`. Compared in constant time so the
    * response cannot be used to discover a valid signature byte by byte.
    */

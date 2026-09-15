@@ -24,7 +24,7 @@ export class WalletService {
     return Boolean(this.config.get<string>('PAYSTACK_SECRET_KEY'))
   }
 
-  /** FR-2.1 / FR-2.4 — balance and ledger together; the page shows both. */
+  /** FR-2.1 / FR-2.4, balance and ledger together; the page shows both. */
   async summary(userId: string) {
     const [user, rows] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({
@@ -42,7 +42,7 @@ export class WalletService {
   }
 
   /**
-   * FR-2.2 — top up.
+   * FR-2.2, top up.
    *
    * With a Paystack key this returns somewhere to pay and credits nothing: the
    * wallet moves only when Paystack tells our server the money arrived, through

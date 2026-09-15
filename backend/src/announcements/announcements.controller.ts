@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Post } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
-import { IsArray, IsOptional, IsString, MaxLength, MinLength } from 'class-validator'
+import { IsArray, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { AnnouncementsService } from './announcements.service'
 
@@ -15,7 +15,12 @@ export class SendAnnouncementDto {
   @MaxLength(5000)
   message!: string
 
-  /** Omitted, or empty, means every active agent. Otherwise the exact ids chosen. */
+  /** Defaults to `all`. `selected` reads `agentIds`; the other two ignore it. */
+  @IsOptional()
+  @IsIn(['all', 'agents', 'admins', 'selected'])
+  audience?: 'all' | 'agents' | 'admins' | 'selected'
+
+  /** Only read when `audience` is `selected`, the exact ids chosen. */
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
@@ -29,11 +34,11 @@ export class SendAnnouncementDto {
 export class AnnouncementsController {
   constructor(private readonly announcements: AnnouncementsService) {}
 
-  /** The agent picker for admin/superadmin composing a targeted announcement. */
-  @Get('agents')
+  /** The recipient picker for admin/superadmin composing a targeted announcement. */
+  @Get('recipients')
   @Roles('admin', 'superadmin')
-  agents() {
-    return this.announcements.activeAgents()
+  recipients() {
+    return this.announcements.eligibleRecipients()
   }
 
   @Post()
@@ -45,7 +50,7 @@ export class AnnouncementsController {
     // panel. Never trusted blindly, see `appUrl`.
     @Headers('origin') origin?: string,
   ) {
-    const audience = dto.agentIds && dto.agentIds.length > 0 ? dto.agentIds : 'all'
+    const audience = dto.audience === 'selected' ? (dto.agentIds ?? []) : (dto.audience ?? 'all')
     return this.announcements.send(user, dto.title, dto.message, audience, origin)
   }
 
@@ -56,7 +61,7 @@ export class AnnouncementsController {
   }
 
   @Get('mine')
-  @Roles('agent')
+  @Roles('agent', 'admin')
   mine(@CurrentUser() user: AuthUser) {
     return this.announcements.mine(user.id)
   }
@@ -67,13 +72,13 @@ export class AnnouncementsController {
    * Content-Type to text/html and trips the client's JSON sniffing.
    */
   @Get('unread-count')
-  @Roles('agent')
+  @Roles('agent', 'admin')
   async unreadCount(@CurrentUser() user: AuthUser): Promise<{ count: number }> {
     return { count: await this.announcements.unreadCount(user.id) }
   }
 
   @Post(':id/read')
-  @Roles('agent')
+  @Roles('agent', 'admin')
   markRead(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.announcements.markRead(id, user.id)
   }

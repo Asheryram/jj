@@ -6,12 +6,12 @@ import { Badge, Callout, Card, EmptyState, PageHead, TextInput } from '../compon
 import { AlertIcon, HelpIcon, SearchIcon } from '../components/icons'
 
 /**
- * "What can I do here" — one page, two guides.
+ * "What can I do here", one page, two guides.
  *
- * Staff only (admin, superadmin, agent) — see the `RequireAuth roles={[...]}`
+ * Staff only (admin, superadmin, agent), see the `RequireAuth roles={[...]}`
  * gate in App.tsx. Customers never see this: a guest's whole relationship to
  * the platform is a four-step checkout, not a dashboard with a nav full of
- * pages to learn — there is nothing here for that role to act on. Which of
+ * pages to learn, there is nothing here for that role to act on. Which of
  * the two guides shows is decided purely from the signed-in session's role,
  * not a picker: an agent looking this up wants their own answer, not a menu
  * to choose the right one from first.
@@ -20,7 +20,7 @@ export default function Info() {
   const { session } = useStore()
   const [query, setQuery] = useState('')
 
-  // Guaranteed by the route guard — RequireAuth redirects anyone else away
+  // Guaranteed by the route guard, RequireAuth redirects anyone else away
   // before this ever renders. Still checked so the type is a real Session,
   // not (Session | null), for everything below.
   if (!session) return null
@@ -46,25 +46,25 @@ export default function Info() {
           <HelpIcon className="size-3.5" /> {label}
         </Badge>
         <span className="text-xs text-slate-500 dark:text-slate-400">
-          Shown for your account — signed in as {session.name}.
+          Shown for your account, signed in as {session.name}.
         </span>
       </div>
 
       {/* Said once here rather than repeated in every task below: on a phone
           only a handful of menu items sit at the bottom of the screen at
-          once — everything past those is one tap away behind "More," not
+          once, everything past those is one tap away behind "More," not
           missing. Each task below still names the exact real item to look
           for either way. */}
       <Callout tone="info" className="mb-6" icon={<HelpIcon className="size-4" />}>
         On your phone, only a few menu items show at the bottom at once. If a step below sends you
-        somewhere you can't see, tap <strong className="font-semibold">More</strong> first — it's
+        somewhere you can't see, tap <strong className="font-semibold">More</strong> first, it's
         there.
       </Callout>
 
       <div className="relative mb-6">
         <SearchIcon className="absolute inset-y-0 left-3.5 my-auto size-4 text-slate-500 dark:text-slate-400" />
         <TextInput
-          placeholder="Search — try “withdraw”, “refund”, or “domain”"
+          placeholder="Search, try “withdraw”, “refund”, or “domain”"
           className="pl-10 text-base"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -84,7 +84,7 @@ export default function Info() {
         <EmptyState
           icon={<SearchIcon className="size-6" />}
           title="No matches"
-          detail="Try a different word — search looks at each task's title and its steps."
+          detail="Try a different word, search looks at each task's title and its steps."
         />
       ) : (
         <div className="space-y-7">
@@ -183,7 +183,7 @@ function renderInline(text: string): ReactNode {
   return nodes
 }
 
-/** Only a group with at least one matching task survives — an empty group heading answers nothing. */
+/** Only a group with at least one matching task survives, an empty group heading answers nothing. */
 function filterGuide(groups: GuideGroup[], needle: string): GuideGroup[] {
   if (!needle) return groups
   return groups

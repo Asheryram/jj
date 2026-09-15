@@ -55,7 +55,7 @@ export default function FloatPanel() {
       )
 
   /**
-   * "Should hold" is never a stored figure — it is recomputed from every
+   * "Should hold" is never a stored figure, it is recomputed from every
    * capital move and every order ever charged, fresh on every request. So
    * there is nothing to "recalculate" on the backend; the only reason this
    * screen can look stale is that it fetched once on load and nothing since
@@ -126,13 +126,13 @@ export default function FloatPanel() {
         {observation === null ? (
           /* Honest empty state. Not "GHS 0.00", which would read as an emergency. */
           <Callout tone="info" title="Not known yet">
-            DataHub does not publish a balance, so this only appears once an order has been sent —
+            DataHub does not publish a balance, so this only appears once an order has been sent,
             their reply is the only place the number exists.
           </Callout>
         ) : (
           <>
             {/* Side by side on purpose: two independent answers to "how much is
-                left," each coloured on its own merits — so if they ever
+                left," each coloured on its own merits, so if they ever
                 disagree, which one is actually the problem is visible at a
                 glance instead of hidden behind whichever the alert picked. */}
             <div className="grid grid-cols-2 gap-3">
@@ -202,7 +202,7 @@ export default function FloatPanel() {
         {reconciliation?.flagged && (
           <Callout tone="danger" title="Float is short" icon={<AlertIcon className="size-4" />}>
             Going by what you've logged and what orders have spent, the float should hold{' '}
-            {cedis(reconciliation.expected)} — it actually holds {cedis(reconciliation.observed)},{' '}
+            {cedis(reconciliation.expected)}, it actually holds {cedis(reconciliation.observed)},{' '}
             {cedis(reconciliation.shortfall)} short. This usually means a top-up or withdrawal
             happened without being logged below.
           </Callout>
@@ -222,7 +222,7 @@ export default function FloatPanel() {
               </p>
               {reconciliation?.pending && (
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Logged — "Should hold" above will confirm against the live float once the next
+                  Logged, "Should hold" above will confirm against the live float once the next
                   order updates it.
                 </p>
               )}
@@ -252,7 +252,7 @@ export default function FloatPanel() {
   )
 }
 
-/** James saying he moved his own money into or out of the float — either direction. */
+/** James saying he moved his own money into or out of the float, either direction. */
 function CapitalModal({
   direction,
   onClose,
@@ -309,7 +309,7 @@ function CapitalModal({
     >
       <div className="space-y-4">
         <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-          This tracks your own capital — it never counts as revenue or cost, and does not change
+          This tracks your own capital, it never counts as revenue or cost, and does not change
           the profit figures anywhere else.
         </Callout>
 
@@ -326,7 +326,7 @@ function CapitalModal({
             />
             <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
               {source === 'reimbursement'
-                ? "Money already collected from customers for what DataHub charges — you're moving it from Paystack to where it was always meant to end up, not adding new capital. This is the only kind of top-up that clears \"Already spent on bundles\" on the Reserve panel."
+                ? "Money already collected from customers for what DataHub charges, you're moving it from Paystack to where it was always meant to end up, not adding new capital. This is the only kind of top-up that clears \"Already spent on bundles\" on the Reserve panel."
                 : 'Fresh money, from somewhere other than what this business itself has collected.'}
             </p>
           </Field>

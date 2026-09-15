@@ -4,7 +4,7 @@ import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { WalletService } from './wallet.service'
 import { TopUpDto } from './wallet.dto'
 
-/** Customers only — an agent's balance is an earnings account, not a wallet. */
+/** Customers only, an agent's balance is an earnings account, not a wallet. */
 @ApiTags('wallet')
 @ApiBearerAuth()
 @Controller('wallet')

@@ -9,7 +9,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../common/domain-
 /**
  * Closes orders that DataHub GH accepted but never reported back on.
  *
- * NFR-3.2 / NFR-3.3 — webhooks get lost. They are dropped by a restart, a
+ * NFR-3.2 / NFR-3.3, webhooks get lost. They are dropped by a restart, a
  * tunnel that rotated, ten seconds of downtime, or simply never sent. Without
  * this, a lost callback strands a paid order in `processing` forever: the buyer
  * is charged, the agent is not credited, and nobody finds out until someone
@@ -31,7 +31,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   private readonly intervalMs = 60_000
   /**
    * How long an order may sit before we chase it. Long enough that the webhook
-   * gets first refusal — chasing immediately would double the request volume for
+   * gets first refusal, chasing immediately would double the request volume for
    * no benefit and risk their rate limit.
    */
   private readonly graceMs = 90_000
@@ -42,7 +42,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    *
    * There has to be a limit. Approval is manual on DataHub's side with no
    * promised turnaround, and their submission endpoint is currently down
-   * entirely — so "it will come through shortly" is a hope, not a fact, and
+   * entirely, so "it will come through shortly" is a hope, not a fact, and
    * holding a stranger's money on it indefinitely is not something the customer
    * agreed to. Six hours is long enough for a same-day approval to land and
    * short enough that nobody is left wondering overnight.
@@ -76,13 +76,13 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
-   * Close out checkouts nobody paid for — and rescue the ones they did.
+   * Close out checkouts nobody paid for, and rescue the ones they did.
    *
    * A customer who opens the Paystack page and walks away leaves an order in
    * `awaiting_payment` for ever, which clutters every report with sales that
    * never happened. Asking Paystack settles it either way: they say `abandoned`
-   * and the order closes, or they say `success` — a payment whose webhook went
-   * missing — and it is fulfilled, late but correctly.
+   * and the order closes, or they say `success`, a payment whose webhook went
+   * missing, and it is fulfilled, late but correctly.
    *
    * Deliberately generous with the delay. Mobile Money in Ghana involves the
    * customer leaving the browser to approve a prompt on their handset, and
@@ -117,7 +117,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * it never sees a top-up: a `Payment` with `purpose: 'topup'` has no order
    * attached at all. Without this, a top-up's only two paths to being
    * credited are Paystack's webhook and the customer manually returning to
-   * `/pay/return` — and Mobile Money in Ghana routinely means leaving the
+   * `/pay/return`, and Mobile Money in Ghana routinely means leaving the
    * browser entirely to approve a PIN prompt and never coming back to it. If
    * the webhook is also lost, that money sits confirmed at Paystack and
    * uncredited in the wallet forever, with nothing ever checking again and no
@@ -147,7 +147,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * Give up on approvals that never came, and record what is owed.
    *
    * The customer paid for a bundle we could not deliver. Whatever the reason sits
-   * with the provider, the obligation is ours — so this closes the order through
+   * with the provider, the obligation is ours, so this closes the order through
    * the ordinary rejection path, which queues a refund request for authorisation.
    * It does not pay anybody: money leaving is a decision, and a background job on
    * a timer is not in a position to make it.
@@ -166,7 +166,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
 
     for (const order of expired) {
       this.log.warn(
-        `${order.reference}: ${order.recipient} was never approved within the hold — ` +
+        `${order.reference}: ${order.recipient} was never approved within the hold, ` +
           'closing the order and queueing a refund for approval',
       )
       await this.fulfilment.settleFromProvider(
@@ -184,8 +184,8 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * test, rather than only on the clock.
    */
   async sweep(): Promise<{ checked: number; settled: number }> {
-    // Payments do not depend on the supplier being live — money can be owed and
-    // owing whether or not DataHub is simulated — so these run before the guard
+    // Payments do not depend on the supplier being live, money can be owed and
+    // owing whether or not DataHub is simulated, so these run before the guard
     // below rather than being switched off with it.
     let settled = await this.resolveAbandonedPayments()
     settled += await this.resolveStaleTopUps()
@@ -200,11 +200,11 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
         providerReference: { not: null },
         /**
          * A `manual_`-prefixed reference is DataHub routing this order to
-         * one of their own staff, not their automated pipeline — it was
+         * one of their own staff, not their automated pipeline, it was
          * never going to show up in `/order-status`, which only knows
          * about the automated path. Checking it here isn't a real attempt
          * at reconciliation, it's a guaranteed `not_found` on every single
-         * sweep, forever, until a human clears it — verified against the
+         * sweep, forever, until a human clears it, verified against the
          * actual log: every "does not recognise" line this ever produced
          * was for a `manual_` reference, never once for a real one. That
          * made an every-60-seconds error log entry for something already
@@ -231,10 +231,10 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
 
       if (result.kind === 'not_found') {
         // They accepted a reference and now do not recognise it. Never resolved
-        // automatically — refunding risks paying back a delivered bundle, and
+        // automatically, refunding risks paying back a delivered bundle, and
         // completing risks crediting a sale that never happened.
         this.log.error(
-          `${order.reference}: DataHub does not recognise ${order.providerReference} — needs manual checking`,
+          `${order.reference}: DataHub does not recognise ${order.providerReference}, needs manual checking`,
         )
         continue
       }
@@ -274,7 +274,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    *    or long past any plausible delivery.
    *  · Already closed, but disputed: `FulfilmentService.settle` flagged
    *    `conflictNote` because a settlement source reported an outcome that
-   *    disagreed with one this order was already settled with — regardless
+   *    disagreed with one this order was already settled with, regardless
    *    of age, since a conflict does not get less real by waiting.
    */
   async needsAttention(olderThanMinutes = 15) {
@@ -312,27 +312,27 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       createdAt: r.createdAt.toISOString(),
       conflict: r.conflictNote !== null,
       // Without a provider reference we never got a usable reply, so there is
-      // nothing to ask them about — this one needs a human looking at their
+      // nothing to ask them about, this one needs a human looking at their
       // dashboard. A `manual_`-prefixed one is routed to DataHub's own staff
       // and was never going to show up in `/order-status` at all (see
-      // `sweep`'s own exclusion) — worth saying plainly here, since "accepted
+      // `sweep`'s own exclusion), worth saying plainly here, since "accepted
       // but never reported back" reads as something might still be coming,
       // when the honest answer is that only a person at DataHub, contacted
       // directly, ever will.
       reason:
         r.conflictNote ??
         (r.providerReference?.startsWith('manual_')
-          ? `Routed to DataHub's manual queue — only their own staff can clear it, quote them ${r.providerReference}`
+          ? `Routed to DataHub's manual queue, only their own staff can clear it, quote them ${r.providerReference}`
           : r.providerReference
             ? 'Accepted by DataHub but never reported back'
-            : 'No reply from DataHub — may or may not have been placed'),
+            : 'No reply from DataHub, may or may not have been placed'),
     }))
   }
 
   /**
    * A human has checked a flagged conflict and is closing it out.
    *
-   * Deliberately does not touch the order's money or status at all — see
+   * Deliberately does not touch the order's money or status at all, see
    * `SettleResult`'s doc comment on why nothing here ever auto-resolves one
    * of these. This only clears the flag, once whoever looked has confirmed
    * (against Paystack's or DataHub's own dashboard, or the customer directly)
@@ -354,16 +354,16 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     }
 
     await this.prisma.order.update({ where: { id: orderId }, data: { conflictNote: null } })
-    this.log.log(`${order.reference}: conflict acknowledged by ${adminId} — ${reason}`)
+    this.log.log(`${order.reference}: conflict acknowledged by ${adminId}, ${reason}`)
   }
 
   /**
    * Settle an order by hand, when nothing automatic ever will.
    *
    * `sweep()` only resolves an order once DataHub's own status reaches a
-   * recognised terminal word — `SUCCESSFUL`, `FAILED`, `CANCELLED`. Anything
+   * recognised terminal word, `SUCCESSFUL`, `FAILED`, `CANCELLED`. Anything
    * else, including a status they never change again, is deliberately left
-   * alone forever rather than guessed at (see `mapProviderStatus`) — the
+   * alone forever rather than guessed at (see `mapProviderStatus`), the
    * conservative failure mode is right for automation, but it means a
    * genuinely-delivered order whose provider reply is permanently stuck (a
    * `manual_` reference that needed a person at DataHub to close out, for
@@ -392,23 +392,23 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       throw new ConflictError('ALREADY_SETTLED', `That order is already ${order.status}.`)
     }
 
-    this.log.warn(`${order.reference}: resolving by hand as ${outcome} by ${adminId} — ${reason}`)
+    this.log.warn(`${order.reference}: resolving by hand as ${outcome} by ${adminId}, ${reason}`)
     const result = await this.fulfilment.settleFromProvider(
       orderId,
       outcome,
-      `Marked ${outcome} by hand — ${reason}`,
+      `Marked ${outcome} by hand, ${reason}`,
       undefined,
       true,
     )
 
     /**
      * This pre-check and the atomic claim inside `settle` are not the same
-     * guard — the read above proves nothing about what is still true by the
+     * guard, the read above proves nothing about what is still true by the
      * time `settle`'s own write runs a moment later. The provider's webhook,
      * the reconciler's own sweep, or a second admin can all settle the same
      * order in between. Without checking `result`, the caller here was told
      * "done" even when their click was silently discarded because something
-     * else won that race a moment earlier — which is worse than an error,
+     * else won that race a moment earlier, which is worse than an error,
      * because it hides that the order was NOT settled the way they just
      * asked for.
      */
@@ -416,7 +416,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       throw new ConflictError(
         'ALREADY_SETTLED',
         result.conflict
-          ? `Something else — the provider's own report, or another admin — already settled this order as ` +
+          ? `Something else (the provider's own report, or another admin) already settled this order as ` +
             `${result.actualOutcome} just now. Nothing was changed. Check the order before doing anything else.`
           : `That order was already settled as ${result.actualOutcome}.`,
       )

@@ -1,5 +1,5 @@
 # Functional & Non-Functional Requirements
-## JamesDataConsult — Data Bundle & Reseller Platform
+## JamesDataConsult: Data Bundle & Reseller Platform
 
 Prepared by: Asher Yram Tetteh-Abotsi
 Date: August 2026
@@ -9,7 +9,7 @@ Version: 1.1
 
 ## 0. Change log
 
-### 1.1 — the reseller chain
+### 1.1: the reseller chain
 Version 1.0 described a single cost price sourced from DataHub GH, with agents
 free to set any resale price at or above it. That left **no room for James's own
 margin**: an agent could sell at the supplier's wholesale price and the platform
@@ -21,11 +21,11 @@ Version 1.1 fixes both:
 | Change | Requirements affected |
 |---|---|
 | **Four price tiers** per product instead of one, so James's margin is built into every agent's cost rather than calculated as a commission | FR-3.3, FR-3.4, FR-3.7, FR-3.8 |
-| **Split at sale** — the buyer pays the platform and every participant in the chain is credited their own margin as the order completes | FR-2.8 → FR-2.11 |
+| **Split at sale**: the buyer pays the platform and every participant in the chain is credited their own margin as the order completes | FR-2.8 → FR-2.11 |
 | **Agent sell links**, so a customer can buy at an agent's prices without the agent handling money | FR-5.7 → FR-5.9 |
 | **Guest checkout**, without which a sell link is useless | FR-4.8, FR-2.12 |
 | **Guest order tracking**, because a guest has no order history to recover a voucher from | FR-4.9 |
-| Agent wallets become **earnings accounts** — credited by sales, never topped up | FR-2.1, FR-2.7 |
+| Agent wallets become **earnings accounts**: credited by sales, never topped up | FR-2.1, FR-2.7 |
 
 ---
 
@@ -49,7 +49,7 @@ The system covers the customer-facing storefront, agent/customer accounts and wa
 | **Split** | The division of one sale between the supplier, James, and every agent in the chain. Recorded on the order |
 | Customer wallet | A spendable balance a customer tops up, so repeat purchases need no Mobile Money prompt |
 | Agent earnings | An agent's balance, credited automatically by their margin on each completed sale and withdrawable to Mobile Money. Never topped up |
-| Upstream provider | DataHub GH — supplies data/airtime/SMS/voice bundles via API |
+| Upstream provider | DataHub GH: supplies data/airtime/SMS/voice bundles via API |
 | Checker voucher | A serial number + PIN used to check BECE/WASSCE results |
 | Guest | Someone who buys without an account, paying by Mobile Money at checkout |
 
@@ -110,7 +110,7 @@ James's standard price and James keeps the entire spread.
 | FR-3.1 | The system shall display available products by category: Data Bundles, Airtime, Voice Bundles, SMS Bundles, AFA Registration, Result Checkers. |
 | FR-3.2 | The system shall display products by network: MTN, Telecel, AirtelTigo (where applicable). |
 | FR-3.3 | The system shall store four price tiers per product: **supplier cost** (what James pays DataHub GH or the voucher supplier), **agent price** (what James charges his agents), **standard price** (what a walk-up customer pays), and **retail cap** (the most anyone in the chain may charge). |
-| FR-3.4 | Each agent shall be able to set their own resale price per product, provided it is not below **their own cost** — which is their upline's resale price, or James's agent price if they sit directly beneath him — and not above the retail cap. |
+| FR-3.4 | Each agent shall be able to set their own resale price per product, provided it is not below **their own cost** (which is their upline's resale price, or James's agent price if they sit directly beneath him) and not above the retail cap. |
 | FR-3.5 | A customer buying without a sell link shall see the standard price set by James. A customer arriving through an agent's sell link shall see that agent's prices. |
 | FR-3.6 | The system shall allow James to update any of the four tiers per product, and shall refuse a set of tiers that are out of order (agent price below supplier cost, or cap below agent price). |
 | FR-3.7 | The supplier cost shall never be visible to any user other than James. An agent shall see only their own cost, their own price and their own margin. |
@@ -142,7 +142,7 @@ James's standard price and James keeps the entire spread.
 | FR-5.4 | The system shall support only single-level referral (agent → sub-agent, no deeper) by default. |
 | FR-5.5 | The system shall include an admin-configurable toggle to enable multi-level referral (sub-agents recruiting their own sub-agents) in the future, without requiring a system rebuild. Every account shall store its upline from registration onwards regardless of the toggle's state, so enabling it requires no migration or backfill. |
 | FR-5.6 | When multi-level referral is toggled on, the system shall track and display the full referral chain for each agent, and each agent shall earn their margin on sales at any depth beneath them. |
-| FR-5.7 | Each agent shall have a **sell link** — a public storefront priced at their own prices — which is separate from their referral link. An order placed through it shall be attributed to that agent and split up their chain. |
+| FR-5.7 | Each agent shall have a **sell link** (a public storefront priced at their own prices) which is separate from their referral link. An order placed through it shall be attributed to that agent and split up their chain. |
 | FR-5.8 | An agent shall be able to see, per order, how the money divided between the supplier, James and each agent in the chain, and which of those was them. |
 | FR-5.9 | The system shall enforce the retail cap (FR-3.3) so that a long referral chain cannot inflate the customer-facing price beyond what James considers competitive. |
 | FR-5.10 | An agent shall be able to place an order through their own sell link, in which case their own margin is credited back to them so their net cost is their own cost price. |
@@ -205,8 +205,8 @@ James's standard price and James keeps the entire spread.
 |---|---|
 | NFR-3.1 | The system shall target 99% uptime post-launch. |
 | NFR-3.2 | The system shall handle DataHub GH API downtime gracefully, queuing or retrying orders rather than losing them. |
-| NFR-3.3 | Wallet balances shall never be debited without a corresponding successful or refunded order — no silent loss of funds. This applies equally to a guest with no wallet: a failed Mobile Money order shall always result in a traceable, claimable credit (FR-2.12). |
-| NFR-3.4 | The credit of every participant's margin (FR-2.8) and the recording of the order as completed shall occur atomically. A partial split — some participants credited and others not — shall not be possible. |
+| NFR-3.3 | Wallet balances shall never be debited without a corresponding successful or refunded order: no silent loss of funds. This applies equally to a guest with no wallet: a failed Mobile Money order shall always result in a traceable, claimable credit (FR-2.12). |
+| NFR-3.4 | The credit of every participant's margin (FR-2.8) and the recording of the order as completed shall occur atomically. A partial split (some participants credited and others not) shall not be possible. |
 
 ### 3.4 Usability
 
@@ -247,8 +247,8 @@ James's standard price and James keeps the entire spread.
 - A separate voucher supplier is assumed to be needed for BECE/WASSCE checkers unless confirmed otherwise by DataHub GH.
 - Multi-level referral logic will exist in the system from launch but remain switched off (per FR-5.5) until James decides to enable it.
 - Withdrawal approval is manual for v1; automated payout can be considered in a future version.
-- **Agents do not pre-fund anything.** They hold no float and carry no stock, so the platform bears no credit risk from them — but it does mean every sale must route through the platform, and an agent cannot serve a walk-in customer who paid them cash outside the system except by using their own sell link.
-- **Guest refunds are held as credit, not reversed.** Reversing a Mobile Money collection through Paystack is neither instant nor guaranteed, so FR-2.12 holds the money against the buyer's phone number instead. **This needs James's confirmation** — the alternative is that he returns the money by hand, which is simpler to build but leaves NFR-3.3 depending on him remembering.
+- **Agents do not pre-fund anything.** They hold no float and carry no stock, so the platform bears no credit risk from them, but it does mean every sale must route through the platform, and an agent cannot serve a walk-in customer who paid them cash outside the system except by using their own sell link.
+- **Guest refunds are held as credit, not reversed.** Reversing a Mobile Money collection through Paystack is neither instant nor guaranteed, so FR-2.12 holds the money against the buyer's phone number instead. **This needs James's confirmation**, the alternative is that he returns the money by hand, which is simpler to build but leaves NFR-3.3 depending on him remembering.
 - **Multi-level markup stacking inflates the retail price.** Each additional level adds its own margin, so at three or four levels deep a bundle can price itself out of the market. The retail cap (FR-3.3, FR-5.9) is the control for this, and James will need to set it deliberately per product rather than accept a default.
 - Paystack transaction fees are assumed to be absorbed by James out of his own margin, not passed to the buyer or deducted from an agent's earnings. **To be confirmed.**
 

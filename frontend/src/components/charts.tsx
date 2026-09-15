@@ -61,7 +61,7 @@ export function BarChart({
       <figcaption className="sr-only">
         <table>
           <caption>
-            {label} — {data.length} days, {valueLabel(total)} in total
+            {label}, {data.length} days, {valueLabel(total)} in total
           </caption>
           <thead>
             <tr>

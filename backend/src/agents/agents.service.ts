@@ -29,7 +29,7 @@ export class AgentsService {
     return { balance: user.balance, earnings: rows.map(toEarning) }
   }
 
-  /** FR-3.4 / FR-6.2 — this agent's own resale prices. */
+  /** FR-3.4 / FR-6.2, this agent's own resale prices. */
   async prices(userId: string) {
     const rows = await this.prisma.agentPrice.findMany({
       where: { userId },
@@ -39,7 +39,7 @@ export class AgentsService {
   }
 
   /**
-   * Set one price. The band is recomputed server-side from the live chain — an
+   * Set one price. The band is recomputed server-side from the live chain, an
    * agent must not be able to sell below what they pay by posting a number the
    * form would have rejected.
    */
@@ -71,7 +71,7 @@ export class AgentsService {
   }
 
   /**
-   * FR-5.2 — the agents this agent referred, with what each has actually sold.
+   * FR-5.2, the agents this agent referred, with what each has actually sold.
    *
    * One level, matching what actually pays: a referrer earns on the people they
    * personally brought in, and nothing on those people's own recruits. Showing a
@@ -91,7 +91,7 @@ export class AgentsService {
     const codes = everyone.map((a) => a.referralCode)
 
     const [sales, uplineCredit] = await Promise.all([
-      // Only completed orders count as volume — a failed one was refunded.
+      // Only completed orders count as volume, a failed one was refunded.
       this.prisma.order.groupBy({
         by: ['soldByCode'],
         where: { soldByCode: { in: codes }, status: 'completed' },

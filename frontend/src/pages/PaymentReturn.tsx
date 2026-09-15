@@ -11,19 +11,19 @@ import { CheckIcon, ClockIcon, SearchIcon } from '../components/icons'
  *
  * The URL carries a reference and nothing else, and that is all it is trusted
  * for. A page returning from a payment provider is the one party in the exchange
- * with a motive to claim success, so this asks our server, which asks Paystack —
+ * with a motive to claim success, so this asks our server, which asks Paystack,
  * `?status=success` in a query string would be a forgeable claim about money.
  *
  * Three outcomes, and none of them dead-end here:
  *
- *  · **paid** — straight to the receipt, where the delivery is watched as usual.
- *  · **failed** — Paystack says it will not be paid (a declined PIN, insufficient
- *    funds — the single most common outcome in Mobile Money checkout). Resumed
+ *  · **paid**, straight to the receipt, where the delivery is watched as usual.
+ *  · **failed**, Paystack says it will not be paid (a declined PIN, insufficient
+ *    funds, the single most common outcome in Mobile Money checkout). Resumed
  *    straight back into the same checkout via `finish()`, exactly like a
  *    successful payment resumes to its receipt, rather than shown a static
- *    dead-end here — re-typing the phone number from scratch is not a real
+ *    dead-end here, re-typing the phone number from scratch is not a real
  *    recovery path for the most ordinary failure this page sees.
- *  · **pending** — Mobile Money in Ghana finishes on the customer's handset, so
+ *  · **pending**, Mobile Money in Ghana finishes on the customer's handset, so
  *    coming back before approving the prompt is normal. Polled for a short
  *    while, then handed off to Track order with the reference rather than left
  *    on static text forever.
@@ -39,7 +39,7 @@ export default function PaymentReturn() {
   const attempts = useRef(0)
 
   const finish = useCallback(async () => {
-    // An order goes to its receipt. Anything else has no receipt to show — this
+    // An order goes to its receipt. Anything else has no receipt to show, this
     // used to be a wallet top-up, and landed on a wallet page that no longer
     // exists, on the one screen a paying customer must never see break.
     //
@@ -85,7 +85,7 @@ export default function PaymentReturn() {
         }
         if (status === 'failed') {
           // Resume the checkout it actually failed on, same as a successful
-          // payment resumes to its receipt — a declined PIN or insufficient
+          // payment resumes to its receipt, a declined PIN or insufficient
           // funds is the single most common outcome here, and re-typing the
           // phone number from scratch is not a real recovery path for it.
           void finish()
@@ -93,14 +93,14 @@ export default function PaymentReturn() {
         }
 
         // Still pending. Mobile Money approval happens on the handset, so this
-        // is the ordinary case rather than an error — give it about a minute
+        // is the ordinary case rather than an error, give it about a minute
         // before handing over to the reference.
         setState('pending')
         if (attempts.current < 20) {
           timer = window.setTimeout(check, 3000)
         } else {
           // The poll has run its course. Ghanaian MoMo confirmations routinely
-          // take longer than a minute, so this is not a failure — but sitting
+          // take longer than a minute, so this is not a failure, but sitting
           // on static text forever with no way out is. Track order is the
           // honest handoff: it looks the order up by the reference this page
           // still holds, same as `finish()`'s own fallback.

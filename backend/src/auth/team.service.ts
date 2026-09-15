@@ -9,7 +9,7 @@ import { SetupTokensService } from './setup-tokens.service'
  *
  * A superadmin creates the business owner's admin account and hands over a
  * one-time link. They never choose or see that password, which is the point: the
- * alternative — seeding an admin with a password published in `.env.example` — is
+ * alternative (seeding an admin with a password published in `.env.example`) is
  * a live credential in production and cannot be rotated without a deploy.
  */
 @Injectable()
@@ -43,7 +43,7 @@ export class TeamService {
       email: row.email,
       role: row.role,
       status: row.status,
-      /** No password chosen yet — their setup link is still outstanding. */
+      /** No password chosen yet, their setup link is still outstanding. */
       pendingSetup: !row.passwordHash,
       joinedAt: row.joinedAt.toISOString(),
     }))
@@ -62,7 +62,7 @@ export class TeamService {
     /**
      * Does this address already belong to somebody here?
      *
-     * If it does, this is not a new person — it is an existing account gaining an
+     * If it does, this is not a new person, it is an existing account gaining an
      * admin profile, which is the whole point of the profile model. That profile
      * gets no password and no setup link: they already have both, on the row that
      * holds them, and issuing a second would create two ways into one identity.
@@ -120,7 +120,7 @@ export class TeamService {
     })
 
     if (owner) {
-      this.log.log(`admin profile added to the existing account ${email} — no link needed`)
+      this.log.log(`admin profile added to the existing account ${email}, no link needed`)
       return {
         id: created.id,
         email,
@@ -156,7 +156,7 @@ export class TeamService {
    *
    * Deliberately a superadmin action rather than a public "forgot password" form:
    * there is no mail provider to send to, so a public version could only hand the
-   * link to whoever asked — which is every attacker who knows an admin's email.
+   * link to whoever asked, which is every attacker who knows an admin's email.
    */
   async resendLink(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -171,7 +171,7 @@ export class TeamService {
      * The link belongs to the person, not to the profile that was clicked.
      *
      * One person may hold several profiles and exactly one of them carries a
-     * password — that invariant is what makes a single sign-in able to reach all
+     * password, that invariant is what makes a single sign-in able to reach all
      * of them. Issuing a link against a password-less secondary profile would set
      * a password on *that* row, giving one human two credentials; `login` then
      * picks whichever row the database happens to return first, which is not a

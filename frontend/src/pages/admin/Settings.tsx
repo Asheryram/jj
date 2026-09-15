@@ -48,10 +48,10 @@ export default function Settings() {
 
           Removed at the client's request: an agent earns from what they sell and
           nothing from the sales of people they invited. Who invited whom is still
-          recorded and still shown to agents — it just no longer moves money, so
+          recorded and still shown to agents, it just no longer moves money, so
           there is no rate to set and no switch to explain. */}
 
-      {/* ── NFR-2.4 — credentials live in the environment, and the UI says so ── */}
+      {/* ── NFR-2.4, credentials live in the environment, and the UI says so ── */}
       <Card className="mt-3">
         <CardHead
           title="Integrations"
@@ -108,7 +108,7 @@ export default function Settings() {
 
           <Callout tone="warning" icon={<ShieldIcon className="size-4" />}>
             Keys are stored as environment secrets on the server and are never sent to the browser or
-            committed to the repository. They cannot be revealed here — only replaced.
+            committed to the repository. They cannot be revealed here, only replaced.
           </Callout>
         </div>
       </Card>
@@ -130,7 +130,7 @@ export default function Settings() {
               }
             >
               {datahubState === 'live'
-                ? 'LIVE — spending money'
+                ? 'LIVE, spending money'
                 : datahubState === 'live-requested-no-key'
                   ? 'Misconfigured'
                   : 'Simulated'}
@@ -140,7 +140,7 @@ export default function Settings() {
         <div className="space-y-3 p-4 sm:p-5">
           {datahubState === 'live' ? (
             <Callout tone="danger" title="Every data order is buying a real bundle">
-              Each completed order calls DataHub GH and debits your prepaid float — including orders
+              Each completed order calls DataHub GH and debits your prepaid float, including orders
               placed by anyone testing the site. Set{' '}
               <strong className="font-mono font-semibold">DATAHUB_LIVE=false</strong> and restart to
               stop.
@@ -161,13 +161,13 @@ export default function Settings() {
 
           <p className="text-sm text-slate-500 dark:text-slate-400">
             This is an environment setting rather than a button, on purpose: going live spends real
-            money on every order, so it should take a deliberate change and a restart — not a click,
+            money on every order, so it should take a deliberate change and a restart, not a click,
             and not something a stolen admin session can do.
           </p>
 
           <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
             DataHub GH sells <strong className="font-semibold">data bundles only</strong>. Airtime,
-            voice, SMS, AFA registration and result checkers have no automated fulfilment — when
+            voice, SMS, AFA registration and result checkers have no automated fulfilment, when
             live, an order for one of those is refused and refunded rather than quietly marked
             delivered.
           </Callout>
@@ -206,11 +206,11 @@ export default function Settings() {
  *
  * Entered in cedis because that is how James thinks about his float, stored in
  * pesewas because that is how every amount in this system is stored. Zero means
- * off, and says so — a threshold of nothing would otherwise look like a threshold
+ * off, and says so, a threshold of nothing would otherwise look like a threshold
  * that never triggers, which is the same behaviour with none of the honesty.
  */
 /**
- * What Paystack keeps on a Mobile Money payment — shown to every buyer as a
+ * What Paystack keeps on a Mobile Money payment, shown to every buyer as a
  * "processing fee" line at checkout and charged on top of the listed price.
  *
  * See `checkoutTotal`. It is not the fee itself, which is whatever Paystack
@@ -241,7 +241,7 @@ function PaystackFeeSetting() {
   const save = async () => {
     const percent = draft.trim() === '' ? 0 : Number(draft)
     if (!Number.isFinite(percent) || percent < 0 || percent >= 100) {
-      pushToast({ tone: 'error', title: 'Enter a rate like 2 or 2.35 — under 100.' })
+      pushToast({ tone: 'error', title: 'Enter a rate like 2 or 2.35, under 100.' })
       return
     }
     const bp = Math.round(percent * 100)
@@ -264,7 +264,7 @@ function PaystackFeeSetting() {
       />
       <div className="space-y-3 px-4 pb-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          Buyers see this as its own line at checkout — "Bundle price" plus "Processing fee" — and
+          Buyers see this as its own line at checkout ("Bundle price" plus "Processing fee") and
           pay the total. Your own prices and an agent's default markup keep meaning exactly what they
           say; the buyer's fee line covers Paystack's cut instead of it coming out of anyone's margin.
           Check your Paystack dashboard for their current rate now and then; the money audit script
@@ -275,7 +275,7 @@ function PaystackFeeSetting() {
         <Field
           label="Fee rate (%)"
           htmlFor="paystack-fee"
-          hint="Starts at 2%, Paystack's usual Mobile Money rate. Changes what customers see and pay at checkout — the real fee on each payment is still recorded exactly as Paystack reports it."
+          hint="Starts at 2%, Paystack's usual Mobile Money rate. Changes what customers see and pay at checkout, the real fee on each payment is still recorded exactly as Paystack reports it."
         >
           <div className="relative max-w-40">
             <TextInput
@@ -350,7 +350,7 @@ function FloatThresholds() {
       <div className="space-y-3 px-4 pb-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
           The float is prepaid, and when it empties every order fails after the customer has already
-          paid. DataHub publishes no balance, so it is read from the reply to each order — which
+          paid. DataHub publishes no balance, so it is read from the reply to each order, which
           means a warning is the only advance notice possible.
         </p>
 
@@ -394,8 +394,8 @@ function FloatThresholds() {
 /**
  * The smallest amount worth a manual MoMo transfer (FR-2.6).
  *
- * There is no customer wallet or top-up any more — a buyer pays per order and
- * needs no account — so the only place a small amount is ever worth guarding
+ * There is no customer wallet or top-up any more, a buyer pays per order and
+ * needs no account, so the only place a small amount is ever worth guarding
  * against is an agent's own withdrawal request, where a tiny payout can cost
  * more in transfer fees than it is worth sending.
  */
@@ -470,7 +470,7 @@ function MinWithdrawalSetting() {
  *
  * An agent profile is a real account, not a preview: it has its own balance,
  * referral code and shop link, and the API strips supplier costs from it exactly
- * as it does for any other agent. That is the point — a preview built on your own
+ * as it does for any other agent. That is the point, a preview built on your own
  * admin session would still show you your buying price, which is the one number
  * an agent can never see.
  *
@@ -554,7 +554,7 @@ function YourProfiles() {
  * Editable here rather than by an admin: it is the account your own money goes to,
  * so nobody else should be setting it.
  *
- * Applies to every profile you hold — they share a number because they are the
+ * Applies to every profile you hold, they share a number because they are the
  * same person, and leaving one behind would mean a payout to a stale value.
  */
 function YourDetails() {
@@ -588,7 +588,7 @@ function YourDetails() {
       <div className="space-y-3 px-4 pb-4">
         {placeholder && (
           <Callout tone="warning" title="No real number on your account" icon={<AlertIcon className="size-4" />}>
-            Your account still holds the placeholder it was created with. Nothing can be paid to it —
+            Your account still holds the placeholder it was created with. Nothing can be paid to it,
             set your Mobile Money number before requesting a withdrawal.
           </Callout>
         )}
@@ -620,7 +620,7 @@ function YourDetails() {
 
         <p className="text-xs text-slate-500 dark:text-slate-400">
           Changing this updates every profile you hold. A withdrawal can still be sent to a different
-          number — you choose it when you request one.
+          number, you choose it when you request one.
         </p>
       </div>
     </Card>
@@ -677,7 +677,7 @@ function AgentApproval() {
           </label>
           <p className="mt-1 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
             On, and anyone who signs up can sell immediately. Off, and every sign-up waits in Agent
-            applications until you decide — which is what you want once people you do not recognise
+            applications until you decide, which is what you want once people you do not recognise
             are finding the form. Either way the account is real and your decision is recorded.
           </p>
         </div>
@@ -696,15 +696,15 @@ function AgentApproval() {
  * Whether Paystack's live balance is actually being watched for a real
  * shortfall.
  *
- * Off by default — and off does not mean "less accurate." "Should be at
- * Paystack" on the Reserve panel is always the same all-time figure —
- * everything ever collected, less every payout and refund actually sent —
+ * Off by default, and off does not mean "less accurate." "Should be at
+ * Paystack" on the Reserve panel is always the same all-time figure,
+ * everything ever collected, less every payout and refund actually sent,
  * computed entirely from this platform's own records, whatever this is set
  * to. All this decides is whether the background check ever asks Paystack
  * for its live balance at all: off, and it never does, so no email can ever
  * fire; on, and every 30 minutes the live balance is compared against that
- * same figure, and a real shortfall — the live balance reading lower than
- * expected — reaches an admin's inbox. See `SolvencyService.reconcile`.
+ * same figure, and a real shortfall, the live balance reading lower than
+ * expected, reaches an admin's inbox. See `SolvencyService.reconcile`.
  */
 function PaystackPayoutSetting() {
   const { pushToast } = useStore()
@@ -740,7 +740,7 @@ function PaystackPayoutSetting() {
 
   return (
     <Card className="mt-3">
-      <CardHead title="Watch your live Paystack balance?" subtitle="Only changes background alerting — never what 'Should be at Paystack' shows" />
+      <CardHead title="Watch your live Paystack balance?" subtitle="Only changes background alerting, never what 'Should be at Paystack' shows" />
       <div className="flex items-start justify-between gap-4 px-4 pb-4">
         <div>
           <label htmlFor="paystack-watch" className="block font-semibold text-slate-900 dark:text-slate-50">
@@ -748,10 +748,10 @@ function PaystackPayoutSetting() {
           </label>
           <p className="mt-1 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
             "Should be at Paystack" on the Reserve panel is always everything ever collected, less
-            every payout and refund you have actually sent — this switch never changes that. Off,
+            every payout and refund you have actually sent, this switch never changes that. Off,
             nothing here ever calls Paystack in the background. On, that figure is checked every 30
             minutes against Paystack's actual live balance, and you're emailed only if it comes back
-            genuinely lower — never for reading higher, which usually just means a payout landed
+            genuinely lower, never for reading higher, which usually just means a payout landed
             without being logged here.
           </p>
         </div>
@@ -770,7 +770,7 @@ function PaystackPayoutSetting() {
  * The admin's WhatsApp channel, offered to every agent.
  *
  * Shown to an agent as a permanent card on their dashboard, and once as a
- * popup the first time they see a given link — see `Dashboard.tsx`. Nothing
+ * popup the first time they see a given link, see `Dashboard.tsx`. Nothing
  * here is sensitive: a bad or missing link just means nobody sees a channel
  * to join, never a place money or a password could go, so validation is
  * limited to "looks like a link."
@@ -854,13 +854,13 @@ function WhatsAppChannelSetting() {
 }
 
 /**
- * A site-wide warning banner — agents, customers and guests all see the same
+ * A site-wide warning banner, agents, customers and guests all see the same
  * one, on every page including an agent's own storefront. Not a popup on
  * purpose: it's meant to sit in view for as long as the situation lasts, so a
  * visitor who returns partway through still sees it, rather than only the
  * first person to load the page after it was set.
  *
- * Stays up until cleared here — nothing expires it automatically, since only
+ * Stays up until cleared here, nothing expires it automatically, since only
  * James knows when the actual problem is over.
  */
 function SiteNoticeSetting() {
@@ -893,7 +893,7 @@ function SiteNoticeSetting() {
         detail:
           text === ''
             ? 'The site is back to normal for everyone.'
-            : 'Every visitor sees it now — agents, customers and guests, on every page.',
+            : 'Every visitor sees it now, agents, customers and guests, on every page.',
       })
     } catch (error) {
       pushToast({
@@ -912,7 +912,7 @@ function SiteNoticeSetting() {
       />
       <div className="space-y-3 px-4 pb-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          For something like a network running slow. It's not a popup — it sits at the top of every
+          For something like a network running slow. It's not a popup, it sits at the top of every
           page for as long as it's set, agents and public visitors alike, including anyone on an
           agent's own shop. Clear it the moment things are back to normal; nothing here expires on its
           own.
@@ -925,7 +925,7 @@ function SiteNoticeSetting() {
         >
           <TextInput
             id="site-notice"
-            placeholder="MTN is running slow right now — orders are still going through, just taking longer than usual."
+            placeholder="MTN is running slow right now, orders are still going through, just taking longer than usual."
             maxLength={300}
             disabled={!loaded}
             value={draft}

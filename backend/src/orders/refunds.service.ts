@@ -13,7 +13,7 @@ import { resalePriceFor, type OrderSplit, type PricingAgent } from '../domain/pr
  * The split between owing and paying is the whole design. `FulfilmentService`
  * records the debt when a delivery fails; nothing here runs until James decides.
  * That costs the customer time and buys the one control that matters on an
- * outbound payment — because the alternative was demonstrated: an automatic rule
+ * outbound payment, because the alternative was demonstrated: an automatic rule
  * credited eight customers GHS 196 they had never paid, and there was nothing in
  * between.
  *
@@ -36,7 +36,7 @@ export class RefundsService {
     private readonly paystack: PaystackClient,
   ) {}
 
-  /** The queue. Pending first and oldest first — the longest wait is the worst. */
+  /** The queue. Pending first and oldest first, the longest wait is the worst. */
   async list(status?: 'pending' | 'approved' | 'rejected') {
     const rows = await this.prisma.refundRequest.findMany({
       where: status ? { status } : {},
@@ -49,7 +49,7 @@ export class RefundsService {
     })
 
     /**
-     * What Paystack actually kept, per `Payment.fee` — not `split.processingFee`,
+     * What Paystack actually kept, per `Payment.fee`, not `split.processingFee`,
      * which is only the checkout estimate. Same figure and same reasoning as
      * `OrdersService.list`'s own `feeByOrderId`; null for a wallet-paid order,
      * whose fee (if any) was already paid once at top-up time, not again here.
@@ -62,7 +62,7 @@ export class RefundsService {
 
     /**
      * Today's selling price for the same product, for the "Reorder" preview
-     * to sanity-check against — an agent sale against that specific agent's
+     * to sanity-check against, an agent sale against that specific agent's
      * own current price, a direct sale against the standard one. Purely
      * informational: the amount actually owed is `row.amount`, frozen at
      * sale, regardless of what either price has done since.
@@ -75,7 +75,7 @@ export class RefundsService {
 
     /**
      * The specific agent an order was sold through, resolved once for every
-     * distinct `soldByCode` in this page — not the wholesale floor everyone
+     * distinct `soldByCode` in this page, not the wholesale floor everyone
      * pays, but what *this* agent actually charges, explicit price or their
      * own default markup, exactly how a live checkout would price it (see
      * `resalePriceFor`). An agent who has since raised or lowered their own
@@ -102,7 +102,7 @@ export class RefundsService {
     const agentByReferralCode = new Map(agentUsers.map((a) => [a.referralCode, a]))
 
     return rows.map((row) => {
-      // Frozen at the original sale and unchanged by a reorder — `settle`'s
+      // Frozen at the original sale and unchanged by a reorder, `settle`'s
       // delivered branch always pays an agent this exact amount regardless of
       // what the SKU costs today, so it is the one number the "Reorder" modal
       // needs to turn a live cost into a true net margin rather than a gross
@@ -115,14 +115,14 @@ export class RefundsService {
 
       return {
         id: row.id,
-        /** For the "Reorder" action — see `FulfilmentService.reorder`. */
+        /** For the "Reorder" action, see `FulfilmentService.reorder`. */
         orderId: row.orderId,
         network: row.order.network,
         category: row.order.category,
         /** Owed to an agent from this exact sale, unchanged by a reorder. */
         agentMargin,
         /**
-         * What this order was originally priced against — see
+         * What this order was originally priced against, see
          * `Order.supplierCodeAtSale`'s own comment. The "Reorder" modal
          * compares this to the chosen bundle's cost today: reordering at the
          * same cost the sale already assumed is not a gain, it is just this
@@ -131,7 +131,7 @@ export class RefundsService {
          */
         originalCost: split.supplierCost,
         /**
-         * What Paystack actually kept from the original payment — already
+         * What Paystack actually kept from the original payment, already
          * spent, not something a reorder redoes or gets back. Null for a
          * wallet-paid order, whose fee (if any) was booked once already at
          * top-up time, not against this sale.
@@ -140,7 +140,7 @@ export class RefundsService {
         /** Whether this was sold through an agent's own link (FR-5.7). */
         soldByAgent: row.order.soldByCode !== null,
         /**
-         * Today's price for this same product — for an agent sale, that
+         * Today's price for this same product, for an agent sale, that
          * specific agent's own current price, explicit or their default
          * markup, priced exactly as a live checkout would (`resalePriceFor`),
          * not admin's wholesale floor everyone pays; for a direct sale, the
@@ -151,7 +151,7 @@ export class RefundsService {
           if (!product) return null
           if (!row.order.soldByCode) return product.standardPrice
           const agent = agentByReferralCode.get(row.order.soldByCode)
-          if (!agent) return product.adminPrice // agent no longer exists — the wholesale floor is the best fallback
+          if (!agent) return product.adminPrice // agent no longer exists, the wholesale floor is the best fallback
           const pricingAgent: PricingAgent = {
             userId: agent.id,
             name: '',
@@ -201,7 +201,7 @@ export class RefundsService {
    *
    * A wallet customer is credited directly. A Mobile Money payer has no wallet
    * and a MoMo collection cannot be reliably reversed, so the amount is held
-   * against their number as a claim — NFR-3.3 without depending on a reversal
+   * against their number as a claim, NFR-3.3 without depending on a reversal
    * that may never land.
    */
   async approve(id: string, adminId: string, momoNetwork?: Network) {
@@ -212,12 +212,12 @@ export class RefundsService {
      * A Mobile Money refund needs to know which network to pay.
      *
      * Already known when the original payment reported it (see
-     * `FulfilmentService.settle`, which reads it off Paystack at that point) —
+     * `FulfilmentService.settle`, which reads it off Paystack at that point),
      * this only blocks when it is not: a guest whose payment predates this, or
      * one Paystack did not report cleanly. Never guessed from the phone number
      * itself. Ghana's number portability means a prefix cannot tell you which
-     * network carries a line — the platform used to guess and turned real
-     * customers away for it — so an unknown case falls to whoever has the
+     * network carries a line, the platform used to guess and turned real
+     * customers away for it, so an unknown case falls to whoever has the
      * order in front of them.
      */
     if (request.method === 'transfer' && !momoNetwork && !request.momoNetwork) {
@@ -231,7 +231,7 @@ export class RefundsService {
        * Claimed atomically, not read-then-written.
        *
        * A plain `findUnique` + a status check proves nothing about what is
-       * still true by the time the later `update`s run — two admins clicking
+       * still true by the time the later `update`s run, two admins clicking
        * approve within the same window, or one admin double-clicking, both
        * pass a read-then-write guard and both go on to pay. `updateMany`'s
        * `WHERE status = 'pending'` is the actual guard: only the caller that
@@ -258,7 +258,7 @@ export class RefundsService {
 
       if (request.method === 'transfer') {
         // Nothing moves in here. The money is sent after this commits, because a
-        // transaction must never be held open across an outbound HTTP call — and
+        // transaction must never be held open across an outbound HTTP call, and
         // the request has to be marked approved first so a second click cannot
         // start a second transfer.
         await tx.refundRequest.update({
@@ -282,7 +282,7 @@ export class RefundsService {
           },
         })
       } else {
-        // Legacy shape only — see RefundMethod.claimable.
+        // Legacy shape only, see RefundMethod.claimable.
         await tx.claimableCredit.upsert({
           where: { reference: request.orderRef },
           create: {
@@ -332,7 +332,7 @@ export class RefundsService {
     // Committed. Now actually send it.
     if (request.method === 'transfer') {
       await this.sendRefund(id).catch((error) => {
-        // A failure here does not undo the approval — the decision stands and
+        // A failure here does not undo the approval, the decision stands and
         // `sendRefund` records what happened. This only catches the unexpected.
         this.log.error(`refund transfer for ${id} threw: ${String(error)}`)
       })
@@ -344,17 +344,17 @@ export class RefundsService {
   /**
    * Mark a Mobile Money refund as sent outside Paystack.
    *
-   * Some Paystack accounts cannot initiate third-party payouts at all — a
+   * Some Paystack accounts cannot initiate third-party payouts at all, a
    * Starter Business tier refuses every transfer with a reason that has
    * nothing to do with this platform's code, and there is no code fix for it.
    * When that is the wall, whoever is looking at the queue can pay the
-   * customer directly instead — their own Mobile Money, cash, however — and
+   * customer directly instead (their own Mobile Money, cash, however) and
    * record it here so the books and the customer's receipt agree with what
    * actually happened.
    *
    * Held to the same standard as a refusal: a reason is required and kept
    * against the person who gave it, because "I sent it" is a claim nobody
-   * else verifies the way Paystack's webhook verifies an automatic transfer —
+   * else verifies the way Paystack's webhook verifies an automatic transfer,
    * the record is what answers a dispute later.
    */
   async settleManually(id: string, adminId: string, note: string, momoNetwork?: Network) {
@@ -374,7 +374,7 @@ export class RefundsService {
 
     return this.prisma.$transaction(async (tx) => {
       /**
-       * Claimed atomically, not read-then-written — same reasoning as
+       * Claimed atomically, not read-then-written, same reasoning as
        * `approve()` above. Two admins racing to settle the same stuck refund
        * by hand must not both credit it and both tell the customer it's sent.
        */
@@ -386,10 +386,10 @@ export class RefundsService {
           decidedBy: adminId,
           momoNetwork: momoNetwork ?? existing.momoNetwork,
           transferStatus: 'success',
-          transferNote: `Sent manually — ${reason}`,
+          transferNote: `Sent manually, ${reason}`,
           paidAt: new Date(),
           // The one thing a later genuine Paystack transfer event for this
-          // same reference can check to refuse acting — see the field's own
+          // same reference can check to refuse acting, see the field's own
           // doc comment in schema.prisma and `PaymentsService.applyTransfer`.
           resolvedManually: true,
         },
@@ -413,7 +413,7 @@ export class RefundsService {
 
       await this.ledger.record(
         [
-          // The same cost as any other refund — money left to make the
+          // The same cost as any other refund, money left to make the
           // customer whole, whichever account it left from. Re-recorded here
           // because a prior failed Paystack attempt removes this entry;
           // `record` is idempotent on its key either way, so this cannot
@@ -428,7 +428,7 @@ export class RefundsService {
             occurredAt: new Date(),
           },
           /**
-           * The business did not pay this — a person did, out of their own
+           * The business did not pay this, a person did, out of their own
            * pocket, because Paystack refused to. That is a debt to them, not
            * a cost to the business twice over, so it is booked as capital
            * coming in rather than a second refund line, and does not touch
@@ -440,7 +440,7 @@ export class RefundsService {
             idempotencyKey: LedgerService.key('order', request.orderRef, 'capital_in'),
             kind: 'capital_in',
             amount: request.amount,
-            description: `Covered refund ${request.orderRef} personally — ${reason}`,
+            description: `Covered refund ${request.orderRef} personally, ${reason}`,
             orderRef: request.orderRef,
             occurredAt: new Date(),
             affectsProfit: false,
@@ -470,7 +470,7 @@ export class RefundsService {
     if (!row || row.status !== 'approved') return
 
     if (row.transferCode) {
-      this.log.warn(`refund ${refundId} already has a transfer — not sending again`)
+      this.log.warn(`refund ${refundId} already has a transfer, not sending again`)
       return
     }
 
@@ -512,7 +512,7 @@ export class RefundsService {
       recipientCode,
       amount: row.amount,
       reference: `RFD-${row.id}`,
-      reason: `Refund — ${row.productName} (${row.orderRef})`,
+      reason: `Refund, ${row.productName} (${row.orderRef})`,
     })
 
     if (result.kind === 'sent') {
@@ -521,15 +521,15 @@ export class RefundsService {
        * can take up to 30 seconds, long enough for their webhook to arrive and
        * resolve this refund first. An unconditional write here would then
        * clobber a real `transferStatus: 'success'` back to whatever this stale
-       * reply says — a bookkeeping inconsistency, not a double-pay, but a
+       * reply says, a bookkeeping inconsistency, not a double-pay, but a
        * needless one to leave in.
        *
-       * Written as an explicit `OR` rather than `NOT: { transferStatus: 'success' }`
-       * — SQL's three-valued NULL logic means a plain negation SILENTLY EXCLUDES
+       * Written as an explicit `OR` rather than `NOT: { transferStatus: 'success' }`,
+       * SQL's three-valued NULL logic means a plain negation SILENTLY EXCLUDES
        * a null `transferStatus`, and this column is null on every refund the
        * first time it is ever sent (nothing sets it before this point). The
        * `NOT` form was verified against the local database to update zero rows
-       * on a completely normal, first-time send — it would have quietly stopped
+       * on a completely normal, first-time send, it would have quietly stopped
        * every refund from ever recording its transfer code.
        */
       await this.prisma.refundRequest.updateMany({
@@ -576,7 +576,7 @@ export class RefundsService {
   }
 
   /**
-   * The transfer did not go. Put the refund back in the queue — usually.
+   * The transfer did not go. Put the refund back in the queue, usually.
    *
    * Back to `pending` on a plain `failed`: the customer is still owed, so it
    * belongs in the list of people waiting rather than sitting as an approval
@@ -584,15 +584,15 @@ export class RefundsService {
    * looks knows what to fix.
    *
    * `unknown` and `otp` are both exceptions, and for related but different
-   * reasons — both stay `approved`, never `pending`:
+   * reasons, both stay `approved`, never `pending`:
    *
-   *  · `unknown` — the money may already be moving, and re-approving it
+   *  · `unknown`, the money may already be moving, and re-approving it
    *    could pay it twice.
-   *  · `otp` — nothing has moved (Paystack blocked the transfer outright
+   *  · `otp`, nothing has moved (Paystack blocked the transfer outright
    *    pending a code), but `transferCode` is already set from this very
    *    attempt. Resetting to `pending` here used to mislabel this as
    *    `failed`, and an admin who then re-approved it hit `sendRefund`'s own
-   *    "already has a transfer — not sending again" guard — a dead end that
+   *    "already has a transfer (not sending again" guard) a dead end that
    *    alternated `pending` → `approved` forever with zero progress. This
    *    only actually clears by resolving the OTP requirement in Paystack's
    *    own dashboard, same as the message already says.
@@ -616,8 +616,8 @@ export class RefundsService {
       },
     })
 
-    // Nothing has actually been paid in either `failed` or `otp` — only
-    // `unknown` might genuinely already have moved — so it must not sit on
+    // Nothing has actually been paid in either `failed` or `otp`, only
+    // `unknown` might genuinely already have moved, so it must not sit on
     // the books as a cost until it's actually confirmed sent.
     const row = await this.prisma.refundRequest.findUnique({ where: { id: refundId } })
     if (row && status !== 'unknown') {
@@ -634,7 +634,7 @@ export class RefundsService {
    *
    * Kept deliberately hard to do quietly. This is a decision not to return money
    * a customer paid, so the reason is required and stored against the person who
-   * made it — the record has to survive being asked about months later.
+   * made it, the record has to survive being asked about months later.
    */
   async reject(id: string, adminId: string, note: string) {
     const reason = note.trim()

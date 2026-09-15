@@ -31,7 +31,7 @@ export class WithdrawalsService {
   ) {}
 
   /**
-   * `limit` was a hard 200 with no way past it — same clamped-but-adjustable
+   * `limit` was a hard 200 with no way past it, same clamped-but-adjustable
    * shape as `OrdersService.list`, rather than true cursor pagination: this
    * queue is checked by a person deciding what to do next, not paged through
    * like a report, so "show me more" beats a page-by-page control here.
@@ -47,7 +47,7 @@ export class WithdrawalsService {
   }
 
   /**
-   * FR-2.6 — request a payout.
+   * FR-2.6, request a payout.
    *
    * The balance is held the moment the request is made, not when James approves
    * it. Otherwise an agent could request their whole balance twice and, if both
@@ -75,7 +75,7 @@ export class WithdrawalsService {
       // Same conditional-update discipline as the wallet debit: Postgres decides
       // whether the balance covers it, so two simultaneous requests cannot both
       // pass a stale check.
-      // `id` is TEXT, not uuid — Prisma maps String @id to text, so no cast here.
+      // `id` is TEXT, not uuid, Prisma maps String @id to text, so no cast here.
       const affected = await tx.$executeRaw`
         UPDATE users SET balance = balance - ${amount}
         WHERE id = ${user.id} AND balance >= ${amount}
@@ -99,7 +99,7 @@ export class WithdrawalsService {
           userId: user.id,
           agentName: after.name,
           // The number the agent asked to be paid on, not whatever their profile
-          // says — see RequestWithdrawalDto.momoNumber.
+          // says, see RequestWithdrawalDto.momoNumber.
           agentPhone: momoNumber,
           amount,
           momoNetwork,
@@ -107,7 +107,7 @@ export class WithdrawalsService {
         },
       })
 
-      // The debit is recorded now, described as held rather than paid — the agent
+      // The debit is recorded now, described as held rather than paid, the agent
       // must be able to see where the money went in their own ledger.
       await tx.earning.create({
         data: {
@@ -131,7 +131,7 @@ export class WithdrawalsService {
    * The balance was held the moment they requested it, so a typo'd amount or
    * the wrong Mobile Money number otherwise leaves that balance stuck until
    * James happens to work through the queue and reject it. This is the same
-   * reversal as a rejection — the held amount simply goes back — restricted
+   * reversal as a rejection (the held amount simply goes back) restricted
    * to the one person who should not need an admin's permission to undo their
    * own request.
    */
@@ -139,7 +139,7 @@ export class WithdrawalsService {
     return this.prisma.$transaction(async (tx) => {
       const row = await tx.withdrawal.findUnique({ where: { id } })
       if (!row || row.userId !== user.id) {
-        // Same message either way — an agent probing another agent's request
+        // Same message either way, an agent probing another agent's request
         // id learns nothing from the difference between "not yours" and
         // "does not exist".
         throw new NotFoundError('We could not find that withdrawal request.')
@@ -165,7 +165,7 @@ export class WithdrawalsService {
           type: 'withdrawal',
           amount: row.amount,
           balanceAfter: after.balance,
-          description: 'Withdrawal request cancelled — amount returned to your balance',
+          description: 'Withdrawal request cancelled, amount returned to your balance',
           reference: `WDR-${row.id.slice(0, 8).toUpperCase()}-C`,
           depth: 0,
         },
@@ -177,14 +177,14 @@ export class WithdrawalsService {
   }
 
   /**
-   * FR-6.5 — James approves or rejects.
+   * FR-6.5, James approves or rejects.
    *
    * Approval is a bookkeeping act: the money was already deducted at request
-   * time. The MoMo transfer itself is still made by hand on Paystack — approving
+   * time. The MoMo transfer itself is still made by hand on Paystack, approving
    * here debits the agent's balance and records the payout, it does not move the
    * money. Paystack's Transfer API would automate it; until then the balance is
    * checked first so an agent is never marked paid against money that is not there.
-   * Rejection is what has to move money — it puts the held amount back.
+   * Rejection is what has to move money, it puts the held amount back.
    */
   async decide(id: string, status: WithdrawalStatus) {
     if (status !== 'approved' && status !== 'rejected') {
@@ -208,7 +208,7 @@ export class WithdrawalsService {
        * Claimed atomically, not read-then-written.
        *
        * A plain read-then-status-check proves nothing about what is still
-       * true by the time the writes below run — two admins deciding the same
+       * true by the time the writes below run, two admins deciding the same
        * request at once, or one double-clicking, both pass a read-then-write
        * guard and both go on to move money. `updateMany`'s `WHERE status =
        * 'pending'` is the actual guard: only the caller that wins this write
@@ -228,13 +228,13 @@ export class WithdrawalsService {
 
       /**
        * A suspension is a decision to stop, not a decision about this specific
-       * payout — but approving one still sends real money out, and nothing
+       * payout, but approving one still sends real money out, and nothing
        * before this checked the agent's current status at all. Without this,
        * a request queued before a suspension for suspected fraud would sail
        * through approval exactly like any other, with nobody warned that the
        * agent receiving it is currently under review.
        *
-       * Only guards approval — a rejection returns the held balance and moves
+       * Only guards approval, a rejection returns the held balance and moves
        * nothing external, so it is always safe regardless of status. Throwing
        * here rolls back the claim above too, so a refused approval leaves the
        * request exactly as pending as it was before this ran.
@@ -256,7 +256,7 @@ export class WithdrawalsService {
           select: { balance: true },
         })
 
-        // Typed `withdrawal` rather than `sale` — it is not income, it is the
+        // Typed `withdrawal` rather than `sale`, it is not income, it is the
         // hold being released. The Earnings page groups it with the request it
         // cancels, which is where a reader looks for it.
         await tx.earning.create({
@@ -265,7 +265,7 @@ export class WithdrawalsService {
             type: 'withdrawal',
             amount: row.amount,
             balanceAfter: after.balance,
-            description: 'Withdrawal rejected — amount returned to your balance',
+            description: 'Withdrawal rejected, amount returned to your balance',
             reference: `WDR-${row.id.slice(0, 8).toUpperCase()}-R`,
             depth: 0,
           },
@@ -275,7 +275,7 @@ export class WithdrawalsService {
       if (status === 'approved') {
         // Cash out, but NOT a cost: this margin was booked as a cost the moment
         // the sale completed. Recording it again here would charge the business
-        // twice for the same earning — which is exactly what `affectsProfit`
+        // twice for the same earning, which is exactly what `affectsProfit`
         // exists to prevent.
         await this.ledger.record(
           [
@@ -305,7 +305,7 @@ export class WithdrawalsService {
     // rows for as long as Paystack takes to answer.
     if (status === 'approved') {
       await this.sendPayout(id).catch((error) => {
-        // A failure here does not undo the approval — the decision was made and
+        // A failure here does not undo the approval, the decision was made and
         // the agent's balance is already debited. `sendPayout` handles a refusal
         // by giving the money back; this only catches the unexpected.
         this.log.error(`payout for ${id} threw: ${String(error)}`)
@@ -313,7 +313,7 @@ export class WithdrawalsService {
 
       /**
        * `decided` is what the transaction above returned, frozen before
-       * `sendPayout` ever ran — it still reads `transferStatus: null` and
+       * `sendPayout` ever ran, it still reads `transferStatus: null` and
        * `status: 'approved'` even when `sendPayout` just marked this `manual`
        * (nothing to send to yet), `failed` (and returned the agent's
        * balance), or actually sent it. The caller waited for the real
@@ -330,8 +330,8 @@ export class WithdrawalsService {
   /**
    * Pay an approved withdrawal out to the agent's Mobile Money.
    *
-   * The agent's balance was debited when they asked, so nothing is deducted here
-   * — this moves money that is already accounted for. Three outcomes, and each
+   * The agent's balance was debited when they asked, so nothing is deducted here,
+   * this moves money that is already accounted for. Three outcomes, and each
    * has to leave the books honest:
    *
    *  · **Accepted.** The withdrawal stays `approved` and waits for Paystack's
@@ -339,7 +339,7 @@ export class WithdrawalsService {
    *  · **Refused.** Nothing left the account, so the agent gets their balance
    *    back immediately and the request is marked failed with the reason.
    *  · **Unknown.** No usable answer. Nothing is returned and nothing is retried,
-   *    because the money may be on its way — the same rule as a supplier dispatch,
+   *    because the money may be on its way, the same rule as a supplier dispatch,
    *    and for the same reason: paying twice is worse than paying late.
    */
   private async sendPayout(withdrawalId: string): Promise<void> {
@@ -349,7 +349,7 @@ export class WithdrawalsService {
     // Already handed over. Guards a double approval or a retried request from
     // creating a second transfer.
     if (row.transferCode) {
-      this.log.warn(`payout ${withdrawalId} already has a transfer — not sending again`)
+      this.log.warn(`payout ${withdrawalId} already has a transfer, not sending again`)
       return
     }
 
@@ -362,7 +362,7 @@ export class WithdrawalsService {
             'No Paystack key on this server, so this one has to be sent by hand.',
         },
       })
-      this.log.warn(`payout ${withdrawalId} left for manual sending — Paystack is not configured`)
+      this.log.warn(`payout ${withdrawalId} left for manual sending, Paystack is not configured`)
       return
     }
 
@@ -411,7 +411,7 @@ export class WithdrawalsService {
       recipientCode,
       amount: row.amount,
       reference: `WDR-${row.id}`,
-      reason: `${row.agentName} — agent earnings`,
+      reason: `${row.agentName}, agent earnings`,
     })
 
     if (result.kind === 'sent') {
@@ -419,8 +419,8 @@ export class WithdrawalsService {
       // 30 seconds, long enough for their webhook to arrive and resolve this
       // withdrawal first. An unconditional write here would then clobber a
       // real `transferStatus: 'success'` back to whatever this stale reply
-      // says, purely a bookkeeping inconsistency — `status` itself is untouched
-      // either way — but a needless one to leave in.
+      // says, purely a bookkeeping inconsistency, `status` itself is untouched
+      // either way, but a needless one to leave in.
       await this.prisma.withdrawal.updateMany({
         where: { id: row.id, status: 'approved' },
         data: { transferCode: result.transferCode, transferStatus: result.status },
@@ -460,14 +460,14 @@ export class WithdrawalsService {
       return
     }
 
-    // unknown — may or may not have been created.
+    // unknown, may or may not have been created.
     await this.prisma.withdrawal.update({
       where: { id: row.id },
       data: {
         transferStatus: 'unknown',
         transferNote:
           `We did not get an answer from Paystack: ${result.reason} The money may be on its ` +
-          'way. Check the transfer in their dashboard before doing anything else — do not ' +
+          'way. Check the transfer in their dashboard before doing anything else, do not ' +
           'approve it again.',
       },
     })
@@ -478,18 +478,18 @@ export class WithdrawalsService {
    * Confirm a payout was sent by hand.
    *
    * The fallback for exactly the same wall `RefundsService.settleManually`
-   * exists for — some Paystack accounts refuse every third-party transfer
+   * exists for, some Paystack accounts refuse every third-party transfer
    * outright until upgraded, and until then, or until this server even has
    * live Paystack credentials configured at all, a payout genuinely has to
    * leave through the admin's own Mobile Money or bank transfer instead. This
    * records that it did, without ever pretending Paystack sent it.
    *
    * The agent's balance was already debited at request time and the ledger's
-   * `payout` cost was already booked at approval — neither happens again
+   * `payout` cost was already booked at approval, neither happens again
    * here. What IS booked is a `capital_in`, because it was not the tracked
    * Paystack balance that paid this out, a person did, from their own
    * pocket. See `SolvencyService.transfersSince` for why this must never
-   * carry a `transferCode` — that is the only thing telling a real transfer
+   * carry a `transferCode`, that is the only thing telling a real transfer
    * apart from this one, so `expectedAtPaystack` is not quietly overstated as
    * if the money had left Paystack when nothing here can actually confirm it did.
    */
@@ -510,7 +510,7 @@ export class WithdrawalsService {
       }
 
       /**
-       * Claimed atomically, not read-then-written — same reasoning as
+       * Claimed atomically, not read-then-written, same reasoning as
        * `decide()` above. Two admins racing to settle the same stuck payout
        * by hand must not both book a `capital_in` and both tell the agent
        * it's sent.
@@ -520,10 +520,10 @@ export class WithdrawalsService {
         data: {
           status: 'paid',
           transferStatus: 'success',
-          transferNote: `Sent manually — ${reason}`,
+          transferNote: `Sent manually, ${reason}`,
           paidAt: new Date(),
           // The one thing a later genuine Paystack transfer event for this
-          // same reference can check to refuse acting — see the field's own
+          // same reference can check to refuse acting, see the field's own
           // doc comment in schema.prisma and `PaymentsService.applyTransfer`.
           resolvedManually: true,
         },
@@ -543,7 +543,7 @@ export class WithdrawalsService {
             idempotencyKey: LedgerService.key('withdrawal', id, 'capital_in'),
             kind: 'capital_in',
             amount: row.amount,
-            description: `Covered ${row.agentName}'s payout personally — ${reason}`,
+            description: `Covered ${row.agentName}'s payout personally, ${reason}`,
             withdrawalId: id,
             occurredAt: new Date(),
             affectsProfit: false,
@@ -558,7 +558,7 @@ export class WithdrawalsService {
   }
 
   /**
-   * Manual payout advances still owed back to whoever paid them — the exact
+   * Manual payout advances still owed back to whoever paid them, the exact
    * mirror of `FloatMonitorService.outstandingManualRefunds`, one column
    * over. See `settleManually` above for why these are booked as capital in
    * the first place.
@@ -600,7 +600,7 @@ export class WithdrawalsService {
         idempotencyKey: LedgerService.key('withdrawal', withdrawalId, 'capital_out'),
         kind: 'capital_out',
         amount: -advance.amount,
-        description: `Reimbursed — payout ${withdrawalId}`,
+        description: `Reimbursed, payout ${withdrawalId}`,
         withdrawalId,
         occurredAt: new Date(),
         affectsProfit: false,
@@ -639,7 +639,7 @@ export class WithdrawalsService {
           type: 'withdrawal',
           amount: row.amount,
           balanceAfter: after.balance,
-          description: 'Payout could not be sent — amount returned to your balance',
+          description: 'Payout could not be sent, amount returned to your balance',
           reference: `WDR-${row.id.slice(0, 8).toUpperCase()}-F`,
           depth: 0,
         },

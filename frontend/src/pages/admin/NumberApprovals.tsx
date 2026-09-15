@@ -23,7 +23,7 @@ import { AlertIcon, CheckIcon, CopyIcon, RefreshIcon } from '../../components/ic
  *
  * DataHub will not deliver an MTN bundle to a number that is not on their
  * beneficiary list, and their `/beneficiaries` submission endpoint answers 502 on
- * every valid request — so approving a number is a manual job in their dashboard.
+ * every valid request, so approving a number is a manual job in their dashboard.
  * This is the queue for that job.
  *
  * A sale to an unapproved number is now **refused before anything is charged**, so
@@ -32,13 +32,13 @@ import { AlertIcon, CheckIcon, CopyIcon, RefreshIcon } from '../../components/ic
  * counts how many times that has happened, which is what makes a number worth
  * doing first.
  *
- * Some rows still hold money — orders placed before the refusal existed, and
+ * Some rows still hold money, orders placed before the refusal existed, and
  * orders whose dispatch came back needing approval after payment. Those are the
  * urgent ones, and they sort to the top.
  *
  * The list re-checks with DataHub when it loads, so what you see is what is still
  * outstanding. Approval is theirs to grant, so their answer is the only thing that
- * may release an order — there is deliberately no button here to mark one approved
+ * may release an order, there is deliberately no button here to mark one approved
  * by hand.
  */
 export default function NumberApprovals() {
@@ -63,8 +63,8 @@ export default function NumberApprovals() {
    *
    * The point of this screen is the numbers that are *still* not approved, so
    * opening it asks the provider before rendering rather than showing a list that
-   * may already be stale. Quiet on purpose — no toast, because nobody asked a
-   * question — and the server refuses to run it more than once a minute, so
+   * may already be stale. Quiet on purpose, no toast, because nobody asked a
+   * question, and the server refuses to run it more than once a minute, so
    * refreshing repeatedly cannot hammer their rate limit.
    */
   useEffect(() => {
@@ -97,7 +97,7 @@ export default function NumberApprovals() {
         (current ?? []).map((row) => (phones.includes(row.phone) ? { ...row, copiedAt: now } : row)),
       )
     } catch {
-      // The clipboard copy itself already succeeded — worth completing that
+      // The clipboard copy itself already succeeded, worth completing that
       // rather than failing the whole action over a checkpoint that can
       // simply be set again next time.
     }
@@ -118,7 +118,7 @@ export default function NumberApprovals() {
     }
   }
 
-  /** Copying just one — for a single new number, without re-sending the batch. */
+  /** Copying just one, for a single new number, without re-sending the batch. */
   const copyOne = async (phone: string) => {
     setCopyingPhone(phone)
     try {
@@ -252,13 +252,13 @@ export default function NumberApprovals() {
               <Callout
                 tone="warning"
                 title={`${rows.length} number${rows.length === 1 ? '' : 's'} to approve${
-                  heldValue > 0 ? ` — ${cedis(heldValue)} of customer money held` : ''
+                  heldValue > 0 ? `, ${cedis(heldValue)} of customer money held` : ''
                 }`}
                 icon={<AlertIcon className="size-4" />}
               >
                 <p>
                   DataHub only delivers MTN bundles to numbers on their approved list, and their
-                  automatic submission is failing on their side — so add these in your DataHub
+                  automatic submission is failing on their side, so add these in your DataHub
                   dashboard, then press <strong className="font-semibold">Re-check</strong>.
                 </p>
                 <p className="mt-1.5">
@@ -315,7 +315,7 @@ export default function NumberApprovals() {
                             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{row.networkKey}</p>
                           </div>
                           {/* Copying just this one number, and checkpointing only
-                              it — for a single fresh arrival, without re-sending
+                              it, for a single fresh arrival, without re-sending
                               (and re-dating) the whole batch. */}
                           <button
                             type="button"
@@ -332,7 +332,7 @@ export default function NumberApprovals() {
                         </div>
                       </Td>
                       <Td>
-                        <p className="text-slate-800 dark:text-slate-100">{row.lastProduct ?? '—'}</p>
+                        <p className="text-slate-800 dark:text-slate-100">{row.lastProduct ?? '-'}</p>
                       </Td>
                       <Td align="right">
                         {/* What this number has actually cost. Since the sale is
@@ -348,14 +348,14 @@ export default function NumberApprovals() {
                         </Badge>
                       </Td>
                       <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                        {row.valueHeld > 0 ? cedis(row.valueHeld) : '—'}
+                        {row.valueHeld > 0 ? cedis(row.valueHeld) : '-'}
                       </Td>
                       <Td align="right" className="text-xs text-slate-500 dark:text-slate-400">
                         {dateTime(row.waitingSince)}
                       </Td>
                       <Td align="right">
                         {/* The checkpoint itself. Not-yet-copied is the row worth
-                            noticing — a fresh arrival since the last batch — so
+                            noticing (a fresh arrival since the last batch) so
                             it's the one that stands out, not the routine case. */}
                         {row.copiedAt ? (
                           <span
@@ -381,7 +381,7 @@ export default function NumberApprovals() {
 }
 
 /**
- * "3m ago", "2h ago" — deliberately relative rather than a clock time. The
+ * "3m ago", "2h ago", deliberately relative rather than a clock time. The
  * whole point of the checkpoint is answering "was this one already in the
  * last batch I sent" at a glance, and a bare timestamp needs doing that
  * arithmetic by hand every time; the full time is still one hover away, via

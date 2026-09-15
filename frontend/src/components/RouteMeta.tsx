@@ -31,7 +31,7 @@ const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
     meta: {
       title: `Buy Data Bundles, Airtime & Result Checkers in Ghana | ${SITE}`,
       description:
-        'Buy MTN, Telecel and AirtelTigo data bundles, airtime, voice and SMS bundles, MTN AFA registration and BECE/WASSCE result checkers. Pay with Mobile Money — no account needed, delivered in seconds.',
+        'Buy MTN, Telecel and AirtelTigo data bundles, airtime, voice and SMS bundles, MTN AFA registration and BECE/WASSCE result checkers. Pay with Mobile Money, no account needed, delivered in seconds.',
     },
   },
   {
@@ -62,7 +62,7 @@ const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
     match: (p) => p === '/info',
     meta: {
       title: `What Can I Do Here? | ${SITE}`,
-      description: 'A searchable, step-by-step guide to using JamesDataConsult — different for admins, agents and customers.',
+      description: 'A searchable, step-by-step guide to using JamesDataConsult, different for admins, agents and customers.',
       noindex: true,
     },
   },
@@ -117,7 +117,7 @@ const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
 ]
 
 const FALLBACK: Meta = {
-  title: `${SITE} — Data Bundles, Airtime & Result Checkers`,
+  title: `${SITE}, Data Bundles, Airtime & Result Checkers`,
   description:
     'Buy data bundles, airtime and BECE/WASSCE result checkers in Ghana. Paid by Mobile Money, delivered in seconds.',
 }
@@ -172,7 +172,7 @@ export default function RouteMeta() {
 
   return (
     <div aria-live="polite" aria-atomic="true" className="sr-only">
-      {announcement && `${announcement} — page loaded`}
+      {announcement && `${announcement}, page loaded`}
     </div>
   )
 }

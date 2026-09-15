@@ -2,7 +2,7 @@
  * The origin to build shareable links from.
  *
  * `window.location.origin` rather than a hardcoded domain, because an agent's
- * sell link is the thing they actually send to customers — and during testing
+ * sell link is the thing they actually send to customers, and during testing
  * the app is reached over localhost, a LAN address or an ngrok tunnel, none of
  * which is the production domain. A link nobody can open is a broken feature,
  * not a cosmetic detail.

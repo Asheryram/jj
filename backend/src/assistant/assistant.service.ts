@@ -23,7 +23,7 @@ import { OrdersService } from '../orders/orders.service'
 /**
  * Free-tier friendly, and deliberately so: this answers plain questions about
  * an agent's own account from a handful of small read-only lookups, not hard
- * reasoning — the kind of workload where a bigger model buys nothing but cost.
+ * reasoning, the kind of workload where a bigger model buys nothing but cost.
  */
 const MODEL = 'openai/gpt-oss-20b'
 
@@ -42,7 +42,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_prices',
       description:
-        "The agent's actual current selling price, their own cost, and their own profit for every bundle, whether they've set their own price or it's still the standard one, each tagged with its real network (MTN, Telecel or AirtelTigo). Use this for any question about how much a bundle costs, or how much profit/margin the agent makes per sale. When asked about one network, filter using the network field this returns — never guess a product's network from its name, since names like \"1GB Data\" or \"iShare\" don't reliably say which network they're on.",
+        "The agent's actual current selling price, their own cost, and their own profit for every bundle, whether they've set their own price or it's still the standard one, each tagged with its real network (MTN, Telecel or AirtelTigo). Use this for any question about how much a bundle costs, or how much profit/margin the agent makes per sale. When asked about one network, filter using the network field this returns, never guess a product's network from its name, since names like \"1GB Data\" or \"iShare\" don't reliably say which network they're on.",
     },
   },
   {
@@ -65,7 +65,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_top_products',
       description:
-        "Which products the agent has sold the most of, ranked by number of completed sales. Use this for any question about what's popular, best-selling, or most bought — never try to work it out yourself from the earnings list.",
+        "Which products the agent has sold the most of, ranked by number of completed sales. Use this for any question about what's popular, best-selling, or most bought, never try to work it out yourself from the earnings list.",
     },
   },
   {
@@ -73,7 +73,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_withdrawals',
       description:
-        "The agent's own recent withdrawal (payout) requests and where each one stands — pending, paid, rejected, and so on.",
+        "The agent's own recent withdrawal (payout) requests and where each one stands, pending, paid, rejected, and so on.",
     },
   },
   {
@@ -81,7 +81,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_recent_orders',
       description:
-        "The agent's most recent sales (their own and their downline's), each with its reference, product, status, amount and date — use this for any question about a specific order or sale, or whether one went through.",
+        "The agent's most recent sales (their own and their downline's), each with its reference, product, status, amount and date, use this for any question about a specific order or sale, or whether one went through.",
     },
   },
   {
@@ -89,7 +89,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_summary',
       description:
-        "How the agent's shop is doing right now: earned today, earned all time, orders today vs completed vs total, how many of their downline are active, and this week's earnings against last week's — use this for any \"how am I doing\" or \"how's business\" style question.",
+        "How the agent's shop is doing right now: earned today, earned all time, orders today vs completed vs total, how many of their downline are active, and this week's earnings against last week's, use this for any \"how am I doing\" or \"how's business\" style question.",
     },
   },
   {
@@ -97,7 +97,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_branding_status',
       description:
-        "The status of the agent's own shop-look (branding) request — their live shop name/colour/logo, anything still waiting on an admin's decision, and the most recent decision if one was made.",
+        "The status of the agent's own shop-look (branding) request, their live shop name/colour/logo, anything still waiting on an admin's decision, and the most recent decision if one was made.",
     },
   },
   {
@@ -105,7 +105,7 @@ const AGENT_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_my_markup',
       description:
-        "The agent's own default markup percentage — the extra they charge above cost on any product they haven't set a specific price for.",
+        "The agent's own default markup percentage, the extra they charge above cost on any product they haven't set a specific price for.",
     },
   },
 ]
@@ -139,7 +139,7 @@ const ADMIN_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_needs_attention',
       description:
-        'Orders nothing automatic has resolved — stuck in progress too long, or flagged because two different sources disagreed on the outcome.',
+        'Orders nothing automatic has resolved, stuck in progress too long, or flagged because two different sources disagreed on the outcome.',
     },
   },
   {
@@ -169,7 +169,7 @@ const ADMIN_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_profit_statement',
       description:
-        "The real profit and loss for the last 30 days — revenue minus every actual cost (supplier cost, payment fees, agent margins, referral bonuses, refunds, payout fees), not just revenue. Use this for any question about actual profit or how much the business has made, not just sold.",
+        "The real profit and loss for the last 30 days, revenue minus every actual cost (supplier cost, payment fees, agent margins, referral bonuses, refunds, payout fees), not just revenue. Use this for any question about actual profit or how much the business has made, not just sold.",
     },
   },
   {
@@ -185,7 +185,7 @@ const ADMIN_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_catalogue_accuracy',
       description:
-        "Whether the catalogue's believed cost for each product still matches what the supplier actually charged on its most recent sale — flags a product whose real cost has drifted from what the books assume.",
+        "Whether the catalogue's believed cost for each product still matches what the supplier actually charged on its most recent sale, flags a product whose real cost has drifted from what the books assume.",
     },
   },
   {
@@ -216,36 +216,36 @@ const ADMIN_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_float_risk_products',
       description:
-        'Which specific products cost more than the float can currently cover right now — the detail behind a plain "is the float okay" answer. This also lists every product that is not on sale at all, for any reason (a fresh import with no price set yet, a product James discontinued, or genuine float risk) — never assume a product is inactive because of the float unless it also appears in the at-risk list.',
+        'Which specific products cost more than the float can currently cover right now (the detail behind a plain "is the float okay" answer. This also lists every product that is not on sale at all, for any reason (a fresh import with no price set yet, a product James discontinued, or genuine float risk)) never assume a product is inactive because of the float unless it also appears in the at-risk list.',
     },
   },
 ]
 
 /**
- * The in-app help assistant — " Assistant " rather than a static page.
+ * The in-app help assistant, " Assistant " rather than a static page.
  * Read-only by design: it can look up real account or platform data to answer
  * plainly, but it can never change a price, approve a refund, resolve an
- * order, or anything else — those stay a deliberate click in the app, not
+ * order, or anything else, those stay a deliberate click in the app, not
  * something a typed sentence can trigger by accident.
  *
  * Shared by every role, with a completely different tool set and voice
  * depending on who's asking: an agent's questions are about their own shop
  * and earnings; an admin or superadmin's are about running the platform
  * itself. The read-only boundary and the plain-language rule are the same
- * for both — see `systemPrompt` and `AGENT_TOOLS`/`ADMIN_TOOLS` below.
+ * for both, see `systemPrompt` and `AGENT_TOOLS`/`ADMIN_TOOLS` below.
  *
  * The people asking are not developers. Every answer has to read the way
- * `AdminOrders.tsx`'s `explain()` already talks to James — plain words, no
- * jargon, a short answer first — which is why that voice is spelled out in
+ * `AdminOrders.tsx`'s `explain()` already talks to James, plain words, no
+ * jargon, a short answer first, which is why that voice is spelled out in
  * the system prompt below rather than left to the model to guess at.
  *
- * Runs on Groq rather than Claude or Gemini — a second deliberate swap.
+ * Runs on Groq rather than Claude or Gemini, a second deliberate swap.
  * Anthropic usage hit a billing wall; Gemini's free tier turned out to cap
  * at 20 requests/day, shared across everyone testing it, and emptied twice
  * within about fifteen minutes of light use. Groq needs no card on file,
  * but is not actually wall-free either: this account's on-demand tier has a
  * hard 200,000-tokens/day ceiling, confirmed live by hitting it (a 429 with
- * `error.type: "tokens"`) — see the `RateLimitError` branch in `ask()` below
+ * `error.type: "tokens"`), see the `RateLimitError` branch in `ask()` below
  * for what a caller actually sees when that happens. Real, low-volume usage
  * is unlikely to hit this in a normal day; heavy testing does. Nothing about
  * the app's own tone or the read-only boundary changed; only the provider did.
@@ -320,18 +320,18 @@ export class AssistantService {
         }
       }
 
-      // Ran out of rounds without a final answer — say so plainly rather
+      // Ran out of rounds without a final answer, say so plainly rather
       // than silently returning nothing.
       return {
         reply: "Sorry, I couldn't work that out. Try asking it a different way, or check the app directly.",
       }
     } catch (error) {
       // Confirmed live: this is a real, distinct failure mode, not a rare
-      // edge case — Groq's on-demand tier has a hard 200,000-tokens/day
+      // edge case, Groq's on-demand tier has a hard 200,000-tokens/day
       // ceiling, and heavy use of this feature (or just a busy day) can hit
-      // it. Told to a user as "under maintenance" on purpose — a free-tier
+      // it. Told to a user as "under maintenance" on purpose, a free-tier
       // quota is an internal cost detail, not something worth explaining to
-      // an agent or admin — but it's logged here in full so whoever reads
+      // an agent or admin, but it's logged here in full so whoever reads
       // the server log knows exactly why, and that retrying in the next few
       // minutes won't help; the real wait is until the daily quota resets.
       if (error instanceof RateLimitError) {
@@ -344,7 +344,7 @@ export class AssistantService {
               : "The help assistant is getting a lot of questions right now. Please wait a minute and try again.",
         }
       }
-      // A broken assistant reply must never look like a broken app — this
+      // A broken assistant reply must never look like a broken app, this
       // is a help feature, not the checkout or the ledger.
       this.log.error(`assistant request failed: ${String(error)}`)
       return { reply: 'Something went wrong answering that. Please try again in a moment.' }
@@ -352,12 +352,12 @@ export class AssistantService {
   }
 
   /**
-   * Every money field this app holds is an integer in pesewas — the model has
+   * Every money field this app holds is an integer in pesewas, the model has
    * no way to know that on its own, and handing it a raw `325` reads as
    * "GHS 325" rather than the GHS 3.25 it actually is (confirmed live: that
    * exact misreading is what a raw `earnings.balance` produced here before
    * this existed). So every tool result is reshaped into plain cedis before
-   * it ever reaches the model, the same way `cedis()` does for the UI —
+   * it ever reaches the model, the same way `cedis()` does for the UI,
    * nothing pesewas-denominated is ever handed over as-is.
    */
   private toCedis(pesewas: number): number {
@@ -384,7 +384,7 @@ export class AssistantService {
       }
       case 'get_my_prices': {
         // Deliberately every active product's actual current price, not just
-        // the ones the agent has personally overridden — "what's my price for
+        // the ones the agent has personally overridden, "what's my price for
         // 1GB?" has a real answer even when it's still the standard one, and
         // the old version (just the override table) left the assistant with
         // nothing to say for any product an agent hadn't touched.
@@ -403,7 +403,7 @@ export class AssistantService {
           })
           return {
             product: p.name,
-            // A product's own name never says which network it's on — "1GB
+            // A product's own name never says which network it's on, "1GB
             // Data" exists on both MTN and Telecel with the same name, and
             // "iShare" (AirtelTigo's own bundle brand) doesn't say
             // "AirtelTigo" either. Confirmed live: without this field the
@@ -412,10 +412,10 @@ export class AssistantService {
             // this field, never by reading the network out of the name.
             network: p.network,
             priceGhs: this.toCedis(salePesewas),
-            // What the agent themselves pays James for this bundle — their
+            // What the agent themselves pays James for this bundle, their
             // own real floor, same number the pricing band on the actual
             // Pricing screen shows them. Not `supplierCost` (James's own
-            // wholesale cost): that stays admin-only, on purpose — see
+            // wholesale cost): that stays admin-only, on purpose, see
             // `toProduct`'s stripping comment in mappers.ts.
             costGhs: this.toCedis(p.adminPrice),
             profitGhs: this.toCedis(salePesewas - p.adminPrice),
@@ -424,7 +424,7 @@ export class AssistantService {
         })
       }
       case 'get_my_downline': {
-        // No earnings figure here, on purpose — referring someone pays no
+        // No earnings figure here, on purpose, referring someone pays no
         // bonus (see `pricing.ts`'s "Referring earns nothing"), so there is
         // no honest non-zero number to report. `AgentsService.downline`'s own
         // `earnedForUpline` can only ever be a leftover from before that rule
@@ -446,7 +446,7 @@ export class AssistantService {
       }
       case 'get_my_top_products': {
         // Computed here rather than left for the model to work out by
-        // eyeballing the earnings list — confirmed live that this model
+        // eyeballing the earnings list, confirmed live that this model
         // family won't reliably do that arithmetic itself and would rather
         // claim it doesn't have the information at all. A ranked count is a
         // fact, not a judgement call, so it's cheaper and more reliable to
@@ -686,47 +686,47 @@ export class AssistantService {
         ', one of the agents (resellers) who sells bundles through their own shop link.'
 
     const boundary = admin
-      ? 'You cannot approve or refuse a refund, resolve an order, top up the float, or change anything on the agent\'s or a customer\'s behalf. If asked to do one of these, explain in plain steps how to do it themselves in the app — never claim to have done it.'
-      : 'You cannot change a price, request a withdrawal, refer anyone, or resolve anything on the agent\'s behalf. If asked to do one of these, explain in plain steps how they can do it themselves in the app — never claim to have done it.'
+      ? 'You cannot approve or refuse a refund, resolve an order, top up the float, or change anything on the agent\'s or a customer\'s behalf. If asked to do one of these, explain in plain steps how to do it themselves in the app, never claim to have done it.'
+      : 'You cannot change a price, request a withdrawal, refer anyone, or resolve anything on the agent\'s behalf. If asked to do one of these, explain in plain steps how they can do it themselves in the app, never claim to have done it.'
 
     const menu = admin
-      ? `Where things are in the menu — use these exact names, never a paraphrase:
-- Overview (/admin),  Assistant  (/admin/assistant), All orders (/admin/orders), Refunds (/admin/refunds) — always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
-- Withdrawals (/admin/withdrawals), Needs attention (/admin/needs-attention), Number approvals (/admin/approvals), Users (/admin/users), Cost prices (/admin/prices), Catalogue accuracy (/admin/catalogue-accuracy), Float risk (/admin/float-risk), Branding (/admin/branding), Settings (/admin/settings) — on a phone these are one tap further: tap "More" at the bottom first, then the name above. On a computer they're just in the left-hand sidebar, no extra tap.
-- Platform team (/admin/team) and Custom domains (/admin/domains) only exist for the platform owner (superadmin), not a regular admin — don't send a regular admin looking for either. Both are behind "More" on a phone for a superadmin too.
-- Whenever you send someone to one of the second group on a phone, say the "More" step out loud — don't assume they can see the full menu.`
-      : `Where things are in the menu — use these exact names, never a paraphrase (an agent who taps "Prices" and finds nothing loses trust fast):
-- Dashboard (/app),  Assistant  (/app/assistant), Sell & refer (/app/referrals), Earnings (/app/earnings) — always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
-- Sales (/app/orders), My prices (/app/pricing), Shop look (/app/shop-look), Browse shop (/shop), Reports (/app/reports), Withdraw (/app/withdrawals) — on a phone these are one tap further: tap "More" at the bottom first, then the name above. On a computer they're just in the left-hand sidebar, no extra tap.
-- Whenever you send someone to one of the second group on a phone, say the "More" step out loud — don't assume they can see the full menu, most agents here are on a phone, and a step that skips it sends them looking for something that isn't on screen yet.`
+      ? `Where things are in the menu, use these exact names, never a paraphrase:
+- Overview (/admin),  Assistant  (/admin/assistant), All orders (/admin/orders), Refunds (/admin/refunds), always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
+- Withdrawals (/admin/withdrawals), Needs attention (/admin/needs-attention), Number approvals (/admin/approvals), Users (/admin/users), Cost prices (/admin/prices), Catalogue accuracy (/admin/catalogue-accuracy), Float risk (/admin/float-risk), Branding (/admin/branding), Settings (/admin/settings), on a phone these are one tap further: tap "More" at the bottom first, then the name above. On a computer they're just in the left-hand sidebar, no extra tap.
+- Platform team (/admin/team) and Custom domains (/admin/domains) only exist for the platform owner (superadmin), not a regular admin, don't send a regular admin looking for either. Both are behind "More" on a phone for a superadmin too.
+- Whenever you send someone to one of the second group on a phone, say the "More" step out loud, don't assume they can see the full menu.`
+      : `Where things are in the menu, use these exact names, never a paraphrase (an agent who taps "Prices" and finds nothing loses trust fast):
+- Dashboard (/app),  Assistant  (/app/assistant), Sell & refer (/app/referrals), Earnings (/app/earnings), always visible at the bottom of the screen on a phone; the first four items in the sidebar on a computer.
+- Sales (/app/orders), My prices (/app/pricing), Shop look (/app/shop-look), Browse shop (/shop), Reports (/app/reports), Withdraw (/app/withdrawals), on a phone these are one tap further: tap "More" at the bottom first, then the name above. On a computer they're just in the left-hand sidebar, no extra tap.
+- Whenever you send someone to one of the second group on a phone, say the "More" step out loud, don't assume they can see the full menu, most agents here are on a phone, and a step that skips it sends them looking for something that isn't on screen yet.`
 
     const domainKnowledge = admin
       ? `How the platform works, in plain terms:
-- The float is a prepaid balance held with DataHub, the delivery partner — every bundle sold draws from it. "Should hold" is what the books say it ought to be; DataHub's own last report is what they actually say — a gap between the two almost always means a top-up or withdrawal that was never logged.
-- A refund is never automatic — a failed order only queues the debt, a person still decides whether to pay it or refuse it.
+- The float is a prepaid balance held with DataHub, the delivery partner (every bundle sold draws from it. "Should hold" is what the books say it ought to be; DataHub's own last report is what they actually say) a gap between the two almost always means a top-up or withdrawal that was never logged.
+- A refund is never automatic, a failed order only queues the debt, a person still decides whether to pay it or refuse it.
 - MTN numbers need DataHub's own approval before a bundle can reach them; a number waiting here means real paid sales are stuck until it's approved.
-- "Needs attention" is the small number of orders nothing automatic could settle — either stuck too long, or two different sources disagreed about what happened to it. Almost everything else resolves on its own.
+- "Needs attention" is the small number of orders nothing automatic could settle, either stuck too long, or two different sources disagreed about what happened to it. Almost everything else resolves on its own.
 - An agent's downline is who they've referred; an agent's own withdrawal moves money out of their earnings balance into Mobile Money, reviewed by an admin before it pays out.`
       : `How the platform works, in plain terms:
-- Every agent gets their own shop link to share with customers. When someone buys through it, the agent earns the difference between what they charged and what the platform itself charges for that bundle — that difference is their margin.
-- An agent can set their own price for a product, within a band the platform allows — that is what decides their margin on that sale.
-- An agent can build a "downline" by referring other agents, and see them listed for their own visibility — but this pays no bonus of any kind, now or ever. Every agent earns from their own sales only, at the same price from James no matter who is above them in the chain. If asked, say this plainly rather than implying there's a bonus to wait for.
-- A withdrawal moves money out of an agent's earnings balance into their Mobile Money account. It is reviewed by an admin before it pays out — it is not instant.
-- A custom domain (like sageshop.example.com) is optional. An agent requests one from the [Shop look](/app/shop-look) screen — that's the only place to do it — so their shop has its own web address instead of a shared link; it needs an admin's approval before it goes live.
-- An order can be "processing" (still being delivered, usually seconds to a few minutes), "completed" (delivered), or "failed" (something went wrong — the money is either already back with the customer or being sorted out, never simply lost).`
+- Every agent gets their own shop link to share with customers. When someone buys through it, the agent earns the difference between what they charged and what the platform itself charges for that bundle, that difference is their margin.
+- An agent can set their own price for a product, within a band the platform allows, that is what decides their margin on that sale.
+- An agent can build a "downline" by referring other agents, and see them listed for their own visibility, but this pays no bonus of any kind, now or ever. Every agent earns from their own sales only, at the same price from James no matter who is above them in the chain. If asked, say this plainly rather than implying there's a bonus to wait for.
+- A withdrawal moves money out of an agent's earnings balance into their Mobile Money account. It is reviewed by an admin before it pays out, it is not instant.
+- A custom domain (like sageshop.example.com) is optional. An agent requests one from the [Shop look](/app/shop-look) screen (that's the only place to do it) so their shop has its own web address instead of a shared link; it needs an admin's approval before it goes live.
+- An order can be "processing" (still being delivered, usually seconds to a few minutes), "completed" (delivered), or "failed" (something went wrong, the money is either already back with the customer or being sorted out, never simply lost).`
 
     return `You are the in-app help assistant for JamesDataConsult (JKB Data Hub), a data bundle, airtime and result-checker reselling platform in Ghana. ${who}
 
 How to talk:
-- Plain words only — never say "API", "webhook", "database", "endpoint", "provider reference", "tool", "function", "null", "undefined", or any other technical term, and never describe what a lookup "returned" — just say the plain fact itself (e.g. no domain requested yet, not "the tool returned null"). Explain things the way you would to someone who has never used a computer for work before.
+- Plain words only (never say "API", "webhook", "database", "endpoint", "provider reference", "tool", "function", "null", "undefined", or any other technical term, and never describe what a lookup "returned") just say the plain fact itself (e.g. no domain requested yet, not "the tool returned null"). Explain things the way you would to someone who has never used a computer for work before.
 - Keep answers short: a sentence or two first, then offer to say more if they want it. Do not front-load a long explanation nobody asked for.
-- If a question needs real, current information, use the tools available to you rather than guessing or giving a generic answer. This includes questions that need you to work something out from the data, not just look it up directly — always call the tool that matches first, even then. Never tell someone you don't have information without having actually tried a relevant tool.
-- Never state a fact a tool didn't actually give you — a network, a status, a date, anything specific — by guessing it from a product or person's name instead. If a tool's data doesn't say it, say what the tool actually told you, or that you're not sure, rather than filling the gap with a guess that sounds plausible.
-- Any field ending in "Ghs" from a tool is already in Ghana cedis, ready to say as-is (e.g. "GHS 3.25") — never multiply, divide, or otherwise convert it.
-- Use **double asterisks** around a word or phrase only to genuinely emphasise it (a warning, a key number) — not on every heading or label, and never around a link (the next rule) since it already stands out on its own.
-- Whenever you tell someone to go to a specific screen, write it as a markdown link using its exact path from the menu below, e.g. "check [My prices](/app/pricing)" or "go to [Refunds](/admin/refunds)" — plain like that, not bolded — never say a screen name without also linking it this way, and never invent a path that isn't listed below.
-- A markdown table (a header row of "|"-separated cells, a "|---|---|" row under it, then more rows the same way) renders as a real table here — use one when someone asks for "a table", or when you're listing several items that each have more than one number attached (like a product with both a price and a cost). For a simple one-value-per-item list, plain "- " lines are still the better fit.
-- Never use an em dash (—). Use a comma, a period, or parentheses instead.
+- If a question needs real, current information, use the tools available to you rather than guessing or giving a generic answer. This includes questions that need you to work something out from the data, not just look it up directly, always call the tool that matches first, even then. Never tell someone you don't have information without having actually tried a relevant tool.
+- Never state a fact a tool didn't actually give you (a network, a status, a date, anything specific) by guessing it from a product or person's name instead. If a tool's data doesn't say it, say what the tool actually told you, or that you're not sure, rather than filling the gap with a guess that sounds plausible.
+- Any field ending in "Ghs" from a tool is already in Ghana cedis, ready to say as-is (e.g. "GHS 3.25"), never multiply, divide, or otherwise convert it.
+- Use **double asterisks** around a word or phrase only to genuinely emphasise it (a warning, a key number), not on every heading or label, and never around a link (the next rule) since it already stands out on its own.
+- Whenever you tell someone to go to a specific screen, write it as a markdown link using its exact path from the menu below, e.g. "check [My prices](/app/pricing)" or "go to [Refunds](/admin/refunds)" (plain like that, not bolded) never say a screen name without also linking it this way, and never invent a path that isn't listed below.
+- A markdown table (a header row of "|"-separated cells, a "|---|---|" row under it, then more rows the same way) renders as a real table here, use one when someone asks for "a table", or when you're listing several items that each have more than one number attached (like a product with both a price and a cost). For a simple one-value-per-item list, plain "- " lines are still the better fit.
+- Never use an em dash (-). Use a comma, a period, or parentheses instead.
 
 What you can never do:
 - ${boundary}

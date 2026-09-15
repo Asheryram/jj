@@ -48,7 +48,7 @@ import { isAdmin } from '../lib/roles'
  *
  * There is no mock and no demo mode: every balance, order and price on screen
  * came out of Postgres. If the API cannot be reached the app says so rather than
- * falling back to invented data — a shop that shows plausible prices while
+ * falling back to invented data, a shop that shows plausible prices while
  * disconnected is worse than one that admits it is down, because someone will
  * try to buy at those prices.
  *
@@ -159,7 +159,7 @@ interface Store {
   whatsappChannelUrl: string | null
   /** Call once the popup has been acted on or dismissed, so it does not return. */
   markWhatsappChannelSeen: () => Promise<void>
-  /** A warning banner for the whole site — agents and guests alike. Null = not set. */
+  /** A warning banner for the whole site, agents and guests alike. Null = not set. */
   siteNotice: string | null
   retailPrice: (product: Product, sellerCode?: string | null) => number
   myBand: (product: Product) => PriceBand
@@ -184,9 +184,9 @@ interface Store {
 
   claimableCredits: ClaimableCredit[]
 
-  /** FR-5.2 — the signed-in agent's downline. */
+  /** FR-5.2, the signed-in agent's downline. */
   subAgents: SubAgent[]
-  /** FR-8.1 — platform turnover per day (admin). */
+  /** FR-8.1, platform turnover per day (admin). */
   revenueByDay: RevenueDay[]
   /** The agent's own earnings per day, split own vs downline. */
   agentEarningsByDay: AgentEarningsDay[]
@@ -221,7 +221,7 @@ let toastSeq = 0
 /**
  * ~5 minutes: 10 polls at 1.5s, then every 5s.
  *
- * Past this the page stops asking, but the order is NOT abandoned — the
+ * Past this the page stops asking, but the order is NOT abandoned, the
  * reconciler settles it server-side and the receipt stays retrievable from
  * Track order. Nothing is lost by the screen giving up; the customer just has to
  * be told that, which is what the receipt copy does.
@@ -237,7 +237,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    *
    * The header reads `profiles.length` to decide whether to show the switcher, so
    * a payload without the field took the whole app down with a TypeError the
-   * moment somebody logged in — a white screen, and only for signed-in users. That
+   * moment somebody logged in, a white screen, and only for signed-in users. That
    * is exactly what a frontend deployed ahead of its API looks like, and it is not
    * a state the client should be able to reach.
    */
@@ -260,14 +260,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /**
    * The Paystack fee, in basis points, sent with the catalogue so a price
    * derived here locally (an agent's own default markup) matches what the
-   * server would actually charge. Defaults to 0 — no gross-up — until the first
+   * server would actually charge. Defaults to 0 (no gross-up) until the first
    * snapshot arrives, which only matters for the instant before it does.
    */
   const [paystackFeeBp, setPaystackFeeBp] = useState(0)
 
   /**
-   * The admin's WhatsApp channel link, sent only to an agent or admin session
-   * — absent (rather than null) for anyone else, which reads the same as "not
+   * The admin's WhatsApp channel link, sent only to an agent or admin session,
+   * absent (rather than null) for anyone else, which reads the same as "not
    * set" here.
    */
   const [whatsappChannelUrl, setWhatsappChannelUrl] = useState<string | null>(null)
@@ -328,7 +328,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   /**
    * Everything that depends on who is signed in. Called after login, after a
-   * mutation that moves money, and on first load — so a dashboard is never a
+   * mutation that moves money, and on first load, so a dashboard is never a
    * cached guess about a balance.
    *
    * Individual failures are swallowed per-request: one unavailable report should
@@ -429,6 +429,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       )
     }
 
+    // Not `isAdmin`: superadmin composes announcements but is never a
+    // recipient, so fetching this for them would just always read zero.
+    if (current.role === 'admin') {
+      tasks.push(
+        api
+          .announcementUnreadCount()
+          .then(setUnreadAnnouncementsCount)
+          .catch(() => undefined),
+      )
+    }
+
     await Promise.all(tasks)
   }, [])
 
@@ -460,7 +471,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
          *
          * This used to drop the session on *any* failure, so a rate limit, a
          * five-hundred or a moment of bad signal logged the user out and left them
-         * on the public shell — where every link is a signed-out link, which reads
+         * on the public shell, where every link is a signed-out link, which reads
          * as the app being broken rather than as having been ejected from it.
          *
          * On anything else the token is kept and the app comes up offline-ish: the
@@ -507,7 +518,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // its *shape* depends on who is asking: `supplierCost` is admin-only and
       // is stripped for everyone else. Skipping this left an admin holding the
       // anonymous payload, so every "you pay" and margin on the Prices page
-      // rendered from an absent number — GHS NaN.
+      // rendered from an absent number, GHS NaN.
       await Promise.all([loadCatalogue(), loadForSession(result.user)])
       return result.user
     },
@@ -520,15 +531,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * The catalogue is refetched for the same reason login refetches it, and the
    * reason matters more here: its shape depends on who is asking, because
    * `supplierCost` and the markups are stripped for anyone who is not an admin.
-   * Switching without this would leave an agent holding admin data — or worse,
+   * Switching without this would leave an agent holding admin data, or worse,
    * an admin holding the agent payload, which is exactly how the Prices page
    * came to render GHS NaN.
    *
-   * `setSession` runs last, once the loads above have already settled — not
+   * `setSession` runs last, once the loads above have already settled, not
    * first. Committing it first left a window where the rest of the app saw
    * the new role while the URL was still the old page (the switch is still
    * awaiting the data below), and `RequireAuth` redirected on its own,
-   * correctly but a step ahead of the caller — which then tried to navigate a
+   * correctly but a step ahead of the caller, which then tried to navigate a
    * second time to where the guard had already put it, and that raced into a
    * blank screen instead of just doing nothing. Loading everything before
    * announcing the new session means the one render that shows it also has
@@ -549,7 +560,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [loadCatalogue, loadForSession],
   )
 
-  /** Give yourself another profile. No password and no link — you have both. */
+  /** Give yourself another profile. No password and no link, you have both. */
   const addProfile = useCallback(
     async (role: 'admin' | 'agent') => {
       try {
@@ -705,7 +716,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   /**
-   * Drop an individual override — back to the agent's own default markup,
+   * Drop an individual override, back to the agent's own default markup,
    * the only way back from one before this was recomputing it by hand.
    */
   const clearAgentPrice = useCallback(
@@ -811,7 +822,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /**
    * Follow an order until the provider answers.
    *
-   * FR-4.4 — status moves from a provider callback, not from anything the browser
+   * FR-4.4, status moves from a provider callback, not from anything the browser
    * did, so the browser has to ask. Polling rather than a socket because a lost
    * poll is self-healing and a lost socket is not, and Ghana 4G loses things.
    */
@@ -823,7 +834,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       /**
        * Poll fast at first, then ease off, and keep watching for five minutes.
        *
-       * This was a flat 1.5s interval that gave up after 60 tries — exactly 90
+       * This was a flat 1.5s interval that gave up after 60 tries, exactly 90
        * seconds, which is exactly the reconciler's grace period. The customer's
        * screen therefore stopped watching at the precise moment the server-side
        * fallback became eligible to settle the order, so a slow delivery could
@@ -831,7 +842,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
        *
        * Most orders land in the first few seconds, which is what the tight
        * opening interval is for. But DataHub can genuinely sit in PROCESSING for
-       * minutes, and hammering them 200 times would only burn rate limit — so
+       * minutes, and hammering them 200 times would only burn rate limit, so
        * after the first ~15s it drops to every 5s.
        */
       const tick = () => {
@@ -862,7 +873,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                     : `Sent to ${fresh.recipient}. An SMS confirmation is on its way.`,
               })
             } else if (fresh.paymentCollected === false) {
-              // The Mobile Money charge itself never went through — nothing was
+              // The Mobile Money charge itself never went through, nothing was
               // ever taken, so "refund" language here would be a lie. See
               // `Order.paymentCollected`'s own comment.
               pushToast({
@@ -876,8 +887,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               pushToast({
                 tone: 'error',
                 title: fresh.refunded
-                  ? 'Order failed — your money is back'
-                  : 'Order failed — your money is owed back to you',
+                  ? 'Order failed, your money is back'
+                  : 'Order failed, your money is owed back to you',
                 detail: fresh.refunded
                   ? fresh.paidWith === 'wallet'
                     ? `${(fresh.salePrice / 100).toFixed(2)} cedis went back to your wallet.`
@@ -894,7 +905,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               // loadForSession(null) here would be actively harmful: its first
               // act is to clear `orders`, which is where the order this receipt
               // is about lives. That blanked the receipt at the exact moment the
-              // buyer had just paid — the worst screen in the product to lose.
+              // buyer had just paid, the worst screen in the product to lose.
               void api
                 .credits(fresh.buyerPhone)
                 .then(setClaimableCredits)
@@ -956,7 +967,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
 
       // Only watch an order that is actually on its way. One waiting to be paid
-      // for resolves through the payment return, not by polling — and polling it
+      // for resolves through the payment return, not by polling, and polling it
       // would just burn requests until the watcher gave up.
       if (order.status !== 'awaiting_payment') watchOrder(order.id)
       return order
@@ -995,7 +1006,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   /**
-   * Dismissing the popup or tapping "Join channel" both call this — either
+   * Dismissing the popup or tapping "Join channel" both call this, either
    * way the point is the same: don't show it again for this same link.
    * Silent on failure, deliberately: worst case the popup reappears once
    * more, which is a much smaller problem than a toast about a WhatsApp link.
@@ -1010,7 +1021,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshUnreadAnnouncements = useCallback(async () => {
-    if (!session || session.role !== 'agent') return
+    if (!session || (session.role !== 'agent' && session.role !== 'admin')) return
     await api.announcementUnreadCount().then(setUnreadAnnouncementsCount).catch(() => undefined)
   }, [session])
 
@@ -1057,7 +1068,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const updated = await api.cancelWithdrawal(id)
         setWithdrawals((current) => current.map((w) => (w.id === id ? updated : w)))
         // The held balance is only actually usable again once the account
-        // re-reads it — same reasoning as `requestWithdrawal` re-reading below.
+        // re-reads it, same reasoning as `requestWithdrawal` re-reading below.
         await loadForSession(session)
         pushToast({ tone: 'info', title: 'Withdrawal request cancelled' })
       } catch (error) {

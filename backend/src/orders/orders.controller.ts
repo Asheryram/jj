@@ -24,7 +24,7 @@ export class OrdersController {
   ) {}
 
   /**
-   * Public on purpose. FR-4.8 — a guest arriving on an agent's sell link must be
+   * Public on purpose. FR-4.8, a guest arriving on an agent's sell link must be
    * able to complete a purchase, or the sell link is worthless. A signed-in
    * caller is still recognised, because the token is decoded on every route.
    */
@@ -33,7 +33,7 @@ export class OrdersController {
     @Body() dto: PlaceOrderDto,
     @CurrentUser() user: AuthUser | undefined,
     // Where Paystack should send this buyer back to, if it's their own agent's
-    // custom domain — see `PaymentsService.callbackUrl`. Never trusted blindly:
+    // custom domain, see `PaymentsService.callbackUrl`. Never trusted blindly:
     // only used if it resolves to the domain that specific agent actually has
     // live and approved.
     @Headers('origin') origin?: string,
@@ -50,7 +50,7 @@ export class OrdersController {
     return this.orders.verifyRecipient(dto.productId, dto.recipient)
   }
 
-  /** FR-4.9 — reference plus phone number, no account needed. */
+  /** FR-4.9, reference plus phone number, no account needed. */
   @Post('track')
   track(@Body() dto: TrackOrderDto) {
     return this.orders.track(dto)
@@ -88,7 +88,7 @@ export class OrdersController {
   }
 
   /**
-   * Settle a stuck order by hand — see `ReconcilerService.resolveManually`.
+   * Settle a stuck order by hand, see `ReconcilerService.resolveManually`.
    * For the case nothing automatic ever resolves: the provider's own status
    * never reaches a recognised terminal word, even though the real outcome
    * (delivered or not) is already known to whoever is looking at it.
@@ -101,9 +101,9 @@ export class OrdersController {
   }
 
   /**
-   * Retry dispatch by hand — see `FulfilmentService.retryDispatch`. Only for
+   * Retry dispatch by hand, see `FulfilmentService.retryDispatch`. Only for
    * an order whose last attempt timed out before DataHub ever answered, so
-   * there is no reference for the automatic reconciler to check with — an
+   * there is no reference for the automatic reconciler to check with, an
    * admin who has confirmed nothing was actually sent (their own dashboard,
    * for this recipient) can send the request again.
    */
@@ -115,7 +115,7 @@ export class OrdersController {
   }
 
   /**
-   * Reorder a failed order whose refund has not been paid yet — see
+   * Reorder a failed order whose refund has not been paid yet, see
    * `FulfilmentService.reorder`. Only valid while the refund is still
    * pending: once it is approved or paid, this is refused, because reordering
    * on top of that would hand the customer both the money back and the bundle.
@@ -128,7 +128,7 @@ export class OrdersController {
   }
 
   /**
-   * Clear a flagged conflict — see `ReconcilerService.acknowledgeConflict`.
+   * Clear a flagged conflict, see `ReconcilerService.acknowledgeConflict`.
    * For an order a settlement source disagreed with itself on, after a human
    * has actually checked what really happened.
    */

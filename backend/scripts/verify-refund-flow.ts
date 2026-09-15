@@ -48,9 +48,9 @@ async function main() {
   })
   // The seeded test customer has no usable password, so drive the wallet debit
   // through the database instead and place the order as a guest-with-wallet is
-  // impossible — use the order API with a token minted for them.
+  // impossible, use the order API with a token minted for them.
   if (!asCustomer.ok) {
-    console.log('(test customer has no password — setting one)')
+    console.log('(test customer has no password, setting one)')
     const bcrypt = await import('bcryptjs')
     await prisma.user.update({
       where: { id: customer.id },
@@ -100,9 +100,9 @@ async function main() {
 
   console.log(`\nafter the failure`)
   console.log(`  order status          : ${failed.status}`)
-  console.log(`  order.refunded        : ${failed.refunded}   (must be false — nobody approved it)`)
+  console.log(`  order.refunded        : ${failed.refunded}   (must be false, nobody approved it)`)
   console.log(`  refund request        : ${failed.refundRequest?.status ?? 'NONE'} ${failed.refundRequest ? ghs(failed.refundRequest.amount) : ''}`)
-  console.log(`  customer balance      : ${ghs(afterFailure)}   (must still be down — not refunded yet)`)
+  console.log(`  customer balance      : ${ghs(afterFailure)}   (must still be down, not refunded yet)`)
 
   const queuedCorrectly =
     failed.status === 'failed' &&
@@ -136,7 +136,7 @@ async function main() {
     headers: auth,
   }).then((r) => r.json() as Promise<{ code?: string }>)
   const finalBalance = (await prisma.user.findUniqueOrThrow({ where: { id: customer.id } })).balance
-  console.log(`\napprove again           : ${replay.code ?? 'ACCEPTED — BUG'}`)
+  console.log(`\napprove again           : ${replay.code ?? 'ACCEPTED, BUG'}`)
   console.log(`  customer balance      : ${ghs(finalBalance)}   (unchanged)`)
 
   await fetch(`${API}/admin/settings`, {
@@ -152,7 +152,7 @@ async function main() {
     replay.code === 'ALREADY_DECIDED' &&
     finalBalance === before
 
-  console.log(`\n${queuedCorrectly && paidOnce ? 'PASS' : 'FAIL'} — queued without paying, then paid once`)
+  console.log(`\n${queuedCorrectly && paidOnce ? 'PASS' : 'FAIL'}, queued without paying, then paid once`)
   if (!(queuedCorrectly && paidOnce)) process.exitCode = 1
 }
 

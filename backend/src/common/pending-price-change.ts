@@ -2,12 +2,12 @@ import type { Prisma } from '@prisma/client'
 import type { PrismaService } from '../prisma/prisma.service'
 
 /**
- * Upserts `PendingPriceChange` for one `adminPrice` edit — the one place both
+ * Upserts `PendingPriceChange` for one `adminPrice` edit, the one place both
  * `AdminService.setTier` and `applyMarkup` funnel through, so a bundle priced
  * by hand and one repriced in bulk are logged the same way.
  *
  * No-ops the moment the price is not actually moving, and collapses (deletes)
- * the row the moment it round-trips back to what agents were last told —
+ * the row the moment it round-trips back to what agents were last told,
  * see the model's own doc comment in schema.prisma for why that has to be
  * value-based rather than "just log every edit".
  */

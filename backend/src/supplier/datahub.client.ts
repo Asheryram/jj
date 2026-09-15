@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 
 /**
- * The DataHub GH HTTP client. Transport only — no domain decisions here.
+ * The DataHub GH HTTP client. Transport only, no domain decisions here.
  *
  * Everything this file knows came from their published spec at
  * `GET /api/external/docs` (v2.2.0). Three things about that contract shape the
@@ -14,7 +14,7 @@ import { ConfigService } from '@nestjs/config'
  *
  *  2. **There is no idempotency key.** They accept no client reference, so a
  *     retried purchase can bill and deliver twice. `purchase()` therefore never
- *     retries — a timeout is reported as `unknown` and left for reconciliation.
+ *     retries, a timeout is reported as `unknown` and left for reconciliation.
  *     This is the single most important rule in the file.
  *
  *  3. **Their balance is prepaid.** A purchase deducts from a float James funds,
@@ -25,7 +25,7 @@ import { ConfigService } from '@nestjs/config'
 /**
  * Every outcome carries `raw`: the provider's reply, verbatim.
  *
- * `reason` is our one-line reading of it, and it is lossy by design — a bare
+ * `reason` is our one-line reading of it, and it is lossy by design, a bare
  * "Insufficient balance" tells you the class of failure but not the amount they
  * wanted or the amount you had. When an order fails in production the first
  * question is always "what did they actually say", and reconstructing it after
@@ -49,7 +49,7 @@ export type PurchaseOutcome =
  * How they phrase a number that is not on the beneficiary list.
  *
  * Matched on rather than inferred from `success`, because `success: false` is also
- * how they report a malformed number — and refusing a sale for that reason would
+ * how they report a malformed number, and refusing a sale for that reason would
  * be blaming the customer for our own validation.
  */
 const NOT_A_BENEFICIARY = /not\s+(added|registered)\s+to\s+.*beneficiar/i
@@ -91,7 +91,7 @@ interface DatahubEnvelope {
  * `data.price` is the bundle's list price, which is what they charge unless a
  * promotion applies.
  *
- * Null when none are present — better than a zero that would read as free and
+ * Null when none are present, better than a zero that would read as free and
  * make every margin on the order look like pure profit.
  */
 function deductedFrom(body: DatahubEnvelope): number | null {
@@ -110,8 +110,8 @@ function deductedFrom(body: DatahubEnvelope): number | null {
  *
  * The only place this number is ever available: DataHub publishes no balance
  * endpoint, so the float is knowable exactly once per purchase, in the reply.
- * It used to be parsed and discarded — `deductedFrom` reads `current` only to
- * work out what was charged — which is why nobody could see the float until an
+ * It used to be parsed and discarded, `deductedFrom` reads `current` only to
+ * work out what was charged, which is why nobody could see the float until an
  * order failed for want of it.
  *
  * Null when they did not send it, never zero: zero is a real and alarming
@@ -143,7 +143,7 @@ export class DatahubClient {
   /**
    * Everything transactional sits one level deeper, under `/external`.
    *
-   * This is not cosmetic. `/api/data-purchase` does not exist — it answers with
+   * This is not cosmetic. `/api/data-purchase` does not exist, it answers with
    * the site's HTML 404 page, which this client reads as a clean rejection
    * (status < 500), so every live order would have been "declined by the
    * provider" and refunded without a single request ever reaching their
@@ -167,7 +167,7 @@ export class DatahubClient {
   }
 
   /**
-   * Retry with exponential backoff — for requests that are safe to repeat.
+   * Retry with exponential backoff, for requests that are safe to repeat.
    *
    * DataHub's integration guide recommends retrying with backoff generally. That
    * is right for everything here except the one call that spends money: their API
@@ -176,7 +176,7 @@ export class DatahubClient {
    * twice, with no way to tell afterwards which attempt did what. `purchase()`
    * therefore does its own single-shot fetch and never calls this.
    *
-   * Reads are different — asking twice what a bundle costs, or what an order's
+   * Reads are different, asking twice what a bundle costs, or what an order's
    * status is, costs nothing and changes nothing.
    *
    * Retried: transport failures, 5xx, and 429. Their limits are per-minute (30/min
@@ -219,7 +219,7 @@ export class DatahubClient {
   /**
    * Buy a data bundle.
    *
-   * `capacity` is a size in GB as a bare string — "1", "2", "5" — which is how
+   * `capacity` is a size in GB as a bare string ("1", "2", "5") which is how
    * their API expresses it. `recipient` is a 10-digit Ghana number starting 0.
    *
    * Deliberately single-shot. A network timeout here is genuinely ambiguous: the
@@ -253,7 +253,7 @@ export class DatahubClient {
       })
     } catch (error) {
       const reason = (error as Error)?.name === 'TimeoutError' ? 'timed out' : String(error)
-      this.log.error(`purchase to ${input.recipient} ${reason} — outcome unknown, NOT retrying`)
+      this.log.error(`purchase to ${input.recipient} ${reason}, outcome unknown, NOT retrying`)
       return {
         kind: 'unknown',
         reason: `Request ${reason} before a reply arrived.`,
@@ -261,8 +261,8 @@ export class DatahubClient {
       }
     }
 
-    // Read the body as text first, then parse. A non-JSON reply — their HTML
-    // error page, a proxy's 502 — is exactly the case worth keeping, and
+    // Read the body as text first, then parse. A non-JSON reply, their HTML
+    // error page, a proxy's 502, is exactly the case worth keeping, and
     // `response.json()` would throw it away.
     const rawText = await response.text().catch(() => '')
     const raw = `HTTP ${response.status} ${rawText}`.slice(0, 2000)
@@ -283,7 +283,7 @@ export class DatahubClient {
       if (insufficientBalance) {
         this.log.error(`DataHub float exhausted: ${reason}`)
       }
-      // A 5xx is not a clean rejection — they may have taken the order before
+      // A 5xx is not a clean rejection, they may have taken the order before
       // failing to answer. Treat it as unknown so nothing is refunded prematurely.
       if (response.status >= 500) {
         return { kind: 'unknown', reason: `Provider returned ${response.status}: ${reason}`, raw }
@@ -309,7 +309,7 @@ export class DatahubClient {
       // What they actually took, in cedis.
       //
       // Their spec documents `deducted`, but live replies have been seen with
-      // only `previous` and `current` — so the difference is the fallback, and
+      // only `previous` and `current`, so the difference is the fallback, and
       // `data.price` the last resort. Getting this right is what powers the
       // cost-mismatch alarm: the first real order was priced from a catalogue
       // cost of GHS 4.70 and actually charged GHS 4.20, and reading only
@@ -356,7 +356,7 @@ export class DatahubClient {
   }
 
   /**
-   * FR-4.2 adjacent — MTN numbers must be on their beneficiary list before a
+   * FR-4.2 adjacent, MTN numbers must be on their beneficiary list before a
    * purchase, or the order fails after the money has moved. Advisory: a failure
    * to verify does not block the sale, it only warns.
    */
@@ -373,7 +373,7 @@ export class DatahubClient {
           body: JSON.stringify({ networkKey, recipient, is_ported_number: true }),
           // Tighter than the background calls, and one retry rather than two.
           // This one runs inside checkout with a customer waiting, and it fails
-          // open — so a long stall buys nothing: worst case here is ~16s before
+          // open, so a long stall buys nothing: worst case here is ~16s before
           // the order proceeds anyway, against ~46s on the default settings.
           signal: AbortSignal.timeout(8_000),
         },
@@ -393,7 +393,7 @@ export class DatahubClient {
        *
        *     { success: false, message: "0509999999 is not added to our beneficiary list" }
        *
-       * So `success: false` is not automatically an error — it carries the refusal
+       * So `success: false` is not automatically an error, it carries the refusal
        * we most need to act on. It also carries genuine errors, like
        * "Recipient must be a valid 10-digit phone number", which must NOT be read
        * as a refusal. Hence matching the message: a refusal is specific and
@@ -410,7 +410,7 @@ export class DatahubClient {
         return { kind: 'not_registered', message: said }
       }
 
-      // `success: true` with `exists` absent or false — defensive, and the same
+      // `success: true` with `exists` absent or false, defensive, and the same
       // conclusion as the message form above.
       if (body.success && body.data && body.data.exists === false) {
         return { kind: 'not_registered', message: said || 'Not on their approved list.' }
@@ -426,7 +426,7 @@ export class DatahubClient {
    * Submit MTN numbers to be added to their beneficiary list.
    *
    * Their ceiling is 30 numbers per request and 20 requests a minute. Approval
-   * is not instant and not guaranteed — the reply means "queued for review", so
+   * is not instant and not guaranteed, the reply means "queued for review", so
    * nothing here may report a number as usable. `/verify` is what answers that,
    * later.
    *
@@ -478,7 +478,7 @@ export class DatahubClient {
       const raw = body?.error ?? body?.message ?? text
       const reason = /<!DOCTYPE|<html/i.test(raw ?? '')
         ? `DataHub GH returned ${response.status} from their upstream instead of a reply. ` +
-          'Their beneficiary service is down — numbers must be approved by hand in their dashboard.'
+          'Their beneficiary service is down, numbers must be approved by hand in their dashboard.'
         : (raw ?? `HTTP ${response.status}`)
       this.log.warn(`beneficiaries ${response.status}: ${String(text).slice(0, 200)}`)
       return { ok: false, reason }
@@ -497,7 +497,7 @@ export class DatahubClient {
    * converted to pesewas here, at the boundary, so nothing downstream ever holds
    * a float.
    *
-   * Read-only and free — safe to call whenever, unlike everything else on this
+   * Read-only and free, safe to call whenever, unlike everything else on this
    * client.
    */
   async catalogue(): Promise<CatalogueOutcome> {
@@ -513,7 +513,7 @@ export class DatahubClient {
       )
     } catch (error) {
       const reason = (error as Error)?.name === 'TimeoutError' ? 'timed out' : String(error)
-      return { kind: 'failed', reason: `Could not reach DataHub GH — request ${reason}.` }
+      return { kind: 'failed', reason: `Could not reach DataHub GH, request ${reason}.` }
     }
 
     const body = (await response.json().catch(() => ({}))) as DatahubEnvelope & {
@@ -575,7 +575,7 @@ export type CatalogueOutcome =
 /**
  * Their status vocabulary mapped onto ours.
  *
- * `null` means "not terminal yet" — keep waiting. Anything unrecognised is
+ * `null` means "not terminal yet", keep waiting. Anything unrecognised is
  * treated as still in flight rather than as a failure, because guessing wrong in
  * the failure direction refunds a buyer whose bundle actually arrived.
  */

@@ -8,13 +8,13 @@ import { SetupTokensService } from './setup-tokens.service'
  *
  * The problem this solves is small and load-bearing: a production database starts
  * empty, and somebody has to be able to sign in to it. Every easy answer to that
- * is a bad one — a seeded password is a published credential, a default account is
+ * is a bad one, a seeded password is a published credential, a default account is
  * a known target, and a public "claim this platform" endpoint is a race with
  * whoever finds it first.
  *
  * So on boot, the address in `SUPERADMIN_EMAIL` is made a superadmin if it is not
  * one already. If that account has no usable password, a one-time setup link is
- * minted and written to the server log — which is the one channel that is already
+ * minted and written to the server log, which is the one channel that is already
  * private, needs no mail provider, and is only readable by whoever deployed the
  * thing.
  *
@@ -39,12 +39,12 @@ export class BootstrapService implements OnApplicationBootstrap {
       // Not fatal in development, where the seed provides accounts. The
       // production boot guard in app.module refuses to start without it.
       this.log.warn(
-        'No SUPERADMIN_EMAIL set — nobody can be given platform access on a fresh database.',
+        'No SUPERADMIN_EMAIL set, nobody can be given platform access on a fresh database.',
       )
       return
     }
 
-    // Their password-holding profile, whatever role it currently has — this is
+    // Their password-holding profile, whatever role it currently has, this is
     // the row that gets promoted, not a secondary profile they added later.
     const existing = await this.prisma.user.findFirst({
       where: { email, passwordHash: { not: null } },
@@ -70,7 +70,7 @@ export class BootstrapService implements OnApplicationBootstrap {
         name: 'Platform operator',
         email,
         // A placeholder rather than a real number. It is required by the schema
-        // and is not used to log in — email is.
+        // and is not used to log in, email is.
         phone: '0000000000',
         // Null, not a placeholder: the column is nullable precisely to mean
         // "no password chosen yet", and `login` already treats a null hash as
@@ -92,7 +92,7 @@ export class BootstrapService implements OnApplicationBootstrap {
 
   private async announce(userId: string, email: string, what: string): Promise<void> {
     // Emailed first. The operator of a deployed platform should not have to read
-    // container logs to get into it — on a hosted box those logs may be awkward
+    // container logs to get into it, on a hosted box those logs may be awkward
     // to reach, or rotated away before anybody looks.
     const { link, sent, reason } = await this.tokens.issueAndSend(userId, 'setup')
 

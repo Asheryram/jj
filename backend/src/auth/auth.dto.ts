@@ -12,8 +12,8 @@ import {
  * Normalise an email before it is validated.
  *
  * Order matters: `@IsEmail()` runs against the transformed value, so without
- * this a leading capital or a trailing space — exactly what a phone keyboard and
- * an autocomplete suggestion produce — fails validation and the user is told
+ * this a leading capital or a trailing space, exactly what a phone keyboard and
+ * an autocomplete suggestion produce, fails validation and the user is told
  * their perfectly good address is not an email.
  */
 const NormaliseEmail = () =>
@@ -30,8 +30,8 @@ const GH_PHONE = /^0\d{9}$/
 
 export class LoginDto {
   /**
-   * Email, not phone. A phone number changes hands in Ghana — SIMs are swapped,
-   * numbers get recycled — and an identifier that can end up belonging to
+   * Email, not phone. A phone number changes hands in Ghana, SIMs are swapped,
+   * numbers get recycled, and an identifier that can end up belonging to
    * someone else is the wrong thing to hang an account on. The number stays on
    * the account for delivery and payout; it is just not the credential.
    */
@@ -65,8 +65,8 @@ export class RegisterDto {
    *
    * A buyer needs no account: they enter a number, pay with Mobile Money, and the
    * bundle goes to the number they gave. A customer account only ever existed to
-   * hold a wallet, and a wallet is somebody else's money sitting on the platform
-   * — a liability to reconcile, top up, refund and audit, for a convenience
+   * hold a wallet, and a wallet is somebody else's money sitting on the platform,
+   * a liability to reconcile, top up, refund and audit, for a convenience
    * nobody asked for. Deferred rather than removed: the `customer` role and the
    * wallet ledger stay in the schema for when it earns its keep.
    *
@@ -78,7 +78,7 @@ export class RegisterDto {
   })
   accountType!: 'agent'
 
-  /** FR-1.2 — the referral code they signed up through, if any. */
+  /** FR-1.2, the referral code they signed up through, if any. */
   @IsOptional()
   @IsString()
   referralCode?: string

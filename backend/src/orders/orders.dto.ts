@@ -13,7 +13,7 @@ export class PlaceOrderDto {
   @IsString()
   productId!: string
 
-  /** FR-4.1 / FR-4.2 — the number that receives the bundle. */
+  /** FR-4.1 / FR-4.2, the number that receives the bundle. */
   @Matches(GH_PHONE, { message: 'A Ghana number needs 10 digits.' })
   recipient!: string
 
@@ -22,7 +22,7 @@ export class PlaceOrderDto {
   @Matches(GH_PHONE, { message: 'A Ghana number needs 10 digits.' })
   buyerPhone?: string
 
-  /** FR-4.8 — a guest gives a name or gets 'Guest'. */
+  /** FR-4.8, a guest gives a name or gets 'Guest'. */
   @IsOptional()
   @IsString()
   @MaxLength(80)
@@ -73,7 +73,7 @@ export class ResolveOrderDto {
 
   /**
    * Why this is being decided by hand rather than by the provider's own
-   * answer. Required and kept on the record — same reason a refund refusal
+   * answer. Required and kept on the record, same reason a refund refusal
    * requires one: nothing else here confirms the claim.
    */
   @IsString()
@@ -84,7 +84,7 @@ export class ResolveOrderDto {
 
 export class RetryDispatchDto {
   /**
-   * What was checked before retrying — the delivery partner's own dashboard,
+   * What was checked before retrying, the delivery partner's own dashboard,
    * specifically, for this recipient. Required and kept on the record, same
    * reason `ResolveOrderDto.note` is: a retry is only safe once a human has
    * confirmed the first attempt genuinely never landed, and this is the
@@ -101,7 +101,7 @@ export class ReorderDto {
    * Why this failed order is being reordered. Required and kept on the
    * record, though for a different reason than `RetryDispatchDto.note`: a
    * `rejected` outcome already means DataHub, or our own validation, said no
-   * outright — there is no ambiguity to have checked on a dashboard, only a
+   * outright, there is no ambiguity to have checked on a dashboard, only a
    * decision that the reason for the rejection no longer applies.
    */
   @IsString()
@@ -115,8 +115,8 @@ export class ReorderDto {
    * frozen `supplierCodeAtSale`.
    *
    * Deliberately not silently reused, for two reasons: it can be stale in a
-   * way nobody caused — see the migration that left it `null` on every order
-   * still open when `supplier_code_at_sale` was introduced — and the cost
+   * way nobody caused, see the migration that left it `null` on every order
+   * still open when `supplier_code_at_sale` was introduced, and the cost
    * behind a SKU moves over time, so the admin needs to see today's price
    * against what the customer already paid before deciding this is still
    * worth fulfilling, not after.

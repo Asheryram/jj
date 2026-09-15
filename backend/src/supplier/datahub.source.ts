@@ -9,7 +9,7 @@ import type { CatalogueSource, SourceSku } from './catalogue-source'
  * Their `networkKey` is the identifier an order is placed with, so it is the
  * thing worth keying on. Two of theirs collapse onto one of ours: AT_PREMIUM
  * (iShare) and AT_BIGTIME are both AirtelTigo, but they are separate product
- * lines with separate prices — iShare runs 1–20GB, BigTime starts at 30GB — so
+ * lines with separate prices (iShare runs 1–20GB, BigTime starts at 30GB) so
  * they stay distinct as products and are only grouped under one network chip.
  *
  * A network key we do not recognise is skipped rather than guessed at. Inventing
@@ -48,7 +48,7 @@ export class DatahubSource implements CatalogueSource {
       if (!mapping) {
         this.log.warn(
           `DataHub GH offers "${network.networkKey}" (${network.displayName}) and we have no ` +
-            'mapping for it — its bundles are not on sale. Add it to NETWORKS to sell them.',
+            'mapping for it, its bundles are not on sale. Add it to NETWORKS to sell them.',
         )
         continue
       }

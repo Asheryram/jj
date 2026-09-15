@@ -21,7 +21,7 @@ export interface CapitalSummary {
 
 /**
  * Whether the float holds what the logged capital and known spending say it
- * should. Null wherever there isn't enough to check yet — no capital logged,
+ * should. Null wherever there isn't enough to check yet, no capital logged,
  * or no observation to compare against.
  */
 export interface FloatReconciliation {
@@ -31,11 +31,11 @@ export interface FloatReconciliation {
   observed: number
   /** expected - observed. Positive means the float holds less than it should. */
   shortfall: number
-  /** shortfall exceeds the rounding tolerance, AND the live reading is fresh enough to trust — worth telling someone about. */
+  /** shortfall exceeds the rounding tolerance, AND the live reading is fresh enough to trust, worth telling someone about. */
   flagged: boolean
   /**
    * The live reading predates the most recent logged capital move, so it
-   * cannot possibly reflect it yet — only the next order will. Not a
+   * cannot possibly reflect it yet, only the next order will. Not a
    * discrepancy, just not confirmed.
    */
   pending: boolean
@@ -55,13 +55,13 @@ export interface ManualRefundAdvance {
 export interface FloatObservation {
   /** Pesewas left in the provider float. */
   balance: number
-  /** When the provider reported it — always the moment of a purchase. */
+  /** When the provider reported it, always the moment of a purchase. */
   observedAt: string
   /** The order whose reply revealed it, for tracing. */
   orderRef: string | null
   level: FloatLevel
   /**
-   * What actually decided `level` — the lower of `balance` and what tracked
+   * What actually decided `level`, the lower of `balance` and what tracked
    * capital says the float should hold. Equal to `balance` unless tracked
    * capital is the more pessimistic of the two, so the screen can explain
    * when the level disagrees with the number shown.
@@ -87,7 +87,7 @@ const SEVERITY: Record<FloatLevel, number> = { ok: 0, watch: 1, risk: 2 }
  * Which band a balance falls in. A threshold of zero is switched off.
  *
  * At-or-below rather than strictly below, so a threshold set to exactly the
- * remaining balance still counts as reached — the point is to be told before it
+ * remaining balance still counts as reached, the point is to be told before it
  * matters, not after.
  */
 function levelFor(balance: number, watchAt: number, riskAt: number): FloatLevel {
@@ -101,7 +101,7 @@ function levelFor(balance: number, watchAt: number, riskAt: number): FloatLevel 
  *
  * The float is prepaid: DataHub deducts the cost of every bundle from a balance
  * James tops up himself, so an empty float does not slow the platform down, it
- * fails every order outright — after the customer has paid. The money then has to
+ * fails every order outright, after the customer has paid. The money then has to
  * come back through the refund queue by hand.
  *
  * Two things make this awkward. There is no balance endpoint, so the figure is
@@ -141,7 +141,7 @@ export class FloatMonitorService {
 
       await this.checkFloat(balance)
     } catch (error) {
-      // Deliberately swallowed — see the doc comment above.
+      // Deliberately swallowed, see the doc comment above.
       this.log.error(`could not record the provider float: ${String(error)}`)
     }
   }
@@ -150,8 +150,8 @@ export class FloatMonitorService {
    * Re-check the watch/risk level and the capital-vs-float shortfall against
    * a balance, and alert on either one crossing a line since the last check.
    *
-   * Called after anything that could move either side of the comparison — a
-   * fresh order (via `record`), or James logging capital (via `logCapital`) —
+   * Called after anything that could move either side of the comparison, a
+   * fresh order (via `record`), or James logging capital (via `logCapital`),
    * so a risk that tracked capital reveals never has to sit unnoticed until
    * the next sale happens to confirm it.
    */
@@ -165,13 +165,13 @@ export class FloatMonitorService {
      * Only on a change, and only email downwards.
      *
      * Every order reports the balance, so alerting on the level itself would
-     * send one email per order for as long as the float stayed low — dozens on
+     * send one email per order for as long as the float stayed low, dozens on
      * a busy afternoon, which trains you to ignore them. A recovery is recorded
      * silently: seeing the balance climb is not news, and it re-arms the alert
      * for the next time it falls.
      *
-     * This runs on *every paid order* — two dispatching close together is the
-     * normal case, not an edge case — so the level transition is claimed
+     * This runs on *every paid order*, two dispatching close together is the
+     * normal case, not an edge case, so the level transition is claimed
      * atomically (see `claimTransition`'s own doc comment): only the caller
      * whose `previous` reading is still the stored value acts on it. Losing
      * the race here means a concurrent order already moved the level, so
@@ -217,18 +217,18 @@ export class FloatMonitorService {
    *
    * DataHub sends no notice when a top-up happens, so this only exists because
    * James says so. Written as `capital_in`/`capital_out` with `affectsProfit:
-   * false` — it is a balance-sheet movement, not income or cost, and must
+   * false`, it is a balance-sheet movement, not income or cost, and must
    * never shift the P&L in `money-audit.ts`.
    *
    * `source` only matters for a top-up (`direction: 'in'`), and only changes
    * the `LedgerKind` it is written under:
    *
-   *  - `'external'` (the default) — fresh money from outside the business.
-   *  - `'reimbursement'` — money already collected from customers to cover
+   *  - `'external'` (the default), fresh money from outside the business.
+   *  - `'reimbursement'`, money already collected from customers to cover
    *    what DataHub charges for their bundles, sitting in Paystack rather
    *    than the float, now moved across to where it was always meant to end
    *    up. Written as `capital_in_reimbursement` instead of `capital_in` so
-   *    `SolvencyService` can tell the two apart — only this kind reduces
+   *    `SolvencyService` can tell the two apart, only this kind reduces
    *    "already spent on bundles" there, because only this kind is actually
    *    settling that specific amount, not adding new capital on top of it.
    */
@@ -244,12 +244,12 @@ export class FloatMonitorService {
     }
 
     /**
-     * The anchor for `reconcile()`, captured once — the first time James logs
-     * anything — from whatever the float last read. Everything before this
+     * The anchor for `reconcile()`, captured once, the first time James logs
+     * anything, from whatever the float last read. Everything before this
      * moment is out of scope: DataHub gave no notice of any earlier top-up or
      * spend, so there is nothing honest to reconstruct that far back.
      *
-     * Falls back to zero when there is no reading yet at all — a shop that has
+     * Falls back to zero when there is no reading yet at all, a shop that has
      * never dispatched an order has, by definition, never spent from the
      * float, so zero is the only honest place for tracking to start. Leaving
      * the baseline uncaptured here would only defer it to some later log,
@@ -260,7 +260,7 @@ export class FloatMonitorService {
      *
      * Two first-ever `logCapital` calls landing close together would both see
      * no baseline yet. `write()` is an `upsert`, which updates rather than
-     * skips on a conflict — so whichever call's write happened to land last
+     * skips on a conflict, so whichever call's write happened to land last
      * would silently overwrite the other's baseline with a value observed at
      * the wrong moment, permanently. `createMany` with `skipDuplicates` is a
      * real `INSERT ... ON CONFLICT DO NOTHING` at the database level: only the
@@ -304,7 +304,7 @@ export class FloatMonitorService {
 
     /**
      * A logged withdrawal can push tracked capital into risk on its own,
-     * without any order to trigger a re-check — waiting for the next sale to
+     * without any order to trigger a re-check, waiting for the next sale to
      * notice would leave that risk silent for however long it takes to sell
      * again. Skipped only when there is truly no live reading yet to check
      * against (a shop that has never dispatched an order).
@@ -317,7 +317,7 @@ export class FloatMonitorService {
    * Cumulative capital James has logged putting in and taking out, all time.
    *
    * `capital_in_reimbursement` counts as capital in here alongside plain
-   * `capital_in` — from the float's own point of view both are money landing
+   * `capital_in`, from the float's own point of view both are money landing
    * in it, and the float does not care where a top-up's money came from.
    * That distinction only matters one place: `SolvencyService.spentOnBundles`,
    * which is the only reader that cares whether a top-up settled money
@@ -327,13 +327,13 @@ export class FloatMonitorService {
    * not incidental. `capital_in`/`capital_out` are also written by
    * `RefundsService.settleManually`/`reimburseManualRefund` (keyed by
    * `orderRef`) and `WithdrawalsService.settleManually`/`reimburseManualAdvance`
-   * (keyed by `withdrawalId`) — a completely different thing that happens to
+   * (keyed by `withdrawalId`), a completely different thing that happens to
    * share this kind: money someone personally sent a *customer* or an *agent*
    * back, unrelated to the DataHub float. Those always carry one of the two;
    * a real top-up logged through `logCapital` never carries either. Without
    * this filter, an outstanding manual refund or payout advance was being
-   * counted as float capital, inflating "should hold" by exactly that amount
-   * — the float and a refund or payout advance are different money and must
+   * counted as float capital, inflating "should hold" by exactly that amount,
+   * the float and a refund or payout advance are different money and must
    * never be added together.
    */
   async capitalSummary(): Promise<CapitalSummary> {
@@ -367,7 +367,7 @@ export class FloatMonitorService {
   /**
    * Manual refunds still owed back to whoever paid them.
    *
-   * A `capital_in` entry with an order attached is not a deliberate top-up —
+   * A `capital_in` entry with an order attached is not a deliberate top-up,
    * it is `RefundsService.settleManually` recording that a Mobile Money
    * refund was paid from someone's own pocket because Paystack refused the
    * transfer outright. That money is owed back until a matching `capital_out`
@@ -402,7 +402,7 @@ export class FloatMonitorService {
    * Settle one manual advance: whoever fronted it has taken the exact amount
    * back out of the business.
    *
-   * Locked to what was actually advanced rather than an amount typed in here —
+   * Locked to what was actually advanced rather than an amount typed in here,
    * a partial or unrelated withdrawal belongs in `logCapital` instead, not
    * this one. This is specifically for closing out a single traced refund.
    */
@@ -418,7 +418,7 @@ export class FloatMonitorService {
       {
         kind: 'capital_out',
         amount: -advance.amount,
-        description: `Reimbursed — refund ${orderRef}`,
+        description: `Reimbursed, refund ${orderRef}`,
         orderRef,
         occurredAt: new Date(),
         affectsProfit: false,
@@ -430,22 +430,22 @@ export class FloatMonitorService {
   }
 
   /**
-   * What the float should hold right now, going only by tracked capital —
+   * What the float should hold right now, going only by tracked capital,
    * independent of any live reading. The baseline captured at the first
    * logged top-up (whatever DataHub held before any tracked money moved),
    * plus every capital move ever logged, minus every bundle DataHub has ever
-   * actually charged for — a full replay from the start, not a running total
+   * actually charged for, a full replay from the start, not a running total
    * that only picks up spending from whenever it happened to be captured.
    * `capitalSummary` was already all-time; the cost side used to stop at the
    * baseline's moment, which was only ever equivalent to a full replay
-   * because nothing has yet been charged before tracking began — this makes
+   * because nothing has yet been charged before tracking began, this makes
    * that true by construction instead of by accident of the data so far.
    *
    * Null until James has logged at least one capital move.
    *
    * Public (not just used internally by `referenceBalance`/`reconcile`): also
    * what `AdminService.floatRisk` judges the catalogue against, deliberately
-   * in preference to the live reading — the live balance only ever refreshes
+   * in preference to the live reading, the live balance only ever refreshes
    * on an order, so it can sit stale for days, while this recomputes from
    * every logged top-up and cost the moment either changes. A top-up James
    * just logged should immediately stop flagging products as too expensive,
@@ -478,7 +478,7 @@ export class FloatMonitorService {
    *
    * Neither number alone is safe to rely on. The live reading only refreshes
    * per order, so it can sit stale-high for a while right after an unlogged
-   * withdrawal — and tracked capital can sit stale-low right after a real
+   * withdrawal, and tracked capital can sit stale-low right after a real
    * top-up the live reading hasn't caught up to yet. Taking the lower of the
    * two means a bigger number on either side can never mask a real risk the
    * other one is already showing.
@@ -500,11 +500,11 @@ export class FloatMonitorService {
     if (!observation) return null
 
     /**
-     * All three kinds `logCapital` can write — matching `capitalSummary`'s
+     * All three kinds `logCapital` can write, matching `capitalSummary`'s
      * own `capitalInKinds` two methods up. `capital_in_reimbursement` was
      * missing here: without it, logging a reimbursement raises `expected`
      * (via `expectedBalance` → `capitalSummary`, which already counts it)
-     * immediately, but this query never noticed a movement happened at all —
+     * immediately, but this query never noticed a movement happened at all,
      * so `pending` stayed false and the stale pre-reimbursement `observed`
      * reading was compared as if it were current, firing a false "Float is
      * short" email at the exact moment an admin did the right thing.
@@ -519,7 +519,7 @@ export class FloatMonitorService {
     const shortfall = expected.balance - observed
 
     /**
-     * A reading older than the last logged move cannot possibly reflect it —
+     * A reading older than the last logged move cannot possibly reflect it,
      * DataHub only ever reports the balance in the reply to an order, so
      * nothing short of a new order can confirm a top-up or withdrawal just
      * logged. Flagging against a stale reading would call every log a
@@ -545,7 +545,7 @@ export class FloatMonitorService {
   }
 
   /**
-   * Email only on the shortfall's edges — appearing and clearing — the same
+   * Email only on the shortfall's edges (appearing and clearing) the same
    * debounce as the watch/risk alert above. A float holding *more* than
    * expected is never flagged: that just means a top-up hasn't been logged
    * yet, or there is simply headroom, neither of which is a problem.
@@ -578,7 +578,7 @@ export class FloatMonitorService {
     return branding?.shopName ?? 'JamesDataConsult'
   }
 
-  /** Tell whoever funds the float — see the doc comment on the query below. */
+  /** Tell whoever funds the float, see the doc comment on the query below. */
   private async alert(
     level: FloatLevel,
     balance: number,
@@ -588,7 +588,7 @@ export class FloatMonitorService {
   ): Promise<void> {
     /**
      * Every active admin, because it is everyone's business when the float
-     * runs out — an order fails for a customer no matter which admin happens
+     * runs out, an order fails for a customer no matter which admin happens
      * to be looking. Falls back to every active superadmin only when no admin
      * exists yet, so a platform mid-setup is not silent either.
      */
@@ -607,7 +607,7 @@ export class FloatMonitorService {
     const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
 
     if (recipients.length === 0) {
-      this.log.warn(`float is ${level} at ${ghs(reference)} — nobody to tell`)
+      this.log.warn(`float is ${level} at ${ghs(reference)}, nobody to tell`)
       return
     }
 
@@ -616,7 +616,7 @@ export class FloatMonitorService {
     const shopName = await this.platformName()
 
     /**
-     * The live reading and tracked capital can disagree — see `referenceBalance`.
+     * The live reading and tracked capital can disagree, see `referenceBalance`.
      * When tracked capital is the more pessimistic of the two, say so plainly:
      * otherwise this email shows a number lower than what DataHub itself
      * reports, which reads as a mistake rather than the point of the check.
@@ -625,11 +625,11 @@ export class FloatMonitorService {
 
     const consequence = urgent
       ? 'This is urgent: once it runs out, every paid order fails after the customer has already been charged, and each one then has to be refunded by hand. Top up your DataHub float now to avoid that.'
-      : 'There is still time to top up before anything fails — no order has been affected yet.'
+      : 'There is still time to top up before anything fails, no order has been affected yet.'
 
     const subject = urgent
-      ? `Float critically low — ${ghs(reference)} left`
-      : `Float getting low — ${ghs(reference)} left`
+      ? `Float critically low, ${ghs(reference)} left`
+      : `Float getting low, ${ghs(reference)} left`
 
     const pillBg = urgent ? '#fee2e2' : '#fef3c7'
     const pillFg = urgent ? '#b3261e' : '#92400e'
@@ -640,7 +640,7 @@ export class FloatMonitorService {
       `You are getting this because you are an active admin on ${escape(shopName)}. ` +
       "It is sent only when the float's status gets worse, never on every order."
 
-    // Sent one at a time rather than in parallel — this is a handful of admins
+    // Sent one at a time rather than in parallel, this is a handful of admins
     // at most, and one slow send should not race a second SMTP connection for
     // no benefit.
     for (const recipient of recipients) {
@@ -662,13 +662,13 @@ export class FloatMonitorService {
          <p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;font-weight:${urgent ? '700' : '400'};color:${urgent ? '#b3261e' : '#1e293b'}">${escape(consequence)}</p>
          ${
            trackedIsLower
-             ? `<p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">DataHub itself still reports ${escape(ghs(balance))} —
+             ? `<p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">DataHub itself still reports ${escape(ghs(balance))},
            this is based on the capital you've logged instead, which is lower and hasn't been confirmed by a fresh
            order yet.</p>`
              : ''
          }
          <p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">This figure comes from the reply to
-           your most recent order — DataHub has no balance endpoint to ask directly, so it is only ever as current
+           your most recent order, DataHub has no balance endpoint to ask directly, so it is only ever as current
            as your last sale.</p>
          <p style="margin:0;font-size:12.5px;line-height:1.6;color:#64748b">You will not get this again until the
            float recovers and falls past the same point, so it will not repeat on every order.</p>`,
@@ -687,11 +687,11 @@ export class FloatMonitorService {
         '',
         ...(trackedIsLower
           ? [
-              `DataHub itself still reports ${ghs(balance)} — this is based on the capital you've logged instead, which is lower and hasn't been confirmed by a fresh order yet.`,
+              `DataHub itself still reports ${ghs(balance)}, this is based on the capital you've logged instead, which is lower and hasn't been confirmed by a fresh order yet.`,
               '',
             ]
           : []),
-        'This figure comes from the reply to your most recent order — DataHub has no balance endpoint to ask directly, so it is only ever as current as your last sale.',
+        'This figure comes from the reply to your most recent order, DataHub has no balance endpoint to ask directly, so it is only ever as current as your last sale.',
         '',
         'You will not get this again until the float recovers and falls past the same point, so it will not repeat on every order.',
       ].join('\n')
@@ -704,7 +704,7 @@ export class FloatMonitorService {
     }
 
     this.log.warn(
-      `float ${level}: ${ghs(reference)} (threshold ${ghs(threshold)}${trackedIsLower ? `, live is ${ghs(balance)}` : ''}) — told ` +
+      `float ${level}: ${ghs(reference)} (threshold ${ghs(threshold)}${trackedIsLower ? `, live is ${ghs(balance)}` : ''}), told ` +
         recipients.map((r) => r.email).join(', '),
     )
   }
@@ -727,7 +727,7 @@ export class FloatMonitorService {
     const shopName = await this.platformName()
 
     if (recipients.length === 0) {
-      this.log.warn(`float short by ${ghs(r.shortfall)} — nobody to tell`)
+      this.log.warn(`float short by ${ghs(r.shortfall)}, nobody to tell`)
       return
     }
 
@@ -735,17 +735,17 @@ export class FloatMonitorService {
     const body =
       `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">The DataHub GH float should hold ` +
       `${escape(ghs(r.expected))}, going by the capital you've logged and what orders have spent since. ` +
-      `It actually holds ${escape(ghs(r.observed))} — ${escape(ghs(r.shortfall))} short.</p>` +
+      `It actually holds ${escape(ghs(r.observed))}, ${escape(ghs(r.shortfall))} short.</p>` +
       `<p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;color:#1e293b">This usually means a top-up or ` +
-      `withdrawal happened without being logged. Check the float panel and log it if so — this note will not ` +
+      `withdrawal happened without being logged. Check the float panel and log it if so, this note will not ` +
       `repeat until the gap changes.</p>`
 
     const html = wrap(shopName, 'Your float is short', body, `You are getting this because you are an active admin on ${escape(shopName)}.`)
     const text =
       `The DataHub GH float should hold ${ghs(r.expected)}, going by the capital you've logged and what orders ` +
-      `have spent since. It actually holds ${ghs(r.observed)} — ${ghs(r.shortfall)} short.\n\n` +
+      `have spent since. It actually holds ${ghs(r.observed)}, ${ghs(r.shortfall)} short.\n\n` +
       `This usually means a top-up or withdrawal happened without being logged. Check the float panel and log it ` +
-      `if so — this note will not repeat until the gap changes.`
+      `if so, this note will not repeat until the gap changes.`
 
     for (const recipient of recipients) {
       await this.mailer
@@ -754,7 +754,7 @@ export class FloatMonitorService {
     }
 
     this.log.warn(
-      `float short by ${ghs(r.shortfall)} (expected ${ghs(r.expected)}, observed ${ghs(r.observed)}) — told ` +
+      `float short by ${ghs(r.shortfall)} (expected ${ghs(r.expected)}, observed ${ghs(r.observed)}), told ` +
         recipients.map((rec) => rec.email).join(', '),
     )
   }

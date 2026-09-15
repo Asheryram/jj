@@ -1,6 +1,6 @@
 # Local dev database for the JamesDataConsult API.
 #
-# Port 5433 on the host, not 5432 — a developer machine very often already has a
+# Port 5433 on the host, not 5432, a developer machine very often already has a
 # Postgres listening on 5432, and a silent connection to the wrong database is a
 # worse failure than a refused one.
 services:

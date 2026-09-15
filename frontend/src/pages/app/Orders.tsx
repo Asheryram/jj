@@ -26,7 +26,7 @@ import { CertificateIcon, ReceiptIcon, SearchIcon } from '../../components/icons
 
 type Filter = 'all' | OrderStatus
 
-/** FR-6.1 — the signed-in user's own orders. */
+/** FR-6.1, the signed-in user's own orders. */
 export default function Orders() {
   const { orders, session, myShareOf } = useStore()
   const shopPath = useShopPath()
@@ -36,7 +36,7 @@ export default function Orders() {
 
   const isAgent = session?.role === 'agent'
 
-  // NFR-2.5 — an agent sees orders they earned from, a customer sees orders
+  // NFR-2.5, an agent sees orders they earned from, a customer sees orders
   // they bought. Nobody sees somebody else's book.
   const mine = useMemo(() => {
     if (!session) return []
@@ -178,7 +178,7 @@ export default function Orders() {
                         <span className="tabular font-semibold text-brand-700 dark:text-brand-300">
                           {order.status === 'completed' && share
                             ? cedis(share.margin, { sign: true })
-                            : '—'}
+                            : '-'}
                         </span>
                         {share && share.depth > 0 && (
                           <Badge tone="info" className="ml-1.5">
@@ -259,7 +259,7 @@ function OrderDetail({
             <Row label="Placed" value={dateTime(order.createdAt)} />
           </dl>
 
-          {/* FR-5.8 — an agent can see exactly where the money went. */}
+          {/* FR-5.8, an agent can see exactly where the money went. */}
           {isAgent && (
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5">
               <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
@@ -303,7 +303,7 @@ function OrderDetail({
           )}
 
           <div className="flex gap-2">
-            {/* Not just a failed order's own retry — a completed one gets this
+            {/* Not just a failed order's own retry, a completed one gets this
                 too, so an agent re-selling the same bundle to the same
                 walk-up customer next week is one tap, not re-typing a
                 number they already sold to. */}

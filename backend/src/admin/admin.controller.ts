@@ -67,7 +67,7 @@ export class LogCapitalDto {
   /**
    * Only meaningful for `direction: 'in'`. 'reimbursement' means this top-up
    * is specifically settling money already collected from customers for
-   * DataHub's charge, not adding fresh capital — see
+   * DataHub's charge, not adding fresh capital, see
    * `FloatMonitorService.logCapital`.
    */
   @IsOptional()
@@ -80,13 +80,13 @@ export class LogCapitalDto {
 
 export class ApplyMarkupDto {
   /**
-   * Percentage over supplier cost. Fractional is allowed — a price of GHS 6.40
+   * Percentage over supplier cost. Fractional is allowed, a price of GHS 6.40
    * against a cost of GHS 4.70 is a markup of 36.17%, and forcing that to a
    * whole number would move the price every time the cost is refreshed.
    *
    * Two of them, because they answer different questions: what an agent buys at,
    * and what a stranger pays at the counter. The walk-up one is allowed to sit
-   * below the agent one — James chooses whether he would rather earn from his
+   * below the agent one, James chooses whether he would rather earn from his
    * own counter or from agent volume.
    */
   @IsNumber({}, { message: 'Enter a percentage, like 15 or 12.5.' })
@@ -188,7 +188,7 @@ export class SetSettingDto {
    *
    * Only the shape is checked here. The ranges (and, for the link, that it looks
    * like one) belong to SettingsService, which also knows that at-risk has to
-   * sit below watch — a rule that needs the other value and so cannot live on a
+   * sit below watch, a rule that needs the other value and so cannot live on a
    * DTO at all.
    */
   @ValidateIf((dto: SetSettingDto) =>
@@ -240,7 +240,7 @@ export class AdminController {
     return this.admin.overview()
   }
 
-  /** Orders nobody can resolve automatically — see `ReconcilerService.needsAttention`. */
+  /** Orders nobody can resolve automatically, see `ReconcilerService.needsAttention`. */
   @Get('orders/needs-attention')
   needsAttention() {
     return this.reconciler.needsAttention()
@@ -256,7 +256,7 @@ export class AdminController {
     return this.admin.toggleUserStatus(id)
   }
 
-  /** Profit earned by every agent combined, all-time — see `AdminService.agentSummary`. */
+  /** Profit earned by every agent combined, all-time, see `AdminService.agentSummary`. */
   @Get('agents/summary')
   agentSummary() {
     return this.admin.agentSummary()
@@ -265,7 +265,7 @@ export class AdminController {
   /**
    * One agent's own earnings ledger, for the drill-down on the Users page.
    * Reuses `AgentsService.earnings`, the same data an agent sees for
-   * themselves at `/agents/me/earnings` — `/agents/me/*` stays self-scoped;
+   * themselves at `/agents/me/earnings`, `/agents/me/*` stays self-scoped;
    * this is the admin-facing way to look up someone else's.
    */
   @Get('agents/:id/earnings')
@@ -287,7 +287,7 @@ export class AdminController {
    * What our suppliers sell, as they report it.
    *
    * Read-only, and there are deliberately no writes beside it. Cost and stock
-   * used to be editable here — a hand-typed cost meant our idea of what we pay
+   * used to be editable here, a hand-typed cost meant our idea of what we pay
    * could drift from the invoice, and a hand-set stock flag meant the shop could
    * claim a SKU was available when the supplier had withdrawn it. Both are the
    * supplier's to state; `sync` below is how they change.
@@ -324,7 +324,7 @@ export class AdminController {
   /**
    * James saying he moved his own money into or out of the float. DataHub
    * gives no notice when this happens, so it is only ever known because he
-   * logged it — this is what lets the platform tell his capital apart from
+   * logged it, this is what lets the platform tell his capital apart from
    * the profit the business has actually earned.
    */
   @Post('supplier/float/capital')
@@ -354,7 +354,7 @@ export class AdminController {
     })
   }
 
-  /** What's waiting to be told to agents — see `PendingPriceChange`. */
+  /** What's waiting to be told to agents, see `PendingPriceChange`. */
   @Get('price-changes')
   pendingPriceChanges() {
     return this.admin.pendingPriceChanges()
@@ -390,7 +390,7 @@ export class AdminController {
   }
 
   /**
-   * Checkpoint: these numbers were just copied to hand to DataHub by hand —
+   * Checkpoint: these numbers were just copied to hand to DataHub by hand,
    * see `ApprovalsService.markCopied`. Not a claim they were received.
    */
   @Post('beneficiaries/mark-copied')
@@ -408,7 +408,7 @@ export class AdminController {
    */
   @Get('finance/statement')
   statement(@Query('days') days?: string) {
-    // `all` bypasses the 365-day cap entirely — the epoch is a lower bound
+    // `all` bypasses the 365-day cap entirely, the epoch is a lower bound
     // the ledger will never actually reach, so this reads every entry ever
     // recorded rather than an arbitrarily large but still-bounded window.
     if (days === 'all') return this.ledger.statement(new Date(0))
@@ -420,7 +420,7 @@ export class AdminController {
 
   /**
    * Per product, whether the catalogue's believed cost still matches what
-   * the supplier charged on that product's most recent sale — see
+   * the supplier charged on that product's most recent sale, see
    * `AdminService.catalogueAccuracy`.
    */
   @Get('catalogue/accuracy')
@@ -430,7 +430,7 @@ export class AdminController {
 
   /**
    * Active products priced above what the float can currently cover, plus
-   * everything that's inactive for context — see `AdminService.floatRisk`.
+   * everything that's inactive for context, see `AdminService.floatRisk`.
    * Purely informational: nothing here changes `active` on its own.
    */
   @Get('catalogue/float-risk')
@@ -448,7 +448,7 @@ export class AdminController {
   /**
    * Money owed back to customers, waiting on a decision.
    *
-   * Refunds are not automatic — a failed delivery records the debt and stops, so
+   * Refunds are not automatic, a failed delivery records the debt and stops, so
    * this queue is the only way the money moves.
    */
   /**
@@ -511,11 +511,11 @@ export class AdminController {
 
   /**
    * Refunds still owed back to whoever personally covered them when Paystack
-   * could not send the transfer — see `SettleManuallyModal` on the Refunds
+   * could not send the transfer, see `SettleManuallyModal` on the Refunds
    * page, which is where each one is created. This is Paystack money, not
    * the DataHub float: it belongs with the refund queue that created it, not
    * with the float panel, even though both draw on the same underlying
-   * capital ledger — see `FloatMonitorService.outstandingManualRefunds`.
+   * capital ledger, see `FloatMonitorService.outstandingManualRefunds`.
    */
   @Get('refunds/manual-advances')
   manualRefundAdvances() {
@@ -524,7 +524,7 @@ export class AdminController {
 
   /**
    * Whoever fronted a manual refund has taken that exact amount back out of
-   * the business. Closes out one traced advance — see
+   * the business. Closes out one traced advance, see
    * `FloatMonitorService.reimburseManualRefund`.
    */
   @Post('refunds/manual-advances/:orderRef/reimburse')
@@ -533,10 +533,10 @@ export class AdminController {
   }
 
   /**
-   * The Reserve panel's whole picture — Paystack's side from `SolvencyService`,
+   * The Reserve panel's whole picture, Paystack's side from `SolvencyService`,
    * plus the DataHub float's current reading alongside it. Not folded into
    * `SolvencyService` itself: the two pots are genuinely separate money, and
-   * the float is not a claim on what should be at Paystack — see
+   * the float is not a claim on what should be at Paystack, see
    * `ReservePanel`'s "your other pot" framing on the frontend.
    */
   @Get('finance/position')
@@ -583,7 +583,7 @@ export class AdminController {
   }
 
   /**
-   * Withdrawals and refunds stuck on `otp`/`unknown` — needs a person to
+   * Withdrawals and refunds stuck on `otp`/`unknown`, needs a person to
    * check Paystack's own dashboard. See `SolvencyService.stuckTransfers`.
    */
   @Get('finance/stuck-transfers')
@@ -603,7 +603,7 @@ export class AdminController {
 
   @Get('reports/revenue')
   revenue(@Query('days') days?: string) {
-    // Same clamp as `finance/statement` — an unbounded `?days=` here used to
+    // Same clamp as `finance/statement`, an unbounded `?days=` here used to
     // size a query's parameter count to however many orders matched, not a
     // fixed shape; large enough and that hits Postgres's own bind-parameter
     // ceiling outright, not just slowness.
@@ -633,7 +633,7 @@ export class ReportsController {
   }
 
   /**
-   * `Reports.tsx`'s date-range summary. Real dates in, real aggregates back —
+   * `Reports.tsx`'s date-range summary. Real dates in, real aggregates back,
    * see `AdminService.myReport`'s own doc comment for why this exists instead
    * of the page deriving it from whatever orders are already loaded client-side.
    */

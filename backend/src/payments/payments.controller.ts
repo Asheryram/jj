@@ -36,7 +36,7 @@ export class PaymentsController {
   /**
    * Paystack's webhook. The fast path for "the money arrived".
    *
-   * Unauthenticated — no @Roles() on it — because Paystack cannot log in to us.
+   * Unauthenticated (no @Roles() on it) because Paystack cannot log in to us.
    * That is safe here because the request is HMAC-verified against the raw body
    * before anything is read from it; an unsigned or wrongly-signed one is
    * refused.
@@ -73,18 +73,18 @@ export class PaymentsController {
    * Called when the customer comes back from Paystack.
    *
    * The browser supplies only a reference, which is a public string it already
-   * knows — every decision is made from a fresh server-to-Paystack verify. This
+   * knows, every decision is made from a fresh server-to-Paystack verify. This
    * exists because the webhook can be late or lost, and the person standing
    * there should not have to wait on it.
    *
    * Rate-limited (reusing `LoginThrottleGuard`'s generic burst/grind windows,
    * not anything login-specific) because it is unauthenticated, takes only a
-   * reference, and answers differently for a real one — a live Paystack verify
-   * call — than for a made-up one — an immediate `failed`. With no limit at
+   * reference, and answers differently for a real one, a live Paystack verify
+   * call (than for a made-up one) an immediate `failed`. With no limit at
    * all that difference is a free existence oracle for enumerating real order
    * references, and each real one burns a call against this account's own
-   * Paystack API quota. `webhook`, just above, stays deliberately unthrottled
-   * — Paystack decides when to call that one, and it must never be the
+   * Paystack API quota. `webhook`, just above, stays deliberately unthrottled,
+   * Paystack decides when to call that one, and it must never be the
    * endpoint a rate limit makes a real payment or delivery go unheard.
    */
   @Post('confirm')

@@ -1,8 +1,8 @@
 # Render blueprint for the API and its database.
 #
 # Committed so the deploy is reproducible rather than a set of settings somebody
-# typed into a dashboard once. Render is one option among several — Railway or
-# Fly.io would work the same way — but the API needs a host that keeps a process
+# typed into a dashboard once. Render is one option among several, Railway or
+# Fly.io would work the same way, but the API needs a host that keeps a process
 # running, and this file records what that host has to provide.
 #
 # The front end is not here. It goes to Vercel as a static build; see
@@ -30,16 +30,16 @@ services:
       # provider, so the only thing shared between them is this string.
       #
       # This is Neon's POOLED connection string (the one with `-pooler` in
-      # the hostname) — what the running app uses for everyday queries.
+      # the hostname), what the running app uses for everyday queries.
       - key: DATABASE_URL
         sync: false
-      # Neon's DIRECT (un-pooled) connection string — same host, minus
+      # Neon's DIRECT (un-pooled) connection string, same host, minus
       # `-pooler`, from the same "Connection details" panel in Neon. Used
       # only by `prisma migrate deploy` in the release command: a pooled
       # PgBouncer connection cannot reliably hold the advisory lock Migrate
       # takes to stop two deploys racing, and running deploy through it
       # times out waiting to acquire a lock it can never actually see itself
-      # holding — see the comment on `datasource db` in schema.prisma.
+      # holding, see the comment on `datasource db` in schema.prisma.
       - key: DIRECT_URL
         sync: false
 
@@ -50,7 +50,7 @@ services:
       - key: SUPERADMIN_EMAIL
         sync: false # who gets the first setup link
       - key: PUBLIC_APP_URL
-        sync: false # the Vercel domain — where Paystack returns customers
+        sync: false # the Vercel domain, where Paystack returns customers
       - key: CORS_ORIGINS
         sync: false # the Vercel domain, exactly
       - key: PAYSTACK_SECRET_KEY
@@ -60,13 +60,13 @@ services:
       - key: DATAHUB_API_KEY
         sync: false
       - key: DATAHUB_BASE_URL
-        sync: false # must end in /api — see supplier/datahub.client.ts
+        sync: false # must end in /api, see supplier/datahub.client.ts
       - key: DATAHUB_LIVE
         sync: false
       - key: DATAHUB_WEBHOOK_SECRET
         sync: false
       # Mail goes through Resend first, SMTP as the fallback if Resend fails or
-      # is not configured — see MailerService for why both exist. Set whichever
+      # is not configured, see MailerService for why both exist. Set whichever
       # you actually have; `configured` only requires one of them.
       - key: RESEND_API_KEY
         sync: false
@@ -81,7 +81,7 @@ services:
       - key: MAIL_FROM
         sync: false
       # Powers the " Assistant " assistant (agent, admin, superadmin). A free
-      # key from console.groq.com/keys works — no card, no daily cap the way
+      # key from console.groq.com/keys works, no card, no daily cap the way
       # some other providers' free tiers have. Left unset, the feature
       # degrades to "not set up yet" rather than erroring.
       - key: GROQ_API_KEY

@@ -1,5 +1,5 @@
 /**
- * NFR-4.3 — domain failures carry a stable machine code AND the exact sentence
+ * NFR-4.3, domain failures carry a stable machine code AND the exact sentence
  * the user should read. The frontend never composes error copy from a code; it
  * shows `message`. The code exists so behaviour can branch without string
  * matching.
@@ -21,7 +21,7 @@ export class InsufficientBalanceError extends DomainError {
    * Two situations, and the same sentence does not fit both.
    *
    * Spending is "this costs more than you have". Withdrawing is "you asked for
-   * more than you have earned" — and an agent has earnings, not a wallet, so the
+   * more than you have earned", and an agent has earnings, not a wallet, so the
    * shared wording told them about an account they do not hold and a purchase
    * they were not making.
    */
@@ -31,7 +31,7 @@ export class InsufficientBalanceError extends DomainError {
       'INSUFFICIENT_BALANCE',
       kind === 'withdrawal'
         ? `You have ${ghs(balance)} available and asked to withdraw ${ghs(required)}.`
-        : `Your wallet has ${ghs(balance)} and this costs ${ghs(required)} — you need ${ghs(required - balance)} more.`,
+        : `Your wallet has ${ghs(balance)} and this costs ${ghs(required)}, you need ${ghs(required - balance)} more.`,
       409,
       { balance, required },
     )
@@ -70,7 +70,7 @@ export class ConflictError extends DomainError {
 
 /**
  * The split-at-sale invariant failed: money would have been created or
- * destroyed. This is never the user's fault and never recoverable in-request —
+ * destroyed. This is never the user's fault and never recoverable in-request,
  * it means the pricing domain and the ledger disagree, so the transaction must
  * roll back loudly rather than commit a plausible-looking wrong number.
  */

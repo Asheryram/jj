@@ -40,7 +40,7 @@ import {
  *
  * "Home" means the agent's storefront whenever a sell link is in force. Linking
  * it to `/` would walk a buyer out of the shop that brought them and into the
- * platform's own — the agent loses the sale they generated, which is the fastest
+ * platform's own, the agent loses the sale they generated, which is the fastest
  * way to make agents stop sharing their links.
  */
 export function Logo({ compact }: { compact?: boolean }) {
@@ -50,7 +50,7 @@ export function Logo({ compact }: { compact?: boolean }) {
   return (
     <Link to={home} className="flex min-w-0 items-center gap-2.5">
       {/* An uploaded mark where there is one, and the shop's own initial where
-          there is not — a hardcoded "J" on an agent's own shop reads as somebody
+          there is not, a hardcoded "J" on an agent's own shop reads as somebody
           else's brand. */}
       {branding.logoUrl ? (
         <img
@@ -65,7 +65,7 @@ export function Logo({ compact }: { compact?: boolean }) {
       )}
       {!compact && (
         // `min-w-0` lets this shrink below its text's natural width inside the
-        // header's flex row — without it a long shop name wraps to a second
+        // header's flex row, without it a long shop name wraps to a second
         // line instead of truncating, and the header's fixed height clips it.
         <span className="min-w-0 leading-tight">
           <span className="block truncate font-bold tracking-tight text-slate-900 dark:text-slate-50">
@@ -87,7 +87,7 @@ interface NavItem {
   label: string
   icon: (props: { className?: string }) => ReactNode
   end?: boolean
-  /** A small count shown on the nav item — currently only agent sign-ups waiting on Users. */
+  /** A small count shown on the nav item, currently only agent sign-ups waiting on Users. */
   badge?: number
 }
 
@@ -97,7 +97,7 @@ interface NavItem {
  * Applied to a customer's "Buy" but deliberately NOT to an agent's "Browse
  * shop". They look like the same destination and are not: a customer shopping
  * through an agent's link must stay attributed to that agent, whereas an agent
- * opening the shop is reviewing their own catalogue — the margin column in
+ * opening the shop is reviewing their own catalogue, the margin column in
  * `Catalogue` only appears when no sell link is active, so scoping it would hide
  * from them the very numbers they went there to see.
  */
@@ -112,8 +112,8 @@ const PROFILE_LABEL: Partial<Record<Role, string>> = {
 /**
  * Ordered by how urgent it is, not alphabetically or by how the API groups it.
  *
- * The first four are what the mobile bottom bar shows before "More" — see
- * `AppShell` below — so they carry the weight: Overview and All orders are
+ * The first four are what the mobile bottom bar shows before "More", see
+ * `AppShell` below, so they carry the weight: Overview and All orders are
  * the daily check, Refunds and Withdrawals are money someone else is waiting
  * on. Number approvals and Users are real but rarely urgent in the same way,
  * so they sit in the overflow rather than crowding out a thumb-reachable slot.
@@ -141,7 +141,7 @@ function navFor(
         badge: needsAttentionCount > 0 ? needsAttentionCount : undefined,
       },
       // Renamed from "Approvals": this is DataHub-blocked phone numbers, not
-      // agent sign-ups — those wait on Users instead (see the badge below),
+      // agent sign-ups, those wait on Users instead (see the badge below),
       // and sharing the word "approvals" between two unrelated queues was
       // sending admins to the wrong screen.
       { to: '/admin/approvals', label: 'Number approvals', icon: ShieldIcon },
@@ -161,13 +161,19 @@ function navFor(
         icon: HelpIcon,
         badge: openFeedbackCount > 0 ? openFeedbackCount : undefined,
       },
-      { to: '/admin/announcements', label: 'Announcements', icon: AlertIcon },
+      {
+        to: '/admin/announcements',
+        label: 'Announcements',
+        icon: AlertIcon,
+        // Superadmin composes but is never a recipient, so only an admin gets a badge.
+        badge: role === 'admin' && unreadAnnouncementsCount > 0 ? unreadAnnouncementsCount : undefined,
+      },
       { to: '/admin/subscriptions', label: 'Subscriptions', icon: ClockIcon },
       { to: '/admin/settings', label: 'Settings', icon: SettingsIcon },
       // Platform access belongs to the operator, not the business owner. An
       // admin must not be shown a door they cannot open. Approving a custom
-      // domain is the same kind of trust decision — vouching that whoever
-      // asked for it actually controls it — so it sits here too.
+      // domain is the same kind of trust decision, vouching that whoever
+      // asked for it actually controls it, so it sits here too.
       ...(role === 'superadmin'
         ? [
             { to: '/admin/team', label: 'Platform team', icon: ShieldIcon },
@@ -183,7 +189,7 @@ function navFor(
   }
 
   if (role === 'agent') {
-    // Agents have earnings, not a wallet — they never pre-fund anything.
+    // Agents have earnings, not a wallet, they never pre-fund anything.
     return [
       { to: '/app', label: 'Dashboard', icon: HomeIcon, end: true },
       { to: '/app/assistant', label: ' Assistant ', icon: HelpIcon },
@@ -192,7 +198,7 @@ function navFor(
       { to: '/app/orders', label: 'Sales', icon: ReceiptIcon },
       { to: '/app/pricing', label: 'My prices', icon: TagIcon },
       { to: '/app/shop-look', label: 'Shop look', icon: StoreIcon },
-      // Unscoped on purpose — see the note above navFor.
+      // Unscoped on purpose, see the note above navFor.
       { to: '/shop', label: 'Browse shop', icon: UsersIcon },
       { to: '/app/reports', label: 'Reports', icon: ChartIcon },
       { to: '/app/withdrawals', label: 'Withdraw', icon: CashIcon },
@@ -209,8 +215,8 @@ function navFor(
   /**
    * The customer menu, minus the wallet.
    *
-   * Customer accounts are no longer created — a buyer pays per order with Mobile
-   * Money and needs none — so this is only ever seen by an account that predates
+   * Customer accounts are no longer created, a buyer pays per order with Mobile
+   * Money and needs none, so this is only ever seen by an account that predates
    * that. The wallet entry is gone because there is nothing to top it up with;
    * leaving it would be a link to a page that can only refuse.
    */
@@ -222,7 +228,7 @@ function navFor(
   ]
 }
 
-/** A small waiting-count on a nav item — currently just agent sign-ups on Users. */
+/** A small waiting-count on a nav item, currently just agent sign-ups on Users. */
 function NavBadge({ count, className }: { count: number; className?: string }) {
   return (
     <span
@@ -246,7 +252,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 // ─── Shell ──────────────────────────────────────────────────────────────────
 
-/** Where a role lands when it needs somewhere to go — its own dashboard. */
+/** Where a role lands when it needs somewhere to go, its own dashboard. */
 function homeFor(role: Role): string {
   return isAdmin(role) ? '/admin' : '/app'
 }
@@ -263,7 +269,7 @@ export function RequireAuth({ role, roles }: { role?: Role; roles?: Role[] }) {
   if (!session)
     return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
 
-  // `roles` generalises the single-`role` gate below to "any of these" — used
+  // `roles` generalises the single-`role` gate below to "any of these", used
   // where a route belongs to more than one role (e.g. /info, staff-only but
   // open to both admin and agent) without loosening it to every signed-in
   // session the way omitting both props does.
@@ -274,7 +280,7 @@ export function RequireAuth({ role, roles }: { role?: Role; roles?: Role[] }) {
     !allowedRoles ||
     allowedRoles.some((r) => session.role === r || (r === 'admin' && isAdmin(session.role)))
   // `homeFor`, not a hardcoded `/app`: an admin who lands here on a mismatched
-  // agent-only route (or mid-switch — see `swap` below) belongs at `/admin`,
+  // agent-only route (or mid-switch, see `swap` below) belongs at `/admin`,
   // not at the agent dashboard.
   if (!allowed) return <Navigate to={homeFor(session.role)} replace />
 
@@ -283,7 +289,7 @@ export function RequireAuth({ role, roles }: { role?: Role; roles?: Role[] }) {
    *
    * Not a redirect loop risk: `/app/status` is reached through this same guard and
    * is excluded below. Enforcing it here rather than page by page means a new agent
-   * screen cannot forget to check — and every one of them would be broken for a
+   * screen cannot forget to check, and every one of them would be broken for a
    * pending agent anyway, since their code does not resolve as a seller.
    */
   if (
@@ -299,12 +305,12 @@ export function RequireAuth({ role, roles }: { role?: Role; roles?: Role[] }) {
 
 /**
  * A site-wide warning banner, set by James for something like a network
- * running slow — not something to interrupt anyone with, so it never pops
+ * running slow, not something to interrupt anyone with, so it never pops
  * up or asks to be dismissed; it just sits in view for as long as the
  * situation lasts, the same for a guest, an agent or an admin. Renders
  * nothing when there's nothing set.
  *
- * Shown in both shells (below), never inside a single page — a page-level
+ * Shown in both shells (below), never inside a single page, a page-level
  * placement would mean it comes and goes as someone navigates, when the
  * whole point is that it stays put regardless of where they are.
  */
@@ -332,7 +338,7 @@ export function AppShell() {
   /**
    * A route change driven by `history.push` (what every in-app `<Link>` does)
    * does not get the browser's native jump-to-anchor behaviour that a real
-   * page load with a `#hash` in the URL gets — so a link like
+   * page load with a `#hash` in the URL gets, so a link like
    * `/admin/settings#your-details` would land on the page without ever
    * scrolling to it. Handled once here rather than per-page.
    */
@@ -350,11 +356,11 @@ export function AppShell() {
    * would bounce you somewhere arbitrary. So the switch decides where you go.
    *
    * `switchProfile` commits the new session to the store as soon as its own
-   * request answers — before the catalogue/session data it also loads has
-   * finished — so `RequireAuth` above sees the new role while the URL is still
+   * request answers, before the catalogue/session data it also loads has
+   * finished, so `RequireAuth` above sees the new role while the URL is still
    * the old page and, correctly, redirects on its own before this function
    * ever gets to. Navigating again afterwards to that same page a second time
-   * left the screen blank instead of just doing nothing — some interruption in
+   * left the screen blank instead of just doing nothing, some interruption in
    * the middle of matching routes, not a crash anything here logs. Checking
    * the real URL first avoids ever sending a second, redundant navigation to
    * where the guard has already put us.
@@ -545,7 +551,7 @@ export function AppShell() {
         </main>
       </div>
 
-      {/* Mobile bottom navigation — four thumb targets plus overflow. */}
+      {/* Mobile bottom navigation, four thumb targets plus overflow. */}
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
         <div className="flex">
           {primary.map((item) => (
@@ -606,7 +612,7 @@ export function AppShell() {
 
 // ─── Public chrome ──────────────────────────────────────────────────────────
 
-/** WCAG 2.4.1 — the first thing in the tab order jumps past the nav. */
+/** WCAG 2.4.1, the first thing in the tab order jumps past the nav. */
 export function SkipLink() {
   return (
     <a href="#main" className="skip-link">
@@ -615,7 +621,7 @@ export function SkipLink() {
   )
 }
 
-/** Switches `data-theme` on `<html>` — see `useTheme` for what that drives. */
+/** Switches `data-theme` on `<html>`, see `useTheme` for what that drives. */
 export function ThemeToggle() {
   const { theme, toggle } = useTheme()
   return (
@@ -657,7 +663,7 @@ export function PublicShell() {
               Result checkers
             </Link>
             {/*
-              Was `hidden ... lg:block` — invisible on every phone and most
+              Was `hidden ... lg:block`, invisible on every phone and most
               tablets, with nothing else in this header standing in for it on
               narrow screens (unlike the logged-in shell, which has its own
               mobile bottom nav). A guest with a failed or delayed order has
@@ -688,7 +694,7 @@ export function PublicShell() {
                   </Button>
                 </Link>
                 <Link to={registerPath}>
-                  {/* Room is tight at 390px — the label shortens rather than wraps. */}
+                  {/* Room is tight at 390px, the label shortens rather than wraps. */}
                   <Button size="sm">
                     <span className="sm:hidden">Sell with us</span>
                     <span className="hidden sm:inline">Become an agent</span>
@@ -719,7 +725,7 @@ export function PublicFooter() {
         <div>
           <Logo />
           <p className="mt-3 max-w-xs text-sm text-slate-500 dark:text-slate-400">
-            Data bundles, airtime, voice and SMS bundles, MTN AFA registration and result checkers —
+            Data bundles, airtime, voice and SMS bundles, MTN AFA registration and result checkers
             delivered in seconds.
           </p>
         </div>
@@ -796,7 +802,7 @@ export function ToastHost() {
       {/*
         The live regions are always in the DOM, even with nothing to say.
         A region created at the same moment as its content is frequently missed
-        by screen readers, so announcements would be silently dropped — exactly
+        by screen readers, so announcements would be silently dropped, exactly
         the messages that confirm money moved.
 
         Errors go in an assertive region (interrupt), everything else polite.

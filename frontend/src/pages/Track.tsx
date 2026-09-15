@@ -18,7 +18,7 @@ import {
 import { AlertIcon, CertificateIcon, CheckIcon, ClockIcon, ReceiptIcon, SearchIcon } from '../components/icons'
 
 /**
- * FR-4.9 — a guest has no order history, so the reference plus their phone
+ * FR-4.9, a guest has no order history, so the reference plus their phone
  * number is the only handle they have on a purchase. Without this page, a
  * checker voucher whose SMS did not arrive is simply lost, which would breach
  * NFR-3.3 in spirit even though the money changed hands correctly.
@@ -32,12 +32,12 @@ export default function Track() {
    *
    * PaymentReturn sends somebody here when it has a payment reference but no
    * order to show a receipt for. Prefilling saves them retyping the one thing
-   * they are least likely to have written down — they still supply their phone
+   * they are least likely to have written down, they still supply their phone
    * number, which is what makes the lookup theirs to make.
    */
   const [params] = useSearchParams()
   const [reference, setReference] = useState(params.get('ref') ?? '')
-  // A signed-in user's own number, prefilled — the reference is still the
+  // A signed-in user's own number, prefilled, the reference is still the
   // real lookup key, this only saves retyping the one part that's already
   // known.
   const [phone, setPhone] = useState(session?.phone ?? '')
@@ -134,7 +134,7 @@ export default function Track() {
           </div>
 
           <div className="space-y-4 p-5">
-            {/* Two different truths, and saying the wrong one is the problem — see
+            {/* Two different truths, and saying the wrong one is the problem, see
                 the identical logic on Buy.tsx's own receipt. A refund is authorised
                 by a person, so until that happens the money is *owed*, not
                 returned; telling a guest it is already back when it is not is the
@@ -149,7 +149,7 @@ export default function Track() {
               <Callout tone="info" title="A refund is being arranged" icon={<ClockIcon className="size-4" />}>
                 {cedis(result.salePrice)} is owed back to you and has been logged for approval.
                 Refunds are checked by a person rather than sent automatically, so this usually takes
-                a few hours. You do not need to ask — we will text{' '}
+                a few hours. You do not need to ask, we will text{' '}
                 <strong className="tabular font-bold">{result.buyerPhone}</strong> when it is done.
               </Callout>
             )}
@@ -163,7 +163,7 @@ export default function Track() {
             {result.status === 'failed' && result.refunded && result.paidWith !== 'wallet' && (
               <Callout tone="success" title="Your money has been sent back" icon={<CheckIcon className="size-4" />}>
                 {cedis(result.salePrice)} has been sent to{' '}
-                <strong className="tabular font-bold">{result.buyerPhone}</strong> — the same number
+                <strong className="tabular font-bold">{result.buyerPhone}</strong>, the same number
                 you paid from. Mobile Money usually lands within a few minutes.
               </Callout>
             )}

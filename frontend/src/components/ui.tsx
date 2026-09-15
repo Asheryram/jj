@@ -34,15 +34,15 @@ type ButtonSize = 'sm' | 'md' | 'lg'
 
 /**
  * Variants own their colours outright. Overriding a colour through `className`
- * does not reliably win — two utilities of the same kind are resolved by CSS
- * source order, not by the order they appear in the attribute — so anything
+ * does not reliably win, two utilities of the same kind are resolved by CSS
+ * source order, not by the order they appear in the attribute, so anything
  * that needs different colours gets a variant here instead.
  */
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary: 'bg-brand-700 text-white hover:bg-brand-800 active:bg-brand-900 shadow-sm',
   /**
    * Golden Yellow, for the single highest-emphasis action on a screen.
-   * The text is deep blue, never white — #FFC107 behind white text fails AA
+   * The text is deep blue, never white, #FFC107 behind white text fails AA
    * badly (1.9:1), behind brand-900 it passes at 6.4:1.
    */
   // Self-contained colour blocks: the fill and its required text colour
@@ -54,14 +54,14 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   ghost: 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800',
   danger: 'bg-red-600 text-white hover:bg-red-700',
   // For use on top of a brand-coloured surface, which is the same blue in
-  // both themes — so this stays plain white-on-blue rather than following
+  // both themes, so this stays plain white-on-blue rather than following
   // the page theme.
   onBrand: 'bg-white text-brand-800 hover:bg-brand-50 shadow-sm',
   onBrandOutline: 'border border-white/30 bg-white/10 text-white hover:bg-white/20',
   whatsapp: 'bg-[#25D366] text-white hover:bg-[#1eb959] shadow-sm',
 }
 
-// Minimum 44px tall at md and above — thumb-sized, per NFR-4.1.
+// Minimum 44px tall at md and above, thumb-sized, per NFR-4.1.
 const BUTTON_SIZES: Record<ButtonSize, string> = {
   sm: 'h-9 px-3 text-sm rounded-lg gap-1.5',
   md: 'h-11 px-4 text-[15px] rounded-xl gap-2',
@@ -143,7 +143,7 @@ export function Card({
   /**
    * Use this rather than passing `bg-*` through `className`. Two utilities of the
    * same kind are resolved by CSS source order, not by attribute order, so an
-   * override there can silently lose to the base class — which is how a filled
+   * override there can silently lose to the base class, which is how a filled
    * card ends up as white text on a white background.
    */
   tone?: keyof typeof CARD_TONES
@@ -161,7 +161,7 @@ export function Card({
         // `min-w-0`: a grid or flex item defaults to `min-width: auto`, so a
         // card holding a wide table (TableWrap's own `min-w-[36rem]`) refused
         // to shrink below that width even in a single mobile-width column,
-        // dragging the whole grid track — and the page — wider than the
+        // dragging the whole grid track (and the page) wider than the
         // viewport. Harmless outside a grid/flex context.
         'min-w-0 rounded-2xl border shadow-[0_1px_2px_rgba(15,23,42,0.04)]',
         CARD_TONES[tone],
@@ -232,7 +232,7 @@ const BADGE_TONES: Record<BadgeTone, string> = {
   danger: 'bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300',
   info: 'bg-sky-100 dark:bg-sky-900/40 text-sky-800 dark:text-sky-300',
   brand: 'bg-brand-100 dark:bg-brand-900/40 text-brand-800 dark:text-brand-300',
-  // Golden Yellow, self-contained like the `cta` button above — the fill and
+  // Golden Yellow, self-contained like the `cta` button above, the fill and
   // its required deep-blue text stay the same in both themes.
   accent: 'bg-accent-500 text-brand-900',
   /** For sitting on top of a filled Deep Blue surface. */
@@ -261,7 +261,7 @@ export function Badge({
   )
 }
 
-/** FR-4.4 — status carries an icon as well as colour, so it is not colour-only. */
+/** FR-4.4, status carries an icon as well as colour, so it is not colour-only. */
 export function StatusBadge({ status }: { status: OrderStatus }) {
   if (status === 'completed') {
     return (
@@ -286,7 +286,7 @@ export function StatusBadge({ status }: { status: OrderStatus }) {
   }
   if (status === 'awaiting_approval') {
     // Deliberately not "Failed" and not "Processing". The money is held and the
-    // bundle is still coming, but nothing is in flight at the provider — and an
+    // bundle is still coming, but nothing is in flight at the provider, and an
     // admin scanning this column needs to see that difference at a glance.
     return (
       <Badge tone="warning">
@@ -339,7 +339,7 @@ const FieldContext = createContext<{ describedBy?: string; invalid: boolean }>({
  *
  * The hint and error are wired to the input with `aria-describedby`, and the
  * error also sets `aria-invalid`, so a screen reader announces *why* a field is
- * wrong when focus lands on it — not just that something failed somewhere on the
+ * wrong when focus lands on it, not just that something failed somewhere on the
  * page. The error carries `role="alert"` so it is also read out the moment it
  * appears. Rendering red text alone would leave both groups of users guessing.
  */
@@ -553,7 +553,7 @@ export function Modal({
   /**
    * False while something is genuinely in flight with nothing sensible to do
    * if it were interrupted (`Wallet.tsx`'s "Opening Paystack…" stage is the
-   * first case) — hides the close button and ignores the backdrop and
+   * first case), hides the close button and ignores the backdrop and
    * Escape, rather than leaving them visibly clickable but silently inert,
    * which reads as a frozen app.
    */
@@ -563,13 +563,13 @@ export function Modal({
   const titleId = useRef(`dialog-${Math.random().toString(36).slice(2, 8)}`).current
 
   // `onClose` is passed fresh on every render by nearly every caller (an inline
-  // arrow function). Keeping it out of the effect below — read through this ref
-  // instead — means typing into a field inside the dialog (which re-renders the
+  // arrow function). Keeping it out of the effect below, read through this ref
+  // instead, means typing into a field inside the dialog (which re-renders the
   // parent on every keystroke) can't re-trigger the effect. It used to: the
   // effect depended on `onClose` directly, so each keystroke re-ran the
   // "move focus inside" step and stole focus back onto the first focusable
-  // element (often a button before the input), blurring the field and — on a
-  // phone — dismissing the keyboard after every character.
+  // element (often a button before the input), blurring the field and, on a
+  // phone, dismissing the keyboard after every character.
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
   const dismissableRef = useRef(dismissable)
@@ -599,7 +599,7 @@ export function Modal({
       }
       if (event.key !== 'Tab') return
 
-      // Keep Tab inside the dialog — otherwise focus escapes to the page behind,
+      // Keep Tab inside the dialog, otherwise focus escapes to the page behind,
       // which a screen-reader user cannot see has been covered.
       const items = focusables()
       if (items.length === 0) {
@@ -659,7 +659,7 @@ export function Modal({
               onClick={onClose}
               aria-label="Close"
               // `before:-inset-1.5` widens the actual tap target to the app's
-              // 44px minimum without growing the visible hover halo — see the
+              // 44px minimum without growing the visible hover halo, see the
               // matching comment on `AdminOrders.tsx`'s `CopyIconButton`.
               className="relative -mr-1 rounded-lg p-1.5 text-slate-500 dark:text-slate-400 before:absolute before:-inset-1.5 before:content-[''] hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300"
             >
@@ -675,7 +675,7 @@ export function Modal({
 }
 
 /**
- * Common reasons as one-click chips above a free-text refusal field — the
+ * Common reasons as one-click chips above a free-text refusal field, the
  * common case fills the field in one tap, and it stays a normal, editable
  * `TextInput` for anything the canned list doesn't cover.
  */
@@ -755,7 +755,7 @@ export function EmptyState({
 }
 
 /**
- * Wide tables scroll inside their own container — the page never scrolls
+ * Wide tables scroll inside their own container, the page never scrolls
  * sideways. The scroll container is focusable and labelled so a keyboard user
  * can actually reach the overflowing content, and `caption` gives screen-reader
  * users the table's purpose before they start reading cells.
@@ -830,7 +830,7 @@ export function Td({
   )
 }
 
-// ─── Stepper (NFR-4.2 — the step budget made visible) ───────────────────────
+// ─── Stepper (NFR-4.2, the step budget made visible) ───────────────────────
 
 export function Stepper({ steps, current }: { steps: string[]; current: number }) {
   return (

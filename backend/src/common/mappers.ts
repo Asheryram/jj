@@ -25,7 +25,7 @@ import type { OrderSplit } from '../domain/pricing'
  * AFA have to come from somewhere else. An admin pricing a mixed catalogue needs
  * to see which row comes from where; a customer does not.
  *
- * Null rather than a guess when nothing is linked yet — an unfulfillable product
+ * Null rather than a guess when nothing is linked yet, an unfulfillable product
  * saying "datahub-gh" would be a claim nobody checked.
  */
 type ProductRow = Product & { supplier?: { provider: string; updatedAt: Date } | null }
@@ -34,7 +34,7 @@ type ProductRow = Product & { supplier?: { provider: string; updatedAt: Date } |
  * What every product read must include for `toProduct` to be complete.
  *
  * Exported so no query can forget. When it was left to each call site, the update
- * paths did not load the relation — so editing a price returned a product whose
+ * paths did not load the relation, so editing a price returned a product whose
  * `provider` was null, and the row that had said `datahub-gh` a moment earlier
  * redrew as "no supplier". The data was fine; the response was simply missing a
  * join, which is the kind of bug that looks like data loss.
@@ -51,7 +51,7 @@ export function toProduct(row: ProductRow) {
     validity: row.validity,
     supplierCost: row.supplierCost,
     /**
-     * When the *catalogue's* belief about this cost last changed — Prisma's
+     * When the *catalogue's* belief about this cost last changed, Prisma's
      * `@updatedAt` on `supplier_products`, which moves whenever that provider
      * row is written, cost or otherwise. Not the same clock as the last real
      * delivery (`catalogueAccuracy.lastSoldAt`): this says how stale the
@@ -65,7 +65,7 @@ export function toProduct(row: ProductRow) {
     walkupMarkupBp: row.walkupMarkupBp,
     /**
      * What the real cost actually was the last time a price on this product
-     * was saved — see the column's own doc comment in schema.prisma for why
+     * was saved, see the column's own doc comment in schema.prisma for why
      * this is compared by value against today's real charge, not by date.
      * Null means never saved with a real figure in front of James yet.
      */
@@ -76,7 +76,7 @@ export function toProduct(row: ProductRow) {
 }
 
 /**
- * `supplierCost` is James's buying price and is commercially sensitive — an
+ * `supplierCost` is James's buying price and is commercially sensitive, an
  * agent seeing it can work out exactly what James makes. Admin-only (FR-6.x),
  * so every non-admin caller gets the field stripped rather than zeroed, which
  * would read as free.
@@ -115,7 +115,7 @@ export function toOrder(row: Order) {
     soldByAgentName: row.soldByAgentName,
     status: row.status,
     createdAt: row.createdAt.toISOString(),
-    /** When this order actually delivered. Null for anything else, including a failed one — see `Order.completedAt`. */
+    /** When this order actually delivered. Null for anything else, including a failed one, see `Order.completedAt`. */
     completedAt: row.completedAt?.toISOString() ?? null,
     paidWith: row.paidWith,
     buyer: row.buyer,
@@ -167,7 +167,7 @@ export function toWithdrawal(row: Withdrawal) {
   return {
     id: row.id,
     // So the admin queue can cross-reference the requesting agent's current
-    // account status — a suspended agent's already-queued payout otherwise
+    // account status, a suspended agent's already-queued payout otherwise
     // looks identical to any other request.
     userId: row.userId,
     agentName: row.agentName,
@@ -176,7 +176,7 @@ export function toWithdrawal(row: Withdrawal) {
     momoNetwork: row.momoNetwork,
     status: row.status,
     requestedAt: row.requestedAt.toISOString(),
-    /** Paystack's word on the transfer, or 'manual'/'unknown' — same shape as a refund's. */
+    /** Paystack's word on the transfer, or 'manual'/'unknown', same shape as a refund's. */
     transferStatus: row.transferStatus,
     /** Why it hasn't gone, or how it was sent by hand, when either is known. */
     transferNote: row.transferNote,
@@ -197,8 +197,8 @@ export function toSession(row: User) {
     /**
      * Carried so the app can show an agent what they are waiting for.
      *
-     * A pending agent is allowed to sign in — being told their password is wrong
-     * would send them round in circles — so the client needs to know that they
+     * A pending agent is allowed to sign in, being told their password is wrong
+     * would send them round in circles, so the client needs to know that they
      * are approved before it offers them selling tools they cannot use.
      */
     status: row.status,
@@ -206,7 +206,7 @@ export function toSession(row: User) {
     statusNote: row.statusNote,
     /**
      * Which `whatsappChannelUrl` this agent has already been shown the join
-     * popup for. Compared against the current setting, not a plain flag — see
+     * popup for. Compared against the current setting, not a plain flag, see
      * the field's own comment on the schema.
      */
     whatsappChannelSeenUrl: row.whatsappChannelSeenUrl,

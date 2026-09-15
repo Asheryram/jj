@@ -19,7 +19,7 @@ export interface AdminDomainView extends MineView {
 }
 
 /**
- * An agent's own domain, pointed at their `/s/<code>` shop — see the
+ * An agent's own domain, pointed at their `/s/<code>` shop, see the
  * `CustomDomain` model for why `allowed` and `active` are kept separate.
  */
 @Injectable()
@@ -30,7 +30,7 @@ export class DomainsService {
    * A short-lived cache for `isTrustedOrigin`, keyed by hostname.
    *
    * That check runs on every CORS preflight from every visitor to every
-   * custom domain — a busy shop can generate one per request. A minute of
+   * custom domain, a busy shop can generate one per request. A minute of
    * staleness (a just-revoked domain staying "trusted" a little longer) is a
    * far better trade than a Postgres round trip on every single OPTIONS
    * request. Deliberately in-memory and per-instance: this is a courtesy
@@ -45,7 +45,7 @@ export class DomainsService {
    *
    * One row per agent (`userId` is unique), so this is an upsert, not a plain
    * create. Re-submitting the exact domain that is already `allowed` is a
-   * no-op — resetting it to pending on every duplicate click would suspend a
+   * no-op, resetting it to pending on every duplicate click would suspend a
    * live shop for no reason. Anything else (a new domain, or resubmitting one
    * that was refused or never reviewed) resets the review from scratch: an
    * approval only ever covers the exact string it was granted for.
@@ -106,13 +106,13 @@ export class DomainsService {
   }
 
   /**
-   * Approve, refuse or suspend — whichever of `allowed`/`active` is present.
+   * Approve, refuse or suspend, whichever of `allowed`/`active` is present.
    *
    * Refusing (`allowed: false`) also takes the domain offline: an approval
    * that was just revoked has no business still serving traffic, even though
    * the public resolve endpoint's own `allowed && active` check would already
-   * catch it — this keeps the record itself from claiming something false.
-   * Approving does NOT also flip `active` on — DNS still has to be confirmed
+   * catch it, this keeps the record itself from claiming something false.
+   * Approving does NOT also flip `active` on, DNS still has to be confirmed
    * before it actually serves anything.
    */
   async review(
@@ -121,7 +121,7 @@ export class DomainsService {
     input: { allowed?: boolean; active?: boolean; reason?: string },
   ): Promise<AdminDomainView> {
     if (input.allowed === undefined && input.active === undefined) {
-      throw new ValidationError('Say what you are changing — allowed, active, or both.')
+      throw new ValidationError('Say what you are changing, allowed, active, or both.')
     }
 
     const existing = await this.prisma.customDomain.findUnique({
@@ -157,12 +157,12 @@ export class DomainsService {
   }
 
   /**
-   * The only endpoint a browser actually calls. Both flags must be true — a
+   * The only endpoint a browser actually calls. Both flags must be true, a
    * domain that is approved but not yet DNS-confirmed must not resolve, and
    * neither should one an admin suspended.
    *
    * Also requires the agent themselves still be active, mirroring
-   * `CatalogueService.seller()` — a suspended agent's shop link stops selling
+   * `CatalogueService.seller()`, a suspended agent's shop link stops selling
    * everywhere else, and their custom domain is not a back door around that.
    */
   async resolve(rawHost: string): Promise<string | null> {
@@ -182,7 +182,7 @@ export class DomainsService {
   }
 
   /**
-   * Whether a browser `Origin` should be trusted for CORS — exactly the same
+   * Whether a browser `Origin` should be trusted for CORS, exactly the same
    * question `resolve` answers, reused rather than duplicated, just cached
    * because of how often this specific caller asks it. See `originCache`.
    */
@@ -216,7 +216,7 @@ function toMineView(row: {
   }
 }
 
-/** Lower-cased, trimmed, and stripped of a port — a Host header can carry one. */
+/** Lower-cased, trimmed, and stripped of a port, a Host header can carry one. */
 function normalizeDomain(input: string): string {
   return input.trim().toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '')
 }

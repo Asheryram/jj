@@ -15,7 +15,7 @@ import { BootstrapService } from './bootstrap.service'
      * Two windows, because the two attacks look different.
      *
      * `burst` stops someone firing a password list at one account as fast as the
-     * network allows. `grind` stops the patient version — a few tries a minute,
+     * network allows. `grind` stops the patient version, a few tries a minute,
      * all day, which slips under any per-minute limit. Registered here rather
      * than globally so only these routes are guarded.
      *

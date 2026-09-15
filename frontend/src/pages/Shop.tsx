@@ -5,7 +5,7 @@ import { PageHead } from '../components/ui'
 /**
  * The catalogue on its own, with no marketing around it. Used for `/shop` and
  * as the body of an agent's sell link. The home page shows the same catalogue
- * with a hero above it — buying is never more than one page away.
+ * with a hero above it, buying is never more than one page away.
  */
 export default function Shop() {
   const { session, sellerCode } = useStore()
@@ -18,7 +18,7 @@ export default function Shop() {
         subtitle={
           browsingOwnShop
             ? 'These are your own resale prices. Your margin is shown on each card.'
-            : 'Pick a category, then a bundle. No account needed — pay with Mobile Money.'
+            : 'Pick a category, then a bundle. No account needed, pay with Mobile Money.'
         }
       />
       <Catalogue />

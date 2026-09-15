@@ -13,7 +13,7 @@ import { AlertIcon, ClockIcon, StoreIcon } from '../../components/icons'
  * they stand.
  *
  * No selling tools are shown, and that is the honest thing rather than a
- * restriction — a shop link that cannot sell and a price list nobody can buy from
+ * restriction, a shop link that cannot sell and a price list nobody can buy from
  * would both appear to work and neither would.
  */
 export default function AwaitingApproval() {
@@ -26,7 +26,7 @@ export default function AwaitingApproval() {
    * An approved agent has no application to wait for.
    *
    * Reachable directly, and it told anybody who arrived that their application was
-   * under review — including agents already selling. A page that states something
+   * under review, including agents already selling. A page that states something
    * untrue about the reader's own account is worse than one that is missing, so an
    * active account is sent to the dashboard instead.
    */
@@ -76,7 +76,7 @@ export default function AwaitingApproval() {
               <ul className="mt-2 space-y-1.5 text-sm text-slate-700 dark:text-slate-200">
                 <li>· We email {session.email} the moment you are approved.</li>
                 <li>· Your shop link and prices are waiting for you when you sign back in.</li>
-                <li>· Nothing you do now is lost — the account is already yours.</li>
+                <li>· Nothing you do now is lost, the account is already yours.</li>
               </ul>
             </div>
 

@@ -3,7 +3,7 @@
 /**
  * Dark mode is an explicit choice, not the system default: `dark:` utilities
  * only fire once `data-theme="dark"` sits on `<html>` (set by the toggle in
- * the header and remembered in localStorage — see `useTheme` in layout.tsx).
+ * the header and remembered in localStorage, see `useTheme` in layout.tsx).
  * Nobody's screen changes look without them asking it to.
  */
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));

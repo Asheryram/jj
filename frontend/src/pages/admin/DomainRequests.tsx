@@ -22,7 +22,7 @@ import { AlertIcon, GlobeIcon } from '../../components/icons'
 type Filter = 'pending' | 'all'
 
 /**
- * Superadmin-only (see `AdminDomainsController`) — approving a domain is
+ * Superadmin-only (see `AdminDomainsController`), approving a domain is
  * vouching that whoever asked for it actually controls it, the same trust
  * decision as creating an admin account. It sits outside James's own admin
  * nav for that reason.
@@ -30,7 +30,7 @@ type Filter = 'pending' | 'all'
  * `allowed` and `active` are independent on purpose (see the `CustomDomain`
  * model): a domain can be approved but waiting on DNS, or approved and later
  * suspended without losing that approval record. So a row is one of four
- * real states, not three — waiting, approved-not-live, live, or refused —
+ * real states, not three, waiting, approved-not-live, live, or refused,
  * and each gets its own action.
  */
 export default function DomainRequests() {
@@ -50,7 +50,7 @@ const LEGEND: { term: string; meaning: string }[] = [
   {
     term: 'Approve',
     meaning:
-      "Grants a waiting request permission to use that domain at all. Does not make it live yet — DNS still has to be pointed here first.",
+      "Grants a waiting request permission to use that domain at all. Does not make it live yet, DNS still has to be pointed here first.",
   },
   {
     term: 'Refuse',
@@ -59,17 +59,17 @@ const LEGEND: { term: string; meaning: string }[] = [
   {
     term: 'Mark as live',
     meaning:
-      'Flips an approved domain active — use this once you have actually confirmed it resolves here. This is what makes it start serving the agent\'s shop.',
+      'Flips an approved domain active, use this once you have actually confirmed it resolves here. This is what makes it start serving the agent\'s shop.',
   },
   {
     term: 'Suspend',
     meaning:
-      "Takes a live domain offline temporarily, without withdrawing its approval. Reversible with one click — \"Mark as live\" brings it straight back.",
+      "Takes a live domain offline temporarily, without withdrawing its approval. Reversible with one click, \"Mark as live\" brings it straight back.",
   },
   {
     term: 'Revoke',
     meaning:
-      "Fully withdraws approval — not a pause. Needs a reason, takes the domain offline immediately if it was live, and it will not work again until someone re-approves it.",
+      "Fully withdraws approval, not a pause. Needs a reason, takes the domain offline immediately if it was live, and it will not work again until someone re-approves it.",
   },
   {
     term: 'Approve after all',
@@ -77,7 +77,7 @@ const LEGEND: { term: string; meaning: string }[] = [
   },
 ]
 
-/** A reference for what each action actually changes — collapsed by default once you know it. */
+/** A reference for what each action actually changes, collapsed by default once you know it. */
 function ActionLegend() {
   return (
     <details className="mt-3 rounded-xl border border-slate-200 dark:border-slate-700 open:bg-slate-50 dark:open:bg-slate-800/60">
@@ -140,7 +140,7 @@ function DomainQueue() {
       <Card className="mt-3">
         <CardHead
           title="Requests"
-          subtitle="Look up who owns a domain before approving it — a shop takes card and Mobile Money details."
+          subtitle="Look up who owns a domain before approving it, a shop takes card and Mobile Money details."
           action={
             <Segmented<Filter>
               options={[
@@ -276,7 +276,7 @@ function DomainRow({
   )
 }
 
-/** Refusing or revoking needs a reason — the agent is shown it either way. */
+/** Refusing or revoking needs a reason, the agent is shown it either way. */
 function RejectModal({
   request,
   onClose,
@@ -321,7 +321,7 @@ function RejectModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`${wasLive ? 'Revoke' : 'Refuse'} — ${request.domain}`}>
+    <Modal open onClose={onClose} title={`${wasLive ? 'Revoke' : 'Refuse'}, ${request.domain}`}>
       <form
         className="space-y-4"
         onSubmit={(event) => {

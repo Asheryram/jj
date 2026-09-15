@@ -5,7 +5,7 @@ import { createTransport, type Transporter } from 'nodemailer'
 export interface Mail {
   to: string
   subject: string
-  /** Plain text. Always sent — some mail clients and most filters prefer it. */
+  /** Plain text. Always sent, some mail clients and most filters prefer it. */
   text: string
   html: string
 }
@@ -17,11 +17,11 @@ export interface Mail {
  *
  * Resend refuses to send to anybody but the account owner until a domain is
  * verified, and verifying a domain means owning one. That is a hard blocker on
- * day one — so SMTP exists as the path that works with a Gmail account and no
+ * day one, so SMTP exists as the path that works with a Gmail account and no
  * domain at all.
  *
  * Resend wins when both are configured: no daily send quota, and it is not tied
- * to one person's Gmail mailbox the way SMTP is. SMTP is the fallback — worth
+ * to one person's Gmail mailbox the way SMTP is. SMTP is the fallback, worth
  * having because container platforms routinely block outbound SMTP or Gmail
  * occasionally rejects a login, and a working alternate path beats losing the
  * message. Before a domain was verified this ran the other way around; nothing
@@ -50,12 +50,12 @@ export class MailerService {
   }
 
   private get smtpPass(): string | null {
-    // Not trimmed at the ends only — Gmail app passwords are shown in groups of
+    // Not trimmed at the ends only, Gmail app passwords are shown in groups of
     // four and get pasted with spaces, which SMTP auth then rejects.
     return this.config.get<string>('SMTP_PASS')?.replace(/\s+/g, '') || null
   }
 
-  /** Whether SMTP is configured at all — the fallback transport, tried after Resend. */
+  /** Whether SMTP is configured at all, the fallback transport, tried after Resend. */
   private get useSmtp(): boolean {
     return Boolean(this.smtpUser && this.smtpPass)
   }
@@ -71,7 +71,7 @@ export class MailerService {
   /**
    * Who mail comes from over SMTP: must be the authenticated mailbox. Gmail
    * rewrites or refuses anything else, so a mismatched MAIL_FROM would either
-   * be silently replaced or bounce — and both are worse than ignoring it. The
+   * be silently replaced or bounce, and both are worse than ignoring it. The
    * display name is still ours, so mail arrives as
    * "JamesDataConsult <the.account@gmail.com>".
    */
@@ -83,7 +83,7 @@ export class MailerService {
   }
 
   /**
-   * Who mail comes from over Resend: must be a domain verified there — never
+   * Who mail comes from over Resend: must be a domain verified there, never
    * the SMTP mailbox, which Resend cannot possibly have verified since it
    * belongs to a different provider (Gmail). Read independently of whether
    * SMTP is configured, so a domain verified for Resend actually gets used
@@ -94,7 +94,7 @@ export class MailerService {
     return this.config.get<string>('MAIL_FROM')?.trim() || 'JamesDataConsult <onboarding@resend.dev>'
   }
 
-  /** True while sending from Resend's shared domain — delivery is limited. */
+  /** True while sending from Resend's shared domain, delivery is limited. */
   get usingSharedSender(): boolean {
     return this.resendFrom.includes('onboarding@resend.dev')
   }
@@ -109,7 +109,7 @@ export class MailerService {
     let unverifiedDomain = false
 
     /**
-     * Resend first, SMTP as the fallback — see the class doc for why the order
+     * Resend first, SMTP as the fallback, see the class doc for why the order
      * flipped once a domain existed to verify.
      */
     if (this.resendKey) {
@@ -117,7 +117,7 @@ export class MailerService {
       if (result.sent) return result
       lastReason = result.reason
       unverifiedDomain = Boolean(result.unverifiedDomain)
-      if (this.useSmtp) this.log.warn(`Resend failed (${lastReason ?? 'no reason given'}) — trying SMTP`)
+      if (this.useSmtp) this.log.warn(`Resend failed (${lastReason ?? 'no reason given'}), trying SMTP`)
     }
 
     if (this.useSmtp) {
@@ -133,7 +133,7 @@ export class MailerService {
      *
      * Narrow on purpose. Resend lets that sender reach only the address owning
      * the account, so this rescues the operator's own setup and reset links on
-     * a platform whose domain is not set up — and cannot quietly deliver
+     * a platform whose domain is not set up, and cannot quietly deliver
      * customer mail from the wrong address, because Resend refuses that too.
      */
     if (unverifiedDomain && !this.usingSharedSender) {
@@ -170,8 +170,8 @@ export class MailerService {
          * Fail in seconds, not minutes.
          *
          * Without these, nodemailer inherits the OS timeout: a blocked SMTP port
-         * hangs for around two minutes. That is long enough to delay startup —
-         * the boot email is awaited — so a mail problem became a deploy that
+         * hangs for around two minutes. That is long enough to delay startup,
+         * the boot email is awaited, so a mail problem became a deploy that
          * looked stalled and failed six health checks before answering. Mail is
          * not important enough to hold the API's boot; better to give up quickly
          * and log the link.
@@ -196,7 +196,7 @@ export class MailerService {
 
       // The two failures worth naming, because neither message says what to do.
       const reason = /invalid login|username and password not accepted|535/i.test(message)
-        ? 'The mail server rejected the login. A Gmail account needs an App Password (16 characters, created after turning on 2-Step Verification) — not the normal account password.'
+        ? 'The mail server rejected the login. A Gmail account needs an App Password (16 characters, created after turning on 2-Step Verification), not the normal account password.'
         : /limit|quota|550/i.test(message)
           ? 'The mail account has hit its sending limit for now. A free Gmail account allows roughly 500 messages a day.'
           : `SMTP failed: ${message}`

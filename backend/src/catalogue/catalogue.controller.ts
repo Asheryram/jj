@@ -9,7 +9,7 @@ export class CatalogueController {
   constructor(private readonly catalogue: CatalogueService) {}
 
   
-  /** Public — the shop is open to everyone (FR-4.8). */
+  /** Public, the shop is open to everyone (FR-4.8). */
   @Get('catalogue')
   snapshot(@CurrentUser() user: AuthUser | undefined) {
     return this.catalogue.snapshot(user?.role)

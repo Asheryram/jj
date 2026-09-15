@@ -24,7 +24,7 @@ import {
 import { AlertIcon, CashIcon, ClockIcon } from '../../components/icons'
 
 /**
- * FR-2.6 — request a payout.
+ * FR-2.6, request a payout.
  *
  * The amount leaves the agent's balance when the request is made, so it cannot be
  * spent twice while it waits. James approves it and sends the MoMo; a rejection
@@ -36,13 +36,13 @@ const PLACEHOLDER_PHONE = '0000000000'
 export default function Withdrawals() {
   const { agentBalance: balance, withdrawals, requestWithdrawal, cancelWithdrawal, session } = useStore()
   const [params] = useSearchParams()
-  // `?open=1` — the "Withdraw" buttons on Dashboard/Earnings used to land here
+  // `?open=1`, the "Withdraw" buttons on Dashboard/Earnings used to land here
   // and stop, one more click away from the thing they were actually for.
   const [open, setOpen] = useState(() => params.get('open') === '1')
   const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   /**
-   * Not `agentPhone === session.phone` — the payout number is whatever was
+   * Not `agentPhone === session.phone`, the payout number is whatever was
    * typed on the request (see RequestModal below: "does not have to be the
    * number you sign in with"), so matching on it silently dropped an agent's
    * own request the moment they withdrew to a different Mobile Money number
@@ -50,7 +50,7 @@ export default function Withdrawals() {
    */
   const mine = withdrawals.filter((w) => w.userId === session?.id)
   const pending = mine.filter((w) => w.status === 'pending')
-  /** Only `paid` — `approved` is a decision made, not yet confirmed sent. */
+  /** Only `paid`, `approved` is a decision made, not yet confirmed sent. */
   const paidOut = mine
     .filter((w) => w.status === 'paid')
     .reduce((sum, w) => sum + w.amount, 0)
@@ -135,10 +135,10 @@ export default function Withdrawals() {
                           : request.status === 'rejected'
                             ? 'Rejected'
                             : request.status === 'failed'
-                              ? 'Could not be sent — returned to you'
+                              ? 'Could not be sent, returned to you'
                               : 'Awaiting review'}
                     </Badge>
-                    {/* "Why it hasn't gone" — a rejection or a stalled transfer
+                    {/* "Why it hasn't gone", a rejection or a stalled transfer
                         with no reason shown here reads as unexplained, sending
                         an agent to support for something already on record. */}
                     {request.transferNote && (
@@ -176,7 +176,7 @@ export default function Withdrawals() {
         balance={balance}
         defaultPhone={session?.phone ?? ''}
         onSubmit={async (amount, network, number) => {
-          // Reported back to the modal — only closing and clearing on success
+          // Reported back to the modal, only closing and clearing on success
           // is the point; the server validates the minimum and the current
           // balance, and a rejected request used to close the form and blank
           // the amount anyway, silently discarding what the agent had just typed.
@@ -206,7 +206,7 @@ function RequestModal({
   const [network, setNetwork] = useState<Network>('MTN')
   /**
    * Prefilled from the account, but blank when the account still holds the
-   * bootstrap placeholder — `0000000000` is not a number any transfer can reach,
+   * bootstrap placeholder, `0000000000` is not a number any transfer can reach,
    * and offering it as a default would invite sending real money nowhere.
    */
   const [phone, setPhone] = useState(defaultPhone === PLACEHOLDER_PHONE ? '' : defaultPhone)
@@ -222,7 +222,7 @@ function RequestModal({
       return
     }
     // The minimum itself is admin-configurable (Settings → Smallest
-    // withdrawal), so it is not guessed here — the server's own rejection
+    // withdrawal), so it is not guessed here, the server's own rejection
     // carries the real, current amount rather than a number that could drift
     // from it.
     if (parsed > balance) {
@@ -235,7 +235,7 @@ function RequestModal({
     }
     setError('')
     setPhoneError('')
-    // Cleared only once `onSubmit` reports success — a rejection (below the
+    // Cleared only once `onSubmit` reports success, a rejection (below the
     // minimum, balance changed, too many pending) used to blank the amount
     // and close the form regardless, losing everything the agent had just
     // typed.

@@ -60,11 +60,11 @@ export default function Referrals() {
     : subAgents
 
   const shareSell = encodeURIComponent(
-    `Buy data, airtime and result checkers from me — instant delivery: ${sellLink}`,
+    `Buy data, airtime and result checkers from me, instant delivery: ${sellLink}`,
   )
   const shareDomain = domainUrl
     ? encodeURIComponent(
-        `Buy data, airtime and result checkers from me — instant delivery: ${domainUrl}`,
+        `Buy data, airtime and result checkers from me, instant delivery: ${domainUrl}`,
       )
     : ''
   const shareRefer = encodeURIComponent(
@@ -87,7 +87,7 @@ export default function Referrals() {
           <p className="mt-1.5 text-lg font-bold">Send this to customers</p>
           <p className="mt-1 text-sm text-brand-50/90">
             They buy at your prices and pay directly. Your margin lands in your earnings the moment
-            the order completes — you never touch the money or hold any stock.
+            the order completes, you never touch the money or hold any stock.
           </p>
         </div>
         <div className="space-y-3 p-4 sm:p-5">
@@ -100,14 +100,14 @@ export default function Referrals() {
         </div>
       </Card>
 
-      {/* ── Your own domain, once it's actually live — the same shop, your own
+      {/* ── Your own domain, once it's actually live, the same shop, your own
           address. Shown only once DNS has confirmed it; before that, ShopBranding
           is where its status lives, not here. ── */}
       {domainLive && domainUrl && (
         <Card className="mt-3">
           <CardHead
             title="Your own domain"
-            subtitle="The same shop, at your own address — share this instead when you have it"
+            subtitle="The same shop, at your own address, share this instead when you have it"
             action={<GlobeIcon className="size-5 text-brand-600 dark:text-brand-300" />}
           />
           <div className="space-y-3 p-4 sm:p-5">
@@ -146,17 +146,17 @@ export default function Referrals() {
           tone="brand"
           icon={<UsersIcon className="size-5" />}
         />
-        <StatTile label="Their total volume" value={cedis(totalVolume)} hint="For your own visibility only — not tied to your earnings" />
+        <StatTile label="Their total volume" value={cedis(totalVolume)} hint="For your own visibility only, not tied to your earnings" />
       </div>
 
       {/* What inviting somebody does, and what it does not.
           The bonus on a referral's sales was removed at the client's request, so
-          this says plainly that there is nothing to wait for — a page that left the
+          this says plainly that there is nothing to wait for, a page that left the
           question open would have agents watching for money that is never coming. */}
       <div className="mt-3">
         <Callout tone="info" title="What you get for inviting someone">
           They join under you and show up in your chain below. You are not paid anything from what
-          they sell, now or ever — every agent earns from their own sales only, at the same price
+          they sell, now or ever, every agent earns from their own sales only, at the same price
           from James no matter who is above them. Inviting someone grows your chain for your own
           visibility; it has no effect on anybody&apos;s price or earnings.
         </Callout>
@@ -225,7 +225,7 @@ export default function Referrals() {
                         <Badge tone="brand">You</Badge>
                       ) : (
                         <span className="text-sm text-slate-600 dark:text-slate-300">
-                          {subAgents.find((a) => a.referralCode === agent.uplineCode)?.name ?? '—'}
+                          {subAgents.find((a) => a.referralCode === agent.uplineCode)?.name ?? '-'}
                         </span>
                       )}
                     </Td>
@@ -248,7 +248,7 @@ export default function Referrals() {
         )}
         {/* Only with somebody in the list. This sat outside the guard above and
             read `subAgents[-1].joinedAt` when the list was empty, which throws
-            during render — React then unmounted the whole tree, so a new agent
+            during render, React then unmounted the whole tree, so a new agent
             with no downline saw a completely blank page with every link gone and
             nothing in the console to explain it. */}
         {subAgents.length > 0 && (

@@ -35,14 +35,14 @@ import { AlertIcon, RefreshIcon } from '../../components/icons'
  *    measured from `supplier_cost`, so a number nobody was charged quietly
  *    misstates the whole business.
  *  · A hand-set stock flag can say a SKU is available after the supplier has
- *    withdrawn it — which sells a customer something that cannot be delivered.
+ *    withdrawn it, which sells a customer something that cannot be delivered.
  *
  * It began as seed data: 36 invented SKUs with invented costs, of which DataHub
  * really sells none. Sync is the only way anything here changes now.
  *
  * A newly imported SKU arrives priced at cost and NOT on sale. A default markup
  * would put a number we made up in front of customers as James's price, so he
- * sets one — here for everything waiting, or per product on the Prices page.
+ * sets one, here for everything waiting, or per product on the Prices page.
  */
 export default function ProviderCatalogue() {
   const { refresh, pushToast, products } = useStore()
@@ -150,7 +150,7 @@ export default function ProviderCatalogue() {
         ) : all.length === 0 ? (
           <EmptyState
             title="Nothing here yet"
-            detail="Press Sync to read what your suppliers currently sell. Until then there is no catalogue — nothing is invented on your behalf."
+            detail="Press Sync to read what your suppliers currently sell. Until then there is no catalogue, nothing is invented on your behalf."
             action={
               <Button loading={syncing} onClick={() => void sync()}>
                 <RefreshIcon className="size-4" /> Sync now
@@ -204,13 +204,13 @@ export default function ProviderCatalogue() {
                   .slice(0, 6)
                   .map((sku) => sku.name)
                   .join(', ')}
-                {outOfStock.length > 6 && ` and ${outOfStock.length - 6} more`} — withdrawn from
+                {outOfStock.length > 6 && ` and ${outOfStock.length - 6} more`}, withdrawn from
                 sale until the supplier lists them again.
               </Callout>
             )}
 
             {categories.length > 1 && (
-              // -mx-3/px-3 cancels AppShell's own px-3 on mobile — not px-4,
+              // -mx-3/px-3 cancels AppShell's own px-3 on mobile, not px-4,
               // which overshoots the viewport by the 4px difference.
               <div className="-mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
                 <Segmented<Category>
@@ -291,8 +291,8 @@ export default function ProviderCatalogue() {
 /**
  * One markup across everything still waiting for a price.
  *
- * Two numbers rather than one, because they answer different questions — what an
- * agent buys at, and what a stranger pays at the counter — and James may set the
+ * Two numbers rather than one, because they answer different questions, what an
+ * agent buys at, and what a stranger pays at the counter, and James may set the
  * walk-up one lower if he would rather earn from agent volume than his own
  * counter.
  */

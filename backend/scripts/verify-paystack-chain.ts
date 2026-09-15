@@ -2,7 +2,7 @@
  * Prove the paid path against a real Paystack transaction.
  *
  * A transaction our app has already `initialize`d cannot be completed through the
- * API — Paystack owns that reference and only their checkout page can finish it,
+ * API, Paystack owns that reference and only their checkout page can finish it,
  * which is exactly the duplicate protection we rely on. So this goes the other
  * way round: charge a fresh reference with their documented test card, then hand
  * that reference to our own confirm path and check what it does with it.
@@ -62,7 +62,7 @@ async function main() {
   console.log(`user balance before : GHS ${(before / 100).toFixed(2)}`)
   console.log(`reference           : ${reference}`)
 
-  // 1 — a real charge at Paystack, with their test card.
+  // 1, a real charge at Paystack, with their test card.
   let result = await paystack('/charge', {
     email,
     amount: AMOUNT,
@@ -86,12 +86,12 @@ async function main() {
   }
   console.log(`paystack            : success (${result.data.gateway_response})`)
 
-  // 2 — the pending expectation our checkout would have written.
+  // 2, the pending expectation our checkout would have written.
   await prisma.payment.create({
     data: { reference, purpose: 'topup', amount: AMOUNT, userId: user.id },
   })
 
-  // 3 — our own confirm path, which re-verifies with Paystack and applies it.
+  // 3, our own confirm path, which re-verifies with Paystack and applies it.
   const confirm = await fetch(`${API}/payments/confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -99,7 +99,7 @@ async function main() {
   })
   console.log(`our confirm         : ${JSON.stringify(await confirm.json())}`)
 
-  // 4 — and again, because Paystack retries and customers refresh.
+  // 4, and again, because Paystack retries and customers refresh.
   const replay = await fetch(`${API}/payments/confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -113,14 +113,14 @@ async function main() {
 
   console.log(`\npayment status      : ${payment.status} via ${payment.channel}`)
   console.log(`user balance after  : GHS ${(after.balance / 100).toFixed(2)}`)
-  console.log(`ledger rows         : ${ledger.length} (must be 1 — replay must not double-credit)`)
+  console.log(`ledger rows         : ${ledger.length} (must be 1, replay must not double-credit)`)
   console.log(
     `credited            : GHS ${((after.balance - before) / 100).toFixed(2)} of GHS ${(AMOUNT / 100).toFixed(2)}`,
   )
 
   const ok =
     payment.status === 'paid' && ledger.length === 1 && after.balance - before === AMOUNT
-  console.log(`\n${ok ? 'PASS' : 'FAIL'} — paid once, credited once`)
+  console.log(`\n${ok ? 'PASS' : 'FAIL'}, paid once, credited once`)
 }
 
 main()
