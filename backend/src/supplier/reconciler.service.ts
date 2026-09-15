@@ -27,8 +27,22 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   private readonly log = new Logger(ReconcilerService.name)
   private timer: NodeJS.Timeout | null = null
 
-  /** How often to sweep. Their own guidance is 30–60s polling. */
-  private readonly intervalMs = 60_000
+  /**
+   * How often to sweep.
+   *
+   * DataHub's own guidance for the order-status chase is 30-60s, but the
+   * other three checks here (abandoned payments, stale top-ups, stale
+   * approvals) already have their own 15-minute-plus staleness windows
+   * before anything becomes actionable, checking those every 60s finds
+   * nothing new that checking every 5 minutes would not have found within a
+   * few minutes anyway. A 60s cadence also sits well inside Neon's 5-minute
+   * autosuspend window, so the database compute could never go idle long
+   * enough to scale down, burning through the free tier's monthly compute
+   * hours with no real benefit. Five minutes still resolves a lost webhook
+   * quickly enough that nobody notices, while giving the database real gaps
+   * to suspend into overnight and during quiet hours.
+   */
+  private readonly intervalMs = 5 * 60_000
   /**
    * How long an order may sit before we chase it. Long enough that the webhook
    * gets first refusal, chasing immediately would double the request volume for
