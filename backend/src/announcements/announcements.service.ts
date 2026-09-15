@@ -133,12 +133,13 @@ export class AnnouncementsService {
   ): Promise<void> {
     const shopName = await this.platformName()
     const subject = `${shopName}: ${title}`
-    // Where "Open in app" goes depends on who is reading it: an admin's copy
-    // of this feature lives on their own screen, not the agent inbox.
+    // Where "Open in app" goes depends on who is reading it: an admin's own
+    // inbox is a separate page from the agent one, and from the compose/sent
+    // screen admins otherwise land on.
     const linkFor = (role: Role) =>
       appUrl(
         this.config,
-        `${role === 'admin' ? '/admin' : '/app'}/announcements?item=${encodeURIComponent(announcementId)}`,
+        `${role === 'admin' ? '/admin/announcements/received' : '/app/announcements'}?item=${encodeURIComponent(announcementId)}`,
         origin,
       )
 

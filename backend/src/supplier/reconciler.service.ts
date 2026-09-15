@@ -1,9 +1,13 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { PrismaService } from '../prisma/prisma.service'
 import { FulfilmentService } from '../orders/fulfilment.service'
 import { PaymentsService } from '../payments/payments.service'
 import { SupplierService } from './supplier.service'
 import { DatahubClient, mapProviderStatus } from './datahub.client'
+import { MailerService } from '../mail/mailer.service'
+import { escape, wrap } from '../mail/templates'
+import { appUrl } from '../common/app-links'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 
 /**
@@ -84,6 +88,8 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     private readonly supplier: SupplierService,
     private readonly fulfilment: FulfilmentService,
     private readonly payments: PaymentsService,
+    private readonly mailer: MailerService,
+    private readonly config: ConfigService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -212,6 +218,8 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     let settled = await this.resolveAbandonedPayments()
     settled += await this.resolveStaleTopUps()
     settled += await this.expireStaleApprovals()
+
+    await this.alertStuckOrders()
 
     if (!this.supplier.isLive) return { checked: 0, settled }
 
@@ -365,6 +373,70 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     const settled = await this.checkWithProvider(order)
     if (settled) this.lastProviderCheckAt.delete(order.id)
     return { settled }
+  }
+
+  private async platformName(): Promise<string> {
+    const branding = await this.prisma.branding.findFirst({ where: { userId: null } })
+    return branding?.shopName ?? 'JamesDataConsult'
+  }
+
+  /**
+   * Email active admins whenever an order is stuck waiting on the delivery
+   * partner, someone paid and has not received their bundle yet, and nobody
+   * was finding out except by opening Needs attention themselves.
+   *
+   * Deliberately not a one-time alert like `SubscriptionsService.alertExpiring`:
+   * this repeats on every sweep, every ten minutes, for as long as any order is
+   * still stuck. A subscription lapsing is a single event worth telling someone
+   * once; a customer still waiting for a bundle they paid for is an ongoing
+   * problem that deserves a standing reminder until it is actually fixed.
+   */
+  private async alertStuckOrders(): Promise<void> {
+    const stuck = (await this.needsAttention()).filter((row) => !row.conflict)
+    if (stuck.length === 0) return
+
+    const admins = await this.prisma.user.findMany({
+      where: { role: 'admin', status: 'active' },
+      select: { name: true, email: true },
+    })
+    const recipients =
+      admins.length > 0
+        ? admins
+        : await this.prisma.user.findMany({
+            where: { role: 'superadmin', status: 'active' },
+            select: { name: true, email: true },
+          })
+    if (recipients.length === 0) {
+      this.log.warn(`${stuck.length} order(s) stuck, nobody to tell`)
+      return
+    }
+
+    const shopName = await this.platformName()
+    const count = stuck.length
+    const appLink = appUrl(this.config, '/admin/needs-attention')
+    const explanation = `${count} order${count === 1 ? '' : 's'} ${count === 1 ? 'has' : 'have'} been waiting too long for the delivery partner. Whoever paid has not received their bundle yet.`
+    const appLinkHtml = `<p style="margin:0"><a href="${appLink}" style="display:inline-block;background:#0B3B8F;color:#fff;font-weight:600;font-size:14px;padding:10px 18px;border-radius:8px;text-decoration:none">Open Needs attention</a></p>`
+    const body =
+      `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${explanation}</p>${appLinkHtml}` +
+      `<p style="margin:18px 0 0;font-size:12.5px;line-height:1.6;color:#64748b">This checks again in ten minutes and keeps emailing while any order is still stuck.</p>`
+    const text =
+      `${explanation}\n\nOpen Needs attention: ${appLink}\n\n` +
+      `This checks again in ten minutes and keeps emailing while any order is still stuck.`
+    const subject = `${count} order${count === 1 ? '' : 's'} stuck, waiting on delivery`
+    const html = wrap(
+      shopName,
+      count === 1 ? 'An order is stuck' : 'Orders are stuck',
+      body,
+      `You are getting this because you are an active admin on ${escape(shopName)}.`,
+    )
+
+    for (const recipient of recipients) {
+      await this.mailer
+        .send({ to: recipient.email, subject, html, text })
+        .catch((error) => this.log.error(`could not tell ${recipient.email} about stuck orders: ${String(error)}`))
+    }
+
+    this.log.warn(`${count} order(s) stuck, told ${recipients.map((r) => r.email).join(', ')}`)
   }
 
   /**

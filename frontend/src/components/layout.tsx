@@ -162,10 +162,13 @@ function navFor(
         badge: openFeedbackCount > 0 ? openFeedbackCount : undefined,
       },
       {
-        to: '/admin/announcements',
+        // An admin with something unread goes straight to Received, the page
+        // the badge is actually counting, rather than landing on Sent and
+        // having to find their way there. Superadmin composes but is never a
+        // recipient, so this always points at Sent for them.
+        to: role === 'admin' && unreadAnnouncementsCount > 0 ? '/admin/announcements/received' : '/admin/announcements',
         label: 'Announcements',
         icon: AlertIcon,
-        // Superadmin composes but is never a recipient, so only an admin gets a badge.
         badge: role === 'admin' && unreadAnnouncementsCount > 0 ? unreadAnnouncementsCount : undefined,
       },
       { to: '/admin/subscriptions', label: 'Subscriptions', icon: ClockIcon },

@@ -52,6 +52,8 @@ import DomainRequests from './pages/admin/DomainRequests'
 import Settings from './pages/admin/Settings'
 import AdminFeedback from './pages/admin/AdminFeedback'
 import AdminAnnouncements from './pages/admin/AdminAnnouncements'
+import ComposeAnnouncement from './pages/admin/ComposeAnnouncement'
+import ReceivedAnnouncements from './pages/admin/ReceivedAnnouncements'
 import Subscriptions from './pages/admin/Subscriptions'
 
 /**
@@ -326,6 +328,8 @@ export default function App() {
               <Route path="/admin/branding" element={<BrandingReview />} />
               <Route path="/admin/feedback" element={<AdminFeedback />} />
               <Route path="/admin/announcements" element={<AdminAnnouncements />} />
+              <Route path="/admin/announcements/new" element={<ComposeAnnouncement />} />
+              <Route path="/admin/announcements/received" element={<ReceivedAnnouncements />} />
               <Route path="/admin/subscriptions" element={<Subscriptions />} />
               <Route path="/admin/team" element={<Team />} />
               <Route path="/admin/domains" element={<DomainRequests />} />
