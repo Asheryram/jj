@@ -4,6 +4,7 @@ import { SettingsService } from '../settings/settings.service'
 import { MailerService } from '../mail/mailer.service'
 import { LedgerService } from '../finance/ledger.service'
 import { ValidationError } from '../common/domain-errors'
+import { claimTransition } from '../common/alert-flag'
 import { escape, wrap } from '../mail/templates'
 
 /** One deliberate movement of James's own money into or out of the float. */
@@ -168,9 +169,17 @@ export class FloatMonitorService {
      * a busy afternoon, which trains you to ignore them. A recovery is recorded
      * silently: seeing the balance climb is not news, and it re-arms the alert
      * for the next time it falls.
+     *
+     * This runs on *every paid order* — two dispatching close together is the
+     * normal case, not an edge case — so the level transition is claimed
+     * atomically (see `claimTransition`'s own doc comment): only the caller
+     * whose `previous` reading is still the stored value acts on it. Losing
+     * the race here means a concurrent order already moved the level, so
+     * acting on a comparison against a value that is no longer current would
+     * either double-send the same alert or silently downgrade a level a
+     * moment after another order correctly raised it.
      */
-    if (level !== previous) {
-      await this.write(ALERT_LEVEL_KEY, level)
+    if (level !== previous && (await claimTransition(this.prisma, ALERT_LEVEL_KEY, previous, level))) {
       if (SEVERITY[level] > SEVERITY[previous]) {
         await this.alert(level, balance, reference, floatWatchAt, floatRiskAt)
       } else {
@@ -542,22 +551,18 @@ export class FloatMonitorService {
    * yet, or there is simply headroom, neither of which is a problem.
    */
   private async checkDiscrepancy(r: FloatReconciliation): Promise<void> {
-    const wasAlerted = await this.discrepancyAlerted()
-    if (r.flagged && !wasAlerted) {
-      await this.write(DISCREPANCY_ALERTED_KEY, true)
-      await this.alertDiscrepancy(r)
-    } else if (!r.flagged && wasAlerted) {
-      await this.write(DISCREPANCY_ALERTED_KEY, false)
-      this.log.log(
-        `float discrepancy cleared (expected GHS ${(r.expected / 100).toFixed(2)}, ` +
-          `observed GHS ${(r.observed / 100).toFixed(2)})`,
-      )
+    if (r.flagged) {
+      if (await claimTransition(this.prisma, DISCREPANCY_ALERTED_KEY, false, true)) {
+        await this.alertDiscrepancy(r)
+      }
+    } else {
+      if (await claimTransition(this.prisma, DISCREPANCY_ALERTED_KEY, true, false)) {
+        this.log.log(
+          `float discrepancy cleared (expected GHS ${(r.expected / 100).toFixed(2)}, ` +
+            `observed GHS ${(r.observed / 100).toFixed(2)})`,
+        )
+      }
     }
-  }
-
-  private async discrepancyAlerted(): Promise<boolean> {
-    const row = await this.prisma.setting.findUnique({ where: { key: DISCREPANCY_ALERTED_KEY } })
-    return row?.value === true
   }
 
   private async write(key: string, value: unknown): Promise<void> {

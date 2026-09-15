@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { DatahubClient } from '../supplier/datahub.client'
 import { FulfilmentService } from './fulfilment.service'
+import { claimTransition } from '../common/alert-flag'
 
 /**
  * Orders paid for and held because DataHub has not approved the recipient.
@@ -227,7 +228,8 @@ export class ApprovalsService {
      * leaves the manual button honest: it either checks, or says when it last did.
      */
     const marker = await this.prisma.setting.findUnique({ where: { key: RECHECK_MARKER } })
-    const last = typeof marker?.value === 'string' ? Date.parse(marker.value) : NaN
+    const previousValue = typeof marker?.value === 'string' ? marker.value : ''
+    const last = previousValue ? Date.parse(previousValue) : NaN
     if (Number.isFinite(last) && Date.now() - last < RECHECK_COOLDOWN_MS) {
       return {
         checked: 0,
@@ -238,12 +240,20 @@ export class ApprovalsService {
       }
     }
 
+    /**
+     * Claimed atomically, not just read-then-written: the approvals screen
+     * runs this on every load, so two admins with it open at once — or one
+     * admin with two tabs — is the ordinary case, not a rare one. Without
+     * this, both could read the cooldown as expired before either wrote a
+     * fresh marker, and both would call DataHub at once — exactly the
+     * thirty-a-minute rate limit this cooldown exists to protect. Losing the
+     * race is treated the same as the cooldown itself firing: a recheck just
+     * started elsewhere, so this call has nothing to add.
+     */
     const startedAt = new Date().toISOString()
-    await this.prisma.setting.upsert({
-      where: { key: RECHECK_MARKER },
-      create: { key: RECHECK_MARKER, value: startedAt },
-      update: { value: startedAt },
-    })
+    if (!(await claimTransition(this.prisma, RECHECK_MARKER, previousValue, startedAt))) {
+      return { checked: 0, approved: [], released: 0, skipped: true, lastCheckedAt: new Date().toISOString() }
+    }
 
     const waiting = await this.prisma.beneficiaryRequest.findMany({
       where: { approvedAt: null },

@@ -5,6 +5,7 @@ import { SettingsService } from '../settings/settings.service'
 import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
+import { claimTransition } from '../common/alert-flag'
 
 /**
  * What is owed, against what there is to pay it with — plus whether Paystack's
@@ -142,27 +143,19 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     // wrong" email.
     if (!reconciliation) return
 
-    const wasAlerted = await this.wasAlerted()
-    if (reconciliation.flagged && !wasAlerted) {
-      await this.setAlerted(true)
-      await this.alertMismatch(reconciliation)
-    } else if (!reconciliation.flagged && wasAlerted) {
-      await this.setAlerted(false)
-      this.log.log('balance mismatch cleared')
+    // See `claimTransition`'s own doc comment — this check runs on a plain
+    // 30-minute interval, so two ticks overlapping (a slow mail send pushing
+    // one past the next timer fire) is the concrete case this guards against,
+    // not a hypothetical one.
+    if (reconciliation.flagged) {
+      if (await claimTransition(this.prisma, SHORTFALL_ALERTED_KEY, false, true)) {
+        await this.alertMismatch(reconciliation)
+      }
+    } else {
+      if (await claimTransition(this.prisma, SHORTFALL_ALERTED_KEY, true, false)) {
+        this.log.log('balance mismatch cleared')
+      }
     }
-  }
-
-  private async wasAlerted(): Promise<boolean> {
-    const row = await this.prisma.setting.findUnique({ where: { key: SHORTFALL_ALERTED_KEY } })
-    return row?.value === true
-  }
-
-  private async setAlerted(value: boolean): Promise<void> {
-    await this.prisma.setting.upsert({
-      where: { key: SHORTFALL_ALERTED_KEY },
-      create: { key: SHORTFALL_ALERTED_KEY, value },
-      update: { value },
-    })
   }
 
   /** Active admins, falling back to superadmins if none exist yet. */
@@ -193,9 +186,10 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     // Only ever a shortfall — `reconcile()` never flags a surplus, so there is
     // no "which direction" branch to phrase here.
     const explanation =
-      `Paystack reports ${escape(ghs(reconciliation.observed))}, but your own records say it ` +
-      `should hold ${escape(ghs(reconciliation.expected))}, all-time, net of every payout and ` +
-      `refund you have sent — ${escape(ghs(reconciliation.shortfall))} short.`
+      `Paystack is showing ${escape(ghs(reconciliation.observed))} right now. Adding up everything ` +
+      `customers have ever paid you, and subtracting every payout and refund you've sent, your own ` +
+      `records say it should be holding ${escape(ghs(reconciliation.expected))} — ` +
+      `${escape(ghs(reconciliation.shortfall))} more than what's actually there.`
 
     const body =
       `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${explanation}</p>` +
@@ -255,27 +249,15 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       (o) => splitDiscrepancy(o.salePrice, o.split as unknown as OrderSplit) !== 0,
     )
 
-    const wasAlerted = await this.wasSplitAlerted()
-    if (broken.length > 0 && !wasAlerted) {
-      await this.setSplitAlerted(true)
-      await this.alertSplitMismatch(broken.map((o) => o.reference))
-    } else if (broken.length === 0 && wasAlerted) {
-      await this.setSplitAlerted(false)
-      this.log.log('split invariant mismatch cleared')
+    if (broken.length > 0) {
+      if (await claimTransition(this.prisma, SPLIT_MISMATCH_ALERTED_KEY, false, true)) {
+        await this.alertSplitMismatch(broken.map((o) => o.reference))
+      }
+    } else {
+      if (await claimTransition(this.prisma, SPLIT_MISMATCH_ALERTED_KEY, true, false)) {
+        this.log.log('split invariant mismatch cleared')
+      }
     }
-  }
-
-  private async wasSplitAlerted(): Promise<boolean> {
-    const row = await this.prisma.setting.findUnique({ where: { key: SPLIT_MISMATCH_ALERTED_KEY } })
-    return row?.value === true
-  }
-
-  private async setSplitAlerted(value: boolean): Promise<void> {
-    await this.prisma.setting.upsert({
-      where: { key: SPLIT_MISMATCH_ALERTED_KEY },
-      create: { key: SPLIT_MISMATCH_ALERTED_KEY, value },
-      update: { value },
-    })
   }
 
   /** Tell whoever can act on it that a recent order's split does not add up. */
@@ -290,9 +272,9 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     const list = references.map((r) => escape(r)).join(', ')
     const explanation =
       `${references.length} recent order${references.length === 1 ? '' : 's'} — ${list} — ` +
-      `do not add up: the customer's payment does not equal the supplier's cost plus every ` +
-      'margin recorded against it. That should never happen, and it means money was either ' +
-      'created or destroyed at the moment of one of these sales.'
+      `${references.length === 1 ? "doesn't" : "don't"} add up: what the customer paid doesn't ` +
+      'match what it cost you plus what everyone earned from it. That should never happen — ' +
+      `money appears to have been created or lost on ${references.length === 1 ? 'this sale' : 'at least one of these sales'}.`
 
     const body =
       `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${explanation}</p>` +
@@ -342,27 +324,15 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     })
 
     const references = overlaps.map((o) => o.orderRef)
-    const wasAlerted = await this.wasOverlapAlerted()
-    if (references.length > 0 && !wasAlerted) {
-      await this.setOverlapAlerted(true)
-      await this.alertRefundOrderOverlap(references)
-    } else if (references.length === 0 && wasAlerted) {
-      await this.setOverlapAlerted(false)
-      this.log.log('completed/refund overlap cleared')
+    if (references.length > 0) {
+      if (await claimTransition(this.prisma, REFUND_ORDER_OVERLAP_ALERTED_KEY, false, true)) {
+        await this.alertRefundOrderOverlap(references)
+      }
+    } else {
+      if (await claimTransition(this.prisma, REFUND_ORDER_OVERLAP_ALERTED_KEY, true, false)) {
+        this.log.log('completed/refund overlap cleared')
+      }
     }
-  }
-
-  private async wasOverlapAlerted(): Promise<boolean> {
-    const row = await this.prisma.setting.findUnique({ where: { key: REFUND_ORDER_OVERLAP_ALERTED_KEY } })
-    return row?.value === true
-  }
-
-  private async setOverlapAlerted(value: boolean): Promise<void> {
-    await this.prisma.setting.upsert({
-      where: { key: REFUND_ORDER_OVERLAP_ALERTED_KEY },
-      create: { key: REFUND_ORDER_OVERLAP_ALERTED_KEY, value },
-      update: { value },
-    })
   }
 
   /** Tell whoever can act on it that a delivered order still has an unresolved refund sitting open. */
