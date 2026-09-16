@@ -896,6 +896,21 @@ export interface AnalyticsCategorySummary {
   profit: number
 }
 
+/** `network`/`category` are plain attributes here (a product belongs to exactly one of each), not the grouping key, so this same fetch can be filtered client-side, e.g. down to one network's products. */
+export interface AnalyticsProductSummary {
+  date: number
+  productId: string
+  productName: string
+  network: string
+  category: string
+  ordersCount: number
+  revenue: number
+  supplierCost: number
+  paystackFee: number
+  agentMargin: number
+  profit: number
+}
+
 export interface AnalyticsDispatchReliability {
   date: number
   network: string
@@ -964,6 +979,10 @@ export interface AnalyticsRefundSummary {
   count: number
   amount: number
   avgTurnaroundHours: number
+  decidedUnder1h: number
+  decided1to4h: number
+  decided4to24h: number
+  decidedOver24h: number
 }
 
 export interface AnalyticsRefundNetworkSummary {
@@ -987,6 +1006,10 @@ export interface AnalyticsPayoutSummary {
   paidCount: number
   paidAmount: number
   avgHoursToPay: number
+  paidUnder1h: number
+  paid1to4h: number
+  paid4to24h: number
+  paidOver24h: number
 }
 
 export interface AnalyticsFeedbackSummary {
@@ -1005,6 +1028,10 @@ export interface AnalyticsApplicationFunnel {
   approved: number
   rejected: number
   avgHoursToDecide: number
+  decidedUnder1h: number
+  decided1to4h: number
+  decided4to24h: number
+  decidedOver24h: number
 }
 
 export interface AnalyticsSolvencySnapshot {
@@ -1028,6 +1055,26 @@ export interface AnalyticsFloatSnapshot {
   reference: number
   level: 'ok' | 'watch' | 'risk'
   observedAt: string | null
+}
+
+/**
+ * `newlyBlocked`/`resolved` are day-scoped and backfillable, like every other
+ * daily table. `stillBlocked`/`stillBlockedValue` are a current snapshot
+ * written into every day's row (same caveat as `AnalyticsSolvencySnapshot`):
+ * summing them across days double-counts a number that never went away.
+ */
+export interface AnalyticsLostRevenue {
+  date: number
+  newlyBlocked: number
+  newlyBlockedValue: number
+  resolved: number
+  avgHoursToResolve: number
+  stillBlocked: number
+  stillBlockedValue: number
+  resolvedUnder1h: number
+  resolved1to4h: number
+  resolved4to24h: number
+  resolvedOver24h: number
 }
 
 // ─── Endpoints ──────────────────────────────────────────────────────────────
@@ -1770,6 +1817,10 @@ export const api = {
   // custom span), built by the dashboard's date-range picker.
   analyticsRefresh: () => request<{ daysProcessed: number }>('/analytics/refresh', { method: 'POST' }),
 
+  /** Rewinds the ETL checkpoint to just before `dateInt` and reruns, recomputing every day from there through today. */
+  analyticsRecomputeFrom: (dateInt: number) =>
+    request<{ daysProcessed: number }>(`/analytics/recompute-from?date=${dateInt}`, { method: 'POST' }),
+
   analyticsDailySummary: (range: AnalyticsRange) =>
     request<AnalyticsDailySummary[]>(`/analytics/daily-summary?${rangeQuery(range)}`),
 
@@ -1778,6 +1829,9 @@ export const api = {
 
   analyticsCategorySummary: (range: AnalyticsRange) =>
     request<AnalyticsCategorySummary[]>(`/analytics/category-summary?${rangeQuery(range)}`),
+
+  analyticsProductSummary: (range: AnalyticsRange) =>
+    request<AnalyticsProductSummary[]>(`/analytics/product-summary?${rangeQuery(range)}`),
 
   analyticsDispatchReliability: (range: AnalyticsRange) =>
     request<AnalyticsDispatchReliability[]>(`/analytics/dispatch-reliability?${rangeQuery(range)}`),
@@ -1828,6 +1882,9 @@ export const api = {
 
   analyticsFloatSnapshot: (range: AnalyticsRange) =>
     request<AnalyticsFloatSnapshot[]>(`/analytics/float-snapshot?${rangeQuery(range)}`),
+
+  analyticsLostRevenue: (range: AnalyticsRange) =>
+    request<AnalyticsLostRevenue[]>(`/analytics/lost-revenue?${rangeQuery(range)}`),
 }
 
 /**

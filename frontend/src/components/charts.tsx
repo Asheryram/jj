@@ -80,7 +80,12 @@ export function BarChart({
         order. The drawing itself is hidden from assistive tech to avoid saying
         everything twice.
       */}
-      <div aria-hidden="true" className="flex gap-2">
+      {/* `overflow-x-hidden` clips only at this row's own right/left edge, so
+          a thinned label's intentional spill into an empty neighbour column
+          (below) still shows, it just can't push past the chart's own
+          boundary and force the page to scroll horizontally on a narrow
+          (mobile, or a squeezed 2-column) container. */}
+      <div aria-hidden="true" className="flex gap-2 overflow-x-hidden">
         <div className="flex shrink-0 flex-col justify-between text-right text-[10px] text-slate-400 dark:text-slate-500" style={{ height }}>
           <span>{valueLabel(axisMax)}</span>
           <span>{valueLabel(axisMax / 2)}</span>
@@ -165,6 +170,13 @@ export function BarChart({
   )
 }
 
+/** A horizontal reference line drawn at a fixed value, e.g. an alert threshold. */
+export interface ChartThreshold {
+  value: number
+  label: string
+  tone?: 'warning' | 'danger'
+}
+
 /**
  * A trend over time: revenue, profit, a rate drifting up or down. `BarChart`
  * above is for discrete, comparable buckets (hour of day, one bar each); a
@@ -176,44 +188,85 @@ export function BarChart({
  * the SVG. A native `<title>` per point gives a hover value on desktop
  * without any extra state, the point markers are large enough to be a real
  * hover/tap target on a phone.
+ *
+ * `previous`, index-aligned with `data` (not date-aligned: it is the equal
+ * length period immediately before), draws a second, dashed, lighter line on
+ * the same axes so "this period vs last period" reads off one chart instead
+ * of a number in one place and a line in another. `thresholds` draws a fixed
+ * reference line, e.g. the same alert floor/ceiling used in `attentionItems`,
+ * so a viewer can see how close a metric is to tripping the alert, not just
+ * whether it did.
  */
 export function LineChart({
   data,
+  previous,
   height = 160,
   valueLabel = cedisCompact,
   label = 'Daily totals',
+  thresholds,
 }: {
   data: { day: string; revenue: number }[]
+  previous?: number[]
   height?: number
   valueLabel?: (value: number) => string
   label?: string
+  thresholds?: ChartThreshold[]
 }) {
   const width = 100
-  const rawMax = Math.max(...data.map((d) => d.revenue), 0)
-  const rawMin = Math.min(...data.map((d) => d.revenue), 0)
+  const allValues = [...data.map((d) => d.revenue), ...(previous ?? []), ...(thresholds ?? []).map((t) => t.value)]
+  const rawMax = Math.max(...allValues, 0)
+  const rawMin = Math.min(...allValues, 0)
   const { axisMin, axisMax } = niceAxisBounds(rawMin, rawMax)
   const span = axisMax - axisMin
   const total = data.reduce((sum, d) => sum + d.revenue, 0)
 
+  const yFor = (value: number) => height - 6 - ((value - axisMin) / span) * (height - 12)
+  const xFor = (index: number) => (data.length > 1 ? (index / (data.length - 1)) * width : width / 2)
+
   // 6px of headroom top and bottom so a point at the max/min isn't drawn
   // right on the edge of the viewBox, clipped by its own stroke width.
-  const points = data.map((point, index) => ({
-    ...point,
-    x: data.length > 1 ? (index / (data.length - 1)) * width : width / 2,
-    y: height - 6 - ((point.revenue - axisMin) / span) * (height - 12),
-  }))
+  const points = data.map((point, index) => ({ ...point, x: xFor(index), y: yFor(point.revenue) }))
   const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')
   const areaPath =
     points.length > 0
       ? `${linePath} L${points[points.length - 1].x.toFixed(2)},${height} L${points[0].x.toFixed(2)},${height} Z`
       : ''
 
+  const previousPoints = (previous ?? []).map((value, index) => ({ x: xFor(index), y: yFor(value) }))
+  const previousPath = previousPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')
+
   const xLabelStep = xAxisStep(data.length)
   const showXLabel = (index: number) => xLabelStep === 1 || index % xLabelStep === 0 || index === data.length - 1
 
   return (
     <figure className="m-0">
-      <div aria-hidden="true" className="flex gap-2">
+      {(previous || thresholds) && (
+        <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+          {previous && (
+            <span className="flex items-center gap-1.5">
+              <span className="h-0.5 w-4 rounded-full bg-brand-600" /> This period
+            </span>
+          )}
+          {previous && (
+            <span className="flex items-center gap-1.5">
+              <span className="h-0.5 w-4 rounded-full border-t-2 border-dashed border-slate-400 dark:border-slate-500" /> Previous period
+            </span>
+          )}
+          {thresholds?.map((t) => (
+            <span key={t.label} className="flex items-center gap-1.5">
+              <span
+                className={cn(
+                  'h-0.5 w-4 rounded-full border-t-2 border-dashed',
+                  t.tone === 'danger' ? 'border-red-500' : 'border-amber-500',
+                )}
+              />
+              {t.label} ({valueLabel(t.value)})
+            </span>
+          ))}
+        </div>
+      )}
+      {/* `overflow-x-hidden`: see the identical note in `BarChart`. */}
+      <div aria-hidden="true" className="flex gap-2 overflow-x-hidden">
         <div className="flex shrink-0 flex-col justify-between text-right text-[10px] text-slate-400 dark:text-slate-500" style={{ height }}>
           <span>{valueLabel(axisMax)}</span>
           <span>{valueLabel((axisMax + axisMin) / 2)}</span>
@@ -248,6 +301,31 @@ export function LineChart({
               className="relative w-full overflow-visible"
             >
               <path d={areaPath} fill="var(--color-brand-100)" className="dark:opacity-20" />
+              {thresholds?.map((t) => (
+                <line
+                  key={t.label}
+                  x1="0"
+                  x2={width}
+                  y1={yFor(t.value)}
+                  y2={yFor(t.value)}
+                  stroke={t.tone === 'danger' ? 'var(--color-red-500)' : 'var(--color-amber-500)'}
+                  strokeWidth="1.5"
+                  strokeDasharray="4 3"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+              {previous && (
+                <path
+                  d={previousPath}
+                  fill="none"
+                  stroke="var(--color-slate-400)"
+                  strokeWidth="1.5"
+                  strokeDasharray="5 4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
               <path
                 d={linePath}
                 fill="none"
@@ -292,13 +370,15 @@ export function LineChart({
             <tr>
               <th scope="col">Day</th>
               <th scope="col">Amount</th>
+              {previous && <th scope="col">Same day, previous period</th>}
             </tr>
           </thead>
           <tbody>
-            {data.map((point) => (
+            {data.map((point, index) => (
               <tr key={point.day}>
                 <th scope="row">{point.day}</th>
                 <td>{valueLabel(point.revenue)}</td>
+                {previous && <td>{previous[index] !== undefined ? valueLabel(previous[index]) : ''}</td>}
               </tr>
             ))}
           </tbody>
@@ -437,5 +517,259 @@ export function Donut({
         ))}
       </ul>
     </div>
+  )
+}
+
+/** Growing-severity ramp: fast (brand) through slow (red), fixed bucket order, not chosen per caller. */
+const DISTRIBUTION_COLOURS = ['bg-brand-600', 'bg-brand-300', 'bg-amber-400', 'bg-red-500']
+
+/**
+ * A compact stacked-bar view of a bucketed turnaround metric (e.g.
+ * <1h / 1-4h / 4-24h / 24h+), shown next to the single averaged number it
+ * explains. One slow outlier can hide inside a fine-looking mean; this shows
+ * the shape the average was computed from instead of trusting the mean alone.
+ */
+export function DistributionBar({ buckets }: { buckets: { label: string; count: number }[] }) {
+  const total = buckets.reduce((sum, b) => sum + b.count, 0)
+  return (
+    <div>
+      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+        {total === 0
+          ? null
+          : buckets.map(
+              (b, i) =>
+                b.count > 0 && (
+                  <div
+                    key={b.label}
+                    className={DISTRIBUTION_COLOURS[i % DISTRIBUTION_COLOURS.length]}
+                    style={{ width: `${(b.count / total) * 100}%` }}
+                    title={`${b.label}: ${b.count}`}
+                  />
+                ),
+            )}
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+        {buckets.map((b) => (
+          <span key={b.label}>
+            {b.label}: <span className="tabular font-medium text-slate-700 dark:text-slate-200">{b.count}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A "who/what is bigger than what else" comparison, top agents, dispatch
+ * reliability by network, refund reasons: exactly the shape a horizontal bar
+ * makes legible at a glance, where the matching table only gives exact
+ * values after mental subtraction. Meant beside its table, not instead of
+ * it. `threshold` draws the same reference line `LineChart` draws
+ * horizontally, so an alert floor/ceiling is visible on the chart itself,
+ * not only implied by a colour once it's already been crossed.
+ */
+export function RankedBarChart({
+  rows,
+  valueLabel = (value: number) => String(value),
+  threshold,
+  toneForValue,
+}: {
+  rows: { label: string; value: number }[]
+  valueLabel?: (value: number) => string
+  threshold?: ChartThreshold
+  toneForValue?: (value: number) => 'warning' | 'danger' | undefined
+}) {
+  const max = Math.max(...rows.map((r) => r.value), threshold?.value ?? 0, 1)
+  return (
+    <div className="space-y-2.5">
+      {rows.map((row) => {
+        const tone = toneForValue?.(row.value)
+        return (
+          <div key={row.label} className="flex items-center gap-2 text-sm">
+            <span className="w-16 shrink-0 truncate text-slate-600 dark:text-slate-300 sm:w-24 md:w-28" title={row.label}>
+              {row.label}
+            </span>
+            <div className="relative h-4 min-w-0 flex-1 rounded-sm bg-slate-100 dark:bg-slate-800">
+              <div
+                className={cn(
+                  'h-full rounded-sm',
+                  tone === 'danger' ? 'bg-red-500' : tone === 'warning' ? 'bg-amber-400' : 'bg-brand-600',
+                )}
+                style={{ width: `${row.value > 0 ? Math.max((row.value / max) * 100, 2) : 0}%` }}
+              />
+              {threshold && (
+                <div
+                  className={cn('absolute inset-y-0 w-0.5', threshold.tone === 'danger' ? 'bg-red-600' : 'bg-amber-600')}
+                  style={{ left: `${Math.min((threshold.value / max) * 100, 100)}%` }}
+                  title={threshold.label}
+                />
+              )}
+            </div>
+            <span className="tabular w-14 shrink-0 text-right font-semibold text-slate-800 dark:text-slate-100">
+              {valueLabel(row.value)}
+            </span>
+          </div>
+        )
+      })}
+      {threshold && (
+        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+          Line: {threshold.label} ({valueLabel(threshold.value)})
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Revenue as bars with profit margin % overlaid as a connected line of dots,
+ * one chart in place of two separate views (a revenue-only donut plus a
+ * profit table elsewhere on the page) that could otherwise show a network or
+ * category as revenue-dominant and barely profitable with nothing making
+ * that contradiction visible. Bar centres and dot x-positions are both
+ * `(index + 0.5) / count`, the same fraction, computed the same way, so an
+ * HTML bar row and an SVG-positioned line always land in registration
+ * without hand-tuned offsets.
+ *
+ * `onSelect`, when given, turns each bar into a real button (not just a
+ * decorative shape under `aria-hidden`) so the whole thing stays keyboard-
+ * and screen-reader-usable once clicking a bar actually does something, e.g.
+ * drilling from a network into its own top products. `selected` highlights
+ * whichever bar's drill-down is currently open; toggling it off (clicking the
+ * same bar again) is the caller's job, this just reports which label was
+ * clicked.
+ */
+export function RevenueMarginChart({
+  rows,
+  height = 200,
+  onSelect,
+  selected,
+}: {
+  rows: { label: string; revenue: number; marginPct: number }[]
+  height?: number
+  onSelect?: (label: string) => void
+  selected?: string | null
+}) {
+  const barsHeight = height - 24
+  const maxRevenue = Math.max(...rows.map((r) => r.revenue), 1)
+  const revenueAxisMax = niceCeiling(maxRevenue)
+  const marginValues = rows.map((r) => r.marginPct)
+  const marginAxisMax = niceCeiling(Math.max(...marginValues, 0, 20))
+  const marginAxisMin = Math.min(...marginValues, 0) < 0 ? -niceCeiling(-Math.min(...marginValues, 0)) : 0
+  const marginSpan = marginAxisMax - marginAxisMin || 1
+
+  const dotX = (index: number) => ((index + 0.5) / rows.length) * 100
+  const dotY = (marginPct: number) => 10 + ((marginAxisMax - marginPct) / marginSpan) * (barsHeight - 20)
+  const linePath = rows.map((r, i) => `${i === 0 ? 'M' : 'L'}${dotX(i).toFixed(2)},${dotY(r.marginPct).toFixed(2)}`).join(' ')
+
+  return (
+    <figure className="m-0">
+      <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+        <span className="flex items-center gap-1.5">
+          <span className="size-2.5 rounded-sm bg-brand-600/80" /> Revenue
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="size-2 rounded-full bg-accent-600" /> Profit margin %
+        </span>
+      </div>
+      <div className="relative" style={{ height }}>
+        <div className="absolute inset-x-0 top-0 flex" style={{ height: barsHeight }}>
+          {rows.map((row) => {
+            const isSelected = selected === row.label
+            const barShape = (
+              <div
+                className={cn(
+                  'w-3/5 max-w-10 rounded-t-md transition-colors',
+                  isSelected ? 'bg-brand-800 dark:bg-brand-400' : 'bg-brand-600/80',
+                )}
+                style={{ height: `${Math.max((row.revenue / revenueAxisMax) * 100, 2)}%` }}
+              />
+            )
+            return onSelect ? (
+              <button
+                key={row.label}
+                type="button"
+                onClick={() => onSelect(row.label)}
+                aria-pressed={isSelected}
+                aria-label={`${row.label}: ${cedisCompact(row.revenue)} revenue, ${row.marginPct.toFixed(1)}% margin, view its top products`}
+                className={cn(
+                  'flex h-full flex-1 flex-col items-center justify-end rounded-t-md outline-none',
+                  'focus-visible:ring-2 focus-visible:ring-brand-400',
+                  isSelected && 'bg-brand-50 dark:bg-brand-900/30',
+                )}
+              >
+                <span className="tabular mb-1 text-center text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+                  {cedisCompact(row.revenue)}
+                </span>
+                {barShape}
+              </button>
+            ) : (
+              <div key={row.label} className="flex h-full flex-1 flex-col items-center justify-end" aria-hidden="true">
+                <span className="tabular mb-1 text-center text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+                  {cedisCompact(row.revenue)}
+                </span>
+                {barShape}
+              </div>
+            )
+          })}
+        </div>
+        <svg
+          aria-hidden="true"
+          viewBox={`0 0 100 ${barsHeight}`}
+          preserveAspectRatio="none"
+          className="pointer-events-none absolute inset-x-0 top-0 h-full w-full overflow-visible"
+          style={{ height: barsHeight }}
+        >
+          <path
+            d={linePath}
+            fill="none"
+            stroke="var(--color-accent-600)"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+        {rows.map((row, i) => (
+          <span
+            key={row.label}
+            aria-hidden="true"
+            title={`${row.label}: ${row.marginPct.toFixed(1)}% margin`}
+            className="pointer-events-none absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-accent-600 dark:border-slate-900"
+            style={{ left: `${dotX(i)}%`, top: dotY(row.marginPct) }}
+          />
+        ))}
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 flex">
+          {rows.map((row) => (
+            <span key={row.label} className="min-w-0 flex-1 truncate px-0.5 text-center text-[11px] text-slate-500 dark:text-slate-400">
+              {row.label}
+            </span>
+          ))}
+        </div>
+      </div>
+      {onSelect && (
+        <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Click a bar to see that network's top products.</p>
+      )}
+      <figcaption className="sr-only">
+        <table>
+          <caption>Revenue and profit margin, by segment</caption>
+          <thead>
+            <tr>
+              <th scope="col">Segment</th>
+              <th scope="col">Revenue</th>
+              <th scope="col">Profit margin</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.label}>
+                <th scope="row">{row.label}</th>
+                <td>{cedisCompact(row.revenue)}</td>
+                <td>{row.marginPct.toFixed(1)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </figcaption>
+    </figure>
   )
 }

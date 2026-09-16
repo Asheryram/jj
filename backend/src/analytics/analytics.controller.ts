@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common'
+import { BadRequestException, Controller, Get, Post, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { Roles } from '../common/auth'
 import { AnalyticsAvailableGuard } from './analytics-available.guard'
@@ -41,6 +41,24 @@ export class AnalyticsController {
     return this.etl.runNow()
   }
 
+  /**
+   * The manual checkpoint-rewind escape hatch: recompute every day from
+   * `date` through today, overwriting whatever was there before, without
+   * wiping the whole warehouse for a full cold-start backfill. Meant for
+   * "I fixed a bug in the ETL logic, recompute the affected days," not for
+   * routine use, so this validates just enough to reject an obvious mistake
+   * (garbage input, a future date) and otherwise trusts the caller.
+   */
+  @Post('recompute-from')
+  recomputeFrom(@Query('date') date?: string) {
+    const dateInt = Number(date)
+    const today = toDateInt(new Date())
+    if (!date || !Number.isInteger(dateInt) || String(dateInt).length !== 8 || dateInt > today) {
+      throw new BadRequestException(`"date" must be a YYYYMMDD date on or before today (${today}).`)
+    }
+    return this.etl.recomputeFrom(dateInt)
+  }
+
   @Get('daily-summary')
   dailySummary(@Query('from') from?: string, @Query('to') to?: string) {
     return this.warehouse.dailySummary.findMany({
@@ -60,6 +78,15 @@ export class AnalyticsController {
   @Get('category-summary')
   categorySummary(@Query('from') from?: string, @Query('to') to?: string) {
     return this.warehouse.dailyCategorySummary.findMany({
+      where: { date: this.range(from, to) },
+      orderBy: { date: 'asc' },
+    })
+  }
+
+  /** `network`/`category` are plain fields here, not part of the key, filtering to one network's products is a client-side job. */
+  @Get('product-summary')
+  productSummary(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.warehouse.dailyProductSummary.findMany({
       where: { date: this.range(from, to) },
       orderBy: { date: 'asc' },
     })
@@ -198,6 +225,14 @@ export class AnalyticsController {
   @Get('float-snapshot')
   floatSnapshot(@Query('from') from?: string, @Query('to') to?: string) {
     return this.warehouse.dailyFloatSnapshot.findMany({
+      where: { date: this.range(from, to) },
+      orderBy: { date: 'asc' },
+    })
+  }
+
+  @Get('lost-revenue')
+  lostRevenue(@Query('from') from?: string, @Query('to') to?: string) {
+    return this.warehouse.dailyLostRevenueSummary.findMany({
       where: { date: this.range(from, to) },
       orderBy: { date: 'asc' },
     })

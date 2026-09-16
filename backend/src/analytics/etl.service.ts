@@ -38,6 +38,23 @@ function average(values: number[]): number {
   return values.length > 0 ? values.reduce((sum, v) => sum + v, 0) / values.length : 0
 }
 
+/**
+ * Buckets a set of turnaround-hours values into the same four bands
+ * everywhere they're used (payouts, refunds, applications, lost-revenue
+ * resolutions): a mean alone hides a slow outlier inside a fine-looking
+ * number, this exposes the actual shape it came from.
+ */
+function bucketHours(values: number[]): { under1h: number; from1to4h: number; from4to24h: number; over24h: number } {
+  const buckets = { under1h: 0, from1to4h: 0, from4to24h: 0, over24h: 0 }
+  for (const hours of values) {
+    if (hours < 1) buckets.under1h++
+    else if (hours < 4) buckets.from1to4h++
+    else if (hours < 24) buckets.from4to24h++
+    else buckets.over24h++
+  }
+  return buckets
+}
+
 /** Orders past this status are paid for, regardless of what happens to them after. */
 const PAID_STATUSES = ['pending', 'processing', 'awaiting_approval', 'completed', 'failed'] as const
 
@@ -185,6 +202,8 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     await this.ingestBronzeUsers(today)
     await this.refreshSilverAgentDim()
     await this.refreshSilverApplications()
+    await this.ingestBronzeBeneficiaryRequests(today)
+    await this.refreshSilverBeneficiaryFacts()
     await this.computeLiveSnapshots(today)
 
     for (const dateInt of dates) {
@@ -202,6 +221,28 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     return { daysProcessed: dates.length }
   }
 
+  /**
+   * The manual escape hatch for "I fixed a bug in the ETL, recompute
+   * everything from March 1st" without wiping the whole warehouse and doing
+   * a full cold-start backfill. Rewinds the checkpoint to just before
+   * `fromDateInt`, then runs immediately: every day from `fromDateInt`
+   * through today gets recomputed on this same run. Safe to replay a day
+   * that was already finalized, every Bronze/Silver/Gold write in
+   * `computeDay` is an upsert keyed by date, so it overwrites that day with
+   * the current logic's answer rather than duplicating rows. The caller
+   * (the controller) is responsible for validating `fromDateInt` is a real,
+   * not-in-the-future date; this trusts it the same way `computeDay` does.
+   */
+  async recomputeFrom(fromDateInt: number): Promise<{ daysProcessed: number }> {
+    const dayBefore = addDays(fromDateInt, -1)
+    await this.warehouse.etlCheckpoint.upsert({
+      where: { id: 1 },
+      create: { id: 1, lastFinalizedDate: dayBefore },
+      update: { lastFinalizedDate: dayBefore },
+    })
+    return this.runNow()
+  }
+
   private async computeDay(dateInt: number): Promise<void> {
     const { start, end } = dayBounds(dateInt)
 
@@ -211,6 +252,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     await this.ingestBronzeRefunds(dateInt, start, end)
     await this.ingestBronzeWithdrawals(dateInt, start, end)
     await this.ingestBronzeFeedback(dateInt, start, end)
+    await this.ingestBronzeLedgerEntries(dateInt, start, end)
 
     // Silver: every business rule resolved exactly once, from Bronze.
     await this.conformSilverOrders(dateInt)
@@ -218,11 +260,13 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     await this.conformSilverRefunds(dateInt)
     await this.conformSilverWithdrawals(dateInt)
     await this.conformSilverFeedback(dateInt)
+    await this.conformSilverLedgerFacts(dateInt)
 
     // Gold: pure aggregation over Silver, what the dashboard actually reads.
     await this.computeDailySummary(dateInt)
     await this.computeNetworkSummary(dateInt)
     await this.computeCategorySummary(dateInt)
+    await this.computeProductSummary(dateInt)
     await this.computeDispatchReliability(dateInt)
     await this.computeAgentSummary(dateInt)
     await this.computeAgentHealth(dateInt, end)
@@ -237,6 +281,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     await this.computeDailyPayoutSummary(dateInt)
     await this.computeDailyFeedbackSummary(dateInt)
     await this.computeDailyApplicationFunnel(dateInt)
+    await this.computeLostRevenueSummary(dateInt)
   }
 
   // ─── Bronze ─────────────────────────────────────────────────────────────
@@ -250,6 +295,8 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
         status: true,
         network: true,
         category: true,
+        productId: true,
+        productName: true,
         salePrice: true,
         split: true,
         soldByCode: true,
@@ -268,6 +315,8 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
           status: o.status,
           network: o.network,
           category: o.category,
+          productId: o.productId,
+          productName: o.productName,
           salePrice: o.salePrice,
           split: o.split as Prisma.InputJsonValue,
           soldByCode: o.soldByCode,
@@ -277,10 +326,17 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
         },
         // A status change (pending -> completed) is the one thing that
         // legitimately mutates an already-ingested row on a re-run of
-        // "today", everything else about an order is frozen at creation.
+        // "today". `productId`/`productName` are also written here even
+        // though they never change after creation: production's own
+        // `Order.productName` is itself frozen at sale time (never rewritten
+        // by a later rename/delete), so re-copying it here is harmless, and
+        // it's what lets `recomputeFrom` backfill this field into Bronze
+        // rows that were ingested before it existed, not just brand-new ones.
         update: {
           status: o.status,
           network: o.network,
+          productId: o.productId,
+          productName: o.productName,
           split: o.split as Prisma.InputJsonValue,
           soldByAgentName: o.soldByAgentName,
         },
@@ -402,6 +458,73 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   /**
+   * `LedgerEntry` is the production schema's own single source of truth for
+   * money (see `BronzeLedgerEntry`'s own comment), keyed by `occurredAt`,
+   * not the order's `createdAt`: a wallet order's revenue is booked at
+   * delivery, a MoMo order's at payment, and bucketing by anything else
+   * would put money on a different day than it actually moved.
+   */
+  private async ingestBronzeLedgerEntries(dateInt: number, start: Date, end: Date): Promise<void> {
+    const entries = await this.prisma.ledgerEntry.findMany({
+      where: { occurredAt: { gte: start, lt: end } },
+      select: { id: true, kind: true, amount: true, affectsProfit: true, orderRef: true, withdrawalId: true, userId: true, occurredAt: true },
+    })
+    for (const e of entries) {
+      // Ledger rows are never edited once written (`LedgerService.record` is
+      // create-only, idempotency-keyed), so there is nothing to refresh on a
+      // re-run of "today", only new rows to add.
+      await this.warehouse.bronzeLedgerEntry.upsert({
+        where: { id: e.id },
+        create: {
+          id: e.id,
+          dateKey: dateInt,
+          kind: e.kind,
+          amount: e.amount,
+          affectsProfit: e.affectsProfit,
+          orderRef: e.orderRef,
+          withdrawalId: e.withdrawalId,
+          userId: e.userId,
+          occurredAt: e.occurredAt,
+        },
+        update: {},
+      })
+    }
+  }
+
+  /**
+   * One snapshot per run, keyed to `today`, the same reasoning as
+   * `ingestBronzeUsers`: the source keeps only the current state per phone,
+   * not a history of every attempt.
+   */
+  private async ingestBronzeBeneficiaryRequests(today: number): Promise<void> {
+    const rows = await this.prisma.beneficiaryRequest.findMany({
+      select: { phone: true, networkKey: true, attempts: true, lastProduct: true, lastValue: true, firstSeenAt: true, approvedAt: true },
+    })
+    for (const r of rows) {
+      await this.warehouse.bronzeBeneficiaryRequest.upsert({
+        where: { phone: r.phone },
+        create: {
+          phone: r.phone,
+          snapshotDateKey: today,
+          networkKey: r.networkKey,
+          attempts: r.attempts,
+          lastProduct: r.lastProduct,
+          lastValue: r.lastValue,
+          firstSeenAt: r.firstSeenAt,
+          approvedAt: r.approvedAt,
+        },
+        update: {
+          snapshotDateKey: today,
+          attempts: r.attempts,
+          lastProduct: r.lastProduct,
+          lastValue: r.lastValue,
+          approvedAt: r.approvedAt,
+        },
+      })
+    }
+  }
+
+  /**
    * Every user with a referral code, not only `role: 'agent'`: an admin
    * account can and does sell directly on its own code (see
    * `SilverAgentDim`'s own comment), and this table has to resolve both.
@@ -469,6 +592,8 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
           isCompleted,
           network: o.network ?? 'UNKNOWN',
           category: o.category,
+          productId: o.productId ?? 'UNKNOWN',
+          productName: o.productName ?? 'UNKNOWN',
           salePrice: o.salePrice,
           supplierCost: isCompleted ? split.supplierCost : 0,
           paystackFee: isCompleted ? split.processingFee : 0,
@@ -487,6 +612,12 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
           isPaid,
           isCompleted,
           network: o.network ?? 'UNKNOWN',
+          // Same reasoning as `network` above and as `ingestBronzeOrders`'s
+          // own update clause: harmless to re-write an immutable value, and
+          // it's what lets a Silver row ingested before this field existed
+          // pick it up on a `recomputeFrom` rerun instead of staying 'UNKNOWN'.
+          productId: o.productId ?? 'UNKNOWN',
+          productName: o.productName ?? 'UNKNOWN',
           supplierCost: isCompleted ? split.supplierCost : 0,
           paystackFee: isCompleted ? split.processingFee : 0,
           agentMargin: isCompleted
@@ -588,6 +719,91 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
           escalated: f.escalated,
           turnaroundHours: f.decidedAt ? hoursBetween(f.createdAt, f.decidedAt) : null,
         },
+      })
+    }
+  }
+
+  /**
+   * `network`/`category`/`agentId` resolved here, once, via a join through
+   * `orderRef` to `BronzeOrder` (and, for the agent, on to `SilverAgentDim`
+   * the same way `conformSilverOrders` does it). A `topup`/`payout`/
+   * `capital_*` entry has no `orderRef` and correctly resolves to nulls,
+   * excluded from any per-network/category/agent cut without special-casing
+   * it at every Gold query.
+   */
+  private async conformSilverLedgerFacts(dateInt: number): Promise<void> {
+    const entries = await this.warehouse.bronzeLedgerEntry.findMany({ where: { dateKey: dateInt } })
+    if (entries.length === 0) return
+
+    const orderRefs = [...new Set(entries.map((e) => e.orderRef).filter((r): r is string => Boolean(r)))]
+    const orders =
+      orderRefs.length > 0
+        ? await this.warehouse.bronzeOrder.findMany({
+            where: { reference: { in: orderRefs } },
+            select: { reference: true, network: true, category: true, productId: true, productName: true, soldByCode: true },
+          })
+        : []
+    const orderByRef = new Map(orders.map((o) => [o.reference, o]))
+
+    const codes = [...new Set(orders.map((o) => o.soldByCode).filter((c): c is string => Boolean(c)))]
+    const agents =
+      codes.length > 0
+        ? await this.warehouse.silverAgentDim.findMany({ where: { referralCode: { in: codes } } })
+        : []
+    const agentByCode = new Map(agents.map((a) => [a.referralCode, a.agentId]))
+
+    for (const e of entries) {
+      const order = e.orderRef ? orderByRef.get(e.orderRef) : undefined
+      // `userId` wins when the entry carries one: `agent_margin` is written
+      // once per share (see `FulfilmentService.recordDelivered`), each
+      // correctly tagged with that share's own agent, which an order-level
+      // `soldByCode` fallback could not tell apart if a sale ever produces
+      // more than one share again. Only entries with no `userId` of their
+      // own (`revenue`, `supplier_cost`, `payment_fee`, all order-wide, not
+      // per-agent) fall back to the order's single seller.
+      const agentId = e.userId ?? (order?.soldByCode ? agentByCode.get(order.soldByCode) ?? order.soldByCode : null)
+      const row = {
+        kind: e.kind,
+        amount: e.amount,
+        affectsProfit: e.affectsProfit,
+        orderRef: e.orderRef,
+        network: order?.network ?? (order ? 'UNKNOWN' : null),
+        category: order?.category ?? null,
+        productId: order?.productId ?? (order ? 'UNKNOWN' : null),
+        productName: order?.productName ?? (order ? 'UNKNOWN' : null),
+        agentId,
+      }
+      await this.warehouse.silverLedgerFact.upsert({
+        where: { entryId: e.id },
+        create: { entryId: e.id, dateKey: e.dateKey, ...row },
+        update: row,
+      })
+    }
+  }
+
+  /**
+   * Refreshed from the latest `BronzeBeneficiaryRequest` snapshot every run,
+   * the same reasoning as `refreshSilverAgentDim`, but safe to write into
+   * historical days for the immutable half of it: `firstSeenAt` never
+   * changes, and neither does `approvedAt` once it is set, only the
+   * "still blocked right now" reading is a snapshot rather than history.
+   */
+  private async refreshSilverBeneficiaryFacts(): Promise<void> {
+    const rows = await this.warehouse.bronzeBeneficiaryRequest.findMany()
+    for (const r of rows) {
+      const resolved = r.approvedAt !== null
+      const data = {
+        networkKey: r.networkKey,
+        attempts: r.attempts,
+        lastValue: r.lastValue,
+        resolved,
+        resolvedDateKey: r.approvedAt ? toDateInt(r.approvedAt) : null,
+        hoursToResolve: r.approvedAt ? hoursBetween(r.firstSeenAt, r.approvedAt) : null,
+      }
+      await this.warehouse.silverBeneficiaryFact.upsert({
+        where: { phone: r.phone },
+        create: { phone: r.phone, dateKey: toDateInt(r.firstSeenAt), ...data },
+        update: data,
       })
     }
   }
@@ -723,31 +939,42 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
 
   // ─── Gold ───────────────────────────────────────────────────────────────
 
+  /** Signed pesewa sum per `kind`, for whatever slice of `SilverLedgerFact` the caller already filtered to. */
+  private sumLedgerByKind(entries: { kind: string; amount: number }[]): Map<string, number> {
+    const totals = new Map<string, number>()
+    for (const e of entries) totals.set(e.kind, (totals.get(e.kind) ?? 0) + e.amount)
+    return totals
+  }
+
+  /**
+   * Every money figure here comes from `SilverLedgerFact`, never from
+   * `SilverOrderFact.supplierCost`/`paystackFee`/`agentMargin` (which no
+   * longer exist as separate fields): those used to be parsed straight out
+   * of `Order.split`, a point-in-time estimate frozen at sale, not the
+   * settled truth `LedgerEntry` is. `profit` is the single
+   * `affectsProfit`-filtered sum, the same computation `LedgerService.statement()`
+   * itself uses, which nets revenue, cost, fees, margins AND refunds/write-offs/
+   * overpayments in one pass, this table's own `refundsAmount` is no longer
+   * something a reader has to remember to also subtract.
+   */
   private async computeDailySummary(dateInt: number): Promise<void> {
-    const orders = await this.warehouse.silverOrderFact.findMany({ where: { dateKey: dateInt } })
-    const paid = orders.filter((o) => o.isPaid)
-    const completed = orders.filter((o) => o.isCompleted)
-
-    const revenue = paid.reduce((sum, o) => sum + o.salePrice, 0)
-    const supplierCost = completed.reduce((sum, o) => sum + o.supplierCost, 0)
-    const paystackFees = completed.reduce((sum, o) => sum + o.paystackFee, 0)
-    const agentMargins = completed.reduce((sum, o) => sum + o.agentMargin, 0)
-    const completedRevenue = completed.reduce((sum, o) => sum + o.salePrice, 0)
-    const profit = completedRevenue - supplierCost - paystackFees - agentMargins
-
-    const refunds = await this.warehouse.silverRefundFact.findMany({ where: { dateKey: dateInt } })
-    const refundsAmount = refunds.reduce((sum, r) => sum + r.amount, 0)
+    const orders = await this.warehouse.silverOrderFact.findMany({
+      where: { dateKey: dateInt },
+      select: { status: true },
+    })
+    const ledger = await this.warehouse.silverLedgerFact.findMany({ where: { dateKey: dateInt } })
+    const byKind = this.sumLedgerByKind(ledger)
 
     const row = {
       ordersCount: orders.length,
-      completedCount: completed.length,
+      completedCount: orders.filter((o) => o.status === 'completed').length,
       failedCount: orders.filter((o) => o.status === 'failed').length,
-      revenue,
-      supplierCost,
-      paystackFees,
-      agentMargins,
-      refundsAmount,
-      profit,
+      revenue: byKind.get('revenue') ?? 0,
+      supplierCost: -(byKind.get('supplier_cost') ?? 0),
+      paystackFees: -(byKind.get('payment_fee') ?? 0),
+      agentMargins: -(byKind.get('agent_margin') ?? 0),
+      refundsAmount: -(byKind.get('refund') ?? 0),
+      profit: ledger.filter((e) => e.affectsProfit).reduce((sum, e) => sum + e.amount, 0),
     }
     await this.warehouse.dailySummary.upsert({
       where: { date: dateInt },
@@ -756,29 +983,31 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     })
   }
 
+  /** Same money-from-the-ledger approach as `computeDailySummary`, cut by `SilverLedgerFact.network` instead of platform-wide. */
   private async computeNetworkSummary(dateInt: number): Promise<void> {
-    const orders = await this.warehouse.silverOrderFact.findMany({ where: { dateKey: dateInt, isPaid: true } })
+    const orders = await this.warehouse.silverOrderFact.findMany({
+      where: { dateKey: dateInt, isPaid: true },
+      select: { network: true },
+    })
+    const ordersCountByNetwork = new Map<string, number>()
+    for (const o of orders) ordersCountByNetwork.set(o.network, (ordersCountByNetwork.get(o.network) ?? 0) + 1)
 
-    const byNetwork = new Map<
-      string,
-      { ordersCount: number; revenue: number; completedRevenue: number; supplierCost: number; paystackFee: number; agentMargin: number }
-    >()
-    for (const o of orders) {
-      const row = byNetwork.get(o.network) ?? { ordersCount: 0, revenue: 0, completedRevenue: 0, supplierCost: 0, paystackFee: 0, agentMargin: 0 }
-      row.ordersCount++
-      row.revenue += o.salePrice
-      if (o.isCompleted) {
-        row.completedRevenue += o.salePrice
-        row.supplierCost += o.supplierCost
-        row.paystackFee += o.paystackFee
-        row.agentMargin += o.agentMargin
-      }
-      byNetwork.set(o.network, row)
+    const ledger = await this.warehouse.silverLedgerFact.findMany({ where: { dateKey: dateInt, network: { not: null } } })
+    const byNetwork = new Map<string, { revenue: number; supplierCost: number; paystackFee: number; agentMargin: number; profit: number }>()
+    for (const e of ledger) {
+      const network = e.network as string
+      const row = byNetwork.get(network) ?? { revenue: 0, supplierCost: 0, paystackFee: 0, agentMargin: 0, profit: 0 }
+      if (e.kind === 'revenue') row.revenue += e.amount
+      else if (e.kind === 'supplier_cost') row.supplierCost += -e.amount
+      else if (e.kind === 'payment_fee') row.paystackFee += -e.amount
+      else if (e.kind === 'agent_margin') row.agentMargin += -e.amount
+      if (e.affectsProfit) row.profit += e.amount
+      byNetwork.set(network, row)
     }
 
-    for (const [network, row] of byNetwork) {
-      const { completedRevenue, ...rest } = row
-      const data = { ...rest, profit: completedRevenue - row.supplierCost - row.paystackFee - row.agentMargin }
+    for (const network of new Set([...ordersCountByNetwork.keys(), ...byNetwork.keys()])) {
+      const money = byNetwork.get(network) ?? { revenue: 0, supplierCost: 0, paystackFee: 0, agentMargin: 0, profit: 0 }
+      const data = { ordersCount: ordersCountByNetwork.get(network) ?? 0, ...money }
       await this.warehouse.dailyNetworkSummary.upsert({
         where: { date_network: { date: dateInt, network } },
         create: { date: dateInt, network, ...data },
@@ -787,34 +1016,108 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
+  /** Same shape as `computeNetworkSummary`, cut by category instead of network. */
   private async computeCategorySummary(dateInt: number): Promise<void> {
-    const orders = await this.warehouse.silverOrderFact.findMany({ where: { dateKey: dateInt, isPaid: true } })
+    const orders = await this.warehouse.silverOrderFact.findMany({
+      where: { dateKey: dateInt, isPaid: true },
+      select: { category: true },
+    })
+    const ordersCountByCategory = new Map<string, number>()
+    for (const o of orders) ordersCountByCategory.set(o.category, (ordersCountByCategory.get(o.category) ?? 0) + 1)
 
-    const byCategory = new Map<
-      string,
-      { ordersCount: number; revenue: number; completedRevenue: number; supplierCost: number; paystackFee: number; agentMargin: number }
-    >()
-    for (const o of orders) {
-      const row = byCategory.get(o.category) ?? { ordersCount: 0, revenue: 0, completedRevenue: 0, supplierCost: 0, paystackFee: 0, agentMargin: 0 }
-      row.ordersCount++
-      row.revenue += o.salePrice
-      if (o.isCompleted) {
-        row.completedRevenue += o.salePrice
-        row.supplierCost += o.supplierCost
-        row.paystackFee += o.paystackFee
-        row.agentMargin += o.agentMargin
-      }
-      byCategory.set(o.category, row)
+    const ledger = await this.warehouse.silverLedgerFact.findMany({ where: { dateKey: dateInt, category: { not: null } } })
+    const byCategory = new Map<string, { revenue: number; supplierCost: number; paystackFee: number; agentMargin: number; profit: number }>()
+    for (const e of ledger) {
+      const category = e.category as string
+      const row = byCategory.get(category) ?? { revenue: 0, supplierCost: 0, paystackFee: 0, agentMargin: 0, profit: 0 }
+      if (e.kind === 'revenue') row.revenue += e.amount
+      else if (e.kind === 'supplier_cost') row.supplierCost += -e.amount
+      else if (e.kind === 'payment_fee') row.paystackFee += -e.amount
+      else if (e.kind === 'agent_margin') row.agentMargin += -e.amount
+      if (e.affectsProfit) row.profit += e.amount
+      byCategory.set(category, row)
     }
 
-    for (const [category, row] of byCategory) {
-      const { completedRevenue, ...rest } = row
-      const data = { ...rest, profit: completedRevenue - row.supplierCost - row.paystackFee - row.agentMargin }
+    for (const category of new Set([...ordersCountByCategory.keys(), ...byCategory.keys()])) {
+      const money = byCategory.get(category) ?? { revenue: 0, supplierCost: 0, paystackFee: 0, agentMargin: 0, profit: 0 }
+      const data = { ordersCount: ordersCountByCategory.get(category) ?? 0, ...money }
       await this.warehouse.dailyCategorySummary.upsert({
         where: { date_category: { date: dateInt, category } },
         create: { date: dateInt, category, ...data },
         update: data,
       })
+    }
+  }
+
+  /**
+   * Same formula and same ledger-sourced money as `computeNetworkSummary`/
+   * `computeCategorySummary`, one row per individual product instead. Unlike
+   * those two, `network`/`category` are carried here as plain attributes on
+   * each product row (not the grouping key), so the frontend can filter this
+   * same table down to "just this network's products" client-side, e.g. the
+   * drill-down when a bar on the network chart is clicked, without a second
+   * per-network product table.
+   */
+  private async computeProductSummary(dateInt: number): Promise<void> {
+    interface ProductRow {
+      productName: string
+      network: string
+      category: string
+      ordersCount: number
+      revenue: number
+      supplierCost: number
+      paystackFee: number
+      agentMargin: number
+      profit: number
+    }
+    const empty = (productName: string, network: string, category: string): ProductRow => ({
+      productName,
+      network,
+      category,
+      ordersCount: 0,
+      revenue: 0,
+      supplierCost: 0,
+      paystackFee: 0,
+      agentMargin: 0,
+      profit: 0,
+    })
+
+    const byProduct = new Map<string, ProductRow>()
+
+    const orders = await this.warehouse.silverOrderFact.findMany({
+      where: { dateKey: dateInt, isPaid: true },
+      select: { productId: true, productName: true, network: true, category: true },
+    })
+    for (const o of orders) {
+      const row = byProduct.get(o.productId) ?? empty(o.productName, o.network, o.category)
+      row.ordersCount++
+      byProduct.set(o.productId, row)
+    }
+
+    const ledger = await this.warehouse.silverLedgerFact.findMany({ where: { dateKey: dateInt, productId: { not: null } } })
+    for (const e of ledger) {
+      const productId = e.productId as string
+      const row = byProduct.get(productId) ?? empty(e.productName ?? 'UNKNOWN', e.network ?? 'UNKNOWN', e.category ?? 'UNKNOWN')
+      if (e.kind === 'revenue') row.revenue += e.amount
+      else if (e.kind === 'supplier_cost') row.supplierCost += -e.amount
+      else if (e.kind === 'payment_fee') row.paystackFee += -e.amount
+      else if (e.kind === 'agent_margin') row.agentMargin += -e.amount
+      if (e.affectsProfit) row.profit += e.amount
+      byProduct.set(productId, row)
+    }
+
+    // Delete-then-insert, not a per-key upsert: unlike `network`/`category`
+    // (a small, effectively permanent set), `recomputeFrom` fixing a bug in
+    // how an order resolves to its product can genuinely change WHICH
+    // productId an already-processed order belongs to (this is exactly how
+    // this table's own bootstrapping bug was found: every existing order
+    // resolved to 'UNKNOWN' until `ingestBronzeOrders`/`conformSilverOrders`
+    // were fixed to backfill it). An upsert alone leaves the old, now-wrong
+    // key's row behind, since nothing about re-running ever revisits or
+    // deletes a key the fresh computation no longer produces.
+    await this.warehouse.dailyProductSummary.deleteMany({ where: { date: dateInt } })
+    for (const [productId, row] of byProduct) {
+      await this.warehouse.dailyProductSummary.create({ data: { date: dateInt, productId, ...row } })
     }
   }
 
@@ -844,27 +1147,44 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
+  /** `ordersCount`/`agentName`/`agentCode` from `SilverOrderFact` (identity, unaffected by the money source); `revenue`/`margin` from `SilverLedgerFact`, grouped by `agentId`. */
   private async computeAgentSummary(dateInt: number): Promise<void> {
     const orders = await this.warehouse.silverOrderFact.findMany({
       where: { dateKey: dateInt, isPaid: true, agentCode: { not: null } },
     })
     if (orders.length === 0) return
 
-    const byAgent = new Map<string, { agentId: string; name: string; ordersCount: number; revenue: number; margin: number }>()
+    const byAgent = new Map<string, { agentId: string; name: string; ordersCount: number }>()
     for (const o of orders) {
       const code = o.agentCode as string
-      const row = byAgent.get(code) ?? { agentId: o.agentId ?? code, name: o.agentName ?? code, ordersCount: 0, revenue: 0, margin: 0 }
+      const row = byAgent.get(code) ?? { agentId: o.agentId ?? code, name: o.agentName ?? code, ordersCount: 0 }
       row.ordersCount++
-      row.revenue += o.salePrice
-      if (o.isCompleted) row.margin += o.agentMargin
       byAgent.set(code, row)
     }
 
+    const agentIds = [...new Set([...byAgent.values()].map((r) => r.agentId))]
+    const ledger = await this.warehouse.silverLedgerFact.findMany({
+      where: { dateKey: dateInt, agentId: { in: agentIds } },
+    })
+    const revenueByAgent = new Map<string, number>()
+    const marginByAgent = new Map<string, number>()
+    for (const e of ledger) {
+      const agentId = e.agentId as string
+      if (e.kind === 'revenue') revenueByAgent.set(agentId, (revenueByAgent.get(agentId) ?? 0) + e.amount)
+      else if (e.kind === 'agent_margin') marginByAgent.set(agentId, (marginByAgent.get(agentId) ?? 0) + -e.amount)
+    }
+
     for (const [code, row] of byAgent) {
+      const data = {
+        agentName: row.name,
+        ordersCount: row.ordersCount,
+        revenue: revenueByAgent.get(row.agentId) ?? 0,
+        margin: marginByAgent.get(row.agentId) ?? 0,
+      }
       await this.warehouse.dailyAgentSummary.upsert({
         where: { date_agentId: { date: dateInt, agentId: row.agentId } },
-        create: { date: dateInt, agentId: row.agentId, agentName: row.name, agentCode: code, ordersCount: row.ordersCount, revenue: row.revenue, margin: row.margin },
-        update: { agentName: row.name, ordersCount: row.ordersCount, revenue: row.revenue, margin: row.margin },
+        create: { date: dateInt, agentId: row.agentId, agentCode: code, ...data },
+        update: data,
       })
     }
   }
@@ -1004,10 +1324,21 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     })
   }
 
+  /**
+   * `avgSupplierCost` is the real settled charge from `SilverLedgerFact`'s
+   * `supplier_cost` entries, not `SilverOrderFact.supplierCost` (the estimate
+   * frozen in `Order.split` at sale time, before DataHub had actually
+   * replied with what it charged). That estimate is exactly what this KPI
+   * is supposed to be checking pricing *against*, so it cannot also be the
+   * thing standing in for the real number. A `supplier_cost` entry can be
+   * booked days after the order itself, on whichever day DataHub actually
+   * settles it, so this joins by `orderRef` across all of `SilverLedgerFact`,
+   * not by matching `dateKey` to this day.
+   */
   private async computeMarginAccuracy(dateInt: number): Promise<void> {
-    const orders = await this.warehouse.silverOrderFact.findMany({
-      where: { dateKey: dateInt, isCompleted: true },
-      select: { salePrice: true, supplierCost: true },
+    const orders = await this.warehouse.bronzeOrder.findMany({
+      where: { dateKey: dateInt, status: 'completed' },
+      select: { reference: true, salePrice: true },
     })
     if (orders.length === 0) {
       await this.warehouse.dailyMarginAccuracy.upsert({
@@ -1018,8 +1349,15 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       return
     }
 
+    const refs = orders.map((o) => o.reference)
+    const costEntries = await this.warehouse.silverLedgerFact.findMany({
+      where: { kind: 'supplier_cost', orderRef: { in: refs } },
+      select: { orderRef: true, amount: true },
+    })
+    const costByRef = new Map(costEntries.map((e) => [e.orderRef as string, -e.amount]))
+
     const avgSalePrice = Math.round(orders.reduce((sum, o) => sum + o.salePrice, 0) / orders.length)
-    const avgSupplierCost = Math.round(orders.reduce((sum, o) => sum + o.supplierCost, 0) / orders.length)
+    const avgSupplierCost = Math.round(orders.reduce((sum, o) => sum + (costByRef.get(o.reference) ?? 0), 0) / orders.length)
     const avgMarginBp = avgSalePrice > 0 ? Math.round(((avgSalePrice - avgSupplierCost) / avgSalePrice) * 10_000) : 0
 
     await this.warehouse.dailyMarginAccuracy.upsert({
@@ -1031,10 +1369,15 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
 
   private async computeRefundSummary(dateInt: number): Promise<void> {
     const refunds = await this.warehouse.silverRefundFact.findMany({ where: { dateKey: dateInt } })
+    const buckets = bucketHours(refunds.map((r) => r.turnaroundHours))
     const row = {
       count: refunds.length,
       amount: refunds.reduce((sum, r) => sum + r.amount, 0),
       avgTurnaroundHours: average(refunds.map((r) => r.turnaroundHours)),
+      decidedUnder1h: buckets.under1h,
+      decided1to4h: buckets.from1to4h,
+      decided4to24h: buckets.from4to24h,
+      decidedOver24h: buckets.over24h,
     }
     await this.warehouse.dailyRefundSummary.upsert({
       where: { date: dateInt },
@@ -1082,12 +1425,17 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
   private async computeDailyPayoutSummary(dateInt: number): Promise<void> {
     const withdrawals = await this.warehouse.silverWithdrawalFact.findMany({ where: { dateKey: dateInt } })
     const paid = withdrawals.filter((w) => w.isPaid)
+    const buckets = bucketHours(paid.map((w) => w.hoursToPay ?? 0))
     const row = {
       requestedCount: withdrawals.length,
       requestedAmount: withdrawals.reduce((sum, w) => sum + w.amount, 0),
       paidCount: paid.length,
       paidAmount: paid.reduce((sum, w) => sum + w.amount, 0),
       avgHoursToPay: average(paid.map((w) => w.hoursToPay ?? 0)),
+      paidUnder1h: buckets.under1h,
+      paid1to4h: buckets.from1to4h,
+      paid4to24h: buckets.from4to24h,
+      paidOver24h: buckets.over24h,
     }
     await this.warehouse.dailyPayoutSummary.upsert({
       where: { date: dateInt },
@@ -1125,10 +1473,51 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     const approved = decidedToday.filter((a) => a.outcome === 'approved').length
     const rejected = decidedToday.filter((a) => a.outcome === 'rejected').length
     const avgHoursToDecide = average(decidedToday.map((a) => a.hoursToDecide ?? 0))
+    const buckets = bucketHours(decidedToday.map((a) => a.hoursToDecide ?? 0))
 
     if (applied === 0 && decidedToday.length === 0) return
-    const row = { applied, approved, rejected, avgHoursToDecide }
+    const row = {
+      applied,
+      approved,
+      rejected,
+      avgHoursToDecide,
+      decidedUnder1h: buckets.under1h,
+      decided1to4h: buckets.from1to4h,
+      decided4to24h: buckets.from4to24h,
+      decidedOver24h: buckets.over24h,
+    }
     await this.warehouse.dailyApplicationFunnel.upsert({
+      where: { date: dateInt },
+      create: { date: dateInt, ...row },
+      update: row,
+    })
+  }
+
+  /**
+   * `newlyBlocked`/`resolved` are day-scoped and safe to backfill, immutable
+   * events. `stillBlocked` is not: it is `SilverBeneficiaryFact`'s *current*
+   * unresolved count, written the same on every day this runs for, the same
+   * "snapshot, not history" caveat as `computeAgentHealth`.
+   */
+  private async computeLostRevenueSummary(dateInt: number): Promise<void> {
+    const newlyBlockedRows = await this.warehouse.silverBeneficiaryFact.findMany({ where: { dateKey: dateInt } })
+    const resolvedRows = await this.warehouse.silverBeneficiaryFact.findMany({ where: { resolvedDateKey: dateInt } })
+    const stillBlockedRows = await this.warehouse.silverBeneficiaryFact.findMany({ where: { resolved: false } })
+    const buckets = bucketHours(resolvedRows.map((r) => r.hoursToResolve ?? 0))
+
+    const row = {
+      newlyBlocked: newlyBlockedRows.length,
+      newlyBlockedValue: newlyBlockedRows.reduce((sum, r) => sum + (r.lastValue ?? 0), 0),
+      resolved: resolvedRows.length,
+      avgHoursToResolve: average(resolvedRows.map((r) => r.hoursToResolve ?? 0)),
+      stillBlocked: stillBlockedRows.length,
+      stillBlockedValue: stillBlockedRows.reduce((sum, r) => sum + (r.lastValue ?? 0), 0),
+      resolvedUnder1h: buckets.under1h,
+      resolved1to4h: buckets.from1to4h,
+      resolved4to24h: buckets.from4to24h,
+      resolvedOver24h: buckets.over24h,
+    }
+    await this.warehouse.dailyLostRevenueSummary.upsert({
       where: { date: dateInt },
       create: { date: dateInt, ...row },
       update: row,

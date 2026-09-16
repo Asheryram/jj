@@ -12,7 +12,7 @@ import {
 } from 'react'
 import type { Network, OrderStatus } from '../data/types'
 import { NETWORK_STYLES } from '../lib/networks'
-import { CheckIcon, ClockIcon, CopyIcon, XIcon, AlertIcon } from './icons'
+import { CheckIcon, ClockIcon, CopyIcon, XIcon, AlertIcon, HelpIcon } from './icons'
 
 export function cn(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ')
@@ -173,19 +173,87 @@ export function Card({
   )
 }
 
+/**
+ * A small "?" affordance for "what does this chart actually show and how do
+ * I read it", set apart from a card's `subtitle` (always-visible prose,
+ * usually about scope: what range, what filter) because a chart-reading
+ * explanation is longer and only needed occasionally, not something to force
+ * everyone to read past every time. Hover reveals it with a mouse; a tap
+ * opens it where there's no hover to rely on, closing again on a tap
+ * anywhere outside it or on Escape.
+ *
+ * `onClick` only ever opens, never toggles: a real mouse click fires a
+ * `mouseenter` first (which already opened it via hover), so a toggling
+ * click would immediately flip it straight back closed, the tooltip would
+ * never actually appear for a mouse user who both hovers and clicks.
+ *
+ * The bubble is centred (`inset-x-0 mx-auto`) against the nearest `relative`
+ * ancestor, not against this icon's own position, on purpose: the icon sits
+ * wherever the title text ends, which varies card to card, and a bubble
+ * anchored to the icon itself would run off either edge of a narrow card
+ * depending on the title's length. `CardHead` supplies that `relative`
+ * ancestor; a caller reusing this elsewhere needs to do the same.
+ */
+export function HelpTooltip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLSpanElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [open])
+
+  return (
+    <span ref={ref} className="inline-flex shrink-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setOpen(false)
+        }}
+        aria-label="What this shows"
+        aria-expanded={open}
+        className="rounded-full text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+      >
+        <HelpIcon className="size-4" />
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          className="absolute inset-x-0 top-full z-20 mx-auto mt-1.5 w-64 max-w-[calc(100%-1.5rem)] rounded-lg bg-slate-900 p-2.5 text-xs font-normal text-white shadow-lg dark:bg-slate-700"
+        >
+          {text}
+        </span>
+      )}
+    </span>
+  )
+}
+
 export function CardHead({
   title,
   subtitle,
   action,
+  tooltip,
 }: {
   title: string
   subtitle?: string
   action?: ReactNode
+  /** "How do I read this chart", shown via `HelpTooltip` next to the title. */
+  tooltip?: string
 }) {
   return (
     <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800 px-4 py-3.5 sm:px-5">
-      <div className="min-w-0">
-        <h2 className="truncate font-semibold text-slate-900 dark:text-slate-50">{title}</h2>
+      {/* `relative`: the positioning ancestor `HelpTooltip`'s bubble centres
+          against, see that component's own comment. */}
+      <div className="relative min-w-0">
+        <h2 className="flex min-w-0 items-center gap-1.5 font-semibold text-slate-900 dark:text-slate-50">
+          <span className="truncate">{title}</span>
+          {tooltip && <HelpTooltip text={tooltip} />}
+        </h2>
         {subtitle && <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
       </div>
       {action}
@@ -707,7 +775,8 @@ export function StatTile({
 }: {
   label: string
   value: string
-  hint?: string
+  /** A plain caption, or a coloured trend readout, e.g. `TrendBadge` in `Analytics.tsx`. */
+  hint?: ReactNode
   icon?: ReactNode
   tone?: 'neutral' | 'brand' | 'success' | 'warning'
 }) {

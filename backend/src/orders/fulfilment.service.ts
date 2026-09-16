@@ -488,7 +488,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
    * APPROVAL_HOLD_HOURS.
    */
   private async holdForApproval(
-    order: { id: string; reference: string; recipient: string; productName: string },
+    order: { id: string; reference: string; recipient: string; productName: string; salePrice: number },
     reason: string,
   ): Promise<void> {
     await this.prisma.order.update({
@@ -511,10 +511,12 @@ export class FulfilmentService implements OnApplicationBootstrap {
         phone: order.recipient,
         networkKey: supplier?.networkKey ?? 'YELLO',
         lastProduct: order.productName,
+        lastValue: order.salePrice,
       },
       update: {
         attempts: { increment: 1 },
         lastProduct: order.productName,
+        lastValue: order.salePrice,
         approvedAt: null,
       },
     })

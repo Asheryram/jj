@@ -58,6 +58,11 @@ model BronzeOrder {
   status          String
   network         String?
   category        String
+  /// `Order.productId`/`productName`, the same denormalised-at-sale-time name
+  /// production itself keeps (see `Order.productName`'s own comment): a
+  /// renamed or deleted product doesn't rewrite this order's history.
+  productId       String?  @map("product_id")
+  productName     String?  @map("product_name")
   salePrice       Int      @map("sale_price")
   split           Json
   soldByCode      String?  @map("sold_by_code")
@@ -160,6 +165,53 @@ model BronzeUser {
   @@map("bronze_users")
 }
 
+/// A near-verbatim copy of `LedgerEntry`, the production schema's own single
+/// source of truth for money: written from exactly one place
+/// (`LedgerService.record`), idempotent by construction, and already signed
+/// consistently (positive is cash in). Every money figure downstream, revenue,
+/// supplier cost, fees, margins, refunds, comes from here, never from parsing
+/// `Order.split`, which is a point-in-time estimate frozen at sale, not the
+/// settled truth. Keyed by `occurredAt`, not `createdAt`: a wallet order's
+/// revenue is booked at delivery, not at purchase, so bucketing by the event
+/// date is what actually lines up with when the money moved.
+model BronzeLedgerEntry {
+  id            String   @id
+  dateKey       Int      @map("date_key")
+  kind          String
+  amount        Int
+  affectsProfit Boolean  @map("affects_profit")
+  orderRef      String?  @map("order_ref")
+  withdrawalId  String?  @map("withdrawal_id")
+  userId        String?  @map("user_id")
+  occurredAt    DateTime @map("occurred_at")
+  ingestedAt    DateTime @updatedAt @map("ingested_at")
+
+  @@index([dateKey])
+  @@map("bronze_ledger_entries")
+}
+
+/// One row per phone number DataHub has refused to deliver to, a real sale
+/// with nowhere to go until an admin approves it by hand. Snapshot, not an
+/// event stream, same reasoning as `BronzeUser`: the source keeps only the
+/// current state per phone (`attempts`, `lastValue`, `approvedAt`), not a
+/// history of every attempt. `firstSeenAt`/`approvedAt` are the two
+/// immutable-once-set timestamps that let Silver still place "first blocked"
+/// and "resolved" on the correct historical day despite that.
+model BronzeBeneficiaryRequest {
+  phone           String    @id
+  snapshotDateKey Int       @map("snapshot_date_key")
+  networkKey      String    @map("network_key")
+  attempts        Int
+  lastProduct     String?   @map("last_product")
+  lastValue       Int?      @map("last_value")
+  firstSeenAt     DateTime  @map("first_seen_at")
+  approvedAt      DateTime? @map("approved_at")
+  ingestedAt      DateTime  @updatedAt @map("ingested_at")
+
+  @@index([snapshotDateKey])
+  @@map("bronze_beneficiary_requests")
+}
+
 // ─── Silver: cleaned and conformed ──────────────────────────────────────────
 //
 // One row per business event (an order, a dispatch, a refund), same grain as
@@ -184,6 +236,9 @@ model SilverOrderFact {
   isCompleted  Boolean @map("is_completed")
   network      String /// Defaulted to 'UNKNOWN' here, never null.
   category     String
+  /// Defaulted to 'UNKNOWN' the same way `network` is, see `conformSilverOrders`.
+  productId    String  @map("product_id")
+  productName  String  @map("product_name")
   salePrice    Int     @map("sale_price")
   supplierCost Int     @default(0) @map("supplier_cost") /// 0 unless isCompleted.
   paystackFee  Int     @default(0) @map("paystack_fee")
@@ -290,6 +345,44 @@ model SilverAgentDim {
   @@map("silver_agent_dim")
 }
 
+/// The P&L fact, one row per `LedgerEntry`. `network`/`category`/`productId`/
+/// `agentId` are resolved here via a join through `orderRef` to `BronzeOrder`,
+/// exactly once, so Gold's money aggregations are pure `GROUP BY` with nothing
+/// left to resolve, the same relationship `SilverOrderFact` has to `BronzeOrder`.
+/// A `topup`/`payout`/`capital_*` entry has no `orderRef` and resolves to
+/// nulls here, correctly excluded from any per-network/category/product/agent cut.
+model SilverLedgerFact {
+  entryId       String  @id @map("entry_id")
+  dateKey       Int     @map("date_key")
+  kind          String
+  amount        Int
+  affectsProfit Boolean @map("affects_profit")
+  orderRef      String? @map("order_ref")
+  network       String? /// Null when `orderRef` is null or the order's own network is null.
+  category      String?
+  productId     String? @map("product_id")
+  productName   String? @map("product_name")
+  agentId       String? @map("agent_id")
+
+  @@index([dateKey])
+  @@map("silver_ledger_facts")
+}
+
+model SilverBeneficiaryFact {
+  phone           String  @id
+  dateKey         Int     @map("date_key") /// The day first seen, immutable.
+  resolvedDateKey Int?    @map("resolved_date_key") /// The day `approvedAt` was set, immutable once it is.
+  networkKey      String  @map("network_key")
+  attempts        Int
+  lastValue       Int?    @map("last_value")
+  resolved        Boolean /// `approvedAt != null` as of the latest snapshot.
+  hoursToResolve  Float?  @map("hours_to_resolve")
+
+  @@index([dateKey])
+  @@index([resolvedDateKey])
+  @@map("silver_beneficiary_facts")
+}
+
 // ─── Gold: business aggregates ──────────────────────────────────────────────
 //
 // What the /analytics dashboard actually queries. Every model below is a
@@ -364,10 +457,54 @@ model DailyCategorySummary {
   @@map("daily_category_summary")
 }
 
+/// Revenue and profit per individual product (a specific bundle/SKU, not the
+/// broader network or category it belongs to), same formula and same
+/// ledger-sourced money as `DailyNetworkSummary`/`DailyCategorySummary`. With
+/// ~40 products in the live catalogue, Gold reads for this are always a
+/// ranked top-N, never a flat per-product chart.
+///
+/// `network`/`category` are carried as plain attributes, not part of the key:
+/// a given product belongs to exactly one of each for its whole life (you
+/// can't sell "MTN 1GB Daily" under Vodafone), so the frontend can filter
+/// this same table by network (or category) client-side, e.g. the "which
+/// products make up this network's bar" drill-down on the network chart,
+/// without a separate per-network table.
+model DailyProductSummary {
+  date        Int    @map("date")
+  productId   String @map("product_id")
+  productName String @map("product_name")
+  network     String
+  category    String
+
+  ordersCount  Int @default(0) @map("orders_count")
+  revenue      Int @default(0)
+  supplierCost Int @default(0) @map("supplier_cost")
+  paystackFee  Int @default(0) @map("paystack_fee")
+  agentMargin  Int @default(0) @map("agent_margin")
+  /// Same formula as `DailyNetworkSummary.profit`.
+  profit       Int @default(0)
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@id([date, productId])
+  @@map("daily_product_summary")
+}
+
 /// How often the delivery partner actually answers, per day per network.
 /// `noReply` is `ReconcilerService.alertStuckOrders`'s own condition
 /// (providerReference stayed null), the one genuinely bad outcome; the rest
 /// are ordinary operation.
+///
+/// Deliberately attempt-grained, not order-grained: `SupplierDispatch` gets a
+/// new row per retry (`attempt` increments), and a retried-then-succeeded
+/// order correctly produces one `otherFailed`/`noReply` here for the attempt
+/// that didn't land, alongside the `successful` for the one that did. That
+/// is the right answer for "how reliable is DataHub as a channel", the
+/// question this table exists to answer. It is the wrong number to read as
+/// "what fraction of orders got delivered", a retried order that eventually
+/// succeeds must count once, not zero, toward that different question,
+/// which is exactly what `DailySummary.completedCount / ordersCount`
+/// answers instead, from `Order.status`, never from a dispatch attempt.
 model DailyDispatchReliability {
   date    Int    @map("date")
   network String
@@ -512,6 +649,14 @@ model DailyPayoutSummary {
   /// gives; average is close enough while the volume here is small.
   avgHoursToPay   Float @default(0) @map("avg_hours_to_pay")
 
+  /// A bucketed count of `paidCount`, computed alongside `avgHoursToPay` from
+  /// the same rows. A single average hides one slow outlier inside a
+  /// fine-looking mean; this shows the actual shape.
+  paidUnder1h Int @default(0) @map("paid_under_1h")
+  paid1to4h   Int @default(0) @map("paid_1_to_4h")
+  paid4to24h  Int @default(0) @map("paid_4_to_24h")
+  paidOver24h Int @default(0) @map("paid_over_24h")
+
   computedAt DateTime @default(now()) @map("computed_at")
 
   @@map("daily_payout_summary")
@@ -526,6 +671,13 @@ model DailyRefundSummary {
   count              Int   @default(0)
   amount             Int   @default(0)
   avgTurnaroundHours Float @default(0) @map("avg_turnaround_hours")
+
+  /// A bucketed count of `count`, same reasoning as `DailyPayoutSummary`'s
+  /// buckets: one slow refund can hide inside an otherwise fine average.
+  decidedUnder1h Int @default(0) @map("decided_under_1h")
+  decided1to4h   Int @default(0) @map("decided_1_to_4h")
+  decided4to24h  Int @default(0) @map("decided_4_to_24h")
+  decidedOver24h Int @default(0) @map("decided_over_24h")
 
   computedAt DateTime @default(now()) @map("computed_at")
 
@@ -596,6 +748,13 @@ model DailyApplicationFunnel {
   rejected         Int   @default(0)
   avgHoursToDecide Float @default(0) @map("avg_hours_to_decide")
 
+  /// A bucketed count of `approved + rejected`, same reasoning as
+  /// `DailyPayoutSummary`'s buckets.
+  decidedUnder1h Int @default(0) @map("decided_under_1h")
+  decided1to4h   Int @default(0) @map("decided_1_to_4h")
+  decided4to24h  Int @default(0) @map("decided_4_to_24h")
+  decidedOver24h Int @default(0) @map("decided_over_24h")
+
   computedAt DateTime @default(now()) @map("computed_at")
 
   @@map("daily_application_funnel")
@@ -645,4 +804,37 @@ model DailyFloatSnapshot {
   computedAt DateTime @default(now()) @map("computed_at")
 
   @@map("daily_float_snapshot")
+}
+
+/// Real sales blocked on a phone number DataHub hasn't approved.
+/// `newlyBlocked`/`resolved` are day-scoped, immutable events (a number's
+/// first-seen and approved dates never change once set), safe to backfill.
+/// `stillBlocked`/`stillBlockedValue` are the odd ones out: a snapshot of
+/// the *current* approval state as of the most recent ETL run, the same
+/// "not a true historical reconstruction" caveat as `DailyAgentHealth`,
+/// since the source keeps no history of when a number was approved relative
+/// to any other day, only whether it is approved *now*. `lostValue` depends
+/// on `BeneficiaryRequest.lastValue`, which production code did not populate
+/// until this feature prompted fixing it (see `FulfilmentService.holdForApproval`),
+/// so a day computed before that fix shows 0 there even for a real blocked sale.
+model DailyLostRevenueSummary {
+  date Int @id
+
+  newlyBlocked      Int   @default(0) @map("newly_blocked")
+  newlyBlockedValue Int   @default(0) @map("newly_blocked_value")
+  resolved          Int   @default(0)
+  avgHoursToResolve Float @default(0) @map("avg_hours_to_resolve")
+  stillBlocked      Int   @default(0) @map("still_blocked")
+  stillBlockedValue Int   @default(0) @map("still_blocked_value")
+
+  /// A bucketed count of `resolved`, same reasoning as
+  /// `DailyPayoutSummary`'s buckets.
+  resolvedUnder1h Int @default(0) @map("resolved_under_1h")
+  resolved1to4h   Int @default(0) @map("resolved_1_to_4h")
+  resolved4to24h  Int @default(0) @map("resolved_4_to_24h")
+  resolvedOver24h Int @default(0) @map("resolved_over_24h")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@map("daily_lost_revenue_summary")
 }
