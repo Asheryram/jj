@@ -55,6 +55,7 @@ COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/prisma-analytics ./prisma-analytics
 COPY scripts/constraints.sql ./scripts/constraints.sql
+COPY scripts/analytics-migrate-deploy.mjs ./scripts/analytics-migrate-deploy.mjs
 
 # Not root. A container that only ever needs to read its own code has no reason
 # to be able to write to it.
