@@ -1,0 +1,648 @@
+// The analytics warehouse, a separate database from the production one.
+//
+// Every model here is a rollup written by EtlService, never by the app
+// itself. Nothing here is a source of truth, it is all derived, and can
+// always be rebuilt from the production database by re-running the ETL job.
+// That is deliberate: it keeps this database disposable, and keeps every
+// heavy reporting query off the database that is actually taking payments.
+//
+// Money is still an integer number of pesewas, matching the main schema.
+
+generator client {
+  provider = "prisma-client-js"
+  // A distinct output, so this never collides with the main app's generated
+  // client at the default node_modules/@prisma/client.
+  output   = "../node_modules/@prisma-analytics/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("ANALYTICS_DATABASE_URL")
+}
+
+/// Where the ETL job left off. A single row (id fixed at 1). `lastFinalizedDate`
+/// is the newest day that is fully computed and will never be touched again,
+/// everything up to and including it happened in the past and cannot gain new
+/// orders. Only "today" (always incomplete, still accumulating orders) and
+/// anything after `lastFinalizedDate` ever get recomputed, so a historical day
+/// is rolled up exactly once instead of on every single run.
+model EtlCheckpoint {
+  id                Int      @id @default(1)
+  lastFinalizedDate Int?     @map("last_finalized_date") /// YYYYMMDD, null before the first run ever completes.
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("etl_checkpoint")
+}
+
+// ─── Bronze: raw, close to source ───────────────────────────────────────────
+//
+// A near-verbatim copy of the production rows the ETL reads, nothing resolved
+// or joined yet. `dateKey` (YYYYMMDD, the row's own event date) is this
+// warehouse's answer to the year=/month=/day= partition folders a real data
+// lake would use, it is what every query below filters and indexes on. Every
+// Bronze table is written by upserting on the source's own id, not appended
+// per run: an order's `createdAt` never changes once written, so re-ingesting
+// it is idempotent, not a growing history of snapshots. `BronzeUser` is the
+// one exception, see its own comment.
+//
+// Nothing downstream (Silver or Gold) ever queries the production database
+// directly, only Bronze does. That is the entire point of the layer: it is
+// the sole place a heavy or repeated analytics query could ever touch the
+// database that is actually taking payments, and it touches it only once,
+// briefly, per ETL run.
+
+model BronzeOrder {
+  id              String   @id
+  dateKey         Int      @map("date_key")
+  reference       String
+  status          String
+  network         String?
+  category        String
+  salePrice       Int      @map("sale_price")
+  split           Json
+  soldByCode      String?  @map("sold_by_code")
+  soldByAgentName String?  @map("sold_by_agent_name")
+  buyerPhone      String   @map("buyer_phone")
+  createdAt       DateTime @map("created_at")
+  ingestedAt      DateTime @updatedAt @map("ingested_at")
+
+  @@index([dateKey])
+  @@map("bronze_orders")
+}
+
+model BronzeSupplierDispatch {
+  id                String   @id
+  dateKey           Int      @map("date_key")
+  orderId           String   @map("order_id")
+  network           String?
+  outcome           String
+  providerReference String?  @map("provider_reference")
+  providerStatus    String?  @map("provider_status")
+  createdAt         DateTime @map("created_at")
+  ingestedAt        DateTime @updatedAt @map("ingested_at")
+
+  @@index([dateKey])
+  @@map("bronze_supplier_dispatches")
+}
+
+model BronzeRefund {
+  id          String   @id
+  dateKey     Int      @map("date_key") /// The day it was decided, not the day the order was placed.
+  orderId     String   @map("order_id")
+  amount      Int
+  method      String
+  momoNetwork String?  @map("momo_network")
+  reason      String
+  createdAt   DateTime @map("created_at") /// When the order failed, for turnaround against `decidedAt`.
+  decidedAt   DateTime @map("decided_at")
+  ingestedAt  DateTime @updatedAt @map("ingested_at")
+
+  @@index([dateKey])
+  @@map("bronze_refunds")
+}
+
+model BronzeWithdrawal {
+  id          String    @id
+  dateKey     Int       @map("date_key") /// The day it was requested, see `EtlService`'s own comment on why payouts are keyed this way.
+  userId      String    @map("user_id")
+  agentName   String    @map("agent_name")
+  amount      Int
+  momoNetwork String    @map("momo_network")
+  status      String
+  requestedAt DateTime  @map("requested_at")
+  decidedAt   DateTime? @map("decided_at")
+  paidAt      DateTime? @map("paid_at")
+  ingestedAt  DateTime  @updatedAt @map("ingested_at")
+
+  @@index([dateKey])
+  @@map("bronze_withdrawals")
+}
+
+model BronzeFeedback {
+  id         String    @id
+  dateKey    Int       @map("date_key") /// The day it was submitted.
+  userId     String    @map("user_id")
+  category   String
+  status     String
+  escalated  Boolean
+  createdAt  DateTime  @map("created_at")
+  decidedAt  DateTime? @map("decided_at")
+  ingestedAt DateTime  @updatedAt @map("ingested_at")
+
+  @@index([dateKey])
+  @@map("bronze_feedback")
+}
+
+/// A snapshot, not an event stream: the source schema keeps no history of an
+/// agent's status/upline over time, so this holds only the latest known state
+/// per agent, upserted by id every run rather than accumulating one row per
+/// agent per day. `snapshotDateKey` is when that snapshot was taken, so
+/// Silver/Gold rollups for agent structure (health, downline depth) honestly
+/// reflect "as of the most recent ETL run", not a true reconstruction of a
+/// past day, see `EtlService`'s own doc comment for the consequence of that.
+/// `joinedAt`/`decidedAt` are the one exception: both are immutable once set
+/// (an application is decided exactly once), so `SilverApplicationFact`,
+/// built from this same snapshot, can still write correctly into whichever
+/// historical day each of those two events actually happened on.
+model BronzeUser {
+  id              String    @id
+  snapshotDateKey Int       @map("snapshot_date_key")
+  role            String
+  status          String
+  referralCode    String    @map("referral_code")
+  uplineCode      String?   @map("upline_code")
+  name            String?
+  joinedAt        DateTime  @map("joined_at")
+  decidedAt       DateTime? @map("decided_at") /// When an agent application (status pending -> active/rejected) was decided.
+  ingestedAt      DateTime  @updatedAt @map("ingested_at")
+
+  @@index([snapshotDateKey])
+  @@map("bronze_users")
+}
+
+// ─── Silver: cleaned and conformed ──────────────────────────────────────────
+//
+// One row per business event (an order, a dispatch, a refund), same grain as
+// Bronze, but every rule that decides what a number *means* is resolved here
+// exactly once: which statuses count as "paid" (`isPaid`, matching the
+// production code's own `PAID_STATUSES`), what a dispatch's real outcome was
+// (`resolvedOutcome`, via the same `mapProviderStatus` logic the reconciler
+// itself uses), which agent a referral code actually belongs to, what a
+// completed order's margin was in pesewas rather than buried in a JSON blob.
+// Gold below does no resolution of its own, only GROUP BY over these tables,
+// which is what keeps a rollup fix a one-place change instead of a hunt
+// through every aggregate that happened to duplicate the same logic.
+
+model SilverOrderFact {
+  orderId      String  @id @map("order_id")
+  dateKey      Int     @map("date_key")
+  hour         Int /// 0-23, UTC, which is also Ghana local time, see date.ts.
+  status       String
+  /// Money was actually collected via Paystack for this order, whatever
+  /// happens to it afterwards. Mirrors `PAID_STATUSES` in etl.service.ts.
+  isPaid       Boolean @map("is_paid")
+  isCompleted  Boolean @map("is_completed")
+  network      String /// Defaulted to 'UNKNOWN' here, never null.
+  category     String
+  salePrice    Int     @map("sale_price")
+  supplierCost Int     @default(0) @map("supplier_cost") /// 0 unless isCompleted.
+  paystackFee  Int     @default(0) @map("paystack_fee")
+  agentMargin  Int     @default(0) @map("agent_margin")
+  agentCode    String? @map("agent_code")
+  agentId      String? @map("agent_id")
+  agentName    String? @map("agent_name")
+  buyerPhone   String  @map("buyer_phone")
+
+  @@index([dateKey])
+  @@map("silver_order_facts")
+}
+
+model SilverDispatchFact {
+  dispatchId      String  @id @map("dispatch_id")
+  dateKey         Int     @map("date_key")
+  orderId         String  @map("order_id")
+  network         String
+  /// One of: successful, noReply, manualQueue, otherFailed, or null for a
+  /// dispatch still genuinely in flight, neither a reply nor a timeout yet,
+  /// which counts toward `totalAttempts` in Gold but no bucket beneath it.
+  resolvedOutcome String? @map("resolved_outcome")
+
+  @@index([dateKey])
+  @@map("silver_dispatch_facts")
+}
+
+model SilverRefundFact {
+  refundId        String @id @map("refund_id")
+  dateKey         Int    @map("date_key")
+  amount          Int
+  method          String
+  network         String /// The order's network, resolved via a join to `BronzeOrder`, defaulted to 'UNKNOWN'.
+  category        String /// The order's category, same join.
+  reason          String /// Verbatim, truncated to 200 chars. DataHub's own free-text rejection wording, not a fixed enum, see `BronzeRefund`'s own comment.
+  turnaroundHours Float  @map("turnaround_hours") /// decidedAt - createdAt.
+
+  @@index([dateKey])
+  @@map("silver_refund_facts")
+}
+
+model SilverWithdrawalFact {
+  withdrawalId String  @id @map("withdrawal_id")
+  dateKey      Int     @map("date_key")
+  agentId      String  @map("agent_id")
+  status       String
+  amount       Int
+  isPaid       Boolean @map("is_paid")
+  hoursToPay   Float?  @map("hours_to_pay") /// paidAt - requestedAt, null until paid.
+
+  @@index([dateKey])
+  @@map("silver_withdrawal_facts")
+}
+
+model SilverFeedbackFact {
+  feedbackId      String  @id @map("feedback_id")
+  dateKey         Int     @map("date_key")
+  category        String
+  status          String
+  escalated       Boolean
+  turnaroundHours Float?  @map("turnaround_hours") /// decidedAt - createdAt, null while still open.
+
+  @@index([dateKey])
+  @@map("silver_feedback_facts")
+}
+
+/// One row per agent application ever made (a `User` row with `role: 'agent'`),
+/// not one per day: `appliedDateKey` and `decidedDateKey` are two separate,
+/// immutable event dates on the SAME row, refreshed once per run alongside
+/// `SilverAgentDim` rather than reprocessed per historical day, see
+/// `BronzeUser`'s own comment for why that is still safe here.
+model SilverApplicationFact {
+  userId         String @id @map("user_id")
+  appliedDateKey Int    @map("applied_date_key")
+  decidedDateKey Int?   @map("decided_date_key")
+  /// pending | approved | rejected, mirrors `User.status` at snapshot time.
+  outcome        String
+  hoursToDecide  Float? @map("hours_to_decide")
+
+  @@map("silver_application_facts")
+}
+
+/// Every seller's referral code resolves to a name here, agent or admin: an
+/// admin account can and does sell directly on its own referral code, same
+/// as `computeAgentSummary`'s original lookup had no role filter either.
+/// `role` is what lets Gold's agent-health/downline-depth narrow back down
+/// to `role = 'agent'` only, refreshed from the latest `BronzeUser` snapshot
+/// every run. `depth` is walked once here (upline chain to the root),
+/// instead of every Gold query redoing the same walk.
+model SilverAgentDim {
+  agentId         String   @id @map("agent_id")
+  referralCode    String   @map("referral_code")
+  name            String
+  role            String
+  status          String
+  uplineCode      String?  @map("upline_code")
+  depth           Int
+  /// The real timestamp, kept alongside `joinedDateKey` because "was this
+  /// agent already active before 14:00 today" needs more than a day number.
+  joinedAt        DateTime @map("joined_at")
+  joinedDateKey   Int      @map("joined_date_key")
+  snapshotDateKey Int      @map("snapshot_date_key")
+
+  @@map("silver_agent_dim")
+}
+
+// ─── Gold: business aggregates ──────────────────────────────────────────────
+//
+// What the /analytics dashboard actually queries. Every model below is a
+// GROUP BY over Silver, nothing here parses a JSON blob or classifies a
+// status, that already happened one layer down.
+
+/// One row per day, platform-wide. The headline numbers: how much moved,
+/// what it cost, what was kept.
+model DailySummary {
+  date Int @id /// YYYYMMDD, sorts and filters as a plain integer, no timezone ambiguity.
+
+  ordersCount    Int @map("orders_count")
+  completedCount Int @map("completed_count")
+  failedCount    Int @map("failed_count")
+
+  /// What customers actually paid, all orders placed that day.
+  revenue       Int @default(0)
+  /// What the supplier charged for completed orders.
+  supplierCost  Int @default(0) @map("supplier_cost")
+  /// Paystack's cut, passed on to the buyer, never anyone's margin.
+  paystackFees  Int @default(0) @map("paystack_fees")
+  /// Every agent's margin, summed, completed orders only.
+  agentMargins  Int @default(0) @map("agent_margins")
+  /// Refunds approved that day, not necessarily for orders placed that day.
+  refundsAmount Int @default(0) @map("refunds_amount")
+  /// revenue - supplierCost - paystackFees - agentMargins, completed orders only.
+  profit        Int @default(0)
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@map("daily_summary")
+}
+
+/// Revenue and cost split by network, per day. MTN vs Telecel vs AirtelTigo.
+model DailyNetworkSummary {
+  date    Int    @map("date")
+  network String
+
+  ordersCount  Int @default(0) @map("orders_count")
+  revenue      Int @default(0)
+  supplierCost Int @default(0) @map("supplier_cost")
+  paystackFee  Int @default(0) @map("paystack_fee")
+  agentMargin  Int @default(0) @map("agent_margin")
+  /// completedRevenue - supplierCost - paystackFee - agentMargin, completed
+  /// orders only, the network-level equivalent of `DailySummary.profit`.
+  profit       Int @default(0)
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@id([date, network])
+  @@map("daily_network_summary")
+}
+
+/// Revenue split by product category, per day. Data vs airtime vs voice vs
+/// SMS vs AFA vs result checkers.
+model DailyCategorySummary {
+  date     Int    @map("date")
+  category String
+
+  ordersCount  Int @default(0) @map("orders_count")
+  revenue      Int @default(0)
+  supplierCost Int @default(0) @map("supplier_cost")
+  paystackFee  Int @default(0) @map("paystack_fee")
+  agentMargin  Int @default(0) @map("agent_margin")
+  /// Same formula as `DailyNetworkSummary.profit`, "which category is
+  /// actually most profitable" rather than only "which has the most revenue".
+  profit       Int @default(0)
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@id([date, category])
+  @@map("daily_category_summary")
+}
+
+/// How often the delivery partner actually answers, per day per network.
+/// `noReply` is `ReconcilerService.alertStuckOrders`'s own condition
+/// (providerReference stayed null), the one genuinely bad outcome; the rest
+/// are ordinary operation.
+model DailyDispatchReliability {
+  date    Int    @map("date")
+  network String
+
+  totalAttempts Int @default(0) @map("total_attempts")
+  successful    Int @default(0)
+  noReply       Int @default(0) @map("no_reply")
+  manualQueue   Int @default(0) @map("manual_queue")
+  otherFailed   Int @default(0) @map("other_failed")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@id([date, network])
+  @@map("daily_dispatch_reliability")
+}
+
+/// One row per agent per day they sold something. Powers both a trend line
+/// for one agent and a leaderboard (sum revenue over any date range).
+model DailyAgentSummary {
+  date      Int    @map("date")
+  agentId   String @map("agent_id")
+  agentName String @map("agent_name")
+  agentCode String @map("agent_code")
+
+  ordersCount Int @default(0) @map("orders_count")
+  revenue     Int @default(0)
+  margin      Int @default(0)
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@id([date, agentId])
+  @@map("daily_agent_summary")
+}
+
+/// The agent network's health, platform-wide, one row per day.
+model DailyAgentHealth {
+  date Int @id
+
+  totalAgents         Int @default(0) @map("total_agents")
+  activeAgents        Int @default(0) @map("active_agents")
+  /// Active, but has never sold anything, ever, as of this day.
+  dormantAgents       Int @default(0) @map("dormant_agents")
+  newSignups          Int @default(0) @map("new_signups")
+  pendingApplications Int @default(0) @map("pending_applications")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@map("daily_agent_health")
+}
+
+/// How deep the referral tree actually is, as of this day. `depth` 0 is a
+/// direct agent of the admin root.
+model DailyDownlineDepth {
+  date  Int @map("date")
+  depth Int
+
+  agentCount Int @default(0) @map("agent_count")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@id([date, depth])
+  @@map("daily_downline_depth")
+}
+
+/// Order volume by hour of day, the one rollup at a finer grain than a day:
+/// a daily total cannot show whether sales cluster at lunchtime or at night.
+model HourlyOrderVolume {
+  date Int @map("date")
+  hour Int /// 0-23, local time.
+
+  ordersCount Int @default(0) @map("orders_count")
+  revenue     Int @default(0)
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@id([date, hour])
+  @@map("hourly_order_volume")
+}
+
+/// Checkout abandonment: how many started paying versus how many actually
+/// paid, per day.
+model DailyCheckoutFunnel {
+  date Int @id
+
+  started   Int @default(0)
+  paid      Int @default(0)
+  abandoned Int @default(0)
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@map("daily_checkout_funnel")
+}
+
+/// Whether the same buyer is coming back, as of this day, all-time.
+model DailyCustomerBehavior {
+  date Int @id
+
+  uniqueBuyers Int @default(0) @map("unique_buyers")
+  /// Among uniqueBuyers, how many have more than one completed order ever
+  /// (not just that day), a running total, not a daily-only count.
+  repeatBuyers Int @default(0) @map("repeat_buyers")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@map("daily_customer_behavior")
+}
+
+/// Whether DataHub's real charge is drifting away from the catalogue price,
+/// tracked as a trend instead of only the point-in-time reading
+/// `AdminService.catalogueAccuracy` already shows.
+model DailyMarginAccuracy {
+  date Int @id
+
+  ordersCount     Int @default(0) @map("orders_count")
+  avgSalePrice    Int @default(0) @map("avg_sale_price")
+  avgSupplierCost Int @default(0) @map("avg_supplier_cost")
+  /// (avgSalePrice - avgSupplierCost) / avgSalePrice, in basis points, an
+  /// integer like every other rate in this codebase.
+  avgMarginBp     Int @default(0) @map("avg_margin_bp")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@map("daily_margin_accuracy")
+}
+
+/// How much is moving out to agents, and how fast, per day. Keyed by the day
+/// a payout was *requested*: a request finalized (checkpointed) one day that
+/// only actually gets paid several days later will not retroactively update
+/// that day's `paidCount`/`paidAmount`, the same accepted trade-off
+/// `SilverDispatchFact` already makes for a dispatch that resolves after its
+/// own day is checkpointed. Payouts in this business normally clear in hours,
+/// not days, so this is a low-probability edge case, not a routine one.
+model DailyPayoutSummary {
+  date Int @id
+
+  requestedCount  Int   @default(0) @map("requested_count")
+  requestedAmount Int   @default(0) @map("requested_amount")
+  paidCount       Int   @default(0) @map("paid_count")
+  paidAmount      Int   @default(0) @map("paid_amount")
+  /// Average, not median, over payouts that reached `paid` as of this ETL
+  /// run. A true median needs a window function outside what a `groupBy`
+  /// gives; average is close enough while the volume here is small.
+  avgHoursToPay   Float @default(0) @map("avg_hours_to_pay")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@map("daily_payout_summary")
+}
+
+/// Refunds, platform-wide, one row per day. `refundsAmount` already exists on
+/// `DailySummary`; this is the detail behind it, count and how long a refund
+/// actually sits before it's decided.
+model DailyRefundSummary {
+  date Int @id
+
+  count              Int   @default(0)
+  amount             Int   @default(0)
+  avgTurnaroundHours Float @default(0) @map("avg_turnaround_hours")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@map("daily_refund_summary")
+}
+
+/// Which network's orders refund most, per day.
+model DailyRefundNetworkSummary {
+  date    Int    @map("date")
+  network String
+
+  count  Int @default(0)
+  amount Int @default(0)
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@id([date, network])
+  @@map("daily_refund_network_summary")
+}
+
+/// What's actually driving refunds, per day, grouped by the exact rejection
+/// text rather than a guessed-at semantic category: DataHub returns its own
+/// free-text vocabulary (see `SupplierDispatch.reason`'s own comment), and a
+/// handful of exact strings already repeat often enough to answer "what's
+/// driving refunds" without inventing a taxonomy the source data doesn't have.
+model DailyRefundReasonSummary {
+  date   Int    @map("date")
+  reason String
+
+  count  Int @default(0)
+  amount Int @default(0)
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@id([date, reason])
+  @@map("daily_refund_reason_summary")
+}
+
+/// Complaints and suggestions, per day per category, split by where each one
+/// currently stands. A leading indicator: a rising `openCount` or
+/// `escalatedCount` often shows up here before it shows up in revenue.
+model DailyFeedbackSummary {
+  date     Int    @map("date")
+  category String
+
+  openCount      Int @default(0) @map("open_count")
+  reviewedCount  Int @default(0) @map("reviewed_count")
+  resolvedCount  Int @default(0) @map("resolved_count")
+  escalatedCount Int @default(0) @map("escalated_count")
+  total          Int @default(0)
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@id([date, category])
+  @@map("daily_feedback_summary")
+}
+
+/// The agent acquisition funnel, per day. `applied` counts by the day someone
+/// signed up; `approved`/`rejected` count by the day a decision was made on
+/// them, which is very often a different day, so a single day's row can show
+/// applications with no decisions yet, or decisions on people who applied
+/// earlier, that is expected, not a mismatch to reconcile.
+model DailyApplicationFunnel {
+  date Int @id
+
+  applied          Int   @default(0)
+  approved         Int   @default(0)
+  rejected         Int   @default(0)
+  avgHoursToDecide Float @default(0) @map("avg_hours_to_decide")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@map("daily_application_funnel")
+}
+
+/// A daily snapshot of `SolvencyService.position()`, the same computation
+/// `ReservePanel.tsx` reads live, run once a day so its trend (is the reserve
+/// margin widening or shrinking) becomes visible instead of only ever a single
+/// point-in-time reading. Like `DailyAgentHealth`, this cannot be backfilled
+/// for a past day, since it reads production's *current* outstanding
+/// balances, not an event stream: a historical row is only ever as good as
+/// the day it was actually captured on.
+model DailySolvencySnapshot {
+  date Int @id
+
+  expectedAtPaystack   Int  @map("expected_at_paystack")
+  spentOnBundles       Int  @map("spent_on_bundles")
+  freeToSpend          Int  @map("free_to_spend")
+  owedToAgents         Int  @map("owed_to_agents")
+  owedToCustomers      Int  @map("owed_to_customers")
+  undeliveredOrders    Int  @map("undelivered_orders")
+  queuedPayouts        Int  @map("queued_payouts")
+  manualRefundAdvances Int  @map("manual_refund_advances")
+  manualPayoutAdvances Int  @map("manual_payout_advances")
+  liabilitiesTotal     Int  @map("liabilities_total")
+  floatBalance         Int? @map("float_balance")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@map("daily_solvency_snapshot")
+}
+
+/// A daily snapshot of `FloatMonitorService.latest()`, so "how often do we
+/// actually breach watch/risk" becomes a real count instead of anecdotal.
+/// One account-wide balance, not split by network: DataHub does not expose a
+/// per-network float, so "which network runs out most" genuinely is not
+/// answerable from this data, not just left out of this table.
+model DailyFloatSnapshot {
+  date Int @id
+
+  balance    Int
+  reference  Int /// The lower of the live reading and the tracked-capital projection, what actually gates the level.
+  /// ok | watch | risk.
+  level      String
+  observedAt DateTime? @map("observed_at")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@map("daily_float_snapshot")
+}

@@ -22,7 +22,7 @@ export interface PublicBranding {
 }
 
 /** The platform's identity, used wherever nothing has been customised. */
-const DEFAULT_NAME = 'JamesDataConsult'
+const DEFAULT_NAME = 'JKBK DATA HUB'
 const DEFAULT_COLOR = '#0B3B8F'
 
 /**

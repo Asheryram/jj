@@ -165,7 +165,7 @@ export default function Catalogue() {
             title="Independent reseller"
             icon={<CertificateIcon className="size-4" />}
           >
-            JamesDataConsult sells genuine checker vouchers but is not affiliated with, endorsed by,
+            JKBK DATA HUB sells genuine checker vouchers but is not affiliated with, endorsed by,
             or acting on behalf of WAEC. Vouchers are single-use and non-refundable once revealed.
           </Callout>
         </div>

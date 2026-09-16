@@ -67,7 +67,7 @@ export default function Checkers() {
           title="We are an independent reseller"
           icon={<ShieldIcon className="size-4" />}
         >
-          JamesDataConsult is not affiliated with, endorsed by, or acting on behalf of the West
+          JKBK DATA HUB is not affiliated with, endorsed by, or acting on behalf of the West
           African Examinations Council (WAEC). We resell genuine vouchers obtained from authorised
           suppliers. WAEC alone controls result availability and the checking portal.
         </Callout>

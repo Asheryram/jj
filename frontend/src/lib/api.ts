@@ -848,6 +848,188 @@ export interface PlaceOrderBody {
   idempotencyKey?: string
 }
 
+// ─── Analytics: shapes match the warehouse rollup tables, one row per day
+// (or per day + dimension) ──────────────────────────────────────────────────
+
+/** An exact, inclusive window, both ends YYYYMMDD integers. */
+export interface AnalyticsRange {
+  from: number
+  to: number
+}
+
+function rangeQuery(range: AnalyticsRange): string {
+  return `from=${range.from}&to=${range.to}`
+}
+
+export interface AnalyticsDailySummary {
+  date: number
+  ordersCount: number
+  completedCount: number
+  failedCount: number
+  revenue: number
+  supplierCost: number
+  paystackFees: number
+  agentMargins: number
+  refundsAmount: number
+  profit: number
+}
+
+export interface AnalyticsNetworkSummary {
+  date: number
+  network: string
+  ordersCount: number
+  revenue: number
+  supplierCost: number
+  paystackFee: number
+  agentMargin: number
+  profit: number
+}
+
+export interface AnalyticsCategorySummary {
+  date: number
+  category: string
+  ordersCount: number
+  revenue: number
+  supplierCost: number
+  paystackFee: number
+  agentMargin: number
+  profit: number
+}
+
+export interface AnalyticsDispatchReliability {
+  date: number
+  network: string
+  totalAttempts: number
+  successful: number
+  noReply: number
+  manualQueue: number
+  otherFailed: number
+}
+
+export interface AnalyticsAgentSummary {
+  date: number
+  agentId: string
+  agentName: string
+  agentCode: string
+  ordersCount: number
+  revenue: number
+  margin: number
+}
+
+export interface AnalyticsAgentHealth {
+  date: number
+  totalAgents: number
+  activeAgents: number
+  dormantAgents: number
+  newSignups: number
+  pendingApplications: number
+}
+
+export interface AnalyticsDownlineDepth {
+  date: number
+  depth: number
+  agentCount: number
+}
+
+export interface AnalyticsHourlyVolume {
+  date: number
+  hour: number
+  ordersCount: number
+  revenue: number
+}
+
+export interface AnalyticsCheckoutFunnel {
+  date: number
+  started: number
+  paid: number
+  abandoned: number
+}
+
+export interface AnalyticsCustomerBehavior {
+  date: number
+  uniqueBuyers: number
+  repeatBuyers: number
+}
+
+export interface AnalyticsMarginAccuracy {
+  date: number
+  ordersCount: number
+  avgSalePrice: number
+  avgSupplierCost: number
+  avgMarginBp: number
+}
+
+export interface AnalyticsRefundSummary {
+  date: number
+  count: number
+  amount: number
+  avgTurnaroundHours: number
+}
+
+export interface AnalyticsRefundNetworkSummary {
+  date: number
+  network: string
+  count: number
+  amount: number
+}
+
+export interface AnalyticsRefundReasonSummary {
+  date: number
+  reason: string
+  count: number
+  amount: number
+}
+
+export interface AnalyticsPayoutSummary {
+  date: number
+  requestedCount: number
+  requestedAmount: number
+  paidCount: number
+  paidAmount: number
+  avgHoursToPay: number
+}
+
+export interface AnalyticsFeedbackSummary {
+  date: number
+  category: string
+  openCount: number
+  reviewedCount: number
+  resolvedCount: number
+  escalatedCount: number
+  total: number
+}
+
+export interface AnalyticsApplicationFunnel {
+  date: number
+  applied: number
+  approved: number
+  rejected: number
+  avgHoursToDecide: number
+}
+
+export interface AnalyticsSolvencySnapshot {
+  date: number
+  expectedAtPaystack: number
+  spentOnBundles: number
+  freeToSpend: number
+  owedToAgents: number
+  owedToCustomers: number
+  undeliveredOrders: number
+  queuedPayouts: number
+  manualRefundAdvances: number
+  manualPayoutAdvances: number
+  liabilitiesTotal: number
+  floatBalance: number | null
+}
+
+export interface AnalyticsFloatSnapshot {
+  date: number
+  balance: number
+  reference: number
+  level: 'ok' | 'watch' | 'risk'
+  observedAt: string | null
+}
+
 // ─── Endpoints ──────────────────────────────────────────────────────────────
 
 export const api = {
@@ -1581,6 +1763,71 @@ export const api = {
       '/admin/price-changes/notify',
       { method: 'POST' },
     ),
+
+  // Analytics: every rollup is read-only, computed by the ETL job against
+  // its own separate warehouse database, never the production one. `range`
+  // is an exact, inclusive YYYYMMDD window (a day, a month, a year, or any
+  // custom span), built by the dashboard's date-range picker.
+  analyticsRefresh: () => request<{ daysProcessed: number }>('/analytics/refresh', { method: 'POST' }),
+
+  analyticsDailySummary: (range: AnalyticsRange) =>
+    request<AnalyticsDailySummary[]>(`/analytics/daily-summary?${rangeQuery(range)}`),
+
+  analyticsNetworkSummary: (range: AnalyticsRange) =>
+    request<AnalyticsNetworkSummary[]>(`/analytics/network-summary?${rangeQuery(range)}`),
+
+  analyticsCategorySummary: (range: AnalyticsRange) =>
+    request<AnalyticsCategorySummary[]>(`/analytics/category-summary?${rangeQuery(range)}`),
+
+  analyticsDispatchReliability: (range: AnalyticsRange) =>
+    request<AnalyticsDispatchReliability[]>(`/analytics/dispatch-reliability?${rangeQuery(range)}`),
+
+  analyticsAgentSummary: (range: AnalyticsRange) =>
+    request<AnalyticsAgentSummary[]>(`/analytics/agent-summary?${rangeQuery(range)}`),
+
+  analyticsAgentHealth: (range: AnalyticsRange) =>
+    request<AnalyticsAgentHealth[]>(`/analytics/agent-health?${rangeQuery(range)}`),
+
+  /** Structure, not a trend: the latest snapshot at or before `to`. */
+  analyticsDownlineDepth: (to: number) =>
+    request<AnalyticsDownlineDepth[]>(`/analytics/downline-depth?to=${to}`),
+
+  analyticsHourlyVolume: (range: AnalyticsRange) =>
+    request<AnalyticsHourlyVolume[]>(`/analytics/hourly-volume?${rangeQuery(range)}`),
+
+  analyticsCheckoutFunnel: (range: AnalyticsRange) =>
+    request<AnalyticsCheckoutFunnel[]>(`/analytics/checkout-funnel?${rangeQuery(range)}`),
+
+  analyticsCustomerBehavior: (range: AnalyticsRange) =>
+    request<AnalyticsCustomerBehavior[]>(`/analytics/customer-behavior?${rangeQuery(range)}`),
+
+  analyticsMarginAccuracy: (range: AnalyticsRange) =>
+    request<AnalyticsMarginAccuracy[]>(`/analytics/margin-accuracy?${rangeQuery(range)}`),
+
+  analyticsRefundSummary: (range: AnalyticsRange) =>
+    request<AnalyticsRefundSummary[]>(`/analytics/refund-summary?${rangeQuery(range)}`),
+
+  analyticsRefundNetworkSummary: (range: AnalyticsRange) =>
+    request<AnalyticsRefundNetworkSummary[]>(`/analytics/refund-network-summary?${rangeQuery(range)}`),
+
+  analyticsRefundReasonSummary: (range: AnalyticsRange) =>
+    request<AnalyticsRefundReasonSummary[]>(`/analytics/refund-reason-summary?${rangeQuery(range)}`),
+
+  analyticsPayoutSummary: (range: AnalyticsRange) =>
+    request<AnalyticsPayoutSummary[]>(`/analytics/payout-summary?${rangeQuery(range)}`),
+
+  analyticsFeedbackSummary: (range: AnalyticsRange) =>
+    request<AnalyticsFeedbackSummary[]>(`/analytics/feedback-summary?${rangeQuery(range)}`),
+
+  analyticsApplicationFunnel: (range: AnalyticsRange) =>
+    request<AnalyticsApplicationFunnel[]>(`/analytics/application-funnel?${rangeQuery(range)}`),
+
+  /** A daily snapshot, not backfillable, a past day with no row genuinely has none. */
+  analyticsSolvencySnapshot: (range: AnalyticsRange) =>
+    request<AnalyticsSolvencySnapshot[]>(`/analytics/solvency-snapshot?${rangeQuery(range)}`),
+
+  analyticsFloatSnapshot: (range: AnalyticsRange) =>
+    request<AnalyticsFloatSnapshot[]>(`/analytics/float-snapshot?${rangeQuery(range)}`),
 }
 
 /**

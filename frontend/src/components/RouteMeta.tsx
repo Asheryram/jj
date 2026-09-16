@@ -16,14 +16,14 @@ interface Meta {
   noindex?: boolean
 }
 
-const SITE = 'JamesDataConsult'
+const SITE = 'JKBK DATA HUB'
 
 /**
  * The canonical origin is the production domain, never `window.location.origin`.
  * Otherwise a demo served through an ngrok tunnel would tell crawlers the tunnel
  * is the canonical home of every page.
  */
-const SITE_ORIGIN = import.meta.env.VITE_SITE_ORIGIN ?? 'https://jamesdataconsult.com'
+const SITE_ORIGIN = import.meta.env.VITE_SITE_ORIGIN ?? 'https://app.jkbkdatahub.com'
 
 const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
   {
@@ -62,7 +62,7 @@ const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
     match: (p) => p === '/info',
     meta: {
       title: `What Can I Do Here? | ${SITE}`,
-      description: 'A searchable, step-by-step guide to using JamesDataConsult, different for admins, agents and customers.',
+      description: 'A searchable, step-by-step guide to using JKBK DATA HUB, different for admins, agents and customers.',
       noindex: true,
     },
   },
@@ -71,14 +71,14 @@ const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
     meta: {
       title: `Become a Data Reseller Agent in Ghana | ${SITE}`,
       description:
-        'Sign up as a JamesDataConsult agent, set your own resale prices, share your shop link and keep the margin on every sale. No float to fund, no stock to carry.',
+        'Sign up as a JKBK DATA HUB agent, set your own resale prices, share your shop link and keep the margin on every sale. No float to fund, no stock to carry.',
     },
   },
   {
     match: (p) => p === '/login',
     meta: {
       title: `Agent Log In | ${SITE}`,
-      description: 'Log in to your JamesDataConsult agent or admin account.',
+      description: 'Log in to your JKBK DATA HUB agent or admin account.',
       noindex: true,
     },
   },
@@ -87,7 +87,7 @@ const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
     meta: {
       title: `Buy From an Authorised Agent | ${SITE}`,
       description:
-        'Buy data bundles, airtime and result checkers directly from an authorised JamesDataConsult agent. Pay with Mobile Money, delivered in seconds.',
+        'Buy data bundles, airtime and result checkers directly from an authorised JKBK DATA HUB agent. Pay with Mobile Money, delivered in seconds.',
     },
   },
   {
@@ -103,6 +103,14 @@ const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
     meta: {
       title: `Admin | ${SITE}`,
       description: 'Platform administration.',
+      noindex: true,
+    },
+  },
+  {
+    match: (p) => p.startsWith('/analytics'),
+    meta: {
+      title: `Analytics | ${SITE}`,
+      description: 'Business trends and rollups, computed from a separate warehouse database.',
       noindex: true,
     },
   },

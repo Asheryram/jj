@@ -5,7 +5,7 @@ import { BrandingProvider } from './state/branding'
 import { ThemeProvider } from './lib/theme'
 import { SITE_ORIGIN } from './lib/origin'
 import { api } from './lib/api'
-import { AppShell, PublicShell, RequireAuth } from './components/layout'
+import { AnalyticsShell, AppShell, PublicShell, RequireAuth } from './components/layout'
 import RouteMeta from './components/RouteMeta'
 import { Button, Card, EmptyState, Spinner } from './components/ui'
 import { AlertIcon, SearchIcon } from './components/icons'
@@ -54,6 +54,7 @@ import AdminFeedback from './pages/admin/AdminFeedback'
 import AdminAnnouncements from './pages/admin/AdminAnnouncements'
 import ComposeAnnouncement from './pages/admin/ComposeAnnouncement'
 import ReceivedAnnouncements from './pages/admin/ReceivedAnnouncements'
+import Analytics from './pages/admin/Analytics'
 import Subscriptions from './pages/admin/Subscriptions'
 
 /**
@@ -335,6 +336,16 @@ export default function App() {
               <Route path="/admin/domains" element={<DomainRequests />} />
               <Route path="/admin/settings" element={<Settings />} />
               <Route path="/admin/assistant" element={<Assistant />} />
+            </Route>
+          </Route>
+
+          {/* Its own shell on purpose, not nested in AppShell: it reads a
+              completely separate warehouse database, computed on a schedule,
+              and is meant to feel like its own dashboard rather than one
+              more admin page, hence no shared sidebar/nav here. */}
+          <Route element={<RequireAuth role="admin" />}>
+            <Route element={<AnalyticsShell />}>
+              <Route path="/analytics" element={<Analytics />} />
             </Route>
           </Route>
 

@@ -42,6 +42,13 @@ services:
       # holding, see the comment on `datasource db` in schema.prisma.
       - key: DIRECT_URL
         sync: false
+      # A second, separate Neon project, its own database entirely, never the
+      # same one as DATABASE_URL. Holds only ETL-computed rollups (see
+      # prisma-analytics/schema.prisma), nothing here is a source of truth, so
+      # losing this database loses nothing that cannot be recomputed by
+      # rerunning the ETL job against the real one.
+      - key: ANALYTICS_DATABASE_URL
+        sync: false
 
       # ── Set these in the dashboard; they are secrets or they are per-deploy ──
       # sync: false means Render prompts rather than storing a value in git.

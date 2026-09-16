@@ -22,6 +22,7 @@ import { AssistantModule } from './assistant/assistant.module'
 import { FeedbackModule } from './feedback/feedback.module'
 import { AnnouncementsModule } from './announcements/announcements.module'
 import { SubscriptionsModule } from './subscriptions/subscriptions.module'
+import { AnalyticsModule } from './analytics/analytics.module'
 import { AuthGuard } from './common/auth'
 
 @Module({
@@ -109,6 +110,7 @@ import { AuthGuard } from './common/auth'
     FeedbackModule,
     AnnouncementsModule,
     SubscriptionsModule,
+    AnalyticsModule,
   ],
   controllers: [HealthController],
   providers: [

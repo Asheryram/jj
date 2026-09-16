@@ -12,7 +12,7 @@
  */
 export const SITE_ORIGIN: string =
   (import.meta.env.VITE_SITE_ORIGIN as string | undefined)?.replace(/\/$/, '') ||
-  (typeof window !== 'undefined' ? window.location.origin : 'https://jamesdataconsult.com')
+  (typeof window !== 'undefined' ? window.location.origin : 'https://app.jkbkdatahub.com')
 
 /** An agent's storefront link (FR-5.7). */
 export function sellLinkFor(referralCode: string): string {

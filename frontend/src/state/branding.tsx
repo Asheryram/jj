@@ -29,7 +29,7 @@ import { useTheme } from '../lib/theme'
  * A shop can look like an agent's right up to the moment money moves.
  */
 const DEFAULT: PublicBranding = {
-  shopName: 'JamesDataConsult',
+  shopName: 'JKBK DATA HUB',
   brandColor: '#0B3B8F',
   ramp: deriveBrand('#0B3B8F')!.ramp,
   brandColorDark: '#0B3B8F',

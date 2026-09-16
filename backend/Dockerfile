@@ -20,9 +20,13 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # The schema has to be in place before `prisma generate`, and the generated
-# client is what the TypeScript build type-checks against.
+# client is what the TypeScript build type-checks against. Two schemas, two
+# databases: the analytics warehouse is never the same database as the main
+# one, see prisma-analytics/schema.prisma's own comment for why.
 COPY prisma ./prisma
+COPY prisma-analytics ./prisma-analytics
 RUN npx prisma generate
+RUN npx prisma generate --schema prisma-analytics/schema.prisma
 
 COPY tsconfig*.json nest-cli.json ./
 COPY src ./src
@@ -49,6 +53,7 @@ COPY --from=build /app/package.json ./package.json
 # Both are read at container start, not at build time: the migrations by
 # `migrate deploy`, the SQL by `constraints:prod`.
 COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/prisma-analytics ./prisma-analytics
 COPY scripts/constraints.sql ./scripts/constraints.sql
 
 # Not root. A container that only ever needs to read its own code has no reason

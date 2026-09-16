@@ -14,6 +14,7 @@ import {
   CashIcon,
   ChartIcon,
   CheckIcon,
+  ChevronLeftIcon,
   ClockIcon,
   GlobeIcon,
   HelpIcon,
@@ -130,6 +131,10 @@ function navFor(
   if (isAdmin(role)) {
     return [
       { to: '/admin', label: 'Overview', icon: HomeIcon, end: true },
+      // Not /admin/analytics on purpose, it reads a separate warehouse
+      // database, computed on a schedule, not a live query like everything
+      // else in this list.
+      { to: '/analytics', label: 'Analytics', icon: ChartIcon },
       { to: '/admin/assistant', label: ' Assistant ', icon: HelpIcon },
       { to: '/admin/orders', label: 'All orders', icon: ReceiptIcon },
       { to: '/admin/refunds', label: 'Refunds', icon: ReceiptIcon },
@@ -613,6 +618,62 @@ export function AppShell() {
   )
 }
 
+/**
+ * A deliberately separate shell from `AppShell`, no sidebar, no bottom nav.
+ *
+ * Analytics reads its own warehouse database, computed on a schedule, and the
+ * user asked for it to feel like its own dashboard rather than one more page
+ * in the admin app it happens to be deployed alongside. `RequireAuth` still
+ * gates it and the header still carries the same logout/theme controls, so an
+ * admin never re-authenticates to get here, they just leave the admin chrome
+ * behind, with one link back to it.
+ */
+export function AnalyticsShell() {
+  const { session, logout } = useStore()
+  if (!session) return null
+
+  return (
+    <div className="min-h-dvh bg-slate-50 dark:bg-slate-950">
+      <SkipLink />
+      <header className="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-3 sm:px-4">
+          <Logo compact />
+          <span className="hidden font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:block">
+            Analytics
+          </span>
+          <div className="ml-auto flex items-center gap-2 sm:gap-3">
+            <Link
+              to={homeFor(session.role)}
+              className="flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <ChevronLeftIcon className="size-4" />
+              <span className="hidden sm:inline">Back to admin</span>
+            </Link>
+            <span className="flex size-9 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-white dark:bg-slate-200 dark:text-slate-900">
+              {initials(session.name)}
+            </span>
+            <ThemeToggle />
+            <button
+              type="button"
+              onClick={logout}
+              aria-label="Log out"
+              className="relative rounded-lg p-2 text-slate-500 dark:text-slate-400 before:absolute before:-inset-1 before:content-[''] hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200"
+            >
+              <LogoutIcon className="size-5" />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main id="main" className="mx-auto max-w-7xl px-3 py-5 sm:px-4">
+        <Outlet />
+      </main>
+
+      <ToastHost />
+    </div>
+  )
+}
+
 // ─── Public chrome ──────────────────────────────────────────────────────────
 
 /** WCAG 2.4.1, the first thing in the tab order jumps past the nav. */
@@ -761,7 +822,7 @@ export function PublicFooter() {
         <div className="mx-auto max-w-6xl space-y-2 text-xs text-slate-500 dark:text-slate-400">
           {/* NFR-7.1 */}
           <p>
-            JamesDataConsult is an independent reseller. We are not affiliated with, endorsed by, or
+            JKBK DATA HUB is an independent reseller. We are not affiliated with, endorsed by, or
             acting on behalf of WAEC, MTN, Telecel or AirtelTigo.
           </p>
           {/* NFR-7.2 */}
@@ -769,7 +830,7 @@ export function PublicFooter() {
             Personal data is handled in line with Ghana&apos;s Data Protection Act, 2012 (Act 843)
             and is shared only as needed to fulfil your order.
           </p>
-          <p className="pt-1">© 2026 JamesDataConsult. All rights reserved.</p>
+          <p className="pt-1">© 2026 JKBK DATA HUB. All rights reserved.</p>
         </div>
       </div>
     </footer>
