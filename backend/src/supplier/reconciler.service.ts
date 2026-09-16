@@ -381,18 +381,36 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
-   * Email active admins whenever an order is stuck waiting on the delivery
-   * partner, someone paid and has not received their bundle yet, and nobody
-   * was finding out except by opening Needs attention themselves.
+   * Email active admins whenever an order got no reply at all from the
+   * delivery partner, not a success, not an error, not even an acknowledgment.
+   *
+   * Deliberately narrower than `needsAttention()`: that also surfaces an order
+   * DataHub accepted but never finished (a real `providerReference` exists,
+   * they know about it) and one routed to their own manual queue (a
+   * `manual_`-prefixed reference, also a real reply, a human there is on it).
+   * Both of those already got *some* answer and are ordinary "still working on
+   * it" states, not what this is for. `providerReference: null` on an order
+   * that is still open is the one case where the purchase call itself got
+   * nothing back, timed out or errored before DataHub said anything, and
+   * nobody but an admin opening Needs attention would ever know.
    *
    * Deliberately not a one-time alert like `SubscriptionsService.alertExpiring`:
    * this repeats on every sweep, every ten minutes, for as long as any order is
-   * still stuck. A subscription lapsing is a single event worth telling someone
-   * once; a customer still waiting for a bundle they paid for is an ongoing
+   * still stuck this way. A subscription lapsing is a single event worth
+   * telling someone once; a customer still waiting for a bundle they paid for,
+   * with no idea whether it even reached the delivery partner, is an ongoing
    * problem that deserves a standing reminder until it is actually fixed.
    */
   private async alertStuckOrders(): Promise<void> {
-    const stuck = (await this.needsAttention()).filter((row) => !row.conflict)
+    const cutoff = new Date(Date.now() - 15 * 60_000)
+    const stuck = await this.prisma.order.findMany({
+      where: {
+        status: { in: ['pending', 'processing'] },
+        providerReference: null,
+        createdAt: { lt: cutoff },
+      },
+      select: { id: true, reference: true },
+    })
     if (stuck.length === 0) return
 
     const admins = await this.prisma.user.findMany({
@@ -407,25 +425,27 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
             select: { name: true, email: true },
           })
     if (recipients.length === 0) {
-      this.log.warn(`${stuck.length} order(s) stuck, nobody to tell`)
+      this.log.warn(`${stuck.length} order(s) with no reply from the delivery partner, nobody to tell`)
       return
     }
 
     const shopName = await this.platformName()
     const count = stuck.length
     const appLink = appUrl(this.config, '/admin/needs-attention')
-    const explanation = `${count} order${count === 1 ? '' : 's'} ${count === 1 ? 'has' : 'have'} been waiting too long for the delivery partner. Whoever paid has not received their bundle yet.`
+    const explanation =
+      `${count} order${count === 1 ? '' : 's'} got no reply at all from the delivery partner, ` +
+      `not a success, not an error, nothing. Whoever paid has no bundle and nobody has heard back about it.`
     const appLinkHtml = `<p style="margin:0"><a href="${appLink}" style="display:inline-block;background:#0B3B8F;color:#fff;font-weight:600;font-size:14px;padding:10px 18px;border-radius:8px;text-decoration:none">Open Needs attention</a></p>`
     const body =
       `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${explanation}</p>${appLinkHtml}` +
-      `<p style="margin:18px 0 0;font-size:12.5px;line-height:1.6;color:#64748b">This checks again in ten minutes and keeps emailing while any order is still stuck.</p>`
+      `<p style="margin:18px 0 0;font-size:12.5px;line-height:1.6;color:#64748b">This checks again in ten minutes and keeps emailing while any order is still unanswered.</p>`
     const text =
       `${explanation}\n\nOpen Needs attention: ${appLink}\n\n` +
-      `This checks again in ten minutes and keeps emailing while any order is still stuck.`
-    const subject = `${count} order${count === 1 ? '' : 's'} stuck, waiting on delivery`
+      `This checks again in ten minutes and keeps emailing while any order is still unanswered.`
+    const subject = `${count} order${count === 1 ? '' : 's'} with no reply from the delivery partner`
     const html = wrap(
       shopName,
-      count === 1 ? 'An order is stuck' : 'Orders are stuck',
+      count === 1 ? 'An order got no reply' : 'Orders got no reply',
       body,
       `You are getting this because you are an active admin on ${escape(shopName)}.`,
     )
@@ -436,7 +456,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
         .catch((error) => this.log.error(`could not tell ${recipient.email} about stuck orders: ${String(error)}`))
     }
 
-    this.log.warn(`${count} order(s) stuck, told ${recipients.map((r) => r.email).join(', ')}`)
+    this.log.warn(`${count} order(s) with no reply, told ${recipients.map((r) => r.email).join(', ')}`)
   }
 
   /**
