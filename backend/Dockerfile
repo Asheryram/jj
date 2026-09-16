@@ -37,6 +37,16 @@ RUN npm run build
 # `db execute` both run at container start.
 RUN npm prune --omit=dev
 
+# `npm prune` just deleted `node_modules/@prisma-analytics/client` along with
+# the dev dependencies: unlike `node_modules/@prisma/client`, it has no entry
+# of its own in package.json/package-lock.json, prisma's generator is the
+# only thing that ever wrote it, so npm's dependency tree has no idea it's
+# supposed to survive and drops it as extraneous. It has to exist before
+# `npm run build` above (for `tsc` to type-check against), and it has to
+# still exist after `npm prune` (for the runtime copy below), so it is
+# regenerated a second time here, after pruning, to satisfy both.
+RUN npx prisma generate --schema prisma-analytics/schema.prisma
+
 # ── runtime ─────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime
 WORKDIR /app
