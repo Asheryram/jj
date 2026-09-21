@@ -4,6 +4,7 @@ import {
   Get,
   Header,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -18,6 +19,7 @@ import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { NotFoundError } from '../common/domain-errors'
 import { BrandingService } from './branding.service'
 
+/** The platform owner's own branding, name/colour/logo together, applied at once. */
 export class SubmitBrandingDto {
   @IsOptional()
   @IsString()
@@ -30,6 +32,24 @@ export class SubmitBrandingDto {
   brandColor?: string
 
   /** Used on a dark background instead of `brandColor`. Optional either way. */
+  @IsOptional()
+  @IsHexColor({ message: 'Use a hex colour like #0B3B8F.' })
+  brandColorDark?: string
+}
+
+/** An agent's shop identity: just the fields with real impersonation risk. */
+export class SubmitShopIdentityDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  shopName?: string
+}
+
+/** An agent's colour choice. Applies at once, see `BrandingService.setColor`. */
+export class SetColorDto {
+  @IsHexColor({ message: 'Use a hex colour like #0B3B8F.' })
+  brandColor!: string
+
   @IsOptional()
   @IsHexColor({ message: 'Use a hex colour like #0B3B8F.' })
   brandColorDark?: string
@@ -87,7 +107,9 @@ export class BrandingController {
   }
 
   /**
-   * Propose branding. It is reviewed before it goes live.
+   * Propose a shop name and/or logo. Reviewed before it goes live, see
+   * `BrandingService.submit`'s own doc comment for why colour isn't part of
+   * this anymore.
    *
    * `multipart/form-data`, because a logo comes with it. The 200KB limit here is
    * twice the service's own cap so an oversized file is refused with a readable
@@ -98,18 +120,23 @@ export class BrandingController {
   @UseInterceptors(FileInterceptor('logo', { limits: { fileSize: 200 * 1024 } }))
   submit(
     @CurrentUser() user: AuthUser,
-    @Body() dto: SubmitBrandingDto,
+    @Body() dto: SubmitShopIdentityDto,
     @UploadedFile() logo?: { buffer: Buffer },
   ) {
     return this.branding.submit(
       { id: user.id, name: user.name, referralCode: user.referralCode },
-      {
-        shopName: dto.shopName,
-        brandColor: dto.brandColor,
-        brandColorDark: dto.brandColorDark,
-        logo,
-      },
+      { shopName: dto.shopName, logo },
     )
+  }
+
+  /** Set your own shop colour. Applies immediately, no review. */
+  @Roles('agent')
+  @Patch('mine/color')
+  setColor(@CurrentUser() user: AuthUser, @Body() dto: SetColorDto) {
+    return this.branding.setColor(user.id, {
+      brandColor: dto.brandColor,
+      brandColorDark: dto.brandColorDark,
+    })
   }
 }
 

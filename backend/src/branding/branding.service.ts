@@ -222,7 +222,13 @@ export class BrandingService {
   }
 
   /**
-   * An agent proposes branding. Replaces any earlier unreviewed proposal.
+   * An agent proposes their shop's identity: name and logo. Replaces any
+   * earlier unreviewed proposal.
+   *
+   * Colour is deliberately not part of this anymore, see `setColor()`. Name
+   * and logo are the fields with real impersonation risk (a shop convincingly
+   * badged as a bank or a network), colour carries none, so it no longer
+   * shares a review queue with the fields that actually need one.
    *
    * Replacing rather than queueing a second one: two pending proposals from one
    * agent would mean approving the older of them puts something stale live, and
@@ -232,8 +238,6 @@ export class BrandingService {
     user: { id: string; name: string; referralCode: string },
     input: {
       shopName?: string
-      brandColor?: string
-      brandColorDark?: string
       logo?: { buffer: Buffer }
     },
   ) {
@@ -245,19 +249,10 @@ export class BrandingService {
       throw new ValidationError('Keep the shop name under 40 characters.')
     }
 
-    if (input.brandColor && !deriveBrand(input.brandColor)) {
-      throw new ValidationError('That is not a colour we recognise. Use a hex value like #0B3B8F.')
-    }
-    if (input.brandColorDark && !deriveBrand(input.brandColorDark)) {
-      throw new ValidationError(
-        'That dark-mode colour is not one we recognise. Use a hex value like #0B3B8F.',
-      )
-    }
-
     const logo = input.logo ? this.checkLogo(input.logo.buffer) : null
 
-    if (!shopName && !input.brandColor && !input.brandColorDark && !logo) {
-      throw new ValidationError('Change at least one thing before sending it for approval.')
+    if (!shopName && !logo) {
+      throw new ValidationError('Change the name or the logo before sending it for approval.')
     }
 
     const existing = await this.prisma.brandingRequest.findFirst({
@@ -273,8 +268,6 @@ export class BrandingService {
         agentName: user.name,
         agentCode: user.referralCode,
         shopName: shopName || null,
-        brandColor: input.brandColor ?? null,
-        brandColorDark: input.brandColorDark ?? null,
         logoMime: logo?.mime ?? null,
         logoBytes: logo?.bytes ?? null,
       },
@@ -282,6 +275,43 @@ export class BrandingService {
 
     this.log.log(`${user.referralCode} submitted branding for approval`)
     return { id: created.id, status: created.status }
+  }
+
+  /**
+   * An agent's own colour choice, applied at once, no review.
+   *
+   * Unlike `submit()`, this is not a proposal: colour carries no impersonation
+   * risk (nobody mistakes a shade of blue for a bank), so gating it behind the
+   * same queue as a shop's name and logo only added a wait with no matching
+   * safety benefit. Mirrors `setPlatform()`'s reasoning, just scoped to one
+   * agent's own row instead of the platform's.
+   */
+  async setColor(
+    userId: string,
+    input: { brandColor: string; brandColorDark?: string | null },
+  ): Promise<{ brandColor: string; brandColorDark: string | null }> {
+    if (!deriveBrand(input.brandColor)) {
+      throw new ValidationError('That is not a colour we recognise. Use a hex value like #0B3B8F.')
+    }
+    if (input.brandColorDark && !deriveBrand(input.brandColorDark)) {
+      throw new ValidationError(
+        'That dark-mode colour is not one we recognise. Use a hex value like #0B3B8F.',
+      )
+    }
+
+    const changes = {
+      brandColor: input.brandColor,
+      brandColorDark: input.brandColorDark || null,
+    }
+
+    const row = await this.prisma.branding.upsert({
+      where: { userId },
+      create: { userId, ...changes },
+      update: changes,
+    })
+
+    this.log.log(`colour updated directly for user ${userId}`)
+    return { brandColor: row.brandColor!, brandColorDark: row.brandColorDark }
   }
 
   private checkLogo(buffer: Buffer): { mime: string; bytes: Uint8Array<ArrayBuffer> } {

@@ -1450,9 +1450,16 @@ export const api = {
   /** What the signed-in agent has live, and anything awaiting review. */
   myBranding: () => request<MyBranding>('/branding/mine'),
 
-  /** Propose branding. Reviewed before it goes live. */
+  /** Propose a shop name/logo. Reviewed before it goes live. */
   submitBranding: (form: FormData) =>
     request<{ id: string; status: string }>('/branding/mine', { method: 'POST', form }),
+
+  /** Set your own shop colour. Applies at once, no review, see ShopBranding.tsx. */
+  setBrandColor: (brandColor: string, brandColorDark?: string | null) =>
+    request<{ brandColor: string; brandColorDark: string | null }>('/branding/mine/color', {
+      method: 'PATCH',
+      body: { brandColor, brandColorDark: brandColorDark || undefined },
+    }),
 
   /** The platform owner's own branding. Applies immediately. */
   setPlatformBranding: (form: FormData) =>

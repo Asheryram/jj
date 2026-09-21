@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiAsset, api, ApiError, type MyBranding, type MyDomainStatus } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { deriveBrand } from '../../lib/branding'
+import { BRAND_TEMPLATES, templateFor } from '../../lib/brandTemplates'
 import { dateTime } from '../../lib/format'
 import {
   Badge,
@@ -23,14 +24,11 @@ import { AlertIcon, CheckIcon, ClockIcon, GlobeIcon, StoreIcon, XIcon } from '..
 /**
  * An agent making their shop look like theirs.
  *
- * Nothing here applies immediately. What they submit is reviewed first, and the
- * screen says so in as many words, an agent who changes their logo and sees no
- * change would reasonably assume it was broken and do it again.
- *
- * The review exists because an agent shop takes payment details, so a shop
- * convincingly badged as a bank or a network is a fraud risk the platform carries
- * rather than the agent. That reason is given plainly here too: told why, most
- * people do not try.
+ * Name and logo are held for review before they go live (a shop convincingly
+ * badged as a bank or a network is a fraud risk the platform carries, since
+ * an agent shop takes payment details), so this screen says so plainly.
+ * Colour carries none of that risk, and is handled entirely separately, see
+ * `ShopColorCard` below and `BrandingService.setColor`'s own reasoning.
  */
 export default function ShopBranding() {
   const { session, pushToast } = useStore()
@@ -39,9 +37,6 @@ export default function ShopBranding() {
   const [busy, setBusy] = useState(false)
 
   const [shopName, setShopName] = useState('')
-  const [color, setColor] = useState('#0B3B8F')
-  const [darkEnabled, setDarkEnabled] = useState(false)
-  const [colorDark, setColorDark] = useState('#0B3B8F')
   const [logo, setLogo] = useState<File | null>(null)
   const [logoPreview, setLogoPreview] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -52,12 +47,7 @@ export default function ShopBranding() {
    * including right after a successful submit, so "sent" doesn't keep
    * reading as "still has unsaved changes."
    */
-  const [baseline, setBaseline] = useState<{
-    shopName: string
-    color: string
-    darkEnabled: boolean
-    colorDark: string
-  } | null>(null)
+  const [baseline, setBaseline] = useState<{ shopName: string } | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -66,16 +56,8 @@ export default function ShopBranding() {
       // Seed the form from whatever is furthest along: a pending proposal is
       // what they last intended, so editing continues from there.
       const source = result.pending ?? result.live
-      const seeded = {
-        shopName: source?.shopName ?? '',
-        color: source?.brandColor ?? '#0B3B8F',
-        darkEnabled: Boolean(source?.brandColorDark),
-        colorDark: source?.brandColorDark ?? source?.brandColor ?? '#0B3B8F',
-      }
+      const seeded = { shopName: source?.shopName ?? '' }
       setShopName(seeded.shopName)
-      setColor(seeded.color)
-      setDarkEnabled(seeded.darkEnabled)
-      setColorDark(seeded.colorDark)
       setBaseline(seeded)
       setError('')
     } catch (caught) {
@@ -84,13 +66,7 @@ export default function ShopBranding() {
   }, [])
 
   // A picked-but-unsent logo counts as dirty too, there is no "baseline" file to compare against.
-  const isDirty =
-    baseline !== null &&
-    (shopName !== baseline.shopName ||
-      color !== baseline.color ||
-      darkEnabled !== baseline.darkEnabled ||
-      colorDark !== baseline.colorDark ||
-      logo !== null)
+  const isDirty = baseline !== null && (shopName !== baseline.shopName || logo !== null)
 
   /**
    * Warn before an accidental refresh/close throws away an edit nothing has
@@ -126,23 +102,9 @@ export default function ShopBranding() {
     return () => URL.revokeObjectURL(url)
   }, [logo])
 
-  const derived = deriveBrand(color)
-  const derivedDark = darkEnabled ? deriveBrand(colorDark) : null
-
   const submit = async () => {
-    if (!derived) {
-      pushToast({ tone: 'error', title: 'That is not a colour we recognise.' })
-      return
-    }
-    if (darkEnabled && !derivedDark) {
-      pushToast({ tone: 'error', title: 'That dark-mode colour is not one we recognise.' })
-      return
-    }
-
     const form = new FormData()
     if (shopName.trim()) form.set('shopName', shopName.trim())
-    form.set('brandColor', derived.requested)
-    if (derivedDark) form.set('brandColorDark', derivedDark.requested)
     if (logo) form.set('logo', logo)
 
     setBusy(true)
@@ -154,7 +116,7 @@ export default function ShopBranding() {
       pushToast({
         tone: 'success',
         title: 'Sent for approval',
-        detail: 'Your shop keeps its current look until it is approved.',
+        detail: 'Your shop keeps its current name and logo until it is approved.',
       })
     } catch (caught) {
       pushToast({
@@ -176,7 +138,7 @@ export default function ShopBranding() {
     <div>
       <PageHead
         title="Your shop's look"
-        subtitle="Give your shop link your own name, logo and colour. Changes are checked before they go live."
+        subtitle="Give your shop link your own name, logo and colour."
       />
 
       {error && (
@@ -201,7 +163,7 @@ export default function ShopBranding() {
               icon={<ClockIcon className="size-4" />}
             >
               You sent changes on {dateTime(state.pending.createdAt)}. Your shop keeps its current
-              look until they are approved. Sending again replaces what is waiting.
+              name and logo until they are approved. Sending again replaces what is waiting.
             </Callout>
           )}
 
@@ -219,7 +181,7 @@ export default function ShopBranding() {
           <Card className="mt-3">
             <CardHead
               title="Shop name and mark"
-              subtitle="Shown on your shop link instead of the platform's."
+              subtitle="Shown on your shop link instead of the platform's. Checked before it goes live."
             />
             <div className="space-y-4 p-4 sm:p-5">
               <Field
@@ -269,164 +231,6 @@ export default function ShopBranding() {
           </Card>
 
           <Card className="mt-3">
-            <CardHead
-              title="Shop colour"
-              subtitle="Used for buttons, the header and highlights across your shop."
-            />
-            <div className="space-y-4 p-4 sm:p-5">
-              <div className="flex flex-wrap items-end gap-3">
-                <Field label="Light mode colour" htmlFor="shop-color">
-                  <input
-                    id="shop-color"
-                    type="color"
-                    value={derived?.requested ?? '#0B3B8F'}
-                    onChange={(event) => setColor(event.target.value)}
-                    className="h-11 w-20 cursor-pointer rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1"
-                  />
-                </Field>
-                <Field label="Or type it" htmlFor="shop-color-hex">
-                  <TextInput
-                    id="shop-color-hex"
-                    value={color}
-                    placeholder="#0B3B8F"
-                    className="w-32 font-mono"
-                    invalid={!derived}
-                    onChange={(event) => setColor(event.target.value)}
-                  />
-                </Field>
-              </div>
-
-              <div className="flex items-center gap-2.5 border-t border-slate-100 dark:border-slate-800 pt-4">
-                <Toggle
-                  id="dark-color-toggle"
-                  checked={darkEnabled}
-                  onChange={setDarkEnabled}
-                  label="Use a different colour in dark mode"
-                />
-                {/* A <label> would not activate a button-based Toggle, so this is
-                    a second, plain click target rather than one wired to `for`. */}
-                <button
-                  type="button"
-                  onClick={() => setDarkEnabled(!darkEnabled)}
-                  className="text-sm font-medium text-slate-700 dark:text-slate-200"
-                >
-                  Use a different colour in dark mode
-                </button>
-              </div>
-              {!darkEnabled && (
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Off means your light colour is reused for dark mode too, chosen automatically so
-                  text stays readable. Turn this on for full control over both.
-                </p>
-              )}
-
-              {darkEnabled && (
-                <div className="flex flex-wrap items-end gap-3">
-                  <Field label="Dark mode colour" htmlFor="shop-color-dark">
-                    <input
-                      id="shop-color-dark"
-                      type="color"
-                      value={derivedDark?.requested ?? '#0B3B8F'}
-                      onChange={(event) => setColorDark(event.target.value)}
-                      className="h-11 w-20 cursor-pointer rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1"
-                    />
-                  </Field>
-                  <Field label="Or type it" htmlFor="shop-color-dark-hex">
-                    <TextInput
-                      id="shop-color-dark-hex"
-                      value={colorDark}
-                      placeholder="#0B3B8F"
-                      className="w-32 font-mono"
-                      invalid={!derivedDark}
-                      onChange={(event) => setColorDark(event.target.value)}
-                    />
-                  </Field>
-                </div>
-              )}
-
-              {derived && (
-                <>
-                  <div className="flex flex-wrap gap-1.5">
-                    {Object.entries((darkEnabled && derivedDark ? derivedDark : derived).ramp).map(
-                      ([step, hex]) => (
-                        <div key={step} className="text-center">
-                          <div
-                            className="size-10 rounded-lg border border-slate-200 dark:border-slate-700"
-                            style={{ backgroundColor: hex }}
-                          />
-                          <span className="mt-0.5 block text-[10px] text-slate-500 dark:text-slate-400">
-                            {step}
-                          </span>
-                        </div>
-                      ),
-                    )}
-                  </div>
-
-                  <div>
-                    <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
-                      How it will look
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      Customers can read your shop in either theme, a mock of the same bundle card
-                      shown both ways, so you can check your colour works in both.
-                    </p>
-
-                    {/* Two fixed swatches, not `dark:` classes, this shows both
-                        themes at once regardless of which one you are viewing
-                        the page in yourself. */}
-                    <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
-                      <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-                        <p className="mb-2.5 text-[11px] font-semibold text-slate-400 uppercase">
-                          Light
-                        </p>
-                        <p className="font-semibold text-slate-900">1GB Data</p>
-                        <p className="text-sm text-slate-500">30 days</p>
-                        <div className="mt-3 flex items-end justify-between border-t border-slate-100 pt-3">
-                          <p className="text-xl font-bold tracking-tight" style={{ color: derived.ramp[800] }}>
-                            GHS 4.94
-                          </p>
-                          <Badge tone="accent">Buy</Badge>
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-slate-700 bg-slate-900 p-3.5">
-                        <p className="mb-2.5 text-[11px] font-semibold text-slate-500 uppercase">
-                          Dark{!darkEnabled && ' (auto)'}
-                        </p>
-                        <p className="font-semibold text-slate-50">1GB Data</p>
-                        <p className="text-sm text-slate-400">30 days</p>
-                        <div className="mt-3 flex items-end justify-between border-t border-slate-800 pt-3">
-                          <p
-                            className="text-xl font-bold tracking-tight"
-                            style={{ color: (darkEnabled && derivedDark ? derivedDark : derived).ramp[300] }}
-                          >
-                            GHS 4.94
-                          </p>
-                          <Badge tone="accent">Buy</Badge>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Said out loud rather than done silently. An agent whose colour
-                      is changed without explanation assumes the picker is broken. */}
-                  {derived.adjusted && (
-                    <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-                      Your light-mode colour is a little too light for white button text to be
-                      readable, so buttons use a deeper shade of it. Everything else keeps the
-                      colour you chose.
-                    </Callout>
-                  )}
-                  {darkEnabled && derivedDark?.adjusted && (
-                    <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-                      Your dark-mode colour needed the same adjustment, for the same reason.
-                    </Callout>
-                  )}
-                </>
-              )}
-            </div>
-          </Card>
-
-          <Card className="mt-3">
             <div className="space-y-3 p-4 sm:p-5">
               <Callout tone="info" icon={<StoreIcon className="size-4" />}>
                 <p>
@@ -449,7 +253,7 @@ export default function ShopBranding() {
                 </p>
               )}
 
-              <Button block loading={busy} onClick={() => void submit()}>
+              <Button block loading={busy} disabled={!isDirty} onClick={() => void submit()}>
                 Send for approval
               </Button>
             </div>
@@ -462,15 +266,6 @@ export default function ShopBranding() {
                 <span className="text-sm text-slate-700 dark:text-slate-200">
                   {state.live.shopName ?? 'Platform name'}
                 </span>
-                {state.live.brandColor && (
-                  <span className="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-200">
-                    <span
-                      className={cn('size-4 rounded-full border border-slate-200 dark:border-slate-700')}
-                      style={{ backgroundColor: state.live.brandColor }}
-                    />
-                    {state.live.brandColor}
-                  </span>
-                )}
                 <Badge tone="success">
                   <CheckIcon className="size-3.5" /> approved
                 </Badge>
@@ -478,10 +273,291 @@ export default function ShopBranding() {
             </Card>
           )}
 
+          <ShopColorCard live={state?.live ?? null} onApplied={load} />
+
           <CustomDomainCard />
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * A shop's colour, applied the instant it's chosen, no review, no waiting.
+ *
+ * Two ways in: a small gallery of curated, pre-checked colours (the fast
+ * path, one tap and it's live), or "pick your own" for the same hex-plus-
+ * optional-dark-variant control this used to be all the time. Both call the
+ * same instant endpoint, colour is never queued for approval, see
+ * `BrandingService.setColor`.
+ */
+function ShopColorCard({
+  live,
+  onApplied,
+}: {
+  live: MyBranding['live']
+  onApplied: () => Promise<void> | void
+}) {
+  const { pushToast } = useStore()
+  const [liveColor, setLiveColor] = useState(live?.brandColor ?? null)
+  const [liveColorDark, setLiveColorDark] = useState(live?.brandColorDark ?? null)
+  useEffect(() => {
+    setLiveColor(live?.brandColor ?? null)
+    setLiveColorDark(live?.brandColorDark ?? null)
+  }, [live?.brandColor, live?.brandColorDark])
+
+  const [customOpen, setCustomOpen] = useState(
+    () => Boolean(live?.brandColor) && !templateFor(live?.brandColor ?? null),
+  )
+  const [color, setColor] = useState(liveColor ?? '#0B3B8F')
+  const [darkEnabled, setDarkEnabled] = useState(Boolean(liveColorDark))
+  const [colorDark, setColorDark] = useState(liveColorDark ?? liveColor ?? '#0B3B8F')
+  const [applyingId, setApplyingId] = useState<string | null>(null)
+  const [applyingCustom, setApplyingCustom] = useState(false)
+
+  const derived = deriveBrand(color)
+  const derivedDark = darkEnabled ? deriveBrand(colorDark) : null
+  const activeTemplate = templateFor(liveColor)
+
+  const applyTemplate = async (hex: string, id: string) => {
+    setApplyingId(id)
+    try {
+      const result = await api.setBrandColor(hex, null)
+      setLiveColor(result.brandColor)
+      setLiveColorDark(result.brandColorDark)
+      setCustomOpen(false)
+      pushToast({ tone: 'success', title: 'Colour updated' })
+      await onApplied()
+    } catch (caught) {
+      pushToast({
+        tone: 'error',
+        title: caught instanceof ApiError ? caught.message : 'We could not apply that.',
+      })
+    } finally {
+      setApplyingId(null)
+    }
+  }
+
+  const applyCustom = async () => {
+    if (!derived) {
+      pushToast({ tone: 'error', title: 'That is not a colour we recognise.' })
+      return
+    }
+    if (darkEnabled && !derivedDark) {
+      pushToast({ tone: 'error', title: 'That dark-mode colour is not one we recognise.' })
+      return
+    }
+    setApplyingCustom(true)
+    try {
+      const result = await api.setBrandColor(derived.requested, derivedDark?.requested ?? null)
+      setLiveColor(result.brandColor)
+      setLiveColorDark(result.brandColorDark)
+      pushToast({ tone: 'success', title: 'Colour updated' })
+      await onApplied()
+    } catch (caught) {
+      pushToast({
+        tone: 'error',
+        title: caught instanceof ApiError ? caught.message : 'We could not apply that.',
+      })
+    } finally {
+      setApplyingCustom(false)
+    }
+  }
+
+  const previewed = customOpen ? derived : deriveBrand(liveColor ?? '#0B3B8F')
+  const previewedDark = customOpen
+    ? derivedDark
+    : liveColorDark
+      ? deriveBrand(liveColorDark)
+      : null
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Shop colour"
+        subtitle="Used for buttons, the header and highlights. Applies right away, no review."
+      />
+      <div className="space-y-4 p-4 sm:p-5">
+        <div className="grid grid-cols-4 gap-2.5 sm:grid-cols-8">
+          {BRAND_TEMPLATES.map((template) => {
+            const isActive = !customOpen && activeTemplate?.id === template.id
+            return (
+              <button
+                key={template.id}
+                type="button"
+                onClick={() => void applyTemplate(template.hex, template.id)}
+                disabled={applyingId !== null}
+                aria-label={template.label}
+                aria-pressed={isActive}
+                className={cn(
+                  'flex flex-col items-center gap-1.5 rounded-xl border p-2 text-center transition',
+                  isActive
+                    ? 'border-brand-500 bg-brand-50 dark:border-brand-400 dark:bg-brand-900/30'
+                    : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600',
+                )}
+              >
+                <span
+                  className="relative flex size-9 items-center justify-center rounded-full border border-black/5"
+                  style={{ backgroundColor: template.hex }}
+                >
+                  {applyingId === template.id ? (
+                    <Spinner className="size-4 text-white" />
+                  ) : (
+                    isActive && <CheckIcon className="size-4 text-white" />
+                  )}
+                </span>
+                <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                  {template.label}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setCustomOpen((v) => !v)}
+          className="text-sm font-semibold text-brand-700 dark:text-brand-300 hover:underline"
+        >
+          {customOpen ? 'Hide custom colour' : 'Or pick your own colour'}
+        </button>
+
+        {customOpen && (
+          <div className="space-y-4 border-t border-slate-100 dark:border-slate-800 pt-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <Field label="Light mode colour" htmlFor="shop-color">
+                <input
+                  id="shop-color"
+                  type="color"
+                  value={derived?.requested ?? '#0B3B8F'}
+                  onChange={(event) => setColor(event.target.value)}
+                  className="h-11 w-20 cursor-pointer rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1"
+                />
+              </Field>
+              <Field label="Or type it" htmlFor="shop-color-hex">
+                <TextInput
+                  id="shop-color-hex"
+                  value={color}
+                  placeholder="#0B3B8F"
+                  className="w-32 font-mono"
+                  invalid={!derived}
+                  onChange={(event) => setColor(event.target.value)}
+                />
+              </Field>
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <Toggle
+                id="dark-color-toggle"
+                checked={darkEnabled}
+                onChange={setDarkEnabled}
+                label="Use a different colour in dark mode"
+              />
+              <button
+                type="button"
+                onClick={() => setDarkEnabled(!darkEnabled)}
+                className="text-sm font-medium text-slate-700 dark:text-slate-200"
+              >
+                Use a different colour in dark mode
+              </button>
+            </div>
+            {!darkEnabled && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Off means your light colour is reused for dark mode too, chosen automatically so
+                text stays readable. Turn this on for full control over both.
+              </p>
+            )}
+
+            {darkEnabled && (
+              <div className="flex flex-wrap items-end gap-3">
+                <Field label="Dark mode colour" htmlFor="shop-color-dark">
+                  <input
+                    id="shop-color-dark"
+                    type="color"
+                    value={derivedDark?.requested ?? '#0B3B8F'}
+                    onChange={(event) => setColorDark(event.target.value)}
+                    className="h-11 w-20 cursor-pointer rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1"
+                  />
+                </Field>
+                <Field label="Or type it" htmlFor="shop-color-dark-hex">
+                  <TextInput
+                    id="shop-color-dark-hex"
+                    value={colorDark}
+                    placeholder="#0B3B8F"
+                    className="w-32 font-mono"
+                    invalid={!derivedDark}
+                    onChange={(event) => setColorDark(event.target.value)}
+                  />
+                </Field>
+              </div>
+            )}
+
+            {derived?.adjusted && (
+              <Callout tone="info" icon={<AlertIcon className="size-4" />}>
+                Your light-mode colour is a little too light for white button text to be
+                readable, so buttons use a deeper shade of it. Everything else keeps the colour
+                you chose.
+              </Callout>
+            )}
+            {darkEnabled && derivedDark?.adjusted && (
+              <Callout tone="info" icon={<AlertIcon className="size-4" />}>
+                Your dark-mode colour needed the same adjustment, for the same reason.
+              </Callout>
+            )}
+
+            <Button loading={applyingCustom} onClick={() => void applyCustom()}>
+              Apply colour
+            </Button>
+          </div>
+        )}
+
+        {previewed && (
+          <div>
+            <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
+              How it looks
+            </p>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {customOpen
+                ? 'A preview of what you have picked above, in both themes.'
+                : "Your shop's current colour, in both themes."}
+            </p>
+
+            {/* Two fixed swatches, not `dark:` classes, this shows both
+                themes at once regardless of which one you are viewing
+                the page in yourself. */}
+            <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+                <p className="mb-2.5 text-[11px] font-semibold text-slate-400 uppercase">Light</p>
+                <p className="font-semibold text-slate-900">1GB Data</p>
+                <p className="text-sm text-slate-500">30 days</p>
+                <div className="mt-3 flex items-end justify-between border-t border-slate-100 pt-3">
+                  <p className="text-xl font-bold tracking-tight" style={{ color: previewed.ramp[800] }}>
+                    GHS 4.94
+                  </p>
+                  <Badge tone="accent">Buy</Badge>
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-700 bg-slate-900 p-3.5">
+                <p className="mb-2.5 text-[11px] font-semibold text-slate-500 uppercase">
+                  Dark{!previewedDark && ' (auto)'}
+                </p>
+                <p className="font-semibold text-slate-50">1GB Data</p>
+                <p className="text-sm text-slate-400">30 days</p>
+                <div className="mt-3 flex items-end justify-between border-t border-slate-800 pt-3">
+                  <p
+                    className="text-xl font-bold tracking-tight"
+                    style={{ color: (previewedDark ?? previewed).ramp[300] }}
+                  >
+                    GHS 4.94
+                  </p>
+                  <Badge tone="accent">Buy</Badge>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </Card>
   )
 }
 
