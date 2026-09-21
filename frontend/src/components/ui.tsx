@@ -1009,3 +1009,39 @@ export function CopyField({
     </div>
   )
 }
+
+/**
+ * A bare copy icon for a reference sitting inline in a sentence or a badge,
+ * where `CopyField`'s own boxed layout would be too heavy, a DataHub ticket
+ * number quoted inside "Needs your attention"'s prose, or a manual order
+ * number next to its badge in the orders table, for two.
+ */
+export function CopyIconButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+    } catch {
+      // Clipboard can be blocked; the value is still visible to select by hand.
+    }
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1800)
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label={`Copy ${value}`}
+      // The visible icon stays 20px so it doesn't dominate the row it sits in,
+      // but the actual tap target is widened to the app's own 44px minimum
+      // (`BUTTON_SIZES` above) via an invisible `::before` that doesn't
+      // affect layout, a small icon-only button is otherwise the easiest
+      // thing on the page to miss on a phone.
+      className="relative inline-flex size-5 items-center justify-center rounded-md before:absolute before:-inset-3 before:content-[''] hover:bg-black/5 dark:hover:bg-white/10"
+    >
+      {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+    </button>
+  )
+}

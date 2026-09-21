@@ -9,6 +9,7 @@ import {
   Badge,
   Button,
   Card,
+  CopyIconButton,
   EmptyState,
   NetworkChip,
   PageHead,
@@ -22,7 +23,7 @@ import {
   TextInput,
   Th,
 } from '../../components/ui'
-import { AlertIcon, CheckIcon, CopyIcon, DownloadIcon, ReceiptIcon, SearchIcon } from '../../components/icons'
+import { AlertIcon, DownloadIcon, ReceiptIcon, SearchIcon } from '../../components/icons'
 
 type Filter = 'all' | OrderStatus | 'unresolved'
 const STATUS_VALUES: OrderStatus[] = ['pending', 'processing', 'completed', 'failed']
@@ -735,6 +736,26 @@ function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void 
           <Badge tone="warning">Unresolved</Badge>
         </span>
       )}
+      {/*
+          "Failed" alone flattens two very different things into one word: a
+          customer who paid and DataHub couldn't deliver (money is owed back,
+          see the refund badges below) versus a customer who never actually
+          paid at all, an abandoned Paystack checkout, or a recipient the
+          supplier rejected before any charge went through. `refundRequest` is
+          only ever created when `FulfilmentService.settle` found money had
+          been collected (see its own `collected` check), so its absence,
+          `refunded` false and `refundStatus` null, on a failed order is the
+          one reliable sign nothing was ever taken and there is nothing to
+          chase or refund here.
+      */}
+      {order.status === 'failed' && !order.refunded && !order.refundStatus && (
+        <span
+          className="ml-1.5 inline-block"
+          title="No refund needed here, this closed before the customer's payment ever went through, either they abandoned the checkout or the recipient number was rejected before any charge was collected."
+        >
+          <Badge tone="neutral">Never paid</Badge>
+        </span>
+      )}
       {order.refunded && (
         <Badge tone="info" className="ml-1.5">
           Refunded
@@ -823,33 +844,4 @@ function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void 
   )
 }
 
-function CopyIconButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false)
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(value)
-    } catch {
-      // Clipboard can be blocked; the value is still visible to select by hand.
-    }
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1800)
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={copy}
-      aria-label={`Copy ${value}`}
-      // The visible icon stays 20px so it doesn't dominate the row it sits in,
-      // but the actual tap target is widened to the app's own 44px minimum
-      // (`BUTTON_SIZES`, `ui.tsx`) via an invisible `::before` that doesn't
-      // affect layout, a small icon-only button is otherwise the easiest
-      // thing on the page to miss on a phone.
-      className="relative inline-flex size-5 items-center justify-center rounded-md before:absolute before:-inset-3 before:content-[''] hover:bg-black/5 dark:hover:bg-white/10"
-    >
-      {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
-    </button>
-  )
-}
 

@@ -10,6 +10,7 @@ import {
   Callout,
   Card,
   CardHead,
+  CopyIconButton,
   EmptyState,
   Field,
   Modal,
@@ -237,6 +238,22 @@ export default function NeedsAttention() {
           ) : (
             stuck.map((row) => {
               const style = URGENCY_STYLE[stuckUrgency(row)]
+              /**
+               * DataHub's own ticket number, not the full `manual_<this>_
+               * <their-timestamp>` reference, that prefix and trailing
+               * timestamp are only ever meaningful to us, their support asks
+               * for this number alone, same split `AdminOrders.tsx` uses for
+               * `manualOrderNumber`. `reason`'s prose already spells out
+               * "quote them <full ref>" as plain text, easy to mistype
+               * copying by hand and too small to read as anything but noise,
+               * pulled out entirely so this one number, the one actually
+               * worth copying, sits right next to the badge that explains it.
+               */
+              const manualTicket =
+                stuckUrgency(row) === 'manual' && row.providerReference
+                  ? (row.providerReference.split('_')[1] ?? null)
+                  : null
+              const reasonText = manualTicket ? row.reason.replace(/,?\s*quote them\s*\S*$/, '') : row.reason
               return (
                 <div
                   key={row.id}
@@ -246,10 +263,20 @@ export default function NeedsAttention() {
                     <p className="flex flex-wrap items-center gap-2 font-semibold text-slate-900 dark:text-slate-50">
                       {row.reference} · {row.productName} · {cedis(row.salePrice)}
                       <Badge tone={style.badgeTone}>{style.badgeLabel}</Badge>
+                      {manualTicket && (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                            {manualTicket}
+                          </span>
+                          <CopyIconButton value={manualTicket} />
+                        </span>
+                      )}
                     </p>
                     <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                      {row.reason} · to {row.recipient} · placed {dateTime(row.createdAt)}
-                      {row.providerReference ? ` · ref ${row.providerReference}` : ''}
+                      {reasonText} · to{' '}
+                      <span className="font-bold text-slate-700 dark:text-slate-200">{row.recipient}</span> · placed{' '}
+                      {dateTime(row.createdAt)}
+                      {row.providerReference && !manualTicket ? ` · ref ${row.providerReference}` : ''}
                     </p>
                   </div>
                   <Button
