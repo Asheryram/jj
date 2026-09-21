@@ -90,6 +90,22 @@ interface NavItem {
   end?: boolean
   /** A small count shown on the nav item, currently only agent sign-ups waiting on Users. */
   badge?: number
+  /**
+   * One of the four mobile bottom-bar tabs, decided by how urgent the page
+   * is, not by its position in the list below. Kept as an explicit flag
+   * rather than "the first four items" so reordering or inserting into the
+   * grouped list (Analytics and Assistant were both added after this array
+   * was first written) can never silently bump something like Withdrawals
+   * out of thumb reach without anyone noticing.
+   */
+  primary?: boolean
+  /**
+   * The sidebar/More-menu section this item renders under. Undefined items
+   * render above the first section, un-headed, for the small number of
+   * entry points (Overview, Analytics, Assistant) that aren't really "a
+   * category" of admin work.
+   */
+  section?: string
 }
 
 /**
@@ -111,13 +127,16 @@ const PROFILE_LABEL: Partial<Record<Role, string>> = {
 }
 
 /**
- * Ordered by how urgent it is, not alphabetically or by how the API groups it.
- *
- * The first four are what the mobile bottom bar shows before "More", see
- * `AppShell` below, so they carry the weight: Overview and All orders are
- * the daily check, Refunds and Withdrawals are money someone else is waiting
- * on. Number approvals and Users are real but rarely urgent in the same way,
- * so they sit in the overflow rather than crowding out a thumb-reachable slot.
+ * Grouped by function (Money / Orders / Catalogue / People / Platform), not
+ * alphabetically or by how the API groups it, so a flat 17-item list isn't
+ * the only way to find anything. `primary` marks the four mobile bottom-bar
+ * tabs explicitly, independent of position in this array, Overview and All
+ * orders are the daily check, Refunds and Withdrawals are money someone else
+ * is waiting on. Group order and primary order used to be the same thing
+ * (whichever four happened to be listed first), which is exactly how
+ * Analytics and Assistant, both added later, silently bumped Refunds and
+ * Withdrawals out of thumb reach without either becoming untrue as a
+ * sentence in this comment, see `NavItem.primary`'s own doc.
  */
 function navFor(
   role: Role,
@@ -130,40 +149,54 @@ function navFor(
 ): NavItem[] {
   if (isAdmin(role)) {
     return [
-      { to: '/admin', label: 'Overview', icon: HomeIcon, end: true },
+      { to: '/admin', label: 'Overview', icon: HomeIcon, end: true, primary: true },
       // Not /admin/analytics on purpose, it reads a separate warehouse
       // database, computed on a schedule, not a live query like everything
       // else in this list.
       { to: '/analytics', label: 'Analytics', icon: ChartIcon },
       { to: '/admin/assistant', label: ' Assistant ', icon: HelpIcon },
-      { to: '/admin/orders', label: 'All orders', icon: ReceiptIcon },
-      { to: '/admin/refunds', label: 'Refunds', icon: ReceiptIcon },
-      { to: '/admin/withdrawals', label: 'Withdrawals', icon: CashIcon },
+
+      { to: '/admin/orders', label: 'All orders', icon: ReceiptIcon, section: 'Orders', primary: true },
       {
         to: '/admin/needs-attention',
         label: 'Needs attention',
         icon: AlertIcon,
+        section: 'Orders',
         badge: needsAttentionCount > 0 ? needsAttentionCount : undefined,
       },
       // Renamed from "Approvals": this is DataHub-blocked phone numbers, not
       // agent sign-ups, those wait on Users instead (see the badge below),
       // and sharing the word "approvals" between two unrelated queues was
       // sending admins to the wrong screen.
-      { to: '/admin/approvals', label: 'Number approvals', icon: ShieldIcon },
+      { to: '/admin/approvals', label: 'Number approvals', icon: ShieldIcon, section: 'Orders' },
+
+      { to: '/admin/refunds', label: 'Refunds', icon: ReceiptIcon, section: 'Money', primary: true },
+      { to: '/admin/withdrawals', label: 'Withdrawals', icon: CashIcon, section: 'Money', primary: true },
+      { to: '/admin/finance', label: 'Finance', icon: CashIcon, section: 'Money' },
+      { to: '/admin/float-risk', label: 'Float risk', icon: AlertIcon, section: 'Money' },
+      { to: '/admin/subscriptions', label: 'Subscriptions', icon: ClockIcon, section: 'Money' },
+
+      { to: '/admin/prices', label: 'Cost prices', icon: TagIcon, section: 'Catalogue' },
+      {
+        to: '/admin/catalogue-accuracy',
+        label: 'Catalogue accuracy',
+        icon: TrendUpIcon,
+        section: 'Catalogue',
+      },
+      { to: '/admin/branding', label: 'Branding', icon: StoreIcon, section: 'Catalogue' },
+
       {
         to: '/admin/users',
         label: 'Users',
         icon: UsersIcon,
+        section: 'People',
         badge: pendingApplications > 0 ? pendingApplications : undefined,
       },
-      { to: '/admin/prices', label: 'Cost prices', icon: TagIcon },
-      { to: '/admin/catalogue-accuracy', label: 'Catalogue accuracy', icon: TrendUpIcon },
-      { to: '/admin/float-risk', label: 'Float risk', icon: AlertIcon },
-      { to: '/admin/branding', label: 'Branding', icon: StoreIcon },
       {
         to: '/admin/feedback',
         label: 'Feedback',
         icon: HelpIcon,
+        section: 'People',
         badge: openFeedbackCount > 0 ? openFeedbackCount : undefined,
       },
       {
@@ -174,21 +207,23 @@ function navFor(
         to: role === 'admin' && unreadAnnouncementsCount > 0 ? '/admin/announcements/received' : '/admin/announcements',
         label: 'Announcements',
         icon: AlertIcon,
+        section: 'People',
         badge: role === 'admin' && unreadAnnouncementsCount > 0 ? unreadAnnouncementsCount : undefined,
       },
-      { to: '/admin/subscriptions', label: 'Subscriptions', icon: ClockIcon },
-      { to: '/admin/settings', label: 'Settings', icon: SettingsIcon },
+
+      { to: '/admin/settings', label: 'Settings', icon: SettingsIcon, section: 'Platform' },
       // Platform access belongs to the operator, not the business owner. An
       // admin must not be shown a door they cannot open. Approving a custom
       // domain is the same kind of trust decision, vouching that whoever
       // asked for it actually controls it, so it sits here too.
       ...(role === 'superadmin'
         ? [
-            { to: '/admin/team', label: 'Platform team', icon: ShieldIcon },
+            { to: '/admin/team', label: 'Platform team', icon: ShieldIcon, section: 'Platform' },
             {
               to: '/admin/domains',
               label: 'Custom domains',
               icon: GlobeIcon,
+              section: 'Platform',
               badge: pendingDomainsCount > 0 ? pendingDomainsCount : undefined,
             },
           ]
@@ -199,17 +234,21 @@ function navFor(
   if (role === 'agent') {
     // Agents have earnings, not a wallet, they never pre-fund anything.
     return [
-      { to: '/app', label: 'Dashboard', icon: HomeIcon, end: true },
+      { to: '/app', label: 'Dashboard', icon: HomeIcon, end: true, primary: true },
       { to: '/app/assistant', label: ' Assistant ', icon: HelpIcon },
-      { to: '/app/referrals', label: 'Sell & refer', icon: StoreIcon },
-      { to: '/app/earnings', label: 'Earnings', icon: WalletIcon },
-      { to: '/app/orders', label: 'Sales', icon: ReceiptIcon },
-      { to: '/app/pricing', label: 'My prices', icon: TagIcon },
-      { to: '/app/shop-look', label: 'Shop look', icon: StoreIcon },
+
+      { to: '/app/referrals', label: 'Sell & refer', icon: StoreIcon, section: 'Sell', primary: true },
+      { to: '/app/pricing', label: 'My prices', icon: TagIcon, section: 'Sell' },
+      { to: '/app/shop-look', label: 'Shop look', icon: StoreIcon, section: 'Sell' },
       // Unscoped on purpose, see the note above navFor.
-      { to: '/shop', label: 'Browse shop', icon: UsersIcon },
-      { to: '/app/reports', label: 'Reports', icon: ChartIcon },
-      { to: '/app/withdrawals', label: 'Withdraw', icon: CashIcon },
+      { to: '/shop', label: 'Browse shop', icon: UsersIcon, section: 'Sell' },
+
+      { to: '/app/earnings', label: 'Earnings', icon: WalletIcon, section: 'Money', primary: true },
+      { to: '/app/withdrawals', label: 'Withdraw', icon: CashIcon, section: 'Money' },
+
+      { to: '/app/orders', label: 'Sales', icon: ReceiptIcon, section: 'Activity', primary: true },
+      { to: '/app/reports', label: 'Reports', icon: ChartIcon, section: 'Activity' },
+
       { to: '/app/feedback', label: 'Feedback', icon: HelpIcon },
       {
         to: '/app/announcements',
@@ -229,11 +268,27 @@ function navFor(
    * leaving it would be a link to a page that can only refuse.
    */
   return [
-    { to: '/app', label: 'Dashboard', icon: HomeIcon, end: true },
-    { to: shopPath('/shop'), label: 'Buy', icon: StoreIcon },
-    { to: '/app/orders', label: 'Orders', icon: ReceiptIcon },
-    { to: '/app/reports', label: 'My spending', icon: ChartIcon },
+    { to: '/app', label: 'Dashboard', icon: HomeIcon, end: true, primary: true },
+    { to: shopPath('/shop'), label: 'Buy', icon: StoreIcon, primary: true },
+    { to: '/app/orders', label: 'Orders', icon: ReceiptIcon, primary: true },
+    { to: '/app/reports', label: 'My spending', icon: ChartIcon, primary: true },
   ]
+}
+
+/**
+ * Consecutive runs of the same `section`, in the order the list already
+ * defines, `navFor()` already writes each section's items together so this
+ * is a grouping pass, not a sort. `undefined` sections (Overview, Analytics,
+ * Assistant) come back as their own headless run, rendered with no label.
+ */
+function sectioned(items: NavItem[]): { section: string | undefined; items: NavItem[] }[] {
+  const groups: { section: string | undefined; items: NavItem[] }[] = []
+  for (const item of items) {
+    const current = groups[groups.length - 1]
+    if (current && current.section === item.section) current.items.push(item)
+    else groups.push({ section: item.section, items: [item] })
+  }
+  return groups
 }
 
 /** A small waiting-count on a nav item, currently just agent sign-ups on Users. */
@@ -460,8 +515,8 @@ export function AppShell() {
     unreadAnnouncementsCount,
     pendingDomainsCount,
   )
-  const primary = items.slice(0, 4)
-  const overflow = items.slice(4)
+  const primary = items.filter((item) => item.primary)
+  const overflow = items.filter((item) => !item.primary)
 
   return (
     <div className="min-h-dvh bg-slate-50 dark:bg-slate-950">
@@ -536,13 +591,22 @@ export function AppShell() {
 
       <div className="mx-auto flex max-w-7xl gap-6 px-3 sm:px-4">
         <aside className="sticky top-15 hidden h-fit w-56 shrink-0 py-5 lg:block">
-          <nav className="space-y-1">
-            {items.map((item) => (
-              <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
-                <item.icon className="size-5 shrink-0" />
-                {item.label}
-                {Boolean(item.badge) && <NavBadge count={item.badge as number} className="ml-auto" />}
-              </NavLink>
+          <nav className="space-y-4">
+            {sectioned(items).map((group, index) => (
+              <div key={group.section ?? `_${index}`} className="space-y-1">
+                {group.section && (
+                  <p className="px-2.5 pt-1 text-[11px] font-semibold tracking-wide text-slate-400 dark:text-slate-500 uppercase">
+                    {group.section}
+                  </p>
+                )}
+                {group.items.map((item) => (
+                  <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
+                    <item.icon className="size-5 shrink-0" />
+                    {item.label}
+                    {Boolean(item.badge) && <NavBadge count={item.badge as number} className="ml-auto" />}
+                  </NavLink>
+                ))}
+              </div>
             ))}
           </nav>
           <div className="mt-5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3.5">
@@ -597,18 +661,27 @@ export function AppShell() {
       </nav>
 
       <Modal open={moreOpen} onClose={() => setMoreOpen(false)} title="More">
-        <nav className="space-y-1">
-          {overflow.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={navLinkClass}
-              onClick={() => setMoreOpen(false)}
-            >
-              <item.icon className="size-5 shrink-0" />
-              {item.label}
-              {Boolean(item.badge) && <NavBadge count={item.badge as number} className="ml-auto" />}
-            </NavLink>
+        <nav className="space-y-4">
+          {sectioned(overflow).map((group, index) => (
+            <div key={group.section ?? `_${index}`} className="space-y-1">
+              {group.section && (
+                <p className="px-2.5 text-[11px] font-semibold tracking-wide text-slate-400 dark:text-slate-500 uppercase">
+                  {group.section}
+                </p>
+              )}
+              {group.items.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={navLinkClass}
+                  onClick={() => setMoreOpen(false)}
+                >
+                  <item.icon className="size-5 shrink-0" />
+                  {item.label}
+                  {Boolean(item.badge) && <NavBadge count={item.badge as number} className="ml-auto" />}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
       </Modal>

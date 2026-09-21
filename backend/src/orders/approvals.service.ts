@@ -190,18 +190,24 @@ export class ApprovalsService {
       select: { id: true, reference: true },
     })
 
+    let released = 0
     for (const order of held) {
-      // Back to `processing`: it is genuinely in flight again, and leaving it in
-      // `awaiting_approval` would let a second recheck dispatch it twice.
-      await this.prisma.order.update({
-        where: { id: order.id },
+      // Guarded on the status this read found it in: the reconciler's stale-approval
+      // sweep can independently time the same order out to `failed` between the
+      // `findMany` above and this write. A plain `update` would silently resurrect
+      // an already-refunded order back to `processing`; the `updateMany` guard makes
+      // this a no-op instead when that race happens.
+      const claim = await this.prisma.order.updateMany({
+        where: { id: order.id, status: 'awaiting_approval' },
         data: { status: 'processing' },
       })
+      if (claim.count === 0) continue
+      released++
       this.fulfilment.scheduleFor(order.id)
       this.log.log(`${order.reference} released, ${phone} approved`)
     }
 
-    return held.length
+    return released
   }
 
   /**

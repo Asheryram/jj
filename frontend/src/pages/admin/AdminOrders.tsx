@@ -1,17 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import type { Order, OrderStatus } from '../../data/types'
-import { api, ApiError, type DispatchAttempt, type FinanceStatement } from '../../lib/api'
+import { api, type FinanceStatement } from '../../lib/api'
+import { DispatchModal } from '../../components/DispatchModal'
 import {
   Badge,
   Button,
-  Callout,
   Card,
   EmptyState,
-  Field,
-  Modal,
   NetworkChip,
   PageHead,
   Segmented,
@@ -24,33 +22,102 @@ import {
   TextInput,
   Th,
 } from '../../components/ui'
-import {
-  AlertIcon,
-  CheckIcon,
-  ClockIcon,
-  CopyIcon,
-  DownloadIcon,
-  ReceiptIcon,
-  SearchIcon,
-} from '../../components/icons'
+import { AlertIcon, CheckIcon, CopyIcon, DownloadIcon, ReceiptIcon, SearchIcon } from '../../components/icons'
 
-type Filter = 'all' | OrderStatus
+type Filter = 'all' | OrderStatus | 'unresolved'
+const STATUS_VALUES: OrderStatus[] = ['pending', 'processing', 'completed', 'failed']
+const LINK_FILTER_VALUES: Filter[] = [...STATUS_VALUES, 'unresolved']
+const PAGE_SIZE = 50
+
+/** `YYYY-MM-DD` in the browser's own local date. `daysAgo: 0` is today. */
+function dateStr(daysAgo: number): string {
+  const d = new Date()
+  d.setDate(d.getDate() - daysAgo)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 /** FR-6.3 (all orders) + FR-8.3 (export for record-keeping). */
 export default function AdminOrders() {
-  const { orders } = useStore()
+  const { pushToast } = useStore()
   const [searchParams] = useSearchParams()
   const [inspecting, setInspecting] = useState<Order | null>(null)
-  const [filter, setFilter] = useState<Filter>('all')
+  /** `?status=` links here from the Overview page's failed-orders callout. */
+  const [filter, setFilter] = useState<Filter>(() => {
+    const s = searchParams.get('status')
+    return s && LINK_FILTER_VALUES.includes(s as Filter) ? (s as Filter) : 'all'
+  })
+  const linkedIn = Boolean(searchParams.get('ref') || searchParams.get('status'))
   /**
    * `?ref=` links here from elsewhere (the Overview page's "Needs your
    * attention" card, for one), the same search box, just pre-filled, so
    * landing here shows exactly the one order that was clicked through for.
    */
   const [query, setQuery] = useState(() => searchParams.get('ref') ?? '')
-  /** Table and CSV export only, the summary tiles above stay all-time, on purpose. */
-  const [fromDate, setFromDate] = useState('')
-  const [toDate, setToDate] = useState('')
+  // Debounced separately from `query` so every keystroke doesn't fire a request.
+  const [debouncedQuery, setDebouncedQuery] = useState(query)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 300)
+    return () => window.clearTimeout(timer)
+  }, [query])
+
+  /**
+   * Defaults to the last 7 days: an admin opening this page cold almost
+   * always wants "what's been happening lately", not every order the
+   * platform has ever taken, but a single day is too narrow to be the
+   * default, an order placed yesterday shouldn't already need a manual date
+   * change to find. Landing via a `?ref=`/`?status=` link is the one
+   * exception, an order or a whole status being searched for should not be
+   * hidden by a date boundary it doesn't know to clear.
+   */
+  const [fromDate, setFromDate] = useState(() => (linkedIn ? '' : dateStr(6)))
+  const [toDate, setToDate] = useState(() => (linkedIn ? '' : dateStr(0)))
+
+  const [page, setPage] = useState(1)
+  const [rows, setRows] = useState<Order[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+
+  const [reloadTick, setReloadTick] = useState(0)
+
+  // Any filter change invalidates the current page number.
+  useEffect(() => {
+    setPage(1)
+  }, [filter, fromDate, toDate, debouncedQuery])
+
+  useEffect(() => {
+    let live = true
+    setLoading(true)
+    api
+      .adminOrders({
+        status: filter === 'all' || filter === 'unresolved' ? undefined : filter,
+        unresolvedOnly: filter === 'unresolved',
+        from: fromDate || undefined,
+        to: toDate || undefined,
+        q: debouncedQuery || undefined,
+        page,
+        pageSize: PAGE_SIZE,
+      })
+      .then((result) => {
+        if (!live) return
+        setRows(result.rows)
+        setTotal(result.total)
+        setLoadError(false)
+      })
+      .catch(() => {
+        if (!live) return
+        setRows([])
+        setTotal(0)
+        setLoadError(true)
+      })
+      .finally(() => live && setLoading(false))
+    return () => {
+      live = false
+    }
+  }, [filter, fromDate, toDate, debouncedQuery, page, reloadTick])
+
+  const visible = rows
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   /**
    * "Your profit" is deliberately the exact same number as the Reserve
@@ -107,53 +174,30 @@ export default function AdminOrders() {
     }
   }, [])
 
-  const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    // `toDate` is inclusive of the whole day, not just its midnight instant,
-    // picking "3 Sep" as the end and finding nothing from that day is the
-    // classic off-by-one a date-range filter earns if this is left out.
-    const from = fromDate ? new Date(fromDate) : null
-    const to = toDate ? new Date(`${toDate}T23:59:59.999`) : null
-    return orders.filter((order) => {
-      if (filter !== 'all' && order.status !== filter) return false
-      const createdAt = new Date(order.createdAt)
-      if (from && createdAt < from) return false
-      if (to && createdAt > to) return false
-      if (!needle) return true
-      return (
-        order.recipient.includes(needle) ||
-        order.reference.toLowerCase().includes(needle) ||
-        order.buyer.toLowerCase().includes(needle) ||
-        (order.soldByCode ?? '').toLowerCase().includes(needle) ||
-        (order.soldByAgentName ?? '').toLowerCase().includes(needle) ||
-        order.split.shares.some((s) => s.name.toLowerCase().includes(needle)) ||
-        order.productName.toLowerCase().includes(needle)
-      )
-    })
-  }, [filter, orders, query, fromDate, toDate])
-
   // Landed here via `?ref=` naming exactly one order, open it straight away
   // rather than making the click that brought you here do only half the job.
+  // The date range is already cleared (see `linkedIn` above) and `query` is
+  // seeded with the reference, so the server-side search above should
+  // return exactly this one order regardless of when it was placed.
   //
-  // Guarded on having already opened for this exact `refParam`: `orders` is
-  // in the dependency list so this can retry while the list is still
-  // loading, but it also gets a brand-new array reference on every
-  // `watchOrder` poll tick (any order being tracked anywhere re-sets the
-  // whole list every 1.5-5s) even when nothing about *this* order changed.
-  // Without the guard, every one of those re-fired `setInspecting` with a
-  // fresh-but-equal object, which `DispatchModal`'s own reset effect below
+  // Guarded on having already opened for this exact `refParam`: `rows` is
+  // in the dependency list so this can retry while the page is still
+  // loading, but it also gets a brand-new array reference on every fetch
+  // even when nothing about *this* order changed. Without the guard, every
+  // refetch would re-fire `setInspecting` with a fresh-but-equal object,
+  // which `DispatchModal`'s own reset effect below
   // reads as a genuinely different order and wipes its note field, an
   // admin typing "why" mid-resolve would watch their own keystrokes vanish.
   const refParam = searchParams.get('ref')
   const autoOpenedFor = useRef<string | null>(null)
   useEffect(() => {
     if (!refParam || autoOpenedFor.current === refParam) return
-    const match = orders.find((o) => o.reference === refParam)
+    const match = rows.find((o) => o.reference === refParam)
     if (match) {
       setInspecting(match)
       autoOpenedFor.current = refParam
     }
-  }, [orders, refParam])
+  }, [rows, refParam])
 
   /**
    * `split.supplierCost` is frozen at whatever the catalogue believed at
@@ -181,7 +225,46 @@ export default function AdminOrders() {
   const agentMarginOf = (order: (typeof visible)[number]) =>
     order.split.shares.filter((s) => s.role === 'agent').reduce((sum, s) => sum + s.margin, 0)
 
-  const exportCsv = () => {
+  const [exporting, setExporting] = useState(false)
+
+  /**
+   * Exports everything matching the current filter/dates/search, not just
+   * the page on screen, up to the server's own 2000-row cap. That cap is
+   * called out explicitly if it's hit rather than silently truncating: a
+   * CSV that looks complete but quietly drops rows is worse than a CSV that
+   * says so.
+   */
+  const exportCsv = async () => {
+    setExporting(true)
+    let exportRows: Order[]
+    let matched: number
+    try {
+      const result = await api.adminOrders({
+        status: filter === 'all' || filter === 'unresolved' ? undefined : filter,
+        unresolvedOnly: filter === 'unresolved',
+        from: fromDate || undefined,
+        to: toDate || undefined,
+        q: debouncedQuery || undefined,
+        page: 1,
+        pageSize: 2000,
+      })
+      exportRows = result.rows
+      matched = result.total
+    } catch {
+      pushToast({ tone: 'error', title: 'Could not export', detail: 'Try again in a moment.' })
+      setExporting(false)
+      return
+    }
+    setExporting(false)
+
+    if (matched > exportRows.length) {
+      pushToast({
+        tone: 'info',
+        title: `Showing the first ${exportRows.length.toLocaleString()} of ${matched.toLocaleString()}`,
+        detail: 'Narrow the date range or filter to export the rest.',
+      })
+    }
+
     const header = [
       'Reference',
       'Date',
@@ -206,7 +289,7 @@ export default function AdminOrders() {
       'Resolved by admin',
       'Refund status',
     ]
-    const rows = visible.map((o) => {
+    const csvRows = exportRows.map((o) => {
       const agentShares = o.split.shares.filter((s) => s.role === 'agent')
       return [
         o.reference,
@@ -251,7 +334,7 @@ export default function AdminOrders() {
         o.refunded ? 'approved' : (o.refundStatus ?? ''),
       ]
     })
-    const csv = [header, ...rows].map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n')
+    const csv = [header, ...csvRows].map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -267,7 +350,7 @@ export default function AdminOrders() {
         title="All orders"
         subtitle="Every order placed on the platform, by anyone."
         action={
-          <Button variant="outline" onClick={exportCsv}>
+          <Button variant="outline" loading={exporting} onClick={() => void exportCsv()}>
             <DownloadIcon className="size-4" /> Export CSV
           </Button>
         }
@@ -275,9 +358,9 @@ export default function AdminOrders() {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatTile
-          label="Orders shown"
-          value={String(visible.length)}
-          hint="Only this tile follows the filter, dates and search below"
+          label="Orders matching"
+          value={String(total)}
+          hint="Follows the filter, dates and search below. The table shows one page of these at a time"
         />
         <StatTile
           label="Customers paid"
@@ -314,6 +397,11 @@ export default function AdminOrders() {
             { value: 'all', label: 'All' },
             { value: 'completed', label: 'Completed' },
             { value: 'processing', label: 'Processing' },
+            // A processing order stuck with no reply from the delivery
+            // partner at all, the same "stuck" definition Needs Attention
+            // uses, surfaced here too since not every admin thinks to check
+            // a separate page for it.
+            { value: 'unresolved', label: 'Unresolved' },
             { value: 'failed', label: 'Failed' },
           ]}
           value={filter}
@@ -363,11 +451,26 @@ export default function AdminOrders() {
       </div>
 
       <Card>
-        {visible.length === 0 ? (
+        {loading ? (
+          <div className="py-10 text-center">
+            <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
+          </div>
+        ) : loadError ? (
+          <EmptyState
+            icon={<AlertIcon className="size-6" />}
+            title="Could not load orders"
+            detail="Try again in a moment."
+            action={
+              <Button variant="outline" onClick={() => setReloadTick((t) => t + 1)}>
+                Retry
+              </Button>
+            }
+          />
+        ) : visible.length === 0 ? (
           <EmptyState
             icon={<ReceiptIcon className="size-6" />}
             title="No orders matched"
-            detail="Adjust the filter or clear your search."
+            detail="Adjust the filter, dates or search."
             action={
               <Button variant="outline" onClick={() => setQuery('')}>
                 Clear search
@@ -553,6 +656,32 @@ export default function AdminOrders() {
         )}
       </Card>
 
+      {!loading && !loadError && total > 0 && (
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Page {page} of {totalPages} · {total.toLocaleString()} order{total === 1 ? '' : 's'} match
+          </p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+
       <DispatchModal order={inspecting} onClose={() => setInspecting(null)} />
     </div>
   )
@@ -724,558 +853,3 @@ function CopyIconButton({ value }: { value: string }) {
   )
 }
 
-/**
- * Turn a supplier's reply into something James can act on.
- *
- * He is not a developer, and `HTTP 400 {"success":false,"error":"Insufficient
- * balance"}` is not an instruction. Every failure here has exactly one sensible
- * next move, top up, get the number approved, fix the catalogue, call the
- * partner, and that move is the thing worth putting on screen.
- *
- * Matched on the provider's words rather than a code, because they send no
- * codes. An unrecognised reason falls through to their text verbatim: better a
- * sentence he has to puzzle over than a confident wrong diagnosis.
- */
-function explain(attempt: DispatchAttempt): {
-  tone: 'success' | 'danger' | 'warning' | 'info'
-  title: string
-  detail: string
-  action: string | null
-} {
-  const reason = attempt.reason ?? ''
-
-  if (attempt.simulated) {
-    return {
-      tone: 'info',
-      title: 'Test mode, nothing was sent',
-      detail: 'The delivery partner was not contacted. This order was simulated end to end.',
-      action: null,
-    }
-  }
-
-  if (attempt.outcome === 'delivered') {
-    return {
-      tone: 'success',
-      title: 'Delivered',
-      detail: 'The delivery partner confirmed the bundle reached the recipient.',
-      action: null,
-    }
-  }
-
-  if (attempt.outcome === 'pending') {
-    return {
-      tone: 'info',
-      title: 'Sent, waiting for confirmation',
-      detail:
-        'The delivery partner accepted the order and is working on it. They confirm separately, usually within a couple of minutes.',
-      action: null,
-    }
-  }
-
-  if (attempt.outcome === 'unknown') {
-    /**
-     * "Checked automatically every minute" is only true when there is a
-     * `providerReference` to check *with*, the reconciler's sweep can only
-     * ask DataHub's `/order-status` for a reference they themselves handed
-     * back. A purchase call that timed out before any reply arrived at all
-     * never got one, so that order is invisible to the sweep forever, not
-     * merely waiting on it. Telling an admin it's being handled automatically
-     * when it never will be is worse than saying nothing, it's exactly the
-     * kind of reassurance that delays the one manual check that will
-     * actually resolve it.
-     */
-    return {
-      tone: 'warning',
-      title: 'We do not know whether this was delivered',
-      detail:
-        'The connection broke before the partner answered, so the bundle may or may not have been sent.',
-      action: attempt.providerReference
-        ? 'Do not re-send it manually, that risks paying twice. It is being checked automatically every minute.'
-        : 'This never got a reference back from the delivery partner, so it cannot be checked automatically. Check their own dashboard for this recipient below before doing anything, if nothing was actually sent, it can be retried safely; if you find out some other way what really happened, mark it delivered or failed instead.',
-    }
-  }
-
-  if (/insufficient balance/i.test(reason)) {
-    return {
-      tone: 'danger',
-      title: 'Your DataHub account is out of credit',
-      detail:
-        'Nothing is wrong with this order or this number. Bundles are paid for from a prepaid balance you hold with DataHub, and there is not enough in it to buy this one.',
-      action:
-        'Top up at app.datahubgh.com. Every order will keep failing this way until you do. The customer was not charged.',
-    }
-  }
-
-  if (/not verified|beneficiary/i.test(reason)) {
-    return {
-      tone: 'danger',
-      title: 'This number is not approved for delivery yet',
-      detail:
-        'DataHub only sends MTN bundles to numbers on their approved list, and this one is not on it.',
-      action: 'Ask DataHub to add the number, then try again.',
-    }
-  }
-
-  if (/no automated fulfilment|not found|no bundle/i.test(reason)) {
-    return {
-      tone: 'danger',
-      title: 'The partner does not sell this bundle',
-      detail:
-        'They have no matching bundle for this size and network, so it cannot be delivered automatically.',
-      action: 'Sync the provider catalogue, and take the bundle off sale if it has been withdrawn.',
-    }
-  }
-
-  if (/out of stock/i.test(reason)) {
-    return {
-      tone: 'warning',
-      title: 'Out of stock with the partner',
-      detail: 'They are temporarily unable to supply this bundle.',
-      action: 'Try again later, or take it off sale in the meantime.',
-    }
-  }
-
-  if (/forced failure|test switch/i.test(reason)) {
-    return {
-      tone: 'info',
-      title: 'Deliberately failed by the test switch',
-      detail: 'The "simulate failure" setting is on, so this order was rejected on purpose.',
-      action: 'Turn the switch off in Settings when you are done testing.',
-    }
-  }
-
-  return {
-    tone: 'danger',
-    title: 'The delivery partner refused this order',
-    detail: reason || 'They gave no reason.',
-    action: null,
-  }
-}
-
-/**
- * What we asked the supplier for this order, and what came back.
- *
- * Exists because "failed" is not an answer anyone can act on. An empty float
- * means top up; an unapproved recipient means get the number added; a withdrawn
- * bundle means fix the catalogue, three different jobs behind one badge.
- *
- * Written for James rather than for a developer: the plain reading leads, and
- * the provider's raw reply is folded away underneath. It is still there, because
- * our summary is lossy and when it is wrong the raw text is the only way to find
- * out, but it is not what he has to read first.
- */
-function DispatchModal({ order, onClose }: { order: Order | null; onClose: () => void }) {
-  const { pushToast, refresh } = useStore()
-  const [attempts, setAttempts] = useState<DispatchAttempt[] | null>(null)
-  const [error, setError] = useState('')
-  const [resolving, setResolving] = useState<'delivered' | 'rejected' | null>(null)
-  const [note, setNote] = useState('')
-  const [noteError, setNoteError] = useState('')
-  const [retrying, setRetrying] = useState(false)
-  const [retryNote, setRetryNote] = useState('')
-  const [retryNoteError, setRetryNoteError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [checkingNow, setCheckingNow] = useState(false)
-
-  /**
-   * Keyed on `order?.id`, not `order` itself, a parent re-render can (and
-   * does, via `watchOrder`'s polling refreshing the whole orders list) hand
-   * this the *same* order as a fresh object every few seconds. Depending on
-   * the object reference reset the note field being typed into below on
-   * every one of those, not just on an actual navigation to a different order.
-   */
-  useEffect(() => {
-    if (!order) {
-      setAttempts(null)
-      setError('')
-      setResolving(null)
-      setNote('')
-      setNoteError('')
-      setRetrying(false)
-      setRetryNote('')
-      setRetryNoteError('')
-      return
-    }
-    let live = true
-    api
-      .orderDispatches(order.id)
-      .then((rows) => live && setAttempts(rows))
-      .catch(
-        (caught) =>
-          live && setError(caught instanceof ApiError ? caught.message : 'We could not load this.'),
-      )
-    return () => {
-      live = false
-    }
-  }, [order?.id])
-
-  if (!order) return null
-
-  const stuck = order.status === 'pending' || order.status === 'processing'
-  /**
-   * Retry is only ever offered for the one case nothing automatic can ever
-   * resolve: the *most recent* attempt timed out before any reply arrived,
-   * so it has no `providerReference`, see `FulfilmentService.retryDispatch`.
-   * `attempts` is oldest-first, so the last element is the latest one.
-   */
-  const latestAttempt = attempts && attempts.length > 0 ? attempts[attempts.length - 1] : null
-  const canRetry = stuck && latestAttempt?.outcome === 'unknown' && !latestAttempt.providerReference
-
-  const submitRetry = async () => {
-    if (retryNote.trim().length < 5) {
-      setRetryNoteError('Say what you checked before retrying. It is kept on the record.')
-      return
-    }
-    setBusy(true)
-    try {
-      await api.retryDispatch(order.id, retryNote.trim())
-      pushToast({ tone: 'success', title: `${order.reference}: sending it again` })
-      await refresh()
-      onClose()
-    } catch (caught) {
-      setRetryNoteError(caught instanceof ApiError ? caught.message : 'We could not retry that.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const submitCheckNow = async () => {
-    setCheckingNow(true)
-    try {
-      const result = await api.checkOrderNow(order.id)
-      if (result.settled) {
-        pushToast({ tone: 'success', title: `${order.reference}: resolved` })
-        await refresh()
-        onClose()
-      } else {
-        pushToast({
-          tone: 'info',
-          title: `${order.reference}: still processing`,
-          detail: "The delivery partner has not answered yet, nothing new to report.",
-        })
-      }
-    } catch (caught) {
-      pushToast({
-        tone: 'error',
-        title: caught instanceof ApiError ? caught.message : 'We could not check that.',
-      })
-    } finally {
-      setCheckingNow(false)
-    }
-  }
-
-  const submitResolve = async () => {
-    if (!resolving) return
-    if (note.trim().length < 5) {
-      setNoteError('Say why you are resolving this by hand. It is kept on the record.')
-      return
-    }
-    setBusy(true)
-    try {
-      await api.resolveOrder(order.id, resolving, note.trim())
-      pushToast({
-        tone: 'success',
-        title: `${order.reference} marked ${resolving === 'delivered' ? 'delivered' : 'failed'}`,
-      })
-      await refresh()
-      onClose()
-    } catch (caught) {
-      setNoteError(caught instanceof ApiError ? caught.message : 'We could not save that.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Modal open onClose={onClose} title={`Order ${order.reference}`}>
-      <div className="space-y-3">
-        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="font-semibold text-slate-900 dark:text-slate-50">{order.productName}</p>
-              <p className="tabular mt-0.5 text-sm text-slate-500 dark:text-slate-400">{order.recipient}</p>
-            </div>
-            <p className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">{cedis(order.salePrice)}</p>
-          </div>
-        </div>
-
-        {error && (
-          <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
-            {error}
-          </Callout>
-        )}
-
-        {attempts === null && !error && (
-          <div className="py-8 text-center">
-            <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
-          </div>
-        )}
-
-        {attempts?.length === 0 && (
-          <Callout
-            tone="info"
-            title="No delivery was attempted"
-            icon={<AlertIcon className="size-4" />}
-          >
-            The order was stopped before it reached the delivery partner, so nothing was sent and
-            nothing was charged.
-          </Callout>
-        )}
-
-        {attempts?.map((attempt) => {
-          const said = explain(attempt)
-          return (
-            <div
-              key={attempt.id}
-              className={cn(
-                'overflow-hidden rounded-xl border',
-                said.tone === 'success' && 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/50',
-                said.tone === 'danger' && 'border-red-200 dark:border-red-800 bg-red-50/50',
-                said.tone === 'warning' && 'border-amber-200 dark:border-amber-800 bg-amber-50/50',
-                said.tone === 'info' && 'border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50',
-              )}
-            >
-              <div className="p-3.5">
-                <div className="flex items-start gap-2.5">
-                  <span
-                    className={cn(
-                      'mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full',
-                      said.tone === 'success' && 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400',
-                      said.tone === 'danger' && 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400',
-                      said.tone === 'warning' && 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400',
-                      said.tone === 'info' && 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300',
-                    )}
-                  >
-                    {said.tone === 'success' ? (
-                      <CheckIcon className="size-4" />
-                    ) : said.tone === 'info' ? (
-                      <ClockIcon className="size-4" />
-                    ) : (
-                      <AlertIcon className="size-4" />
-                    )}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-slate-900 dark:text-slate-50">{said.title}</p>
-                    <p className="mt-1 text-sm leading-relaxed text-slate-700 dark:text-slate-200">{said.detail}</p>
-                  </div>
-                </div>
-
-                {said.action && (
-                  <div className="mt-2.5 rounded-lg border border-white/80 bg-white/80 p-2.5 text-sm font-medium text-slate-800 dark:text-slate-100">
-                    {said.action}
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-white/60 bg-white/50 px-3.5 py-2 text-xs text-slate-500 dark:text-slate-400">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <span>{dateTime(attempt.createdAt)}</span>
-                  {attempts.length > 1 && <span>Try {attempt.attempt}</span>}
-                  <span>
-                    Bundle cost{' '}
-                    <span className="tabular font-semibold text-slate-700 dark:text-slate-200">
-                      {cedis(attempt.costPrice)}
-                    </span>
-                  </span>
-                  {attempt.providerCharged != null && (
-                    <span>
-                      They charged{' '}
-                      <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                        {cedis(attempt.providerCharged)}
-                      </span>
-                    </span>
-                  )}
-                </div>
-
-                {/* Kept, because our plain-English reading above is a summary and
-                    summaries are wrong sometimes. Folded away so it is never the
-                    first thing anyone has to read. */}
-                {(attempt.providerResponse || attempt.providerReference) && (
-                  <details className="mt-1.5">
-                    <summary className="cursor-pointer font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
-                      Technical details
-                    </summary>
-                    <div className="mt-1.5 space-y-1">
-                      {attempt.providerReference && (
-                        <p className="font-mono break-all">
-                          Ref {attempt.providerReference}
-                          {attempt.providerReference.startsWith('manual_') && (
-                            <span className="ml-1.5 font-sans font-semibold text-amber-700 dark:text-amber-400">
-                              (their manual queue, a person clears this, not their system)
-                            </span>
-                          )}
-                        </p>
-                      )}
-                      {attempt.providerStatus && <p>Status {attempt.providerStatus}</p>}
-                      <p className="font-mono">SKU {attempt.supplierCode}</p>
-                      {attempt.providerResponse && (
-                        <pre className="max-h-40 overflow-auto rounded-lg bg-slate-900 p-2 text-[11px] leading-relaxed break-all whitespace-pre-wrap text-slate-100">
-                          {attempt.providerResponse}
-                        </pre>
-                      )}
-                    </div>
-                  </details>
-                )}
-              </div>
-            </div>
-          )
-        })}
-
-        {/* Only for the one case retrying is actually safe: no reference at
-            all was ever obtained, so this can never be double-sent by both
-            a retry and a delayed real reply landing later, there is no
-            delayed reply coming, because DataHub never gave us anything to
-            match one against. */}
-        {canRetry && (
-          <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 p-3.5">
-            {!retrying ? (
-              <>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  Checked the delivery partner's own dashboard for this recipient?
-                </p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Only retry once you've confirmed nothing was actually sent, otherwise this risks
-                  paying twice. If they show nothing for this number, it's safe to send it again.
-                </p>
-                <div className="mt-2.5">
-                  <Button size="sm" variant="outline" onClick={() => setRetrying(true)}>
-                    Retry dispatch
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  Send this order to the delivery partner again
-                </p>
-                <Field
-                  label="What did you check?"
-                  htmlFor="retry-note"
-                  className="mt-2"
-                  error={retryNoteError}
-                >
-                  <TextInput
-                    id="retry-note"
-                    placeholder="Checked DataHub's dashboard for this number, nothing on record"
-                    value={retryNote}
-                    invalid={Boolean(retryNoteError)}
-                    onChange={(event) => {
-                      setRetryNote(event.target.value)
-                      setRetryNoteError('')
-                    }}
-                  />
-                </Field>
-                <div className="mt-2.5 flex gap-2">
-                  <Button size="sm" loading={busy} onClick={() => void submitRetry()}>
-                    Send it again
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => {
-                      setRetrying(false)
-                      setRetryNote('')
-                      setRetryNoteError('')
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* The automatic sweep still covers this order eventually, but only
-            once every ten minutes, this asks the delivery partner directly,
-            right now, instead of waiting on its clock. */}
-        {stuck && (
-          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
-            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              Don't want to wait for the automatic check?
-            </p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Asks the delivery partner for this order's status right now.
-            </p>
-            <div className="mt-2.5">
-              <Button size="sm" variant="outline" loading={checkingNow} onClick={() => void submitCheckNow()}>
-                Check now
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* For the case nothing automatic ever resolves: the provider's own
-            status never reaches a word the reconciler recognises as final
-            (see mapProviderStatus), even though the real outcome is already
-            known to whoever is looking at this. */}
-        {stuck && (
-          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
-            {resolving === null ? (
-              <>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  Know what actually happened?
-                </p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Only the delivery partner, the webhook, or the automatic check above normally
-                  settles an order. Use this only when you are certain, it is kept on the record.
-                </p>
-                <div className="mt-2.5 flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => setResolving('delivered')}>
-                    Mark as delivered
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => setResolving('rejected')}>
-                    Mark as failed
-                  </Button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  {resolving === 'delivered'
-                    ? 'Mark this as delivered'
-                    : 'Mark this as failed, a refund will be queued'}
-                </p>
-                <Field
-                  label="How do you know?"
-                  htmlFor="resolve-note"
-                  className="mt-2"
-                  error={noteError}
-                >
-                  <TextInput
-                    id="resolve-note"
-                    placeholder="Customer confirmed by WhatsApp they received it"
-                    value={note}
-                    invalid={Boolean(noteError)}
-                    onChange={(event) => {
-                      setNote(event.target.value)
-                      setNoteError('')
-                    }}
-                  />
-                </Field>
-                <div className="mt-2.5 flex gap-2">
-                  <Button size="sm" loading={busy} onClick={() => void submitResolve()}>
-                    Confirm
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() => {
-                      setResolving(null)
-                      setNote('')
-                      setNoteError('')
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    </Modal>
-  )
-}

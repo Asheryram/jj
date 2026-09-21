@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 
@@ -63,25 +64,55 @@ export class DomainsService {
       return toMineView(mine)
     }
 
-    const row = await this.prisma.customDomain.upsert({
-      where: { userId },
-      create: { userId, domain },
-      update: {
-        domain,
-        allowed: false,
-        active: false,
-        requestedAt: new Date(),
-        reviewedAt: null,
-        reviewedBy: null,
-        reason: null,
-      },
-    })
+    // The `findUnique` above proves nothing about what is still true by the
+    // time this write runs: two agents submitting the same domain within the
+    // same instant can both pass that check before either commits. The `domain`
+    // column's own unique constraint is the real guard; a P2002 here means we
+    // lost that race, not that something is broken, so it is remapped to the
+    // same friendly conflict the earlier check throws, rather than let a raw
+    // constraint violation reach the client.
+    let row
+    try {
+      row = await this.prisma.customDomain.upsert({
+        where: { userId },
+        create: { userId, domain },
+        update: {
+          domain,
+          allowed: false,
+          active: false,
+          requestedAt: new Date(),
+          reviewedAt: null,
+          reviewedBy: null,
+          reason: null,
+        },
+      })
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictError('DOMAIN_TAKEN', 'That domain is already registered to another account.')
+      }
+      throw error
+    }
     return toMineView(row)
   }
 
   async mine(userId: string): Promise<MineView | null> {
     const row = await this.prisma.customDomain.findUnique({ where: { userId } })
     return row ? toMineView(row) : null
+  }
+
+  /**
+   * Drop the agent's own domain, live or not, and go back to the plain
+   * `/s/<code>` link.
+   *
+   * The only self-service option before this was "submit a different domain",
+   * which still leaves the old one on file mid-transition. A hard delete
+   * rather than a status flag: nothing downstream (ledgers, orders) points at
+   * a `CustomDomain` row, so there is no history here worth keeping, and
+   * `resolve()` stops answering for it the instant the row is gone.
+   */
+  async remove(userId: string): Promise<void> {
+    const deleted = await this.prisma.customDomain.deleteMany({ where: { userId } })
+    if (deleted.count === 0) throw new NotFoundError('You have no domain on file.')
   }
 
   /** The superadmin's review queue. `pending` means never yet decided. */

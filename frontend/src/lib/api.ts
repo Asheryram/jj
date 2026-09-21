@@ -5,6 +5,7 @@ import type {
   Earning,
   Network,
   Order,
+  OrderStatus,
   PlatformUser,
   Product,
   Role,
@@ -1123,6 +1124,8 @@ export const api = {
   requestDomain: (domain: string) =>
     request<MyDomainStatus>('/domains/request', { method: 'POST', body: { domain } }),
 
+  removeDomain: () => request<void>('/domains/mine', { method: 'DELETE' }),
+
   // Custom domains, superadmin review queue
   adminDomains: (pending: boolean) =>
     request<AdminDomainRow[]>(`/admin/domains?pending=${pending}`),
@@ -1250,6 +1253,35 @@ export const api = {
   orders: () => request<Order[]>('/orders'),
 
   order: (id: string) => request<Order>(`/orders/${id}`),
+
+  /**
+   * The admin orders table's real query, server-side filtering, date range
+   * and pagination, rather than `orders()`'s 500-row cap filtered in the
+   * browser. `from`/`to` are `YYYY-MM-DD`; `to` is treated as inclusive of
+   * that whole day on the server.
+   */
+  adminOrders: (params: {
+    status?: OrderStatus
+    from?: string
+    to?: string
+    q?: string
+    /** Open orders whose latest dispatch attempt never got a reply. Overrides `status`. */
+    unresolvedOnly?: boolean
+    page?: number
+    pageSize?: number
+  }) => {
+    const search = new URLSearchParams()
+    if (params.status) search.set('status', params.status)
+    if (params.from) search.set('from', params.from)
+    if (params.to) search.set('to', params.to)
+    if (params.q) search.set('q', params.q)
+    if (params.unresolvedOnly) search.set('unresolvedOnly', 'true')
+    if (params.page) search.set('page', String(params.page))
+    if (params.pageSize) search.set('pageSize', String(params.pageSize))
+    return request<{ rows: Order[]; total: number; page: number; pageSize: number }>(
+      `/admin/orders?${search.toString()}`,
+    )
+  },
 
   /**
    * What we asked the provider for this order and what it answered. Admin only.

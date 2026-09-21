@@ -1,22 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import ReservePanel from './ReservePanel'
-import FloatPanel from './FloatPanel'
 import { useStore } from '../../state/store'
-import { api, type FinanceStatement } from '../../lib/api'
+import { api, type FinanceStatement, type ReservePosition } from '../../lib/api'
 import { cedis, cedisCompact, dateTime, trendText } from '../../lib/format'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
 import { BarChart, Donut } from '../../components/charts'
 import {
   Badge,
   Button,
-  Callout,
   Card,
   CardHead,
   EmptyState,
   NetworkChip,
   PageHead,
-  Segmented,
+  Spinner,
   StatTile,
   StatusBadge,
   TableWrap,
@@ -35,36 +32,6 @@ import {
   UsersIcon,
 } from '../../components/icons'
 
-function MoneyBand({
-  label,
-  value,
-  dot,
-  strong,
-}: {
-  label: string
-  value: string
-  dot?: string
-  strong?: boolean
-}) {
-  return (
-    <div>
-      <dt className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-        {dot && <span className={`size-2 rounded-full ${dot}`} />}
-        {label}
-      </dt>
-      <dd
-        className={
-          strong
-            ? 'tabular mt-1 text-lg font-bold text-brand-700 dark:text-brand-300'
-            : 'tabular mt-1 text-lg font-semibold text-slate-900 dark:text-slate-50'
-        }
-      >
-        {value}
-      </dd>
-    </div>
-  )
-}
-
 /** FR-6.3, all orders, all users, total revenue, system-wide statistics. */
 export default function Overview() {
   const { orders, users, withdrawals, revenueByDay, adminOverview: overview } = useStore()
@@ -81,10 +48,16 @@ export default function Overview() {
     .sort((a, b) => b.salesVolume - a.salesVolume)
     .slice(0, 5)
 
-  const [statement, setStatement] = useState<FinanceStatement | null>(null)
   const [health, setHealth] = useState<Awaited<ReturnType<typeof api.health>> | null>(null)
-  /** The window behind the "Where the money goes" breakdown further down, independent of the fixed 7-day header tiles above it. */
-  const [range, setRange] = useState<'7' | '30' | 'all'>('7')
+  /**
+   * Fixed at 7 days, unconditionally, matching the tile's own "last 7 days"
+   * label. This used to share a single `statement` with the "Where the
+   * money goes" panel's own range selector (now on the Finance page), so
+   * switching that selector to 30 days or all-time silently changed what
+   * this tile showed too, while its label kept reading "last 7 days" no
+   * matter what was actually behind it.
+   */
+  const [weekStatement, setWeekStatement] = useState<FinanceStatement | null>(null)
 
   useEffect(() => {
     let live = true
@@ -100,13 +73,13 @@ export default function Overview() {
   useEffect(() => {
     let live = true
     api
-      .financeStatement(range === 'all' ? 'all' : Number(range))
-      .then((result) => live && setStatement(result))
+      .financeStatement(7)
+      .then((result) => live && setWeekStatement(result))
       .catch(() => undefined)
     return () => {
       live = false
     }
-  }, [range])
+  }, [])
 
   const weekRevenue = revenueByDay.reduce((sum, day) => sum + day.revenue, 0)
   const weekOrders = revenueByDay.reduce((sum, day) => sum + day.orders, 0)
@@ -121,8 +94,39 @@ export default function Overview() {
   const activeAgents = active.filter((u) => u.role === 'agent')
   const awaitingApproval = users.filter((u) => u.status === 'pending').length
   const pendingWithdrawals = withdrawals.filter((w) => w.status === 'pending')
-  const failedOrders = orders.filter((o) => o.status === 'failed')
-  const inFlight = orders.filter((o) => o.status === 'processing' || o.status === 'pending')
+
+  /**
+   * Real, all-time counts, not derived from the `orders` store (capped at
+   * the same 100 most-recent rows the "Latest orders" table uses below,
+   * per the `myMargin` comment further down). A busy platform with more
+   * than 100 orders ever placed would otherwise show "Orders in flight"
+   * silently pinned near 100 whenever a chunk of the most recent 100
+   * happen to still be open, or "Failed orders" undercounting whenever an
+   * older failure has already scrolled out of that window. `pageSize: 1`
+   * keeps the request cheap, only `total` is read.
+   */
+  const [failedTotal, setFailedTotal] = useState<number | null>(null)
+  const [inFlightTotal, setInFlightTotal] = useState<number | null>(null)
+  const [needsAttentionCount, setNeedsAttentionCount] = useState<number | null>(null)
+  useEffect(() => {
+    let live = true
+    Promise.all([
+      api.adminOrders({ status: 'failed', page: 1, pageSize: 1 }),
+      api.adminOrders({ status: 'pending', page: 1, pageSize: 1 }),
+      api.adminOrders({ status: 'processing', page: 1, pageSize: 1 }),
+      api.needsAttentionOrders(),
+    ])
+      .then(([failed, pending, processing, needsAttention]) => {
+        if (!live) return
+        setFailedTotal(failed.total)
+        setInFlightTotal(pending.total + processing.total)
+        setNeedsAttentionCount(needsAttention.length)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
 
   /**
    * FR-6.3, James's own margin, read from the ledger rather than recomputed
@@ -136,17 +140,7 @@ export default function Overview() {
    * time. `profit` is revenue less every real cost: supplier, Paystack's fee,
    * agent margins, and anything else that ever hits the books.
    */
-  const trackedRevenue = statement?.revenue ?? 0
-  const supplierSpend = statement?.costs.supplier ?? 0
-  const paystackFee = statement?.costs.paymentFees ?? 0
-  const agentShare = statement?.costs.agentMargins ?? 0
-  const refunds = statement?.costs.refunds ?? 0
-  /** referralBonuses and payoutFees are both historical-only kinds, nothing live writes either; agentMarginWriteoffs is the rare uncollectable-clawback case. */
-  const otherCosts =
-    (statement?.costs.referralBonuses ?? 0) +
-    (statement?.costs.payoutFees ?? 0) +
-    (statement?.costs.agentMarginWriteoffs ?? 0)
-  const myMargin = statement?.profit ?? 0
+  const myMargin = weekStatement?.profit ?? 0
 
   const byCategory = CATEGORY_ORDER.map((category) => ({
     label: CATEGORY_META[category].label,
@@ -176,31 +170,12 @@ export default function Overview() {
           numbers mean anything. Disappears for good once every step is done. */}
       <GettingStartedCard />
 
-      {/* Things needing attention come before the vanity numbers, informational
-          only, though: each one links to the dedicated page that actually acts
-          on it, rather than doing the work here. */}
-      <div className="mb-3 grid gap-3 sm:grid-cols-2">
-        <NeedsAttentionCallout />
-        {pendingWithdrawals.length > 0 && (
-          <Callout tone="warning" title="Withdrawals waiting on you" icon={<CashIcon className="size-4" />}>
-            {pendingWithdrawals.length} request
-            {pendingWithdrawals.length === 1 ? '' : 's'} totalling{' '}
-            <strong className="font-bold">
-              {cedis(pendingWithdrawals.reduce((s, w) => s + w.amount, 0))}
-            </strong>
-            .{' '}
-            <Link to="/admin/withdrawals" className="font-semibold underline">
-              Review now
-            </Link>
-          </Callout>
-        )}
-        {failedOrders.length > 0 && (
-          <Callout tone="info" title="Failed orders, all refunded" icon={<AlertIcon className="size-4" />}>
-            {failedOrders.length} order{failedOrders.length === 1 ? '' : 's'} failed at the
-            provider. Wallets were credited back automatically, no action needed.
-          </Callout>
-        )}
-      </div>
+      {/* One list, not three separately-styled callouts fighting for grid
+          cells: needing action is the common thread, so it reads as one
+          queue with several rows, not several unrelated banners. Every row
+          is informational-only, though, it links to the dedicated page that
+          actually acts on it rather than doing the work here. */}
+      <AttentionCard needsAttentionCount={needsAttentionCount} pendingWithdrawals={pendingWithdrawals} failedTotal={failedTotal} />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
@@ -232,9 +207,9 @@ export default function Overview() {
         />
         <StatTile
           label="Orders in flight"
-          value={String(inFlight.length)}
-          hint={inFlight.length > 0 ? 'Awaiting provider confirmation' : 'Everything settled'}
-          tone={inFlight.length > 0 ? 'warning' : 'neutral'}
+          value={inFlightTotal === null ? '-' : String(inFlightTotal)}
+          hint={inFlightTotal ? 'Awaiting provider confirmation' : 'Everything settled'}
+          tone={inFlightTotal ? 'warning' : 'neutral'}
           icon={<ReceiptIcon className="size-5" />}
         />
         {overview && (
@@ -260,15 +235,7 @@ export default function Overview() {
 
       {overview && overview.goingQuietAgents.length > 0 && <GoingQuietCard agents={overview.goingQuietAgents} />}
 
-      <ReservePanel />
-
-      {/* The other pot of money, and the one that stops the product working when
-          it empties. Next to the reserve panel because the two are read together:
-          what is free to spend, and what the float still needs. `id` is the
-          "Get set up" checklist's jump target above. */}
-      <div className="mt-3 scroll-mt-20" id="float-panel">
-        <FloatPanel />
-      </div>
+      <FinanceSummaryCard />
 
       <div className="mt-3 grid gap-3 lg:grid-cols-5">
         <Card className="lg:col-span-3">
@@ -384,66 +351,6 @@ export default function Overview() {
         </Card>
       </div>
 
-      {/* FR-6.6, where every cedi that came in actually went. */}
-      <Card className="mt-3">
-        <CardHead
-          title="Where the money goes"
-          subtitle={`${range === '7' ? 'Last 7 days' : range === '30' ? 'Last 30 days' : 'All time'}, from the ledger`}
-          action={
-            <Segmented<'7' | '30' | 'all'>
-              options={[
-                { value: '7', label: '7 days' },
-                { value: '30', label: '30 days' },
-                { value: 'all', label: 'All time' },
-              ]}
-              value={range}
-              onChange={setRange}
-            />
-          }
-        />
-        <div className="p-4 sm:p-5">
-          <div className="flex h-3 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-            {[
-              { label: 'Supplier', value: supplierSpend, className: 'bg-slate-400' },
-              { label: 'Paystack fee', value: paystackFee, className: 'bg-amber-400' },
-              { label: 'You', value: myMargin, className: 'bg-brand-600' },
-              { label: 'Agents', value: agentShare, className: 'bg-brand-300' },
-              ...(refunds > 0
-                ? [{ label: 'Refunds', value: refunds, className: 'bg-red-400' }]
-                : []),
-              ...(otherCosts > 0
-                ? [{ label: 'Other', value: otherCosts, className: 'bg-slate-300 dark:bg-slate-600' }]
-                : []),
-            ].map((band) => (
-              <div
-                key={band.label}
-                className={band.className}
-                style={{
-                  width: `${trackedRevenue > 0 ? (band.value / trackedRevenue) * 100 : 0}%`,
-                }}
-                role="img"
-                aria-label={`${band.label}: ${cedis(band.value)}`}
-              />
-            ))}
-          </div>
-          <dl className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            <MoneyBand label="Customers paid" value={cedis(trackedRevenue)} />
-            <MoneyBand label="To DataHub GH" value={cedis(supplierSpend)} dot="bg-slate-400" />
-            <MoneyBand label="Paystack fee" value={cedis(paystackFee)} dot="bg-amber-400" />
-            <MoneyBand label="Your margin" value={cedis(myMargin)} dot="bg-brand-600" strong />
-            <MoneyBand label="To your agents" value={cedis(agentShare)} dot="bg-brand-300" />
-            {refunds > 0 && <MoneyBand label="Refunds" value={cedis(refunds)} dot="bg-red-400" />}
-            {otherCosts > 0 && (
-              <MoneyBand label="Other" value={cedis(otherCosts)} dot="bg-slate-300 dark:bg-slate-600" />
-            )}
-          </dl>
-          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            From the ledger, not the price you were quoted at sale time, so it reflects what
-            DataHub actually charged and what Paystack actually kept, not the catalogue estimate.
-          </p>
-        </div>
-      </Card>
-
       <CatalogueAccuracyCallout />
 
       {/* Provider health, NFR-3.1, NFR-3.2 made visible. Read from /health, not
@@ -524,32 +431,174 @@ export default function Overview() {
  */
 
 /**
- * Orders nobody can resolve automatically, see `ReconcilerService.needsAttention`.
- *
- * Informational only, on purpose: Overview says how many, and links to the
- * dedicated page that actually resolves them, the same split every other
- * queue on this page already uses (Withdrawals, Refunds), rather than one
- * card being the odd one out with an action embedded in it.
+ * The one number that used to require the full `ReservePanel` to find:
+ * what's actually free to spend, held and owed, minus everything already
+ * committed. Overview's job is a headline, not the full statement, the
+ * complete breakdown (this, the DataHub float, and where every cedi went)
+ * now lives on its own Finance page, linked from here.
  */
-function NeedsAttentionCallout() {
-  const [count, setCount] = useState<number | null>(null)
+function FinanceSummaryCard() {
+  const [position, setPosition] = useState<ReservePosition | null>(null)
 
   useEffect(() => {
+    let live = true
     api
-      .needsAttentionOrders()
-      .then((rows) => setCount(rows.length))
-      .catch(() => setCount(0))
+      .reservePosition()
+      .then((result) => live && setPosition(result))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
   }, [])
 
-  if (!count) return null
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Money held and money owed"
+        subtitle="A quick glance, see Finance for the full breakdown"
+        action={
+          <Link to="/admin/finance">
+            <Button variant="outline" size="sm">
+              <CashIcon className="size-4" /> Finance <ChevronRightIcon className="size-4" />
+            </Button>
+          </Link>
+        }
+      />
+      <div className="p-4 sm:p-5">
+        {position === null ? (
+          <div className="py-4 text-center">
+            <Spinner className="mx-auto size-5 text-brand-600 dark:text-brand-300" />
+          </div>
+        ) : (
+          <div
+            className={cn(
+              'flex items-center justify-between gap-3 rounded-xl border px-4 py-3',
+              position.freeToSpend >= 0
+                ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40'
+                : 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/40',
+            )}
+          >
+            <div>
+              <p
+                className={cn(
+                  'text-sm font-semibold',
+                  position.freeToSpend >= 0
+                    ? 'text-emerald-900 dark:text-emerald-200'
+                    : 'text-red-900 dark:text-red-200',
+                )}
+              >
+                Actually free to spend
+              </p>
+              <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">
+                Should be at Paystack, less everything already owed to someone else and everything
+                already spent on bundles
+              </p>
+            </div>
+            <p
+              className={cn(
+                'tabular shrink-0 text-lg font-bold',
+                position.freeToSpend >= 0
+                  ? 'text-emerald-800 dark:text-emerald-300'
+                  : 'text-red-700 dark:text-red-400',
+              )}
+            >
+              {cedis(position.freeToSpend, { sign: true })}
+            </p>
+          </div>
+        )}
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * Every queue Overview used to surface as its own separately-styled Callout
+ * (stuck orders, withdrawals waiting, failed orders), now one card with one
+ * row each. Same reasoning as before: informational only, each row links to
+ * the dedicated page that actually acts on it, rather than a card being the
+ * odd one out with an action embedded in it. Renders nothing when every row
+ * would be empty, same as each Callout used to individually.
+ */
+function AttentionCard({
+  needsAttentionCount,
+  pendingWithdrawals,
+  failedTotal,
+}: {
+  needsAttentionCount: number | null
+  pendingWithdrawals: { amount: number }[]
+  failedTotal: number | null
+}) {
+  const rows = [
+    needsAttentionCount
+      ? {
+          key: 'stuck',
+          icon: <AlertIcon className="size-4 text-amber-600 dark:text-amber-400" />,
+          text: (
+            <>
+              {needsAttentionCount} order{needsAttentionCount === 1 ? '' : 's'} stuck at the provider, the
+              reconciler will not guess at these.
+            </>
+          ),
+          to: '/admin/needs-attention',
+          cta: 'Review',
+        }
+      : null,
+    pendingWithdrawals.length > 0
+      ? {
+          key: 'withdrawals',
+          icon: <CashIcon className="size-4 text-amber-600 dark:text-amber-400" />,
+          text: (
+            <>
+              {pendingWithdrawals.length} withdrawal{pendingWithdrawals.length === 1 ? '' : 's'} waiting on
+              you, totalling{' '}
+              <strong className="font-semibold">
+                {cedis(pendingWithdrawals.reduce((s, w) => s + w.amount, 0))}
+              </strong>
+              .
+            </>
+          ),
+          to: '/admin/withdrawals',
+          cta: 'Review',
+        }
+      : null,
+    failedTotal
+      ? {
+          key: 'failed',
+          icon: <ReceiptIcon className="size-4 text-slate-500 dark:text-slate-400" />,
+          text: (
+            <>
+              {failedTotal} order{failedTotal === 1 ? '' : 's'} failed at the provider. Wallets were
+              credited back automatically, no action needed.
+            </>
+          ),
+          to: '/admin/orders?status=failed',
+          cta: 'View',
+        }
+      : null,
+  ].filter(Boolean) as { key: string; icon: ReactNode; text: ReactNode; to: string; cta: string }[]
+
+  if (rows.length === 0) return null
 
   return (
-    <Callout tone="warning" title="Needs your attention" icon={<AlertIcon className="size-4" />}>
-      {count} order{count === 1 ? '' : 's'} stuck at the provider, the reconciler will not guess at these.{' '}
-      <Link to="/admin/needs-attention" className="font-semibold underline">
-        Review now
-      </Link>
-    </Callout>
+    <Card className="mb-3 border-amber-200 dark:border-amber-800">
+      <CardHead title="Needs your attention" />
+      <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+        {rows.map((row) => (
+          <li key={row.key} className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
+            <span className="flex items-start gap-2.5 text-sm text-slate-700 dark:text-slate-200">
+              {row.icon}
+              {row.text}
+            </span>
+            <Link
+              to={row.to}
+              className="shrink-0 text-sm font-semibold text-brand-700 dark:text-brand-300 underline"
+            >
+              {row.cta}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Card>
   )
 }
 
@@ -600,8 +649,8 @@ function GettingStartedCard() {
       label: 'Add money to your DataHub float, then log it here',
       detail:
         'Every order spends from this prepaid balance, without it, a paid order can still fail to deliver.',
-      to: '#float-panel',
-      cta: 'Log it below',
+      to: '/admin/finance#float-panel',
+      cta: 'Log it on Finance',
     },
     {
       done: products.some((p) => p.active),

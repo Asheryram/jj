@@ -101,6 +101,20 @@ export interface PlatformSettings {
    * on its own.
    */
   siteNotice: string | null
+  /**
+   * Whether the customer wallet (top-up and wallet-paid checkout) is actually
+   * reachable.
+   *
+   * The product itself has moved on: `RegisterDto` no longer lets a new
+   * account choose the customer/wallet path, and the checkout UI hardcodes
+   * wallet payment off. But the wallet endpoints and the wallet-debit branch
+   * in `OrdersService.place()` were never removed, so any account that still
+   * carries `role: 'customer'` (a legacy row, or one changed by hand) could
+   * still reach them directly. Off by default so that path is actually
+   * closed, not just hidden from the UI; a future relaunch of customer
+   * wallets is one flag flip, not a code change.
+   */
+  walletEnabled: boolean
 }
 
 const DEFAULTS: PlatformSettings = {
@@ -114,6 +128,7 @@ const DEFAULTS: PlatformSettings = {
   minWithdrawal: 1000,
   whatsappChannelUrl: null,
   siteNotice: null,
+  walletEnabled: false,
 }
 
 /**
@@ -154,6 +169,7 @@ export class SettingsService {
       minWithdrawal: money(stored.minWithdrawal, DEFAULTS.minWithdrawal),
       whatsappChannelUrl: str(stored.whatsappChannelUrl, DEFAULTS.whatsappChannelUrl),
       siteNotice: str(stored.siteNotice, DEFAULTS.siteNotice),
+      walletEnabled: bool(stored.walletEnabled, DEFAULTS.walletEnabled),
     }
   }
 

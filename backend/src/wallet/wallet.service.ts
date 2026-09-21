@@ -3,8 +3,9 @@ import { ConfigService } from '@nestjs/config'
 import type { Network } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { PaymentsService } from '../payments/payments.service'
+import { SettingsService } from '../settings/settings.service'
 import { toTransaction } from '../common/mappers'
-import { ValidationError } from '../common/domain-errors'
+import { ForbiddenError, ValidationError } from '../common/domain-errors'
 
 /** Smallest and largest single top-up. Keeps a fat-fingered amount recoverable. */
 const MIN_TOPUP = 100 // GHS 1.00
@@ -18,6 +19,7 @@ export class WalletService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly payments: PaymentsService,
+    private readonly settings: SettingsService,
   ) {}
 
   private get paystackLive(): boolean {
@@ -55,6 +57,13 @@ export class WalletService {
    * the moment real credentials arrived.
    */
   async topUp(userId: string, amount: number, network: Network) {
+    // The product itself has moved past customer wallets (see `walletEnabled`'s
+    // own doc comment on `PlatformSettings`), but a legacy `customer`-role
+    // account could still reach this endpoint directly even with the feature
+    // hidden from the UI. This is the actual gate, not just a missing button.
+    if (!(await this.settings.get('walletEnabled'))) {
+      throw new ForbiddenError('Wallet top-ups are not available right now.')
+    }
     if (!Number.isInteger(amount) || amount < MIN_TOPUP) {
       throw new ValidationError(`The smallest top-up is GHS ${(MIN_TOPUP / 100).toFixed(2)}.`)
     }

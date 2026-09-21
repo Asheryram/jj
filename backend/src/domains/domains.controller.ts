@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger'
 import { IsBoolean, IsOptional, IsString, Matches, MaxLength } from 'class-validator'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
@@ -51,6 +51,13 @@ export class DomainsController {
   @Get('mine')
   mine(@CurrentUser() user: AuthUser) {
     return this.domains.mine(user.id)
+  }
+
+  /** Drop the agent's own domain and go back to the plain /s/&lt;code&gt; link. */
+  @Roles('agent')
+  @Delete('mine')
+  remove(@CurrentUser() user: AuthUser) {
+    return this.domains.remove(user.id)
   }
 
   /**

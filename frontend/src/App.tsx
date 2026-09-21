@@ -34,6 +34,7 @@ import Feedback from './pages/app/Feedback'
 import Announcements from './pages/app/Announcements'
 
 import Overview from './pages/admin/Overview'
+import Finance from './pages/admin/Finance'
 import AdminOrders from './pages/admin/AdminOrders'
 import Users from './pages/admin/Users'
 import CostPrices from './pages/admin/CostPrices'
@@ -317,6 +318,7 @@ export default function App() {
           <Route element={<RequireAuth role="admin" />}>
             <Route element={<AppShell />}>
               <Route path="/admin" element={<Overview />} />
+              <Route path="/admin/finance" element={<Finance />} />
               <Route path="/admin/orders" element={<AdminOrders />} />
               <Route path="/admin/users" element={<Users />} />
               <Route path="/admin/prices" element={<CostPrices />} />

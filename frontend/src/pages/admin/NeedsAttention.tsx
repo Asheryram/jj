@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError, type NeedsAttentionOrder, type StuckTransfer } from '../../lib/api'
+import type { Order } from '../../data/types'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import {
@@ -13,11 +14,11 @@ import {
   Field,
   Modal,
   PageHead,
-  Segmented,
   Spinner,
   TextInput,
 } from '../../components/ui'
 import { AlertIcon, CheckIcon } from '../../components/icons'
+import { DispatchModal } from '../../components/DispatchModal'
 
 /**
  * Orders nobody can resolve automatically, see `ReconcilerService.needsAttention`.
@@ -45,9 +46,15 @@ export default function NeedsAttention() {
   const [rows, setRows] = useState<NeedsAttentionOrder[] | null>(null)
   const [transfers, setTransfers] = useState<StuckTransfer[] | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
-  const [resolving, setResolving] = useState<NeedsAttentionOrder | null>(null)
-  const [outcome, setOutcome] = useState<'delivered' | 'rejected'>('delivered')
-  const [note, setNote] = useState('')
+  /**
+   * The full order behind a stuck row, fetched on demand: `NeedsAttentionOrder`
+   * is a lean summary shape (no `status`, no dispatch history), but the actual
+   * resolve decision needs the same attempt-by-attempt detail and the same
+   * retry/check-now/mark-by-hand actions available from the main orders table,
+   * not a thinner version of them. See `DispatchModal`.
+   */
+  const [inspecting, setInspecting] = useState<Order | null>(null)
+  const [opening, setOpening] = useState<string | null>(null)
   const [acknowledging, setAcknowledging] = useState<NeedsAttentionOrder | null>(null)
   const [ackNote, setAckNote] = useState('')
 
@@ -68,20 +75,17 @@ export default function NeedsAttention() {
     void load()
   }, [load])
 
-  const submit = async () => {
-    if (!resolving) return
-    if (note.trim().length < 5) return
-    setBusyId(resolving.id)
+  const openResolve = async (row: NeedsAttentionOrder) => {
+    setOpening(row.id)
     try {
-      await api.resolveOrder(resolving.id, outcome, note.trim())
-      pushToast({ tone: 'success', title: `${resolving.reference} marked ${outcome}` })
-      setResolving(null)
-      setNote('')
-      await load()
+      setInspecting(await api.order(row.id))
     } catch (caught) {
-      pushToast({ tone: 'error', title: caught instanceof ApiError ? caught.message : 'We could not save that.' })
+      pushToast({
+        tone: 'error',
+        title: caught instanceof ApiError ? caught.message : 'We could not open that order.',
+      })
     } finally {
-      setBusyId(null)
+      setOpening(null)
     }
   }
 
@@ -185,12 +189,8 @@ export default function NeedsAttention() {
                 <Button
                   size="sm"
                   variant="outline"
-                  loading={busyId === row.id}
-                  onClick={() => {
-                    setResolving(row)
-                    setOutcome('delivered')
-                    setNote('')
-                  }}
+                  loading={opening === row.id}
+                  onClick={() => void openResolve(row)}
                 >
                   Resolve by hand
                 </Button>
@@ -236,52 +236,13 @@ export default function NeedsAttention() {
         </Card>
       )}
 
-      {resolving && (
-        <Modal open onClose={() => setResolving(null)} title={`Resolve ${resolving.reference} by hand`}>
-          <form
-            className="space-y-4"
-            onSubmit={(event) => {
-              event.preventDefault()
-              void submit()
-            }}
-          >
-            <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-              This runs through the same settlement path a real confirmation would, the agent is credited (or the
-              refund queued) exactly as if DataHub or Paystack had reported it themselves.
-            </Callout>
-            <Segmented<'delivered' | 'rejected'>
-              options={[
-                { value: 'delivered', label: 'Actually delivered' },
-                { value: 'rejected', label: 'Actually failed' },
-              ]}
-              value={outcome}
-              onChange={setOutcome}
-            />
-            <Field label="Why are you resolving this by hand?" htmlFor="needs-attention-note">
-              <TextInput
-                id="needs-attention-note"
-                placeholder="Customer confirmed they received the bundle"
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-              />
-            </Field>
-            <div className="flex gap-2">
-              <Button type="submit" block loading={busyId === resolving.id}>
-                Confirm
-              </Button>
-              <Button
-                type="button"
-                block
-                variant="outline"
-                disabled={busyId === resolving.id}
-                onClick={() => setResolving(null)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </form>
-        </Modal>
-      )}
+      <DispatchModal
+        order={inspecting}
+        onClose={() => {
+          setInspecting(null)
+          void load()
+        }}
+      />
 
       {acknowledging && (
         <Modal open onClose={() => setAcknowledging(null)} title={`Acknowledge ${acknowledging.reference}`}>

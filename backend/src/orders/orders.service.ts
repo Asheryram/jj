@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { randomInt } from 'node:crypto'
-import { Prisma, type Order } from '@prisma/client'
+import { Prisma, type Order, type OrderStatus } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { PricingService } from '../pricing/pricing.service'
 import { SettingsService } from '../settings/settings.service'
@@ -147,6 +147,14 @@ export class OrdersService {
               throw new ValidationError(
                 'Only a customer account holds a spendable wallet. Pay with Mobile Money instead.',
               )
+            }
+            // Same server-side gate as `WalletService.topUp()`: the product has
+            // moved past customer wallets, but a legacy `customer`-role account
+            // could still reach this branch directly even with the option
+            // hidden from checkout. Checked here too, not just at top-up, since
+            // this is the other place real money would move through it.
+            if (!(await this.settings.get('walletEnabled', tx))) {
+              throw new ValidationError('Wallet payment is not available right now. Pay with Mobile Money instead.')
             }
             await this.debitWallet(tx, user.id, salePrice, reference, `${product.name} → ${dto.recipient}`)
           }
@@ -471,7 +479,111 @@ export class OrdersService {
     })
 
     if (!isAdminRole(user.role)) return rows.map(toOrder)
+    return this.enrichForAdmin(rows)
+  }
 
+  /**
+   * Admin's paginated, filterable order list (`GET /admin/orders`).
+   *
+   * `list()` above is capped at 500 rows and filtered client-side, fine for
+   * an agent or customer's own small history, but an admin's table is the
+   * whole platform's, and 500 most-recent-of-everything can already be
+   * hours old on a busy day, silently dropping older `failed` orders off the
+   * end before anyone searches for them. This runs the filter (status, date
+   * range, text search) and the count in the database instead, so "show me
+   * every failed order from last Tuesday" is an actual query, not a client
+   * array scan over whatever happened to already be loaded.
+   *
+   * `q` matches the same columns the old client-side search did, reference,
+   * recipient, buyer name/phone, sell-link code, the agent name frozen at
+   * sale, and product name, with one deliberate reduction: it does not reach
+   * into `split` to match an upline agent's name several levels up a chain.
+   * That was only ever useful under multi-level referral, which is off, and
+   * a JSON-text search across every order would give up the date-range
+   * filter's index in the process.
+   */
+  async adminList(filter: {
+    status?: OrderStatus
+    from?: Date
+    to?: Date
+    q?: string
+    /**
+     * Orders still open (`pending`/`processing`) whose most recent dispatch
+     * attempt timed out with no `providerReference` ever obtained, the exact
+     * shape `ReconcilerService.needsAttention()` calls "stuck" and this
+     * order's own `dispatchUnresolved` field flags per-row. Overrides
+     * `status` when set, since "unresolved" only ever means an open order.
+     */
+    unresolvedOnly?: boolean
+    page?: number
+    pageSize?: number
+  }) {
+    const page = Math.max(1, Math.floor(filter.page ?? 1))
+    const pageSize = Math.min(Math.max(1, Math.floor(filter.pageSize ?? 50)), 2000)
+    const where = this.adminOrdersWhere(filter)
+
+    const [total, rows] = await Promise.all([
+      this.prisma.order.count({ where }),
+      this.prisma.order.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ])
+
+    return { rows: await this.enrichForAdmin(rows), total, page, pageSize }
+  }
+
+  private adminOrdersWhere(filter: {
+    status?: OrderStatus
+    from?: Date
+    to?: Date
+    q?: string
+    unresolvedOnly?: boolean
+  }): Prisma.OrderWhereInput {
+    const where: Prisma.OrderWhereInput = {}
+    if (filter.unresolvedOnly) {
+      // A retried order can carry an early `unknown` attempt and still have
+      // gone on to resolve normally, but by the time that happens its status
+      // has already moved to `completed`/`failed`, so pairing this with the
+      // open-status filter is safe: nothing still `pending`/`processing`
+      // with an `unknown`, reference-less attempt on file has resolved yet.
+      where.status = { in: ['pending', 'processing'] }
+      where.dispatches = { some: { outcome: 'unknown', providerReference: null } }
+    } else if (filter.status) {
+      where.status = filter.status
+    }
+    if (filter.from || filter.to) {
+      where.createdAt = {
+        ...(filter.from ? { gte: filter.from } : {}),
+        ...(filter.to ? { lte: filter.to } : {}),
+      }
+    }
+    const q = filter.q?.trim()
+    if (q) {
+      where.OR = [
+        { reference: { contains: q, mode: 'insensitive' } },
+        { recipient: { contains: q, mode: 'insensitive' } },
+        { buyer: { contains: q, mode: 'insensitive' } },
+        { buyerPhone: { contains: q, mode: 'insensitive' } },
+        { soldByCode: { contains: q, mode: 'insensitive' } },
+        { soldByAgentName: { contains: q, mode: 'insensitive' } },
+        { productName: { contains: q, mode: 'insensitive' } },
+      ]
+    }
+    return where
+  }
+
+  /**
+   * The admin-only fields layered onto a plain order row: what the supplier
+   * actually charged versus the catalogue estimate, the real Paystack fee,
+   * DataHub's own routing/ticket details, and where an open refund stands.
+   * Shared by `list()` (an admin's own capped, unfiltered view) and
+   * `adminList()` (the paginated, filtered one), so the two can never quietly
+   * drift into showing different figures for the same order.
+   */
+  private async enrichForAdmin(rows: Order[]) {
     /**
      * Admin also gets what the supplier actually charged, alongside the
      * estimate frozen into `split` at sale time, the two can disagree (see

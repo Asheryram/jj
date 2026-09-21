@@ -9,14 +9,16 @@ import {
   Callout,
   Card,
   CardHead,
+  CopyField,
   Field,
+  Modal,
   PageHead,
   Spinner,
   TextInput,
   Toggle,
   cn,
 } from '../../components/ui'
-import { AlertIcon, CheckIcon, ClockIcon, GlobeIcon, StoreIcon } from '../../components/icons'
+import { AlertIcon, CheckIcon, ClockIcon, GlobeIcon, StoreIcon, XIcon } from '../../components/icons'
 
 /**
  * An agent making their shop look like theirs.
@@ -496,6 +498,8 @@ function CustomDomainCard() {
   const [domain, setDomain] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [removing, setRemoving] = useState(false)
+  const [confirmingRemove, setConfirmingRemove] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -533,10 +537,34 @@ function CustomDomainCard() {
     }
   }
 
+  const remove = async () => {
+    setRemoving(true)
+    try {
+      await api.removeDomain()
+      setStatus(null)
+      setDomain('')
+      setConfirmingRemove(false)
+      pushToast({
+        tone: 'success',
+        title: 'Domain removed',
+        detail: 'Your shop is back on your /s/ link only.',
+      })
+    } catch (caught) {
+      pushToast({
+        tone: 'error',
+        title: 'Could not remove it',
+        detail: caught instanceof ApiError ? caught.message : 'Try again in a moment.',
+      })
+    } finally {
+      setRemoving(false)
+    }
+  }
+
   const waiting = status && status.reviewedAt === null
   const live = status && status.allowed && status.active
   const approvedNotLive = status && status.allowed && !status.active
   const refused = status && !status.allowed && status.reviewedAt !== null
+  const needsDns = Boolean(waiting || approvedNotLive)
 
   return (
     <Card className="mt-3">
@@ -574,6 +602,19 @@ function CustomDomainCard() {
               </Callout>
             )}
 
+            {needsDns && (
+              <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Point your domain at us
+                </p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  At your domain's registrar, add this record. It can take a while to take effect
+                  after you save it.
+                </p>
+                <CopyField label="CNAME record" value="cname.vercel-dns.com" mono />
+              </div>
+            )}
+
             <Field
               label="Domain"
               htmlFor="shop-domain"
@@ -597,12 +638,41 @@ function CustomDomainCard() {
               for your shop at a time.
             </Callout>
 
-            <Button block loading={busy} onClick={() => void submit()}>
-              {status ? 'Send again' : 'Send for approval'}
-            </Button>
+            <div className="flex gap-2">
+              <Button block loading={busy} onClick={() => void submit()}>
+                {status ? 'Send again' : 'Send for approval'}
+              </Button>
+              {status && (
+                <Button
+                  variant="outline"
+                  className="shrink-0"
+                  onClick={() => setConfirmingRemove(true)}
+                  aria-label="Remove domain"
+                >
+                  <XIcon className="size-4" />
+                </Button>
+              )}
+            </div>
           </>
         )}
       </div>
+
+      <Modal open={confirmingRemove} onClose={() => setConfirmingRemove(false)} title="Remove this domain?">
+        <div className="space-y-4">
+          <Callout tone="warning" title="What happens next">
+            {status?.domain} stops carrying your shop right away, live or not. You go back to
+            sharing your /s/ link, and can send a domain again any time.
+          </Callout>
+          <div className="flex gap-2">
+            <Button block variant="danger" loading={removing} onClick={() => void remove()}>
+              <XIcon className="size-4" /> Remove domain
+            </Button>
+            <Button block variant="outline" onClick={() => setConfirmingRemove(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </Card>
   )
 }

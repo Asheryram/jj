@@ -133,6 +133,13 @@ export class AuthService {
           `We do not recognise the referral code ${referral}. Check it, or clear the field to sign up directly.`,
         )
       }
+      // A suspended/rejected upline does NOT block this registration: the
+      // person signing up is a separate agent running their own business, and
+      // their referrer's status is not theirs to be penalised for. Since the
+      // commission model is flat (seller + platform only, see
+      // `domain/pricing.ts`), `uplineCode` is attribution/visibility only, no
+      // money or permission ever flows through it either way.
+      //
       // Only a seller can have a downline. Signing up under a customer would
       // create a chain link that can never be paid.
       uplineCode = upline.role === 'customer' ? null : upline.referralCode

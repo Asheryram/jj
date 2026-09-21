@@ -480,17 +480,25 @@ export class PaymentsService {
     }
   }
 
-  /** Paystack says it will not be paid. Close the order; nothing was charged. */
+  /**
+   * Paystack says it will not be paid. Close the order; nothing was charged.
+   *
+   * Claimed the same way `applyPaid` claims a success: a `failed`/`abandoned`
+   * verify can race a genuine `charge.success` for the same reference (webhook
+   * vs. reconciler vs. a customer-triggered `confirm()`), and a plain `update`
+   * with no `WHERE` on `status` would let this land after `applyPaid` already
+   * flipped the row to `paid`, silently lying about a payment that actually
+   * went through.
+   */
   private async applyFailed(reference: string, raw: string): Promise<void> {
-    const payment = await this.prisma.payment.findUnique({ where: { reference } })
-    if (!payment || payment.status !== 'pending') return
-
-    await this.prisma.payment.update({
-      where: { reference },
+    const claim = await this.prisma.payment.updateMany({
+      where: { reference, status: 'pending' },
       data: { status: 'failed', providerResponse: raw },
     })
+    if (claim.count === 0) return
 
-    if (payment.orderId) {
+    const payment = await this.prisma.payment.findUnique({ where: { reference } })
+    if (payment?.orderId) {
       // No refund flag: no money ever left the customer, so claiming one was
       // returned would be a lie on their receipt.
       await this.prisma.order.updateMany({

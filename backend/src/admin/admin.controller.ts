@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import type { LedgerKind } from '@prisma/client'
+import { Type } from 'class-transformer'
 import {
   ArrayNotEmpty,
   IsArray,
@@ -27,6 +28,8 @@ import { SettingsService } from '../settings/settings.service'
 import { SolvencyService } from '../finance/solvency.service'
 import { AgentsService } from '../agents/agents.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
+import { OrdersService } from '../orders/orders.service'
+import type { OrderStatus } from '@prisma/client'
 
 const TIERS = ['supplierCost', 'adminPrice', 'standardPrice'] as const
 
@@ -169,6 +172,7 @@ export class SetSettingDto {
     'minWithdrawal',
     'whatsappChannelUrl',
     'siteNotice',
+    'walletEnabled',
   ])
   key!:
     | 'simulateFailure'
@@ -181,6 +185,7 @@ export class SetSettingDto {
     | 'minWithdrawal'
     | 'whatsappChannelUrl'
     | 'siteNotice'
+    | 'walletEnabled'
 
   /**
    * A whole number for the numeric keys, free text for `whatsappChannelUrl`
@@ -217,6 +222,50 @@ export class ReportQueryDto {
   days?: number
 }
 
+export class AdminOrdersQueryDto {
+  @IsOptional()
+  @IsIn(['pending', 'processing', 'completed', 'failed'])
+  status?: OrderStatus
+
+  /** `YYYY-MM-DD`. Left as a plain string here; `adminOrders()` parses it. */
+  @IsOptional()
+  @IsString()
+  from?: string
+
+  @IsOptional()
+  @IsString()
+  to?: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  q?: string
+
+  /**
+   * Overrides `status`, see `OrdersService.adminList`'s own doc comment.
+   * Left as a literal `'true'` string, not `@IsBoolean`/`@Type(() => Boolean)`,
+   * the same reason `AdminDomainsController.list`'s `pending` param is: a
+   * query string arrives as text, and `Boolean('false')` is `true` in
+   * JavaScript, checked explicitly below instead of trusting a transform.
+   */
+  @IsOptional()
+  @IsIn(['true', 'false'])
+  unresolvedOnly?: string
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(2000)
+  pageSize?: number
+}
+
 @ApiTags('admin')
 @ApiBearerAuth()
 @Controller('admin')
@@ -233,11 +282,35 @@ export class AdminController {
     private readonly platformSettings: SettingsService,
     private readonly agents: AgentsService,
     private readonly reconciler: ReconcilerService,
+    private readonly orders: OrdersService,
   ) {}
 
   @Get('overview')
   overview() {
     return this.admin.overview()
+  }
+
+  /**
+   * The paginated, filterable order list behind `/admin/orders`, the
+   * server-side counterpart to the plain `GET /orders` an agent or customer
+   * gets: a real count and page bounds instead of a 500-row cap filtered in
+   * the browser, so an admin searching for, say, every `failed` order from a
+   * specific day gets an actual query result, not whatever happened to
+   * survive the last 500 orders placed on the whole platform.
+   */
+  @Get('orders')
+  adminOrders(@Query() query: AdminOrdersQueryDto) {
+    return this.orders.adminList({
+      status: query.status,
+      from: query.from ? new Date(query.from) : undefined,
+      // Inclusive of the whole day, not just its midnight instant, matching
+      // the date-range convention already used everywhere else in the app.
+      to: query.to ? new Date(`${query.to}T23:59:59.999Z`) : undefined,
+      q: query.q,
+      unresolvedOnly: query.unresolvedOnly === 'true',
+      page: query.page,
+      pageSize: query.pageSize,
+    })
   }
 
   /** Orders nobody can resolve automatically, see `ReconcilerService.needsAttention`. */
