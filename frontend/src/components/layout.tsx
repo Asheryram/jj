@@ -596,8 +596,19 @@ export function AppShell() {
       <SiteNotice />
 
       <div className="mx-auto flex max-w-7xl gap-6 px-3 sm:px-4">
-        <aside className="sticky top-15 hidden h-fit w-56 shrink-0 py-5 lg:block">
-          <nav className="space-y-4">
+        {/*
+          `h-[calc(100dvh-3.75rem)]` pins this to exactly the space below the
+          sticky header (`top-15` is that same 3.75rem), so `overflow-y-auto`
+          on the nav itself has a real boundary to scroll within, without it
+          a long nav (17 items for a superadmin) just grows the whole
+          sidebar and scrolls the entire page to reach the bottom of it,
+          dragging the header out of view along with it. The profile card
+          stays a normal flex child below the nav rather than something
+          pinned, so it scrolls out of view too on a short screen rather
+          than permanently eating space every other row could use.
+        */}
+        <aside className="sticky top-15 hidden h-[calc(100dvh-3.75rem)] w-56 shrink-0 flex-col py-5 lg:flex">
+          <nav className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
             {sectioned(items).map((group, index) => (
               <div key={group.section ?? `_${index}`} className="space-y-1">
                 {group.section && (
@@ -615,7 +626,7 @@ export function AppShell() {
               </div>
             ))}
           </nav>
-          <div className="mt-5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3.5">
+          <div className="mt-5 shrink-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3.5">
             <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">{session.name}</p>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{session.phone}</p>
             {session.role === 'agent' && (

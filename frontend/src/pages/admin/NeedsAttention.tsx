@@ -21,6 +21,46 @@ import { AlertIcon, CheckIcon } from '../../components/icons'
 import { DispatchModal } from '../../components/DispatchModal'
 
 /**
+ * See the `stuck` derivation below for what these three shapes mean, kept as
+ * a plain structural read of `providerReference` rather than parsing
+ * `reason`'s prose, so this can never quietly drift out of sync with
+ * `ReconcilerService.needsAttention`'s own text.
+ */
+type StuckUrgency = 'unknown' | 'manual' | 'checking'
+
+function stuckUrgency(row: NeedsAttentionOrder): StuckUrgency {
+  if (!row.providerReference) return 'unknown'
+  if (row.providerReference.startsWith('manual_')) return 'manual'
+  return 'checking'
+}
+
+const URGENCY_RANK: Record<StuckUrgency, number> = { unknown: 0, manual: 1, checking: 2 }
+function urgencyRank(row: NeedsAttentionOrder) {
+  return URGENCY_RANK[stuckUrgency(row)]
+}
+
+const URGENCY_STYLE: Record<
+  StuckUrgency,
+  { border: string; badgeTone: 'danger' | 'warning' | 'info'; badgeLabel: string }
+> = {
+  unknown: {
+    border: 'border-l-4 border-l-red-400 dark:border-l-red-500',
+    badgeTone: 'danger',
+    badgeLabel: 'No reply at all',
+  },
+  manual: {
+    border: 'border-l-4 border-l-amber-400 dark:border-l-amber-500',
+    badgeTone: 'warning',
+    badgeLabel: "DataHub's manual queue",
+  },
+  checking: {
+    border: 'border-l-4 border-l-sky-400 dark:border-l-sky-500',
+    badgeTone: 'info',
+    badgeLabel: 'Auto-checking',
+  },
+}
+
+/**
  * Orders nobody can resolve automatically, see `ReconcilerService.needsAttention`.
  *
  * Two different shapes of "nobody can resolve this" show up here:
@@ -107,7 +147,30 @@ export default function NeedsAttention() {
   }
 
   const conflicts = (rows ?? []).filter((r) => r.conflict)
-  const stuck = (rows ?? []).filter((r) => !r.conflict)
+  /**
+   * Every row here reads as "stuck" at a glance, but the three actual shapes
+   * behind that word carry very different urgency, derived from
+   * `providerReference` alone (the same signal `reason`'s own text is built
+   * from server-side, kept here as a structural check rather than parsing
+   * that prose so the two can't quietly drift apart):
+   *
+   *  · No reference at all: the connection broke before DataHub answered,
+   *    nothing here can be checked automatically, ever, only a human looking
+   *    at their own dashboard resolves it. The most uncertain shape, and the
+   *    only one `DispatchModal` ever offers a retry for.
+   *  · A `manual_`-prefixed reference: DataHub has it, in their own staff's
+   *    queue, not ours to chase automatically, but at least its whereabouts
+   *    are known.
+   *  · Any other reference: DataHub has it and the reconciler is still
+   *    asking them for a status every sweep, the least urgent of the three,
+   *    this one is still being worked on without anyone needing to act.
+   *
+   * Sorted by that urgency first, oldest-first within each tier (the order
+   * the backend already returns them in, `Array.sort` is stable), so the
+   * ones nobody can track automatically are never buried under a long list
+   * of ones DataHub is still quietly answering for.
+   */
+  const stuck = [...(rows ?? [])].filter((r) => !r.conflict).sort((a, b) => urgencyRank(a) - urgencyRank(b))
 
   return (
     <div>
@@ -158,7 +221,7 @@ export default function NeedsAttention() {
       <Card className="mt-3">
         <CardHead
           title="Stuck orders"
-          subtitle="Oldest first, the longest wait is the most urgent thing here, not the largest amount."
+          subtitle="Grouped by how likely this is to resolve itself, no reply at all first, then DataHub's manual queue, then the ones still being auto-checked. Oldest first within each group."
         />
         <div className="space-y-2 p-4 sm:p-5">
           {rows === null ? (
@@ -172,30 +235,34 @@ export default function NeedsAttention() {
               detail="Every order has either delivered, failed, or is still within the provider's normal reply window."
             />
           ) : (
-            stuck.map((row) => (
-              <div
-                key={row.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3"
-              >
-                <div>
-                  <p className="font-semibold text-slate-900 dark:text-slate-50">
-                    {row.reference} · {row.productName} · {cedis(row.salePrice)}
-                  </p>
-                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                    {row.reason} · to {row.recipient} · placed {dateTime(row.createdAt)}
-                    {row.providerReference ? ` · ref ${row.providerReference}` : ''}
-                  </p>
-                </div>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  loading={opening === row.id}
-                  onClick={() => void openResolve(row)}
+            stuck.map((row) => {
+              const style = URGENCY_STYLE[stuckUrgency(row)]
+              return (
+                <div
+                  key={row.id}
+                  className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 ${style.border} p-3`}
                 >
-                  Resolve by hand
-                </Button>
-              </div>
-            ))
+                  <div>
+                    <p className="flex flex-wrap items-center gap-2 font-semibold text-slate-900 dark:text-slate-50">
+                      {row.reference} · {row.productName} · {cedis(row.salePrice)}
+                      <Badge tone={style.badgeTone}>{style.badgeLabel}</Badge>
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                      {row.reason} · to {row.recipient} · placed {dateTime(row.createdAt)}
+                      {row.providerReference ? ` · ref ${row.providerReference}` : ''}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    loading={opening === row.id}
+                    onClick={() => void openResolve(row)}
+                  >
+                    Resolve by hand
+                  </Button>
+                </div>
+              )
+            })
           )}
         </div>
       </Card>
