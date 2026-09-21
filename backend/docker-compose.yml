@@ -5,7 +5,7 @@
 # worse failure than a refused one.
 services:
   db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: jdc-postgres
     restart: unless-stopped
     environment:
@@ -17,7 +17,10 @@ services:
     ports:
       - '5433:5432'
     volumes:
-      - jdc-pgdata:/var/lib/postgresql/data
+      # 18+'s image expects a single mount at /var/lib/postgresql (it places
+      # data in a version-named subdirectory itself, `pg_ctlcluster`-style),
+      # not directly at /var/lib/postgresql/data the way 17 and earlier did.
+      - jdc-pgdata:/var/lib/postgresql
       # Mounted so `npm run constraints` can `psql -f` it without depending on
       # shell stdin redirection, which differs between cmd.exe and sh.
       - ./scripts:/scripts:ro

@@ -184,6 +184,12 @@ function navFor(
         section: 'Catalogue',
       },
       { to: '/admin/branding', label: 'Branding', icon: StoreIcon, section: 'Catalogue' },
+      {
+        to: '/admin/branding-requests',
+        label: 'Agent requests',
+        icon: StoreIcon,
+        section: 'Catalogue',
+      },
 
       {
         to: '/admin/users',

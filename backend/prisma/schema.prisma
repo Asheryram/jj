@@ -1169,6 +1169,23 @@ model Branding {
   logoMime  String? @map("logo_mime")
   logoBytes Bytes?  @map("logo_bytes")
 
+  /// Which curated catalogue-tile layout the shop uses, one of
+  /// `TILE_STYLES` (backend `branding.service.ts`). Null means the platform
+  /// default ("classic"). Same reasoning as colour: a layout choice carries
+  /// no impersonation risk, so it lives here next to colour, applied
+  /// instantly, never through `BrandingRequest`.
+  tileStyle String? @map("tile_style")
+
+  /// The "Buy" element's look, independent of `tileStyle`, one of
+  /// `TILE_BUTTON_STYLES`. Null means the platform default ("accent", the
+  /// fixed Golden Yellow badge every shop has always had).
+  tileButtonStyle String? @map("tile_button_style")
+
+  /// How a bundle's network is shown, independent of `tileStyle`, one of
+  /// `TILE_NETWORK_INDICATORS`. Null means the platform default ("chip", the
+  /// coloured pill with the network's name).
+  tileNetworkIndicator String? @map("tile_network_indicator")
+
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("branding")

@@ -4,6 +4,7 @@ import { useStore } from '../../state/store'
 import { deriveBrand } from '../../lib/branding'
 import { BRAND_TEMPLATES, templateFor } from '../../lib/brandTemplates'
 import { dateTime } from '../../lib/format'
+import { TileStylePicker, type TileOptions } from '../../components/TileStylePicker'
 import {
   Badge,
   Button,
@@ -274,6 +275,8 @@ export default function ShopBranding() {
           )}
 
           <ShopColorCard live={state?.live ?? null} onApplied={load} />
+
+          <ShopTileStyleCard live={state?.live ?? null} onApplied={load} />
 
           <CustomDomainCard />
         </>
@@ -556,6 +559,67 @@ function ShopColorCard({
             </div>
           </div>
         )}
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * How each bundle looks in the catalogue grid. Picking a different layout
+ * only updates the preview below, it does not go live until "Apply" is
+ * pressed, same shape as the custom-colour flow in `ShopColorCard`: look
+ * first, commit deliberately. Still no admin review either way, a layout
+ * choice carries no impersonation risk.
+ */
+function ShopTileStyleCard({
+  live,
+  onApplied,
+}: {
+  live: MyBranding['live']
+  onApplied: () => Promise<void> | void
+}) {
+  const { pushToast } = useStore()
+  const current: TileOptions = {
+    tileStyle: live?.tileStyle ?? 'classic',
+    tileButtonStyle: live?.tileButtonStyle ?? 'accent',
+    tileNetworkIndicator: live?.tileNetworkIndicator ?? 'chip',
+  }
+  const [selected, setSelected] = useState<TileOptions>(current)
+  useEffect(() => setSelected(current), [current.tileStyle, current.tileButtonStyle, current.tileNetworkIndicator])
+  const [applying, setApplying] = useState(false)
+
+  const isDirty =
+    selected.tileStyle !== current.tileStyle ||
+    selected.tileButtonStyle !== current.tileButtonStyle ||
+    selected.tileNetworkIndicator !== current.tileNetworkIndicator
+
+  const apply = async () => {
+    setApplying(true)
+    try {
+      await api.setTileOptions(selected)
+      pushToast({ tone: 'success', title: 'Tile style updated' })
+      await onApplied()
+    } catch (caught) {
+      pushToast({
+        tone: 'error',
+        title: caught instanceof ApiError ? caught.message : 'We could not apply that.',
+      })
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Product tiles"
+        subtitle="How each bundle looks in your shop. Preview it, then apply, no review either way."
+      />
+      <div className="space-y-4 p-4 sm:p-5">
+        <TileStylePicker value={selected} onChange={setSelected} disabled={applying} />
+        <Button loading={applying} disabled={!isDirty} onClick={() => void apply()}>
+          {isDirty ? 'Apply this style' : 'This is already live'}
+        </Button>
       </div>
     </Card>
   )

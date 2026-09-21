@@ -501,6 +501,13 @@ export interface TeamMember {
   joinedAt: string
 }
 
+/** Which curated catalogue-tile layout to render, see `lib/tileStyles.ts`. */
+export type TileStyle = 'classic' | 'bold' | 'minimal' | 'compact'
+/** The "Buy" element's look, independent of `TileStyle`. */
+export type TileButtonStyle = 'accent' | 'solid' | 'outline' | 'text'
+/** How a bundle's network is shown, independent of `TileStyle`. */
+export type TileNetworkIndicator = 'chip' | 'dot' | 'pulse'
+
 export interface PublicBranding {
   shopName: string
   /** The colour as chosen. The ramp below may darken its 700 step for contrast. */
@@ -513,6 +520,9 @@ export interface PublicBranding {
   logoUrl: string | null
   /** True when this is an agent's own branding rather than the platform's. */
   custom: boolean
+  tileStyle: TileStyle
+  tileButtonStyle: TileButtonStyle
+  tileNetworkIndicator: TileNetworkIndicator
 }
 
 export interface MyBranding {
@@ -521,6 +531,9 @@ export interface MyBranding {
     brandColor: string | null
     brandColorDark: string | null
     hasLogo: boolean
+    tileStyle: TileStyle
+    tileButtonStyle: TileButtonStyle
+    tileNetworkIndicator: TileNetworkIndicator
   } | null
   pending: {
     id: string
@@ -1459,6 +1472,21 @@ export const api = {
     request<{ brandColor: string; brandColorDark: string | null }>('/branding/mine/color', {
       method: 'PATCH',
       body: { brandColor, brandColorDark: brandColorDark || undefined },
+    }),
+
+  /** Set your own tile layout, button style and network indicator. Applies at once, no review. */
+  setTileOptions: (options: {
+    tileStyle: TileStyle
+    tileButtonStyle: TileButtonStyle
+    tileNetworkIndicator: TileNetworkIndicator
+  }) =>
+    request<{
+      tileStyle: TileStyle
+      tileButtonStyle: TileButtonStyle
+      tileNetworkIndicator: TileNetworkIndicator
+    }>('/branding/mine/tile-style', {
+      method: 'PATCH',
+      body: options,
     }),
 
   /** The platform owner's own branding. Applies immediately. */

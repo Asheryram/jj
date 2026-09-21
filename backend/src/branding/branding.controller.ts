@@ -13,13 +13,18 @@ import {
 } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
 import { ApiTags } from '@nestjs/swagger'
-import { IsHexColor, IsOptional, IsString, MaxLength, MinLength } from 'class-validator'
+import { IsHexColor, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator'
 import type { Response } from 'express'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { NotFoundError } from '../common/domain-errors'
-import { BrandingService } from './branding.service'
+import {
+  BrandingService,
+  TILE_BUTTON_STYLES,
+  TILE_NETWORK_INDICATORS,
+  TILE_STYLES,
+} from './branding.service'
 
-/** The platform owner's own branding, name/colour/logo together, applied at once. */
+/** The platform owner's own branding, everything together, applied at once. */
 export class SubmitBrandingDto {
   @IsOptional()
   @IsString()
@@ -35,6 +40,18 @@ export class SubmitBrandingDto {
   @IsOptional()
   @IsHexColor({ message: 'Use a hex colour like #0B3B8F.' })
   brandColorDark?: string
+
+  @IsOptional()
+  @IsIn(TILE_STYLES)
+  tileStyle?: string
+
+  @IsOptional()
+  @IsIn(TILE_BUTTON_STYLES)
+  tileButtonStyle?: string
+
+  @IsOptional()
+  @IsIn(TILE_NETWORK_INDICATORS)
+  tileNetworkIndicator?: string
 }
 
 /** An agent's shop identity: just the fields with real impersonation risk. */
@@ -53,6 +70,18 @@ export class SetColorDto {
   @IsOptional()
   @IsHexColor({ message: 'Use a hex colour like #0B3B8F.' })
   brandColorDark?: string
+}
+
+/** An agent's tile layout/button/network choice. Applies at once, see `BrandingService.setTileOptions`. */
+export class SetTileOptionsDto {
+  @IsIn(TILE_STYLES)
+  tileStyle!: string
+
+  @IsIn(TILE_BUTTON_STYLES)
+  tileButtonStyle!: string
+
+  @IsIn(TILE_NETWORK_INDICATORS)
+  tileNetworkIndicator!: string
 }
 
 export class RejectBrandingDto {
@@ -138,6 +167,17 @@ export class BrandingController {
       brandColorDark: dto.brandColorDark,
     })
   }
+
+  /** Set your own tile layout, button style and network indicator. Applies immediately, no review. */
+  @Roles('agent')
+  @Patch('mine/tile-style')
+  setTileOptions(@CurrentUser() user: AuthUser, @Body() dto: SetTileOptionsDto) {
+    return this.branding.setTileOptions(user.id, {
+      tileStyle: dto.tileStyle,
+      tileButtonStyle: dto.tileButtonStyle,
+      tileNetworkIndicator: dto.tileNetworkIndicator,
+    })
+  }
 }
 
 /**
@@ -161,6 +201,9 @@ export class AdminBrandingController {
       brandColor: dto.brandColor,
       brandColorDark: dto.brandColorDark,
       logo,
+      tileStyle: dto.tileStyle,
+      tileButtonStyle: dto.tileButtonStyle,
+      tileNetworkIndicator: dto.tileNetworkIndicator,
     })
   }
 

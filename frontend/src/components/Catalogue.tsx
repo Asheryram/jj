@@ -1,12 +1,15 @@
 import { Link, useSearchParams } from 'react-router-dom'
 import { useStore } from '../state/store'
 import { useShopPath } from '../lib/shopPath'
+import { useBranding } from '../state/branding'
 import { cedis } from '../lib/format'
 import { NETWORKS } from '../lib/networks'
 import type { Category, Network, Product } from '../data/types'
+import type { TileButtonStyle, TileNetworkIndicator, TileStyle } from '../lib/api'
 import { CATEGORY_META, CATEGORY_ORDER } from './categories'
-import { Badge, Button, Callout, Card, EmptyState, NetworkChip, cn } from './ui'
-import { CertificateIcon, ChevronRightIcon, SearchIcon } from './icons'
+import { Button, Callout, Card, EmptyState, cn } from './ui'
+import { TileBuyButton, TileNetworkBadge } from './TileStylePicker'
+import { CertificateIcon, SearchIcon } from './icons'
 
 interface AgentMargin {
   cost: number
@@ -22,6 +25,7 @@ interface AgentMargin {
  */
 export default function Catalogue() {
   const { products, session, retailPrice, myBand, hasOwnPrice, sellerCode } = useStore()
+  const { tileStyle, tileButtonStyle, tileNetworkIndicator } = useBranding()
   const [params, setParams] = useSearchParams()
 
   /**
@@ -192,6 +196,9 @@ export default function Catalogue() {
               product={product}
               price={retailPrice(product)}
               agentMargin={marginFor(product)}
+              tileStyle={tileStyle}
+              tileButtonStyle={tileButtonStyle}
+              tileNetworkIndicator={tileNetworkIndicator}
             />
           ))}
         </ul>
@@ -200,26 +207,137 @@ export default function Catalogue() {
   )
 }
 
+/** The "you pay / you keep" line an agent sees on their own catalogue. Identical across every tile style. */
+function AgentMarginLine({ agentMargin }: { agentMargin: AgentMargin }) {
+  return (
+    <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+      you pay {cedis(agentMargin.cost)} ·{' '}
+      <span
+        className={
+          agentMargin.margin > 0 ? 'font-semibold text-brand-700 dark:text-brand-300' : 'text-amber-700 dark:text-amber-400'
+        }
+      >
+        {agentMargin.margin > 0 ? `you keep ${cedis(agentMargin.margin).replace('GHS ', '')}` : 'at cost'}
+      </span>
+      {agentMargin.isDefault && <span className="text-slate-500 dark:text-slate-400"> · default</span>}
+    </p>
+  )
+}
+
+/**
+ * One bundle, in whichever of the four curated layouts the shop has chosen
+ * (see `lib/tileStyles.ts`), applied instantly by the agent, no admin
+ * review. Pricing and the buy link are identical across all four; the "Buy"
+ * treatment and the network indicator are each their own independent axis
+ * (`TileBuyButton`/`TileNetworkBadge`, shared with the branding picker's own
+ * preview so the two can never disagree), only the card's own arrangement is
+ * tied to `tileStyle` itself.
+ */
 function ProductCard({
   product,
   price,
   agentMargin,
+  tileStyle,
+  tileButtonStyle,
+  tileNetworkIndicator,
 }: {
   product: Product
   price: number
   agentMargin: AgentMargin | null
+  tileStyle: TileStyle
+  tileButtonStyle: TileButtonStyle
+  tileNetworkIndicator: TileNetworkIndicator
 }) {
   const shopPath = useShopPath()
+  const href = shopPath(`/buy/${product.id}`)
+  const network = <TileNetworkBadge network={product.network} indicator={tileNetworkIndicator} />
+  const buyButton = <TileBuyButton buttonStyle={tileButtonStyle} />
 
+  if (tileStyle === 'bold') {
+    return (
+      <Card as="li" className="overflow-hidden transition-shadow hover:shadow-md">
+        <Link to={href} className="flex h-full flex-col">
+          <div className="flex items-center justify-between gap-3 bg-brand-50 dark:bg-brand-900/30 px-4 py-3">
+            <p className="truncate font-semibold text-brand-900 dark:text-brand-100">{product.name}</p>
+            {network}
+          </div>
+          <div className="flex flex-1 flex-col justify-between gap-3 p-4">
+            <p className="text-sm text-slate-500 dark:text-slate-400">{product.validity}</p>
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <p className="tabular text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
+                  {cedis(price)}
+                </p>
+                {agentMargin && <AgentMarginLine agentMargin={agentMargin} />}
+              </div>
+              {buyButton}
+            </div>
+          </div>
+        </Link>
+      </Card>
+    )
+  }
+
+  if (tileStyle === 'minimal') {
+    return (
+      <Card as="li" className="border-slate-100 shadow-none dark:border-slate-800">
+        <Link to={href} className="flex h-full flex-col p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate font-medium text-slate-900 dark:text-slate-50">{product.name}</p>
+              <p className="mt-0.5 text-sm text-slate-400 dark:text-slate-500">{product.validity}</p>
+            </div>
+            {network}
+          </div>
+          <div className="mt-5 flex items-end justify-between gap-3">
+            <div>
+              <p className="tabular text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
+                {cedis(price)}
+              </p>
+              {agentMargin && <AgentMarginLine agentMargin={agentMargin} />}
+            </div>
+            {buyButton}
+          </div>
+        </Link>
+      </Card>
+    )
+  }
+
+  if (tileStyle === 'compact') {
+    return (
+      <Card as="li" className="transition-shadow hover:shadow-md">
+        <Link to={href} className="flex h-full flex-col p-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-50">{product.name}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{product.validity}</p>
+            </div>
+            {network}
+          </div>
+          <div className="mt-2 flex items-end justify-between gap-2 border-t border-slate-100 dark:border-slate-800 pt-2">
+            <div>
+              <p className="tabular text-base font-bold tracking-tight text-brand-800 dark:text-brand-300">
+                {cedis(price)}
+              </p>
+              {agentMargin && <AgentMarginLine agentMargin={agentMargin} />}
+            </div>
+            <TileBuyButton buttonStyle={tileButtonStyle} small />
+          </div>
+        </Link>
+      </Card>
+    )
+  }
+
+  // classic, the default and the platform's own long-standing look.
   return (
     <Card as="li" className="transition-shadow hover:shadow-md">
-      <Link to={shopPath(`/buy/${product.id}`)} className="flex h-full flex-col p-4">
+      <Link to={href} className="flex h-full flex-col p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="truncate font-semibold text-slate-900 dark:text-slate-50">{product.name}</p>
             <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{product.validity}</p>
           </div>
-          <NetworkChip network={product.network} />
+          {network}
         </div>
 
         <div className="mt-4 flex items-end justify-between gap-3 border-t border-slate-100 dark:border-slate-800 pt-3.5">
@@ -227,27 +345,9 @@ function ProductCard({
             <p className="tabular text-xl font-bold tracking-tight text-brand-800 dark:text-brand-300">
               {cedis(price)}
             </p>
-            {agentMargin && (
-              <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                you pay {cedis(agentMargin.cost)} ·{' '}
-                <span
-                  className={
-                    agentMargin.margin > 0 ? 'font-semibold text-brand-700 dark:text-brand-300' : 'text-amber-700 dark:text-amber-400'
-                  }
-                >
-                  {agentMargin.margin > 0
-                    ? `you keep ${cedis(agentMargin.margin).replace('GHS ', '')}`
-                    : 'at cost'}
-                </span>
-                {agentMargin.isDefault && <span className="text-slate-500 dark:text-slate-400"> · default</span>}
-              </p>
-            )}
+            {agentMargin && <AgentMarginLine agentMargin={agentMargin} />}
           </div>
-          {/* Golden Yellow marks the action on the card, the one thing the
-              buyer is here to press. */}
-          <Badge tone="accent" className="gap-0.5">
-            Buy <ChevronRightIcon className="size-3.5" />
-          </Badge>
+          {buyButton}
         </div>
       </Link>
     </Card>

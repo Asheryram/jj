@@ -36,6 +36,9 @@ const DEFAULT: PublicBranding = {
   rampDark: deriveBrand('#0B3B8F')!.ramp,
   logoUrl: null,
   custom: false,
+  tileStyle: 'classic',
+  tileButtonStyle: 'accent',
+  tileNetworkIndicator: 'chip',
 }
 
 const BrandingContext = createContext<PublicBranding>(DEFAULT)

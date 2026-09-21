@@ -1,61 +1,49 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiAsset, api, ApiError, type BrandingRequestRow } from '../../lib/api'
+import { useEffect, useRef, useState } from 'react'
+import { api, ApiError } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { deriveBrand } from '../../lib/branding'
-import { dateTime } from '../../lib/format'
-import {
-  Badge,
-  Button,
-  Callout,
-  Card,
-  CardHead,
-  EmptyState,
-  Field,
-  Modal,
-  PageHead,
-  QuickReasons,
-  Segmented,
-  Spinner,
-  TextInput,
-  Toggle,
-} from '../../components/ui'
-import { AlertIcon, CheckIcon, StoreIcon } from '../../components/icons'
-
-type Filter = 'pending' | 'approved' | 'rejected'
+import { BRAND_TEMPLATES, templateFor } from '../../lib/brandTemplates'
+import { TileStylePicker, type TileOptions } from '../../components/TileStylePicker'
+import { Badge, Button, Card, CardHead, Field, PageHead, Spinner, TextInput, Toggle, cn } from '../../components/ui'
+import { CheckIcon } from '../../components/icons'
 
 /**
- * The platform's own branding, and the agents' branding queue.
+ * The platform's own branding: name, logo, colour and how its own catalogue
+ * tiles look. No queue, it is James's platform and there is nobody above him
+ * to approve it (see `BrandingService.setPlatform`).
  *
- * Both on one screen because they are the same job seen from two sides: what the
- * platform looks like, and what each agent is asking to look like.
- *
- * The queue is the reason agent branding is not self-serve. An agent shop
- * collects card and Mobile Money details, so one convincingly named and badged as
- * a bank is a fraud risk carried by the platform. The review screen therefore
- * shows the submitted logo at a real size and the proposed name in full, the two
- * things that would be used to impersonate somebody.
+ * Deliberately its own page, not shared with the agents' branding queue
+ * (`BrandingRequests.tsx`): "what does my own platform look like" and "what
+ * is this specific agent asking to look like" are different jobs, done at
+ * different times, for different reasons, and were only ever on one page
+ * because they both happened to touch the word "branding".
  */
 export default function BrandingReview() {
   return (
     <div>
       <PageHead
         title="Branding"
-        subtitle="Your own shop's name, logo and colour, and the changes your agents have asked for."
+        subtitle="Your own shop's name, logo, colour and catalogue-tile look."
       />
       <PlatformBranding />
-      <AgentQueue />
     </div>
   )
 }
 
-/** James's own branding. No queue, it is his platform. */
+/** James's own branding. */
 function PlatformBranding() {
   const { pushToast } = useStore()
   const [shopName, setShopName] = useState('')
   const [color, setColor] = useState('')
   const [darkEnabled, setDarkEnabled] = useState(false)
   const [colorDark, setColorDark] = useState('')
+  const [customColorOpen, setCustomColorOpen] = useState(false)
   const [logo, setLogo] = useState<File | null>(null)
+  const [tileOptions, setTileOptions] = useState<TileOptions>({
+    tileStyle: 'classic',
+    tileButtonStyle: 'accent',
+    tileNetworkIndicator: 'chip',
+  })
   const [busy, setBusy] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -72,6 +60,12 @@ function PlatformBranding() {
         // wrong here changes nothing visually either way.
         setDarkEnabled(Boolean(b.brandColorDark && b.brandColorDark !== b.brandColor))
         setColorDark(b.brandColorDark)
+        setCustomColorOpen(!templateFor(b.brandColor))
+        setTileOptions({
+          tileStyle: b.tileStyle,
+          tileButtonStyle: b.tileButtonStyle,
+          tileNetworkIndicator: b.tileNetworkIndicator,
+        })
         setLoaded(true)
       })
       .catch(() => setLoaded(true))
@@ -79,6 +73,7 @@ function PlatformBranding() {
 
   const derived = deriveBrand(color || '#0B3B8F')
   const derivedDark = darkEnabled ? deriveBrand(colorDark || '#0B3B8F') : null
+  const activeTemplate = templateFor(color)
 
   const save = async () => {
     const form = new FormData()
@@ -86,6 +81,9 @@ function PlatformBranding() {
     if (derived) form.set('brandColor', derived.requested)
     if (derivedDark) form.set('brandColorDark', derivedDark.requested)
     if (logo) form.set('logo', logo)
+    form.set('tileStyle', tileOptions.tileStyle)
+    form.set('tileButtonStyle', tileOptions.tileButtonStyle)
+    form.set('tileNetworkIndicator', tileOptions.tileNetworkIndicator)
 
     setBusy(true)
     try {
@@ -122,77 +120,14 @@ function PlatformBranding() {
           </div>
         ) : (
           <>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Platform name" htmlFor="platform-name">
-                <TextInput
-                  id="platform-name"
-                  value={shopName}
-                  maxLength={40}
-                  onChange={(event) => setShopName(event.target.value)}
-                />
-              </Field>
-              <Field label="Light mode colour" htmlFor="platform-color">
-                <div className="flex items-center gap-2">
-                  <input
-                    id="platform-color"
-                    type="color"
-                    value={derived?.requested ?? '#0B3B8F'}
-                    onChange={(event) => setColor(event.target.value)}
-                    className="h-11 w-16 cursor-pointer rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1"
-                  />
-                  <TextInput
-                    value={color}
-                    className="font-mono"
-                    invalid={!derived}
-                    onChange={(event) => setColor(event.target.value)}
-                  />
-                </div>
-              </Field>
-            </div>
-
-            <div className="flex items-center gap-2.5">
-              <Toggle
-                id="platform-dark-color-toggle"
-                checked={darkEnabled}
-                onChange={setDarkEnabled}
-                label="Use a different colour in dark mode"
+            <Field label="Platform name" htmlFor="platform-name">
+              <TextInput
+                id="platform-name"
+                value={shopName}
+                maxLength={40}
+                onChange={(event) => setShopName(event.target.value)}
               />
-              {/* A <label> would not activate a button-based Toggle, so this is
-                  a second, plain click target rather than one wired to `for`. */}
-              <button
-                type="button"
-                onClick={() => setDarkEnabled(!darkEnabled)}
-                className="text-sm font-medium text-slate-700 dark:text-slate-200"
-              >
-                Use a different colour in dark mode
-              </button>
-            </div>
-            {!darkEnabled && (
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Off means the light colour is reused for dark mode too, chosen automatically so
-                text stays readable. Turn this on for full control over both.
-              </p>
-            )}
-
-            {darkEnabled && (
-              <Field label="Dark mode colour" htmlFor="platform-color-dark">
-                <div className="flex items-center gap-2">
-                  <input
-                    id="platform-color-dark"
-                    type="color"
-                    value={derivedDark?.requested ?? '#0B3B8F'}
-                    onChange={(event) => setColorDark(event.target.value)}
-                    className="h-11 w-16 cursor-pointer rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1"
-                  />
-                  <TextInput
-                    value={colorDark}
-                    className="font-mono"
-                    invalid={!derivedDark}
-                    onChange={(event) => setColorDark(event.target.value)}
-                  />
-                </div>
-              </Field>
-            )}
+            </Field>
 
             <Field
               label="Logo"
@@ -209,71 +144,191 @@ function PlatformBranding() {
               />
             </Field>
 
-            {derived && (
-              <>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {Object.entries((darkEnabled && derivedDark ? derivedDark : derived).ramp).map(
-                    ([step, hex]) => (
-                      <div
-                        key={step}
-                        className="size-8 rounded-lg border border-slate-200 dark:border-slate-700"
-                        style={{ backgroundColor: hex }}
-                        title={`${step} · ${hex}`}
-                      />
-                    ),
+            <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
+              <p className="mb-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200">Colour</p>
+              <div className="grid grid-cols-4 gap-2.5 sm:grid-cols-8">
+                {BRAND_TEMPLATES.map((template) => {
+                  const isActive = !customColorOpen && activeTemplate?.id === template.id
+                  return (
+                    <button
+                      key={template.id}
+                      type="button"
+                      onClick={() => {
+                        setColor(template.hex)
+                        setCustomColorOpen(false)
+                      }}
+                      aria-label={template.label}
+                      aria-pressed={isActive}
+                      className={cn(
+                        'flex flex-col items-center gap-1.5 rounded-xl border p-2 text-center transition',
+                        isActive
+                          ? 'border-brand-500 bg-brand-50 dark:border-brand-400 dark:bg-brand-900/30'
+                          : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600',
+                      )}
+                    >
+                      <span
+                        className="relative flex size-9 items-center justify-center rounded-full border border-black/5"
+                        style={{ backgroundColor: template.hex }}
+                      >
+                        {isActive && <CheckIcon className="size-4 text-white" />}
+                      </span>
+                      <span className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                        {template.label}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setCustomColorOpen((v) => !v)}
+                className="mt-3 text-sm font-semibold text-brand-700 dark:text-brand-300 hover:underline"
+              >
+                {customColorOpen ? 'Hide custom colour' : 'Or pick your own colour'}
+              </button>
+
+              {customColorOpen && (
+                <div className="mt-3 space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label="Light mode colour" htmlFor="platform-color">
+                      <div className="flex items-center gap-2">
+                        <input
+                          id="platform-color"
+                          type="color"
+                          value={derived?.requested ?? '#0B3B8F'}
+                          onChange={(event) => setColor(event.target.value)}
+                          className="h-11 w-16 cursor-pointer rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1"
+                        />
+                        <TextInput
+                          value={color}
+                          className="font-mono"
+                          invalid={!derived}
+                          onChange={(event) => setColor(event.target.value)}
+                        />
+                      </div>
+                    </Field>
+                  </div>
+
+                  <div className="flex items-center gap-2.5">
+                    <Toggle
+                      id="platform-dark-color-toggle"
+                      checked={darkEnabled}
+                      onChange={setDarkEnabled}
+                      label="Use a different colour in dark mode"
+                    />
+                    {/* A <label> would not activate a button-based Toggle, so this is
+                        a second, plain click target rather than one wired to `for`. */}
+                    <button
+                      type="button"
+                      onClick={() => setDarkEnabled(!darkEnabled)}
+                      className="text-sm font-medium text-slate-700 dark:text-slate-200"
+                    >
+                      Use a different colour in dark mode
+                    </button>
+                  </div>
+                  {!darkEnabled && (
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Off means the light colour is reused for dark mode too, chosen automatically so
+                      text stays readable. Turn this on for full control over both.
+                    </p>
                   )}
-                  {derived.adjusted && (
-                    <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
-                      buttons darkened so white text stays readable
-                    </span>
+
+                  {darkEnabled && (
+                    <Field label="Dark mode colour" htmlFor="platform-color-dark">
+                      <div className="flex items-center gap-2">
+                        <input
+                          id="platform-color-dark"
+                          type="color"
+                          value={derivedDark?.requested ?? '#0B3B8F'}
+                          onChange={(event) => setColorDark(event.target.value)}
+                          className="h-11 w-16 cursor-pointer rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1"
+                        />
+                        <TextInput
+                          value={colorDark}
+                          className="font-mono"
+                          invalid={!derivedDark}
+                          onChange={(event) => setColorDark(event.target.value)}
+                        />
+                      </div>
+                    </Field>
                   )}
                 </div>
+              )}
 
-                <div>
-                  <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
-                    How it will look
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                    Visitors can read the platform in either theme, a mock of the same bundle card
-                    shown both ways, so you can check this colour works in both before saving.
-                  </p>
+              {derived && (
+                <>
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                    {Object.entries((darkEnabled && derivedDark ? derivedDark : derived).ramp).map(
+                      ([step, hex]) => (
+                        <div
+                          key={step}
+                          className="size-8 rounded-lg border border-slate-200 dark:border-slate-700"
+                          style={{ backgroundColor: hex }}
+                          title={`${step} · ${hex}`}
+                        />
+                      ),
+                    )}
+                    {derived.adjusted && (
+                      <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+                        buttons darkened so white text stays readable
+                      </span>
+                    )}
+                  </div>
 
-                  {/* Two fixed swatches, not `dark:` classes, shows both themes
-                      at once regardless of which one you are viewing this page in. */}
-                  <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-xl border border-slate-200 bg-white p-3.5">
-                      <p className="mb-2.5 text-[11px] font-semibold text-slate-400 uppercase">
-                        Light
-                      </p>
-                      <p className="font-semibold text-slate-900">1GB Data</p>
-                      <p className="text-sm text-slate-500">30 days</p>
-                      <div className="mt-3 flex items-end justify-between border-t border-slate-100 pt-3">
-                        <p className="text-xl font-bold tracking-tight" style={{ color: derived.ramp[800] }}>
-                          GHS 4.94
+                  <div className="mt-3">
+                    <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
+                      How it will look
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Visitors can read the platform in either theme, a mock of the same bundle card
+                      shown both ways, so you can check this colour works in both before saving.
+                    </p>
+
+                    {/* Two fixed swatches, not `dark:` classes, shows both themes
+                        at once regardless of which one you are viewing this page in. */}
+                    <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+                        <p className="mb-2.5 text-[11px] font-semibold text-slate-400 uppercase">
+                          Light
                         </p>
-                        <Badge tone="accent">Buy</Badge>
+                        <p className="font-semibold text-slate-900">1GB Data</p>
+                        <p className="text-sm text-slate-500">30 days</p>
+                        <div className="mt-3 flex items-end justify-between border-t border-slate-100 pt-3">
+                          <p className="text-xl font-bold tracking-tight" style={{ color: derived.ramp[800] }}>
+                            GHS 4.94
+                          </p>
+                          <Badge tone="accent">Buy</Badge>
+                        </div>
                       </div>
-                    </div>
-                    <div className="rounded-xl border border-slate-700 bg-slate-900 p-3.5">
-                      <p className="mb-2.5 text-[11px] font-semibold text-slate-500 uppercase">
-                        Dark{!darkEnabled && ' (auto)'}
-                      </p>
-                      <p className="font-semibold text-slate-50">1GB Data</p>
-                      <p className="text-sm text-slate-400">30 days</p>
-                      <div className="mt-3 flex items-end justify-between border-t border-slate-800 pt-3">
-                        <p
-                          className="text-xl font-bold tracking-tight"
-                          style={{ color: (darkEnabled && derivedDark ? derivedDark : derived).ramp[300] }}
-                        >
-                          GHS 4.94
+                      <div className="rounded-xl border border-slate-700 bg-slate-900 p-3.5">
+                        <p className="mb-2.5 text-[11px] font-semibold text-slate-500 uppercase">
+                          Dark{!darkEnabled && ' (auto)'}
                         </p>
-                        <Badge tone="accent">Buy</Badge>
+                        <p className="font-semibold text-slate-50">1GB Data</p>
+                        <p className="text-sm text-slate-400">30 days</p>
+                        <div className="mt-3 flex items-end justify-between border-t border-slate-800 pt-3">
+                          <p
+                            className="text-xl font-bold tracking-tight"
+                            style={{ color: (darkEnabled && derivedDark ? derivedDark : derived).ramp[300] }}
+                          >
+                            GHS 4.94
+                          </p>
+                          <Badge tone="accent">Buy</Badge>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </>
-            )}
+                </>
+              )}
+            </div>
+
+            <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
+              <p className="mb-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                Catalogue tiles
+              </p>
+              <TileStylePicker value={tileOptions} onChange={setTileOptions} disabled={busy} />
+            </div>
 
             <Button loading={busy} onClick={() => void save()}>
               Save platform branding
@@ -282,280 +337,5 @@ function PlatformBranding() {
         )}
       </div>
     </Card>
-  )
-}
-
-/** Agents waiting to be reviewed. */
-function AgentQueue() {
-  const { pushToast } = useStore()
-  const [rows, setRows] = useState<BrandingRequestRow[] | null>(null)
-  const [filter, setFilter] = useState<Filter>('pending')
-  const [busyId, setBusyId] = useState<string | null>(null)
-  const [rejecting, setRejecting] = useState<BrandingRequestRow | null>(null)
-  /**
-   * The one field this whole queue exists to scrutinise for impersonation
-   * risk (see the file's own header comment) was a fixed 56×56px thumbnail
-   * with no way to actually look closely at it. This zooms it full-size.
-   */
-  const [zoomedLogo, setZoomedLogo] = useState<{ url: string; agentName: string } | null>(null)
-
-  const load = useCallback(async () => {
-    try {
-      setRows(await api.brandingQueue(filter))
-    } catch {
-      setRows([])
-    }
-  }, [filter])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  const approve = async (row: BrandingRequestRow) => {
-    setBusyId(row.id)
-    try {
-      await api.approveBranding(row.id)
-      await load()
-      pushToast({ tone: 'success', title: `${row.agentCode}'s shop updated` })
-    } catch (caught) {
-      pushToast({
-        tone: 'error',
-        title: caught instanceof ApiError ? caught.message : 'We could not approve that.',
-      })
-    } finally {
-      setBusyId(null)
-    }
-  }
-
-  return (
-    <>
-      <Card className="mt-3">
-        <CardHead
-          title="Agent requests"
-          subtitle="Nothing here is live yet. Look at the name and logo before approving, a shop that looks like a bank is your liability."
-          action={
-            <Segmented<Filter>
-              options={[
-                { value: 'pending', label: 'Waiting' },
-                { value: 'approved', label: 'Approved' },
-                { value: 'rejected', label: 'Refused' },
-              ]}
-              value={filter}
-              onChange={setFilter}
-            />
-          }
-        />
-        <div className="space-y-3 p-4 sm:p-5">
-          {rows === null ? (
-            <div className="py-8 text-center">
-              <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
-            </div>
-          ) : rows.length === 0 ? (
-            <EmptyState
-              icon={<StoreIcon className="size-6" />}
-              title={filter === 'pending' ? 'Nothing waiting' : 'Nothing here'}
-              detail={
-                filter === 'pending'
-                  ? 'No agent has asked to change their shop look.'
-                  : 'No requests in this state yet.'
-              }
-            />
-          ) : (
-            rows.map((row) => {
-              const derived = row.brandColor ? deriveBrand(row.brandColor) : null
-              return (
-                <div key={row.id} className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex items-start gap-3">
-                      {row.logoUrl ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setZoomedLogo({ url: apiAsset(row.logoUrl) ?? '', agentName: row.agentName })
-                          }
-                          className="shrink-0 rounded-xl outline-offset-2 hover:opacity-90"
-                          aria-label={`Zoom in on ${row.agentName}'s proposed logo`}
-                        >
-                          <img
-                            src={apiAsset(row.logoUrl) ?? undefined}
-                            alt={`${row.agentName}'s proposed logo`}
-                            className="size-14 rounded-xl border border-slate-200 dark:border-slate-700 object-contain"
-                          />
-                        </button>
-                      ) : (
-                        <span className="flex size-14 items-center justify-center rounded-xl border border-dashed border-slate-300 dark:border-slate-600 text-xs text-slate-400 dark:text-slate-500">
-                          no logo
-                        </span>
-                      )}
-                      <div>
-                        <p className="font-semibold text-slate-900 dark:text-slate-50">
-                          {row.shopName ?? <span className="text-slate-400 dark:text-slate-500">name unchanged</span>}
-                        </p>
-                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                          {row.agentName} · {row.agentCode} · {dateTime(row.createdAt)}
-                        </p>
-                        {derived && (
-                          <div className="mt-1.5 flex items-center gap-1.5">
-                            <span
-                              className="size-4 rounded-full border border-slate-200 dark:border-slate-700"
-                              style={{ backgroundColor: derived.ramp[700] }}
-                            />
-                            <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
-                              {row.brandColor}
-                            </span>
-                            {derived.adjusted && (
-                              <span className="text-xs text-slate-500 dark:text-slate-400">(darkened)</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {row.status === 'pending' ? (
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          loading={busyId === row.id}
-                          onClick={() => void approve(row)}
-                        >
-                          Approve
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setRejecting(row)}>
-                          Refuse
-                        </Button>
-                      </div>
-                    ) : (
-                      <Badge tone={row.status === 'approved' ? 'success' : 'danger'}>
-                        {row.status === 'approved' ? (
-                          <>
-                            <CheckIcon className="size-3.5" /> approved
-                          </>
-                        ) : (
-                          'refused'
-                        )}
-                      </Badge>
-                    )}
-                  </div>
-
-                  {row.note && <p className="mt-2 text-xs text-red-700 dark:text-red-400">Refused: {row.note}</p>}
-                </div>
-              )
-            })
-          )}
-        </div>
-      </Card>
-
-      <RefuseModal
-        request={rejecting}
-        onClose={() => setRejecting(null)}
-        onRefused={async () => {
-          await load()
-        }}
-      />
-
-      {zoomedLogo && (
-        <Modal open onClose={() => setZoomedLogo(null)} title={`${zoomedLogo.agentName}'s proposed logo`}>
-          <img
-            src={zoomedLogo.url}
-            alt={`${zoomedLogo.agentName}'s proposed logo, enlarged`}
-            className="mx-auto max-h-[60vh] w-full rounded-xl border border-slate-200 dark:border-slate-700 object-contain"
-          />
-        </Modal>
-      )}
-    </>
-  )
-}
-
-/** Refusing needs a reason, and the agent is shown it so they can fix it. */
-function RefuseModal({
-  request,
-  onClose,
-  onRefused,
-}: {
-  request: BrandingRequestRow | null
-  onClose: () => void
-  onRefused: () => Promise<void>
-}) {
-  const { pushToast } = useStore()
-  const [note, setNote] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-
-  const key = request?.id ?? 'none'
-  const [lastKey, setLastKey] = useState(key)
-  if (key !== lastKey) {
-    setLastKey(key)
-    setNote('')
-    setError('')
-  }
-
-  if (!request) return null
-
-  const submit = async () => {
-    if (note.trim().length < 5) {
-      setError('Say why, so they can fix it and try again.')
-      return
-    }
-    setBusy(true)
-    try {
-      await api.rejectBranding(request.id, note.trim())
-      await onRefused()
-      pushToast({ tone: 'info', title: `Refused ${request.agentCode}'s branding` })
-      onClose()
-    } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'We could not save that.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Modal open onClose={onClose} title={`Refuse, ${request.agentCode}`}>
-      <form
-        className="space-y-4"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void submit()
-        }}
-      >
-        <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-          The agent sees this message, so write it as something they can act on.
-        </Callout>
-
-        <QuickReasons
-          options={[
-            'Looks like a bank or network logo',
-            'Name impersonates another business',
-            'Logo image is too low quality to use',
-          ]}
-          onPick={(text) => {
-            setNote(text)
-            setError('')
-          }}
-        />
-
-        <Field label="Why are you refusing it?" htmlFor="refuse-branding" error={error}>
-          <TextInput
-            id="refuse-branding"
-            placeholder="The logo is MTN's, use your own mark"
-            value={note}
-            invalid={Boolean(error)}
-            onChange={(event) => {
-              setNote(event.target.value)
-              setError('')
-            }}
-          />
-        </Field>
-
-        <div className="flex gap-2">
-          <Button type="submit" block variant="outline" loading={busy}>
-            Refuse
-          </Button>
-          <Button type="button" block disabled={busy} onClick={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </form>
-    </Modal>
   )
 }

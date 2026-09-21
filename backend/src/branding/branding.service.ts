@@ -3,6 +3,26 @@ import { PrismaService } from '../prisma/prisma.service'
 import { deriveBrand, type BrandRamp } from '../domain/branding'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 
+/**
+ * The three independent axes a catalogue tile can be customised on, mirrored
+ * in `frontend/src/lib/tileStyles.ts` (the actual rendering lives there, this
+ * side only needs the valid sets to validate against). Independent on
+ * purpose: a shop can be "bold" layout with a "text" button and "dot"
+ * network indicator, there is no fixed bundle forcing them to move together.
+ * `null` on any of them reads as the platform default (see the individual
+ * `as*` helpers below).
+ */
+export const TILE_STYLES = ['classic', 'bold', 'minimal', 'compact'] as const
+export type TileStyle = (typeof TILE_STYLES)[number]
+
+/** The "Buy" element's look. `accent` is the fixed Golden Yellow badge every shop has always had. */
+export const TILE_BUTTON_STYLES = ['accent', 'solid', 'outline', 'text'] as const
+export type TileButtonStyle = (typeof TILE_BUTTON_STYLES)[number]
+
+/** How a bundle's network is shown. `chip` is the existing coloured pill with the network's name. */
+export const TILE_NETWORK_INDICATORS = ['chip', 'dot', 'pulse'] as const
+export type TileNetworkIndicator = (typeof TILE_NETWORK_INDICATORS)[number]
+
 /** What a shop front needs to render itself. */
 export interface PublicBranding {
   shopName: string
@@ -19,6 +39,25 @@ export interface PublicBranding {
   logoUrl: string | null
   /** True when this is an agent's own branding rather than the platform's. */
   custom: boolean
+  /** Which catalogue-tile layout to render, see `TILE_STYLES`. */
+  tileStyle: TileStyle
+  tileButtonStyle: TileButtonStyle
+  tileNetworkIndicator: TileNetworkIndicator
+}
+
+/** A stored value narrowed to a real `TileStyle`, `null`/anything unknown reads as the default. */
+function asTileStyle(value: string | null | undefined): TileStyle {
+  return (TILE_STYLES as readonly string[]).includes(value ?? '') ? (value as TileStyle) : 'classic'
+}
+
+function asTileButtonStyle(value: string | null | undefined): TileButtonStyle {
+  return (TILE_BUTTON_STYLES as readonly string[]).includes(value ?? '') ? (value as TileButtonStyle) : 'accent'
+}
+
+function asTileNetworkIndicator(value: string | null | undefined): TileNetworkIndicator {
+  return (TILE_NETWORK_INDICATORS as readonly string[]).includes(value ?? '')
+    ? (value as TileNetworkIndicator)
+    : 'chip'
 }
 
 /** The platform's identity, used wherever nothing has been customised. */
@@ -96,6 +135,9 @@ export class BrandingService {
       brandColor: true,
       brandColorDark: true,
       logoMime: true,
+      tileStyle: true,
+      tileButtonStyle: true,
+      tileNetworkIndicator: true,
     } as const
 
     const platform = await this.prisma.branding.findFirst({
@@ -103,8 +145,15 @@ export class BrandingService {
       select: BRANDING_SELECT,
     })
 
-    let agent: { shopName: string | null; brandColor: string | null; brandColorDark: string | null; logoMime: string | null } | null =
-      null
+    let agent: {
+      shopName: string | null
+      brandColor: string | null
+      brandColorDark: string | null
+      logoMime: string | null
+      tileStyle: string | null
+      tileButtonStyle: string | null
+      tileNetworkIndicator: string | null
+    } | null = null
     let agentKey: string | null = null
 
     if (sellerCode) {
@@ -135,6 +184,12 @@ export class BrandingService {
         ? '/api/branding/logo/platform'
         : null
 
+    const tileStyle = asTileStyle(agent?.tileStyle ?? platform?.tileStyle)
+    const tileButtonStyle = asTileButtonStyle(agent?.tileButtonStyle ?? platform?.tileButtonStyle)
+    const tileNetworkIndicator = asTileNetworkIndicator(
+      agent?.tileNetworkIndicator ?? platform?.tileNetworkIndicator,
+    )
+
     return {
       shopName: agent?.shopName ?? platform?.shopName ?? DEFAULT_NAME,
       brandColor: derived.requested,
@@ -142,7 +197,17 @@ export class BrandingService {
       brandColorDark: derivedDark.requested,
       rampDark: derivedDark.ramp,
       logoUrl,
-      custom: Boolean(agent?.shopName || agent?.brandColor || agent?.logoMime),
+      custom: Boolean(
+        agent?.shopName ||
+          agent?.brandColor ||
+          agent?.logoMime ||
+          agent?.tileStyle ||
+          agent?.tileButtonStyle ||
+          agent?.tileNetworkIndicator,
+      ),
+      tileStyle,
+      tileButtonStyle,
+      tileNetworkIndicator,
     }
   }
 
@@ -170,7 +235,15 @@ export class BrandingService {
     const [live, pending] = await Promise.all([
       this.prisma.branding.findUnique({
         where: { userId },
-        select: { shopName: true, brandColor: true, brandColorDark: true, logoMime: true },
+        select: {
+          shopName: true,
+          brandColor: true,
+          brandColorDark: true,
+          logoMime: true,
+          tileStyle: true,
+          tileButtonStyle: true,
+          tileNetworkIndicator: true,
+        },
       }),
       this.prisma.brandingRequest.findFirst({
         where: { userId, status: 'pending' },
@@ -199,6 +272,9 @@ export class BrandingService {
             brandColor: live.brandColor,
             brandColorDark: live.brandColorDark,
             hasLogo: live.logoMime !== null,
+            tileStyle: asTileStyle(live.tileStyle),
+            tileButtonStyle: asTileButtonStyle(live.tileButtonStyle),
+            tileNetworkIndicator: asTileNetworkIndicator(live.tileNetworkIndicator),
           }
         : null,
       pending: pending
@@ -312,6 +388,50 @@ export class BrandingService {
 
     this.log.log(`colour updated directly for user ${userId}`)
     return { brandColor: row.brandColor!, brandColorDark: row.brandColorDark }
+  }
+
+  /**
+   * An agent's own tile layout, button style and network indicator, applied
+   * at once, no review. All three together, not three separate calls: the
+   * frontend previews the combination before committing, so "apply" means
+   * "make these three the live ones", one write, not a race between three.
+   *
+   * Same reasoning as `setColor()` for why none of this needs review: none
+   * of the three is a name or a mark, nobody mistakes a card's layout, its
+   * "Buy" treatment, or how a network dot looks for a bank.
+   */
+  async setTileOptions(
+    userId: string,
+    input: { tileStyle: string; tileButtonStyle: string; tileNetworkIndicator: string },
+  ): Promise<{ tileStyle: TileStyle; tileButtonStyle: TileButtonStyle; tileNetworkIndicator: TileNetworkIndicator }> {
+    if (!(TILE_STYLES as readonly string[]).includes(input.tileStyle)) {
+      throw new ValidationError(`Pick a layout from: ${TILE_STYLES.join(', ')}.`)
+    }
+    if (!(TILE_BUTTON_STYLES as readonly string[]).includes(input.tileButtonStyle)) {
+      throw new ValidationError(`Pick a button style from: ${TILE_BUTTON_STYLES.join(', ')}.`)
+    }
+    if (!(TILE_NETWORK_INDICATORS as readonly string[]).includes(input.tileNetworkIndicator)) {
+      throw new ValidationError(`Pick a network indicator from: ${TILE_NETWORK_INDICATORS.join(', ')}.`)
+    }
+
+    const changes = {
+      tileStyle: input.tileStyle,
+      tileButtonStyle: input.tileButtonStyle,
+      tileNetworkIndicator: input.tileNetworkIndicator,
+    }
+
+    const row = await this.prisma.branding.upsert({
+      where: { userId },
+      create: { userId, ...changes },
+      update: changes,
+    })
+
+    this.log.log(`tile options updated directly for user ${userId}`)
+    return {
+      tileStyle: asTileStyle(row.tileStyle),
+      tileButtonStyle: asTileButtonStyle(row.tileButtonStyle),
+      tileNetworkIndicator: asTileNetworkIndicator(row.tileNetworkIndicator),
+    }
   }
 
   private checkLogo(buffer: Buffer): { mime: string; bytes: Uint8Array<ArrayBuffer> } {
@@ -457,6 +577,9 @@ export class BrandingService {
     brandColor?: string
     brandColorDark?: string
     logo?: { buffer: Buffer }
+    tileStyle?: string
+    tileButtonStyle?: string
+    tileNetworkIndicator?: string
   }) {
     const shopName = input.shopName?.trim()
     if (shopName && shopName.length > 40) {
@@ -470,6 +593,18 @@ export class BrandingService {
         'That dark-mode colour is not one we recognise. Use a hex value like #0B3B8F.',
       )
     }
+    if (input.tileStyle && !(TILE_STYLES as readonly string[]).includes(input.tileStyle)) {
+      throw new ValidationError(`Pick a layout from: ${TILE_STYLES.join(', ')}.`)
+    }
+    if (input.tileButtonStyle && !(TILE_BUTTON_STYLES as readonly string[]).includes(input.tileButtonStyle)) {
+      throw new ValidationError(`Pick a button style from: ${TILE_BUTTON_STYLES.join(', ')}.`)
+    }
+    if (
+      input.tileNetworkIndicator &&
+      !(TILE_NETWORK_INDICATORS as readonly string[]).includes(input.tileNetworkIndicator)
+    ) {
+      throw new ValidationError(`Pick a network indicator from: ${TILE_NETWORK_INDICATORS.join(', ')}.`)
+    }
 
     const logo = input.logo ? this.checkLogo(input.logo.buffer) : null
     const existing = await this.prisma.branding.findFirst({ where: { userId: null } })
@@ -479,6 +614,9 @@ export class BrandingService {
       ...(input.brandColor ? { brandColor: input.brandColor } : {}),
       ...(input.brandColorDark ? { brandColorDark: input.brandColorDark } : {}),
       ...(logo ? { logoMime: logo.mime, logoBytes: logo.bytes } : {}),
+      ...(input.tileStyle ? { tileStyle: input.tileStyle } : {}),
+      ...(input.tileButtonStyle ? { tileButtonStyle: input.tileButtonStyle } : {}),
+      ...(input.tileNetworkIndicator ? { tileNetworkIndicator: input.tileNetworkIndicator } : {}),
     }
 
     if (existing) {
