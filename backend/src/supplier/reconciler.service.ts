@@ -58,6 +58,17 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * no benefit and risk their rate limit.
    */
   private readonly graceMs = 90_000
+  /**
+   * How rarely `alertStuckOrders` may actually send mail, distinct from
+   * `intervalMs`: the sweep itself still runs every ten minutes so a lost
+   * webhook keeps getting chased promptly, this only throttles the *email*,
+   * which was firing every single sweep and flooding an admin's inbox for as
+   * long as anything stayed stuck. In-memory, not persisted, a restart
+   * occasionally sending one email earlier than four hours is a rounding
+   * error for a notification, not worth a migration over.
+   */
+  private static readonly STUCK_ALERT_THROTTLE_MS = 4 * 60 * 60_000
+  private lastStuckAlertAt: number | null = null
   /** Keyed by order id. See `checkOrderNow`'s own comment for why this throttles it. */
   private readonly lastProviderCheckAt = new Map<string, number>()
   private static readonly MIN_PROVIDER_CHECK_GAP_MS = 30_000
@@ -395,11 +406,16 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * nobody but an admin opening Needs attention would ever know.
    *
    * Deliberately not a one-time alert like `SubscriptionsService.alertExpiring`:
-   * this repeats on every sweep, every ten minutes, for as long as any order is
-   * still stuck this way. A subscription lapsing is a single event worth
-   * telling someone once; a customer still waiting for a bundle they paid for,
-   * with no idea whether it even reached the delivery partner, is an ongoing
-   * problem that deserves a standing reminder until it is actually fixed.
+   * this keeps re-sending for as long as any order is still stuck this way,
+   * rather than firing once and going quiet while the problem persists. A
+   * subscription lapsing is a single event worth telling someone once; a
+   * customer still waiting for a bundle they paid for, with no idea whether
+   * it even reached the delivery partner, is an ongoing problem that deserves
+   * a standing reminder until it is actually fixed. It is throttled to at
+   * most once every `STUCK_ALERT_THROTTLE_MS`, though, the sweep itself still
+   * checks every ten minutes so a lost webhook is chased promptly, but that
+   * used to also mean re-sending the same email every ten minutes for as long
+   * as anything stayed stuck, which read as spam rather than urgency.
    */
   private async alertStuckOrders(): Promise<void> {
     const cutoff = new Date(Date.now() - 15 * 60_000)
@@ -412,6 +428,14 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       select: { id: true, reference: true },
     })
     if (stuck.length === 0) return
+
+    if (
+      this.lastStuckAlertAt !== null &&
+      Date.now() - this.lastStuckAlertAt < ReconcilerService.STUCK_ALERT_THROTTLE_MS
+    ) {
+      this.log.warn(`${stuck.length} order(s) still with no reply, email throttled until the next window`)
+      return
+    }
 
     const admins = await this.prisma.user.findMany({
       where: { role: 'admin', status: 'active' },
@@ -438,10 +462,10 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     const appLinkHtml = `<p style="margin:0"><a href="${appLink}" style="display:inline-block;background:#0B3B8F;color:#fff;font-weight:600;font-size:14px;padding:10px 18px;border-radius:8px;text-decoration:none">Open Needs attention</a></p>`
     const body =
       `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">${explanation}</p>${appLinkHtml}` +
-      `<p style="margin:18px 0 0;font-size:12.5px;line-height:1.6;color:#64748b">This checks again in ten minutes and keeps emailing while any order is still unanswered.</p>`
+      `<p style="margin:18px 0 0;font-size:12.5px;line-height:1.6;color:#64748b">This will not repeat for at least four hours, and only then if something is still unanswered.</p>`
     const text =
       `${explanation}\n\nOpen Needs attention: ${appLink}\n\n` +
-      `This checks again in ten minutes and keeps emailing while any order is still unanswered.`
+      `This will not repeat for at least four hours, and only then if something is still unanswered.`
     const subject = `${count} order${count === 1 ? '' : 's'} with no reply from the delivery partner`
     const html = wrap(
       shopName,
@@ -449,6 +473,12 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       body,
       `You are getting this because you are an active admin on ${escape(shopName)}.`,
     )
+
+    // Set before sending, not after: the throttle exists to bound how often an
+    // admin's inbox gets this, not to guarantee delivery, a slow or failing
+    // send must not leave the window open for a burst of retries in the
+    // meantime.
+    this.lastStuckAlertAt = Date.now()
 
     for (const recipient of recipients) {
       await this.mailer
