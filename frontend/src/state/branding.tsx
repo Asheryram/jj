@@ -41,7 +41,27 @@ const DEFAULT: PublicBranding = {
   tileNetworkIndicator: 'chip',
 }
 
-const BrandingContext = createContext<PublicBranding>(DEFAULT)
+/**
+ * What renders before the server has answered which shop this is.
+ *
+ * Not `DEFAULT`. Painting the platform's own name and colour as a stand-in
+ * used to mean every fresh visit to an agent's link, or the platform's own
+ * pages if an admin ever customises them away from this hardcoded blue,
+ * showed the wrong identity for as long as the request took, then snapped to
+ * the right one. A neutral grey ramp and a blank name are never wrong, they
+ * just look like a beat of loading, which is what this actually is.
+ */
+const LOADING: PublicBranding = {
+  ...DEFAULT,
+  shopName: '',
+  brandColor: '#64748b',
+  ramp: deriveBrand('#64748b')!.ramp,
+  brandColorDark: '#64748b',
+  rampDark: deriveBrand('#64748b')!.ramp,
+  logoUrl: null,
+}
+
+const BrandingContext = createContext<PublicBranding>(LOADING)
 
 export function useBranding(): PublicBranding {
   return useContext(BrandingContext)
@@ -61,27 +81,29 @@ export function BrandingProvider({
   sellerCode: string | null
   children: ReactNode
 }) {
-  const [branding, setBranding] = useState<PublicBranding>(DEFAULT)
+  const [branding, setBranding] = useState<PublicBranding>(LOADING)
   const { theme } = useTheme()
 
   useEffect(() => {
     let live = true
 
-    // Back to the platform's look straight away, before asking the server whose
-    // shop this is. Without this, leaving an agent's shop kept their colours on
-    // screen for as long as the request took, which on a slow connection is long
-    // enough to read, and looks like the admin pages belong to the agent.
-    setBranding(DEFAULT)
+    // Neutral straight away, before asking the server whose shop this is.
+    // Without this, leaving an agent's shop kept their colours on screen for
+    // as long as the request took, which on a slow connection is long enough
+    // to read, and looked like the admin pages belonged to the agent, or an
+    // agent's fresh link briefly wore the platform's own name and colour.
+    setBranding(LOADING)
 
     api
       .branding(sellerCode)
       .then((result) => {
         if (live) setBranding(result)
       })
-      // A shop that cannot read its branding still has to sell. The default is a
-      // complete, working theme, so failing quietly here is the right call,
-      // an error banner about a colour would be noise on a checkout page.
-      .catch(() => undefined)
+      // A shop that cannot read its branding still has to sell. The platform's
+      // own look is a complete, working theme to fall back on, so failing
+      // quietly here is the right call, an error banner about a colour would
+      // be noise on a checkout page.
+      .catch(() => live && setBranding(DEFAULT))
     return () => {
       live = false
     }
