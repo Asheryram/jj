@@ -98,6 +98,7 @@ export default function NeedsAttention() {
   const [opening, setOpening] = useState<string | null>(null)
   const [acknowledging, setAcknowledging] = useState<NeedsAttentionOrder | null>(null)
   const [ackNote, setAckNote] = useState('')
+  const [sweeping, setSweeping] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -127,6 +128,42 @@ export default function NeedsAttention() {
       })
     } finally {
       setOpening(null)
+    }
+  }
+
+  /**
+   * Both queues a paid order can be stuck in, checked right now instead of
+   * waiting on whichever clock would otherwise get to it: a lost webhook on
+   * an order already `processing` (`ReconcilerService.sweep()`, normally
+   * every ten minutes), and a number in `awaiting_approval` ("Setting up
+   * number") that DataHub may have approved since (`ApprovalsService.recheck()`,
+   * normally only re-checked when the separate Approvals page loads).
+   * Reloads this list afterward, since a settled order should disappear
+   * from it.
+   */
+  const runSweep = async () => {
+    setSweeping(true)
+    try {
+      const { orders, approvals } = await api.runOrderSweep()
+      const parts = [
+        orders.checked === 0
+          ? 'nothing waiting on a reply'
+          : `${orders.checked} checked, ${orders.settled} settled`,
+        approvals.skipped
+          ? 'numbers checked moments ago already'
+          : approvals.approved.length === 0
+            ? 'no numbers newly approved'
+            : `${approvals.approved.length} number${approvals.approved.length === 1 ? '' : 's'} approved, ${approvals.released} order${approvals.released === 1 ? '' : 's'} released`,
+      ]
+      pushToast({ tone: 'success', title: parts[0], detail: parts[1] })
+      await load()
+    } catch (caught) {
+      pushToast({
+        tone: 'error',
+        title: caught instanceof ApiError ? caught.message : 'We could not run the sweep.',
+      })
+    } finally {
+      setSweeping(false)
     }
   }
 
@@ -178,6 +215,11 @@ export default function NeedsAttention() {
       <PageHead
         title="Needs your attention"
         subtitle="Stuck at the provider, or flagged after settling one way and then hearing another, the reconciler will not guess at either."
+        action={
+          <Button size="sm" variant="outline" loading={sweeping} onClick={() => void runSweep()}>
+            Check now
+          </Button>
+        }
       />
 
       {rows !== null && conflicts.length > 0 && (

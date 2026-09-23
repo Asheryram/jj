@@ -1353,6 +1353,18 @@ export const api = {
   /** Orders nobody can resolve automatically, see ReconcilerService.needsAttention. */
   needsAttentionOrders: () => request<NeedsAttentionOrder[]>('/admin/orders/needs-attention'),
 
+  /**
+   * Runs the reconciler's own ten-minute sweep (lost webhooks on orders
+   * already `processing`) and asks DataHub whether any `awaiting_approval`
+   * number has been approved since, both right now instead of waiting for
+   * their own clocks.
+   */
+  runOrderSweep: () =>
+    request<{
+      orders: { checked: number; settled: number }
+      approvals: { checked: number; approved: string[]; released: number; skipped?: boolean }
+    }>('/admin/orders/sweep', { method: 'POST' }),
+
   stuckTransfers: () => request<StuckTransfer[]>('/admin/finance/stuck-transfers'),
 
   trackOrder: (reference: string, phone: string) =>

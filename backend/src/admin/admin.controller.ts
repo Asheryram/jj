@@ -319,6 +319,28 @@ export class AdminController {
     return this.reconciler.needsAttention()
   }
 
+  /**
+   * Every reason a paid order can be sitting still, checked by hand, right
+   * now, instead of waiting on whichever clock would otherwise get to it.
+   *
+   * Two genuinely different queues, both worth asking about from the one
+   * button an admin actually reaches for: `reconciler.sweep()` chases a
+   * lost webhook on an order already in `processing` (already ran every ten
+   * minutes on its own, `sweep()` was public for exactly this, just never
+   * wired to a route), and `approvals.recheck()` asks whether a number held
+   * in `awaiting_approval` ("Setting up number") has been approved at
+   * DataHub since, releasing every order waiting on it the moment it has.
+   * `recheck()` already rate-limits itself to once a minute regardless of
+   * how it's called, so calling it here on top of the Approvals page's own
+   * on-load check is always safe, never a second real request within that
+   * minute.
+   */
+  @Post('orders/sweep')
+  async runSweep() {
+    const [orders, approvals] = await Promise.all([this.reconciler.sweep(), this.approvals.recheck()])
+    return { orders, approvals }
+  }
+
   @Get('users')
   users() {
     return this.admin.users()
