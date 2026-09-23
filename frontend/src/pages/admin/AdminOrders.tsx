@@ -408,22 +408,21 @@ export default function AdminOrders() {
         />
         <StatTile
           label="Your profit"
+          value={freeToSpendNow === null ? '-' : cedis(freeToSpendNow)}
+          hint="What you could actually take out today without touching money a pending order, an undecided refund, or a customer's wallet still needs, the same figure as the Reserve panel's Actually free to spend. This is the real, safe number, the ones beside it can still move before they're final"
+          tone="success"
+        />
+        <StatTile
+          label="Projected profit, once all sales complete"
           value={
             allTime === null || profitAtFloat === null ? '-' : cedis(allTime.profit - profitAtFloat)
           }
-          hint="All-time. Every sale's revenue less every real cost, less whatever of it became float capital instead of staying yours to withdraw (see the tile beside this one), not affected by the filter, dates or search below"
-          tone="success"
+          hint="All-time. Every sale's revenue less every real cost, assuming every order still in flight finishes successfully, less whatever became float capital instead of staying yours (see the tile beside this one). Not final until those orders actually settle, that's why it can read higher than the profit above"
         />
         <StatTile
           label="Profit that became capital"
           value={profitAtFloat === null ? '-' : cedis(profitAtFloat)}
           hint="All-time. Reimbursed to DataHub beyond what it was actually owed. Still earned, added back to the profit above until this happened, but DataHub cannot send it back out, so it no longer counts as yours to take. See the Float panel"
-        />
-        <StatTile
-          label="Free to withdraw now"
-          value={freeToSpendNow === null ? '-' : cedis(freeToSpendNow)}
-          hint="What you could take out today without touching money a pending order, an undecided refund, or a customer's wallet still needs, the same figure as the Reserve panel's Actually free to spend. Not the same as profit above, and usually smaller"
-          tone="brand"
         />
       </div>
 
