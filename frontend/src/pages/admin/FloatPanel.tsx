@@ -337,6 +337,15 @@ function CapitalModal({
   const [source, setSource] = useState<'external' | 'reimbursement'>('external')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  /**
+   * Deliberately overpaying DataHub with his own profit is allowed, unlike
+   * reaching into money owed to someone else, but it should never happen
+   * as a side effect of not reading the warning. Tied to `value` itself
+   * (reset on every edit, see below), not just shown once, so it always
+   * reflects the exact amount currently typed, not a stale confirmation of
+   * a number he's since changed.
+   */
+  const [acknowledgedOverpay, setAcknowledgedOverpay] = useState(false)
 
   const [lastDirection, setLastDirection] = useState(direction)
   if (direction !== lastDirection) {
@@ -345,6 +354,7 @@ function CapitalModal({
     setNote('')
     setSource('external')
     setError('')
+    setAcknowledgedOverpay(false)
   }
 
   if (!direction) return null
@@ -438,9 +448,22 @@ function CapitalModal({
 
         {overpayBy > 0 && (
           <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
-            DataHub is currently owed {cedis(owedToDataHub)} for bundles bought so far, this is{' '}
-            {cedis(overpayBy)} more than that. That extra is your profit entering the float as
-            capital, not DataHub cost, it stops being free to spend at Paystack the moment this logs.
+            <p>
+              DataHub is currently owed {cedis(owedToDataHub)} for bundles bought so far, this is{' '}
+              {cedis(overpayBy)} more than that. That extra is your profit entering the float as
+              capital, not DataHub cost, it stops being free to spend at Paystack the moment this
+              logs.
+            </p>
+            <label className="mt-2.5 flex cursor-pointer items-start gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 shrink-0 rounded border-slate-300 dark:border-slate-600"
+                checked={acknowledgedOverpay}
+                onChange={(event) => setAcknowledgedOverpay(event.target.checked)}
+              />
+              I understand {cedis(overpayBy)} of my profit is moving into DataHub as capital, and
+              want to log it anyway
+            </label>
           </Callout>
         )}
 
@@ -453,6 +476,7 @@ function CapitalModal({
             onChange={(event) => {
               setValue(event.target.value)
               setError('')
+              setAcknowledgedOverpay(false)
             }}
           />
         </Field>
@@ -470,7 +494,7 @@ function CapitalModal({
           <Button
             block
             loading={busy}
-            disabled={touchesOwedMoney > 0}
+            disabled={touchesOwedMoney > 0 || (overpayBy > 0 && !acknowledgedOverpay)}
             onClick={() => void submit()}
           >
             {direction === 'in' ? 'Log top-up' : 'Log withdrawal'}
