@@ -260,20 +260,12 @@ export default function FloatPanel() {
               <p className="text-xs text-slate-600 dark:text-slate-300">
                 Your own capital{' '}
                 <span className="font-semibold text-slate-900 dark:text-slate-50">{cedis(capital.ownCapital)}</span>
-                {capital.reimbursed > 0 && (
-                  <>
-                    , Paystack money moved in{' '}
-                    <span className="font-semibold text-slate-900 dark:text-slate-50">
-                      {cedis(capital.reimbursed)}
-                    </span>
-                  </>
-                )}
                 , taken out <span className="font-semibold text-slate-900 dark:text-slate-50">{cedis(capital.totalOut)}</span>,
                 since {dateTime(capital.since)}.
               </p>
               {capital.overReimbursed > 0 && (
                 <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
-                  Of that, {cedis(capital.overReimbursed)} was paid in beyond what DataHub was
+                  {cedis(capital.overReimbursed)} has been paid in to DataHub beyond what it was
                   actually owed for bundles bought so far. That extra is now float capital, not
                   profit free to withdraw at Paystack.
                 </p>
