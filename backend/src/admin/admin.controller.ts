@@ -450,6 +450,17 @@ export class AdminController {
     return this.float.reclassifyAsReimbursement(id)
   }
 
+  /**
+   * One click: cancels a top-up or reimbursement entirely, no reissue, for
+   * one that was never a real movement at all (a duplicate submission, a
+   * logging mistake), see `FloatMonitorService.reverseCapitalEntry`.
+   */
+  @Patch('supplier/float/capital/:id/reverse')
+  @Roles('superadmin')
+  reverseCapital(@Param('id') id: string) {
+    return this.float.reverseCapitalEntry(id)
+  }
+
   /** Re-read every configured supplier's catalogue. */
   @Post('supplier/sync')
   sync() {

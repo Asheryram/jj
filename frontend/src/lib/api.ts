@@ -378,10 +378,21 @@ export type FloatLevel = 'ok' | 'watch' | 'risk'
 /** One `capital_in` top-up that might have been mislabeled as personal capital. */
 export interface CapitalNeedingReview {
   id: string
+  /** Only a `capital_in` can be reclassified; either kind can be reversed. */
+  kind: 'capital_in' | 'capital_in_reimbursement'
   /** Pesewas. */
   amount: number
   description: string
   occurredAt: string
+  /**
+   * If this top-up was reclassified into a reimbursement, and that
+   * reimbursement hasn't itself been reversed, the resulting entry.
+   * Reversing this (its own `id`), not the parent, is what actually clears
+   * the amount, the parent already contributes nothing the moment it's
+   * reclassified. Null for a plain top-up nobody's touched, or a
+   * reimbursement logged directly with no parent to anchor on.
+   */
+  reimbursedAs: { id: string; amount: number; description: string; occurredAt: string } | null
 }
 
 export interface SupplierFloat {
@@ -1792,6 +1803,10 @@ export const api = {
   /** One click: reclassifies a mislabeled top-up as a Paystack reimbursement instead of personal capital. */
   reclassifyFloatCapital: (id: string) =>
     request<void>(`/admin/supplier/float/capital/${id}/reclassify`, { method: 'PATCH' }),
+
+  /** One click: cancels a top-up or reimbursement entirely, for one that was never a real movement at all. */
+  reverseFloatCapital: (id: string) =>
+    request<void>(`/admin/supplier/float/capital/${id}/reverse`, { method: 'PATCH' }),
 
   /** Refunds sent from someone's own pocket, not yet taken back out, see the Refunds page. */
   manualRefundAdvances: () => request<ManualRefundAdvance[]>('/admin/refunds/manual-advances'),

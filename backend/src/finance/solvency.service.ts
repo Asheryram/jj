@@ -796,16 +796,33 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
 
   /**
    * All-time pesewas James has logged moving from Paystack to DataHub as a
-   * reimbursement, see `expectedBalance`'s own comment for why this has to
-   * count as money having left Paystack, the exact figure
-   * `spentOnBundles` reads to know the same debt has been settled.
+   * reimbursement, less whatever of that has since been reversed entirely
+   * (see `FloatMonitorService.reverseCapitalEntry`, for a duplicate
+   * submission or a plain logging mistake, an entry that was never a real
+   * movement at all, not one that happened but needs relabelling). See
+   * `expectedBalance`'s own comment for why a real reimbursement counts as
+   * money having left Paystack; a reversed one never left in the first
+   * place, so it must not still count here just because the row exists.
+   *
+   * Mirrors `FloatMonitorService.capitalSummary()`'s own exclusion of a
+   * `correction:`-prefixed `capital_out` and whatever original entry it
+   * points at, this is the same rule, applied here because this method
+   * reads `capital_in_reimbursement` independently rather than through
+   * that one.
    */
   private async reimbursedToDataHub(): Promise<number> {
-    const result = await this.prisma.ledgerEntry.aggregate({
-      where: { kind: 'capital_in_reimbursement' },
-      _sum: { amount: true },
+    const rows = await this.prisma.ledgerEntry.findMany({
+      where: { kind: { in: ['capital_in_reimbursement', 'capital_out'] } },
+      select: { id: true, kind: true, amount: true, idempotencyKey: true },
     })
-    return result._sum.amount ?? 0
+    const reversedIds = new Set(
+      rows
+        .filter((r) => r.kind === 'capital_out' && r.idempotencyKey.startsWith('correction:'))
+        .map((r) => r.idempotencyKey.split(':')[1]),
+    )
+    return rows
+      .filter((r) => r.kind === 'capital_in_reimbursement' && !reversedIds.has(r.id))
+      .reduce((sum, r) => sum + r.amount, 0)
   }
 
   /**
@@ -821,14 +838,14 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
 
     const [bundlesBought, reimbursedToDataHub] = await Promise.all([
       this.prisma.ledgerEntry.aggregate({ where: { kind: 'supplier_cost' }, _sum: { amount: true } }),
-      this.prisma.ledgerEntry.aggregate({ where: { kind: 'capital_in_reimbursement' }, _sum: { amount: true } }),
+      this.reimbursedToDataHub(),
     ])
 
     // supplier_cost entries are stored negative (money leaving the float).
     // Floored at zero: logging more reimbursement than has ever been spent
     // should not turn "already spent on bundles" into a negative number that
     // would add back onto `freeToSpend` instead of merely clearing it.
-    const value = Math.max(0, -(bundlesBought._sum.amount ?? 0) - (reimbursedToDataHub._sum.amount ?? 0))
+    const value = Math.max(0, -(bundlesBought._sum.amount ?? 0) - reimbursedToDataHub)
     this.spentOnBundlesCache = { value, computedAt: Date.now() }
     return value
   }

@@ -8,12 +8,36 @@ import { NotFoundError, ValidationError } from '../common/domain-errors'
 import { claimTransition } from '../common/alert-flag'
 import { escape, wrap } from '../mail/templates'
 
-/** One `capital_in` top-up that might have been mislabeled as personal capital. */
+/**
+ * One `capital_in` or `capital_in_reimbursement` entry that might need
+ * correcting, either mislabeled (only a `capital_in` can be reclassified)
+ * or never a real movement at all (either kind can be reversed).
+ *
+ * Anchored on the original entry, not the reimbursement it may have become:
+ * an original always keeps its own real date and description, a
+ * reimbursement produced by reclassifying one does not (`logCapital` always
+ * stamps the correction's own time), so two reimbursements from different
+ * days can end up reading identically. Searching by the original, with the
+ * reimbursement nested under it, means what's actually distinct is always
+ * what's shown, nothing has to be guessed or expanded to find it.
+ */
 export interface CapitalNeedingReview {
   id: string
+  kind: 'capital_in' | 'capital_in_reimbursement'
   amount: number
   description: string
   occurredAt: string
+  /**
+   * If this top-up was reclassified into a reimbursement, and that
+   * reimbursement has not itself been reversed, the resulting entry.
+   * Reversing *this* (via its own `id`), not the parent, is what actually
+   * clears the amount, the parent already contributes nothing to any total
+   * the moment it was reclassified, regardless of what happens to this
+   * child afterward. Null for a plain top-up nobody has touched yet, or a
+   * reimbursement logged directly (never reclassified from anything), both
+   * of which stand on their own with no downline.
+   */
+  reimbursedAs: { id: string; amount: number; description: string; occurredAt: string } | null
 }
 
 /** One deliberate movement of James's own money into or out of the float. */
@@ -486,27 +510,62 @@ export class FloatMonitorService {
    * miss.
    */
   async capitalInNeedingReview(): Promise<CapitalNeedingReview[]> {
-    const [candidates, corrections] = await Promise.all([
+    const [allRows, corrections] = await Promise.all([
       this.prisma.ledgerEntry.findMany({
-        where: { kind: 'capital_in', orderRef: null, withdrawalId: null },
+        where: { kind: { in: ['capital_in', 'capital_in_reimbursement'] }, orderRef: null, withdrawalId: null },
         orderBy: { occurredAt: 'asc' },
       }),
       this.prisma.ledgerEntry.findMany({
-        where: { idempotencyKey: { startsWith: 'correction:' } },
+        where: { kind: 'capital_out', idempotencyKey: { startsWith: 'correction:' } },
         select: { idempotencyKey: true },
       }),
     ])
-    // `correction:<originalId>:capital_out`, see `reclassifyAsReimbursement`.
-    const alreadyCorrected = new Set(corrections.map((c) => c.idempotencyKey.split(':')[1]))
 
-    return candidates
-      .filter((row) => !alreadyCorrected.has(row.id))
-      .map((row) => ({
-        id: row.id,
-        amount: row.amount,
-        description: row.description,
-        occurredAt: row.occurredAt.toISOString(),
-      }))
+    // `correction:<targetId>:capital_out`, whatever that target was, an
+    // original reclassified away or reversed outright, or a reimbursement
+    // reversed on its own. Either way, the target no longer counts.
+    const correctedIds = new Set(corrections.map((c) => c.idempotencyKey.split(':')[1]))
+
+    // A reimbursement produced by `reclassifyAsReimbursement` is keyed
+    // `correction:<originalId>:capital_in_reimbursement`, the original id
+    // is right there, no separate lookup needed to find which original
+    // produced which reimbursement.
+    const reimbursementByOriginalId = new Map(
+      allRows
+        .filter((r) => r.kind === 'capital_in_reimbursement' && r.idempotencyKey.startsWith('correction:'))
+        .map((r) => [r.idempotencyKey.split(':')[1], r]),
+    )
+
+    const toReview = (row: (typeof allRows)[number]) => ({
+      id: row.id,
+      kind: row.kind as 'capital_in' | 'capital_in_reimbursement',
+      amount: row.amount,
+      description: row.description,
+      occurredAt: row.occurredAt.toISOString(),
+    })
+
+    const results: CapitalNeedingReview[] = []
+    for (const row of allRows) {
+      if (row.kind === 'capital_in') {
+        const child = reimbursementByOriginalId.get(row.id)
+        if (!correctedIds.has(row.id)) {
+          // Never touched: still a plain, active top-up.
+          results.push({ ...toReview(row), reimbursedAs: null })
+        } else if (child && !correctedIds.has(child.id)) {
+          // Reclassified, and that reimbursement is still active, this is
+          // the only case with an actual downline to show.
+          results.push({ ...toReview(row), reimbursedAs: toReview(child) })
+        }
+        // Otherwise fully resolved already (reversed outright, or
+        // reclassified and *that* has since also been reversed), nothing
+        // left to act on, omitted entirely.
+      } else if (!row.idempotencyKey.startsWith('correction:') && !correctedIds.has(row.id)) {
+        // A reimbursement logged directly, never reclassified from
+        // anything, so it has no parent to anchor on and stands on its own.
+        results.push({ ...toReview(row), reimbursedAs: null })
+      }
+    }
+    return results
   }
 
   /**
@@ -535,19 +594,71 @@ export class FloatMonitorService {
     const alreadyDone = await this.prisma.ledgerEntry.findUnique({ where: { idempotencyKey: cancelKey } })
     if (alreadyDone) throw new ValidationError('This one has already been reclassified.')
 
+    /**
+     * `logCapital` always stamps `occurredAt: new Date()`, the correction's
+     * own time, not the original entry's, so the reissued row alone cannot
+     * tell two same-amount top-ups apart any more, both would read
+     * "Reclassified: GHS 500.00..." dated today. Embedding the original's
+     * own timestamp in the note (precise to the second, not just the date,
+     * two duplicate submissions minutes apart are otherwise still
+     * indistinguishable) keeps that one, since this page's own search
+     * matches free text, exactly what a later correction (or reversal, see
+     * `reverseCapitalEntry`) needs to find the right one among several
+     * identical amounts.
+     */
+    const originalWhen = original.occurredAt.toISOString().replace('T', ' ').slice(0, 19)
     const ghs = (original.amount / 100).toFixed(2)
     await this.logCapital({
       direction: 'out',
       amount: original.amount,
-      note: `Correcting a misclassified top-up (GHS ${ghs}): it was actually Paystack money, not personal capital`,
+      note: `Correcting a misclassified top-up from ${originalWhen} (GHS ${ghs}): it was actually Paystack money, not personal capital`,
       idempotencyKey: cancelKey,
     })
     await this.logCapital({
       direction: 'in',
       amount: original.amount,
-      note: `Reclassified: GHS ${ghs} moved from Paystack to pay DataHub back`,
+      note: `Reclassified: GHS ${ghs} originally logged ${originalWhen}, moved from Paystack to pay DataHub back`,
       idempotencyKey: LedgerService.key('correction', entryId, 'capital_in_reimbursement'),
       source: 'reimbursement',
+    })
+  }
+
+  /**
+   * Cancels a `capital_in` or `capital_in_reimbursement` entry entirely, no
+   * reissue.
+   *
+   * Different from `reclassifyAsReimbursement`: that one is for an entry
+   * that genuinely happened but was labelled wrong. This is for an entry
+   * that never should have existed at all, a duplicate submission, a typo
+   * caught immediately, a top-up logged for money that never actually left
+   * Paystack or DataHub. Written as a plain `capital_out` correction, the
+   * same exclusion `capitalSummary()` already applies to a
+   * `reclassifyAsReimbursement` cancel covers this one too, since it uses
+   * the identical `correction:` idempotency prefix, and
+   * `SolvencyService.reimbursedToDataHub()` now excludes a reversed
+   * `capital_in_reimbursement` the same way.
+   */
+  async reverseCapitalEntry(entryId: string): Promise<void> {
+    const original = await this.prisma.ledgerEntry.findUnique({ where: { id: entryId } })
+    if (!original) throw new NotFoundError('No such entry.')
+    if (
+      (original.kind !== 'capital_in' && original.kind !== 'capital_in_reimbursement') ||
+      original.orderRef ||
+      original.withdrawalId
+    ) {
+      throw new ValidationError('Only a plain top-up or reimbursement can be reversed this way.')
+    }
+
+    const cancelKey = LedgerService.key('correction', entryId, 'capital_out')
+    const alreadyDone = await this.prisma.ledgerEntry.findUnique({ where: { idempotencyKey: cancelKey } })
+    if (alreadyDone) throw new ValidationError('This one has already been reversed.')
+
+    const ghs = (original.amount / 100).toFixed(2)
+    await this.logCapital({
+      direction: 'out',
+      amount: original.amount,
+      note: `Reversing a mistaken entry (GHS ${ghs}): never a real movement, a duplicate or logging error`,
+      idempotencyKey: cancelKey,
     })
   }
 

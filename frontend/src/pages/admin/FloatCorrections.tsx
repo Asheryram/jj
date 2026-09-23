@@ -7,7 +7,16 @@ import { AlertIcon, SearchIcon } from '../../components/icons'
 
 /**
  * Corrects a top-up James logged as plain personal capital when it was
- * actually Paystack money paying DataHub back.
+ * actually Paystack money paying DataHub back, or reverses one that was
+ * never a real movement at all.
+ *
+ * Anchored on the original top-up, not on whatever it may have become: an
+ * original always keeps its own real date, a reimbursement produced by
+ * reclassifying one does not (it's stamped at correction time), so two
+ * reimbursements from different days can end up reading identically. The
+ * original never has that problem, so it's what's searched and shown, with
+ * the reimbursement (if any) nested under it, exactly the thing that
+ * actually needs reversing to clear the amount.
  *
  * Deliberately not a list with a button next to every row, sitting on the
  * Float panel where it's easy to click by accident. Nothing here shows
@@ -39,12 +48,17 @@ export default function FloatCorrections() {
   }, [])
 
   const trimmed = query.trim().toLowerCase()
+  /** Matches on the row itself, or on its reimbursement child, if any. */
   const matches =
     trimmed.length === 0
       ? []
       : (rows ?? []).filter((row) => {
           if (row.description.toLowerCase().includes(trimmed)) return true
           if (dateTime(row.occurredAt).toLowerCase().includes(trimmed)) return true
+          if (row.reimbursedAs) {
+            if (row.reimbursedAs.description.toLowerCase().includes(trimmed)) return true
+            if (dateTime(row.reimbursedAs.occurredAt).toLowerCase().includes(trimmed)) return true
+          }
           const ghs = (row.amount / 100).toFixed(2)
           return ghs.includes(trimmed) || ghs.replace('.', '').includes(trimmed)
         })
@@ -65,11 +79,38 @@ export default function FloatCorrections() {
     }
   }
 
+  /**
+   * For an entry that was never a real movement at all, a duplicate
+   * submission, a logging mistake, not one that happened but was labelled
+   * wrong. Cancels it entirely, no reissue, unlike `reclassify` above.
+   *
+   * `targetId` lets the parent's own button reverse its downline in one
+   * click: if `row` has been reclassified, reversing the parent's own id
+   * would do nothing (it already contributes nothing to any total), so
+   * "reverse capital" passes the child's id instead when one exists. The
+   * child's own button always passes its own id.
+   */
+  const reverse = async (row: CapitalNeedingReview, targetId: string, amount: number) => {
+    setBusyId(targetId)
+    try {
+      await api.reverseFloatCapital(targetId)
+      pushToast({ tone: 'success', title: `${cedis(amount)} reversed, never a real movement` })
+      setRows((current) => (current ?? []).filter((r) => r.id !== row.id))
+    } catch (caught) {
+      pushToast({
+        tone: 'error',
+        title: caught instanceof ApiError ? caught.message : 'We could not reverse that entry.',
+      })
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <div>
       <PageHead
         title="Float corrections"
-        subtitle="Fix a top-up that was logged as personal capital but was actually Paystack money paying DataHub back."
+        subtitle="Fix a top-up that was logged as personal capital but was actually Paystack money paying DataHub back, or reverse one that was never a real movement at all."
       />
 
       <Card className="mt-3">
@@ -105,24 +146,63 @@ export default function FloatCorrections() {
           ) : (
             <div className="space-y-2">
               {matches.map((row) => (
-                <div
-                  key={row.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3"
-                >
-                  <div>
-                    <p className="font-semibold text-slate-900 dark:text-slate-50">{cedis(row.amount)}</p>
-                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                      {row.description} · {dateTime(row.occurredAt)}
-                    </p>
+                <div key={row.id} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-slate-900 dark:text-slate-50">{cedis(row.amount)}</p>
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                        {row.description} · {dateTime(row.occurredAt)}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {row.kind === 'capital_in' && !row.reimbursedAs && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          loading={busyId === row.id}
+                          onClick={() => void reclassify(row)}
+                        >
+                          Mark as Paystack reimbursement
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        loading={busyId === (row.reimbursedAs?.id ?? row.id)}
+                        onClick={() =>
+                          void reverse(
+                            row,
+                            row.reimbursedAs?.id ?? row.id,
+                            row.reimbursedAs?.amount ?? row.amount,
+                          )
+                        }
+                      >
+                        {row.reimbursedAs ? 'Reverse capital (and its reimbursement)' : "Wasn't real, reverse it"}
+                      </Button>
+                    </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    loading={busyId === row.id}
-                    onClick={() => void reclassify(row)}
-                  >
-                    Mark as Paystack reimbursement
-                  </Button>
+
+                  {row.reimbursedAs && (
+                    <div className="mt-2.5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-2.5 pl-4 dark:border-slate-800">
+                      <div>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">└─ became a reimbursement</p>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">
+                          {cedis(row.reimbursedAs.amount)}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                          {row.reimbursedAs.description} · {dateTime(row.reimbursedAs.occurredAt)}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        loading={busyId === row.reimbursedAs.id}
+                        onClick={() => void reverse(row, row.reimbursedAs!.id, row.reimbursedAs!.amount)}
+                      >
+                        Reverse just the reimbursement
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
