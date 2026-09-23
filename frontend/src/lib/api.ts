@@ -1664,6 +1664,9 @@ export const api = {
   financeStatement: (days: number | 'all' = 30) =>
     request<FinanceStatement>(`/admin/finance/statement?days=${days}`),
 
+  /** All-time profit, adjusted for every order still open, see LedgerService.projectedProfit. */
+  projectedProfit: () => request<{ projectedProfit: number }>('/admin/finance/projected-profit'),
+
   /**
    * Whether the catalogue's believed cost still matches what the supplier
    * actually charges, per product, going only by each product's most recent

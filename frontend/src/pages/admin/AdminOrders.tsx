@@ -176,6 +176,27 @@ export default function AdminOrders() {
   }, [])
 
   /**
+   * `allTime.profit` still counts every open order's full revenue less its
+   * Paystack fee, no supplier cost or agent margin subtracted yet, those
+   * only book at settlement (`FulfilmentService`). This is the corrected
+   * figure, `LedgerService.projectedProfit`, each open order's own frozen
+   * split tells us what it will actually cost once it settles, so this is
+   * what profit will genuinely be if everything still open finishes
+   * successfully, not just today's uncorrected running total.
+   */
+  const [projectedProfit, setProjectedProfit] = useState<number | null>(null)
+  useEffect(() => {
+    let live = true
+    api
+      .projectedProfit()
+      .then((result) => live && setProjectedProfit(result.projectedProfit))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+
+  /**
    * All-time totals for the top row, from the ledger, not summed from
    * `orders` below for the same reason `freeToSpendNow` isn't: that list is
    * both capped and, worse, whatever the filter and search box currently
@@ -415,9 +436,11 @@ export default function AdminOrders() {
         <StatTile
           label="Projected profit, once all sales complete"
           value={
-            allTime === null || profitAtFloat === null ? '-' : cedis(allTime.profit - profitAtFloat)
+            projectedProfit === null || profitAtFloat === null
+              ? '-'
+              : cedis(projectedProfit - profitAtFloat)
           }
-          hint="All-time. Every sale's revenue less every real cost, assuming every order still in flight finishes successfully, less whatever became float capital instead of staying yours (see the tile beside this one). Not final until those orders actually settle, that's why it can read higher than the profit above"
+          hint="All-time. Every sale's revenue less every real cost, including the supplier cost and agent margin still owed on orders currently in flight, less whatever became float capital instead of staying yours (see the tile beside this one). Assumes every open order finishes successfully; a failure instead means a refund, not this margin"
         />
         <StatTile
           label="Profit that became capital"

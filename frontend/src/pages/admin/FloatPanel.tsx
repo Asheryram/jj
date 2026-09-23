@@ -355,15 +355,19 @@ function CapitalModal({
   /**
    * Reimbursing moves money straight out of Paystack, the same balance
    * agent earnings, customer wallets and pending refunds are sitting in
-   * too. Anything above `freeToSpend` is not the business's spare money any
-   * more, it is somebody else's, still counted as owed the instant this
-   * logs. Checked ahead of `overpayBy` below and shown instead of it when
-   * both would fire, drawing on money owed to someone else is the more
-   * serious of the two problems.
+   * too. Up to what's owed to DataHub is always fine (a real, necessary
+   * cost), and beyond that, up to whatever's actually free, is still his to
+   * choose (it just becomes capital early, see `overpayBy`). Only past
+   * *both* combined is it somebody else's money, matching the backend's own
+   * hard limit in `FloatMonitorService.logCapital`, not a separate,
+   * stricter line drawn here. Checked ahead of `overpayBy` below and shown
+   * instead of it when both would fire, drawing on money owed to someone
+   * else is the more serious of the two problems.
    */
+  const availableToReimburse = owedToDataHub + Math.max(freeToSpend ?? 0, 0)
   const touchesOwedMoney =
-    isReimbursement && freeToSpend !== null && enteredAmount! > Math.max(freeToSpend, 0)
-      ? enteredAmount! - Math.max(freeToSpend, 0)
+    isReimbursement && freeToSpend !== null && enteredAmount! > availableToReimburse
+      ? enteredAmount! - availableToReimburse
       : 0
 
   const overpayBy =
@@ -425,17 +429,18 @@ function CapitalModal({
 
         {touchesOwedMoney > 0 && (
           <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
-            Only {cedis(Math.max(freeToSpend ?? 0, 0))} is actually free to move out of Paystack
-            right now. This would move {cedis(touchesOwedMoney)} that's still owed to agents,
-            customers, or a pending order, not the business's spare money.
+            Only {cedis(availableToReimburse)} can be reimbursed right now, what's owed to DataHub
+            plus what's actually free to spend. This amount reaches {cedis(touchesOwedMoney)} into
+            money still owed to agents, customers, or a pending order, not the business's spare
+            money, so this can't be logged as it stands.
           </Callout>
         )}
 
         {overpayBy > 0 && (
           <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
             DataHub is currently owed {cedis(owedToDataHub)} for bundles bought so far, this is{' '}
-            {cedis(overpayBy)} more than that. The extra becomes float capital, not profit free to
-            spend at Paystack.
+            {cedis(overpayBy)} more than that. That extra is your profit entering the float as
+            capital, not DataHub cost, it stops being free to spend at Paystack the moment this logs.
           </Callout>
         )}
 
@@ -462,7 +467,12 @@ function CapitalModal({
         </Field>
 
         <div className="flex gap-2">
-          <Button block loading={busy} onClick={() => void submit()}>
+          <Button
+            block
+            loading={busy}
+            disabled={touchesOwedMoney > 0}
+            onClick={() => void submit()}
+          >
             {direction === 'in' ? 'Log top-up' : 'Log withdrawal'}
           </Button>
           <Button block variant="outline" disabled={busy} onClick={onClose}>

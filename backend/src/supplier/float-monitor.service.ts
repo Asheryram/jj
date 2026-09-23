@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
 import { MailerService } from '../mail/mailer.service'
 import { LedgerService } from '../finance/ledger.service'
+import { SolvencyService } from '../finance/solvency.service'
 import { NotFoundError, ValidationError } from '../common/domain-errors'
 import { claimTransition } from '../common/alert-flag'
 import { escape, wrap } from '../mail/templates'
@@ -166,6 +167,7 @@ export class FloatMonitorService {
     private readonly settings: SettingsService,
     private readonly mailer: MailerService,
     private readonly ledger: LedgerService,
+    private readonly solvency: SolvencyService,
   ) {}
 
   /**
@@ -289,6 +291,31 @@ export class FloatMonitorService {
   }): Promise<void> {
     if (!Number.isInteger(input.amount) || input.amount <= 0) {
       throw new ValidationError('Enter an amount greater than zero.')
+    }
+
+    /**
+     * A reimbursement may overpay what DataHub is owed (that's just his own
+     * profit becoming float capital early, his call to make, see the
+     * frontend's own warning for it), but it may never reach past what's
+     * actually free, real money owed to agents, customers, or a pending
+     * order. That line is not a judgement call, it's simply not his to
+     * move, so unlike the overpay case, this is a hard stop, not a warning
+     * that can be clicked through.
+     */
+    if (input.direction === 'in' && input.source === 'reimbursement') {
+      const [{ owedToDataHub }, { freeToSpend }] = await Promise.all([
+        this.capitalSummary(),
+        this.solvency.position(),
+      ])
+      const availableToMove = owedToDataHub + Math.max(freeToSpend, 0)
+      if (input.amount > availableToMove) {
+        const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
+        throw new ValidationError(
+          `That's more than what's owed to DataHub (${ghs(owedToDataHub)}) plus what's actually ` +
+            `free to spend (${ghs(Math.max(freeToSpend, 0))}). The rest is owed to agents, ` +
+            `customers, or a pending order, not yours to move.`,
+        )
+      }
     }
 
     /**

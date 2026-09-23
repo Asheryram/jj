@@ -536,6 +536,12 @@ export class AdminController {
     return this.ledger.statement(since)
   }
 
+  /** All-time profit, adjusted for every order still open, see `LedgerService.projectedProfit`. */
+  @Get('finance/projected-profit')
+  async projectedProfit() {
+    return { projectedProfit: await this.ledger.projectedProfit() }
+  }
+
   /**
    * Per product, whether the catalogue's believed cost still matches what
    * the supplier charged on that product's most recent sale, see

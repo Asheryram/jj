@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import type { LedgerKind, Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
+import type { OrderSplit } from '../domain/pricing'
 
 /** One money movement, described by the event that caused it. */
 export interface LedgerDraft {
@@ -162,6 +163,41 @@ export class LedgerService {
       marginRate: revenue > 0 ? profit / revenue : null,
       entryCounts: Object.fromEntries(countOf),
     }
+  }
+
+  /**
+   * `statement()`'s all-time profit, adjusted forward for every order still
+   * open.
+   *
+   * A sale's revenue and Paystack fee book the moment payment confirms; its
+   * real supplier cost and agent margin only book once it actually settles
+   * (see `FulfilmentService`). Until then, `statement().profit` carries that
+   * sale's full revenue-less-fee as if it were pure margin, no cost or
+   * commission subtracted yet, overstated by exactly what's still unbooked.
+   * This corrects for that using each open order's own frozen `split` (the
+   * catalogue's estimate at sale time, the best guess available before the
+   * supplier reports back) to subtract what it will actually cost once it
+   * settles, so this genuinely reflects "if everything open finishes
+   * successfully," not just today's uncorrected running total.
+   */
+  async projectedProfit(): Promise<number> {
+    const [{ profit }, openOrders] = await Promise.all([
+      this.statement(new Date(0)),
+      this.prisma.order.findMany({
+        where: { status: { in: ['awaiting_approval', 'processing'] } },
+        select: { split: true },
+      }),
+    ])
+
+    const pendingCost = openOrders.reduce((sum, order) => {
+      const split = order.split as unknown as OrderSplit
+      const agentMargin = split.shares
+        .filter((share) => share.role === 'agent')
+        .reduce((total, share) => total + share.margin, 0)
+      return sum + split.supplierCost + agentMargin
+    }, 0)
+
+    return profit - pendingCost
   }
 
   /** The statement lines themselves, newest first, for an admin to read. */
