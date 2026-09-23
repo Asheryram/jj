@@ -214,6 +214,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
           create: { id: 1, lastFinalizedDate: dateInt },
           update: { lastFinalizedDate: dateInt },
         })
+        await this.pruneRawHistory(dateInt)
       }
     }
 
@@ -241,6 +242,50 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       update: { lastFinalizedDate: dayBefore },
     })
     return this.runNow()
+  }
+
+  /**
+   * One-time cleanup for history that finalized before this pruning existed:
+   * everything `runNow()`'s own per-day prune would already have removed had
+   * it been running from the start. Safe to call any time, including with
+   * nothing left to prune, an empty `deleteMany` is a cheap no-op.
+   */
+  async pruneHistory(): Promise<{ prunedThrough: number | null }> {
+    const checkpoint = await this.warehouse.etlCheckpoint.findUnique({ where: { id: 1 } })
+    if (!checkpoint?.lastFinalizedDate) return { prunedThrough: null }
+    await this.pruneRawHistory(checkpoint.lastFinalizedDate)
+    return { prunedThrough: checkpoint.lastFinalizedDate }
+  }
+
+  /**
+   * Deletes every Bronze/Silver row at or before `uptoDateInt`, except
+   * `BronzeOrder` and `SilverOrderFact`, which are kept forever on purpose:
+   * `conformSilverRefunds`/`conformSilverLedgerFacts` look `BronzeOrder` up
+   * by id/reference regardless of how much later a refund or a delayed
+   * ledger entry lands, and `computeAgentHealth`/`computeCustomerBehavior`
+   * both read `SilverOrderFact`'s full history (`dateKey: { lte }`), not just
+   * the day being computed, to answer "has this agent ever sold" and "has
+   * this buyer ordered before." Everything else here is read only scoped to
+   * its own day everywhere in this file, so once that day's Gold rollup
+   * exists (this only ever runs after `computeDay` for `uptoDateInt` has
+   * already finished), the raw row has nothing left to serve.
+   */
+  private async pruneRawHistory(uptoDateInt: number): Promise<void> {
+    const where = { dateKey: { lte: uptoDateInt } }
+    const results = await Promise.all([
+      this.warehouse.bronzeSupplierDispatch.deleteMany({ where }),
+      this.warehouse.bronzeRefund.deleteMany({ where }),
+      this.warehouse.bronzeWithdrawal.deleteMany({ where }),
+      this.warehouse.bronzeFeedback.deleteMany({ where }),
+      this.warehouse.bronzeLedgerEntry.deleteMany({ where }),
+      this.warehouse.silverDispatchFact.deleteMany({ where }),
+      this.warehouse.silverRefundFact.deleteMany({ where }),
+      this.warehouse.silverWithdrawalFact.deleteMany({ where }),
+      this.warehouse.silverFeedbackFact.deleteMany({ where }),
+      this.warehouse.silverLedgerFact.deleteMany({ where }),
+    ])
+    const total = results.reduce((sum, r) => sum + r.count, 0)
+    if (total > 0) this.log.log(`ETL: pruned ${total} finalized Bronze/Silver row(s) through ${uptoDateInt}`)
   }
 
   private async computeDay(dateInt: number): Promise<void> {

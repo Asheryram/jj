@@ -59,6 +59,17 @@ export class AnalyticsController {
     return this.etl.recomputeFrom(dateInt)
   }
 
+  /**
+   * One-time cleanup for Bronze/Silver rows that finalized before automatic
+   * pruning existed, see `EtlService.pruneRawHistory`'s own comment for what
+   * is and is not safe to remove. Safe to call more than once, an already-
+   * pruned range simply deletes nothing further.
+   */
+  @Post('prune-history')
+  pruneHistory() {
+    return this.etl.pruneHistory()
+  }
+
   @Get('daily-summary')
   dailySummary(@Query('from') from?: string, @Query('to') to?: string) {
     return this.warehouse.dailySummary.findMany({
