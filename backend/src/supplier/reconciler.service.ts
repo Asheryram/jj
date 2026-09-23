@@ -123,13 +123,18 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * and the order closes, or they say `success`, a payment whose webhook went
    * missing, and it is fulfilled, late but correctly.
    *
-   * Deliberately generous with the delay. Mobile Money in Ghana involves the
-   * customer leaving the browser to approve a prompt on their handset, and
-   * closing an order out from under someone still typing their PIN would be
-   * worse than leaving it open a while.
+   * Short, not generous, and deliberately so: this only ever acts on Paystack's
+   * own authoritative answer (`confirm()` leaves the order untouched on
+   * `pending`), it never invents a status from elapsed time alone. Asking too
+   * soon costs nothing but a wasted round trip; Mobile Money in Ghana still
+   * involves leaving the browser to approve a prompt on the handset, so this
+   * stays well clear of that, but there is no reason to wait as long as this
+   * used to (15 minutes, plus however much of the next sweep interval was
+   * left, made a fast, real payment look badly stuck for up to 25 minutes for
+   * no benefit).
    */
   private async resolveAbandonedPayments(): Promise<number> {
-    const cutoff = new Date(Date.now() - 15 * 60_000)
+    const cutoff = new Date(Date.now() - 5 * 60_000)
     const stale = await this.prisma.order.findMany({
       where: { status: 'awaiting_payment', createdAt: { lt: cutoff } },
       select: { reference: true },
