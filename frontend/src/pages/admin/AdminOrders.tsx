@@ -121,32 +121,54 @@ export default function AdminOrders() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   /**
-   * "Your profit" is deliberately the exact same number as the Reserve
-   * panel's "Actually free to spend", not a separately computed figure that
-   * happens to agree with it.
-   *
-   * James's own definition: profit is only what he could take out today
-   * without touching money any pending order might still need, a refund
-   * that has not been decided yet, a bundle still processing, a customer's
-   * wallet balance. The ledger's all-time revenue-less-costs figure does not
-   * satisfy that: it counts a sale's revenue the moment payment is
-   * confirmed, before knowing whether the order will actually complete. So
-   * this reuses `freeToSpend` itself rather than reconciling two figures
-   * that answer different questions, see `SolvencyService.position`.
+   * What's actually safe to withdraw right now, the exact same number as
+   * the Reserve panel's "Actually free to spend", not a separately computed
+   * figure that happens to agree with it. This is a liquidity figure, not
+   * profit: it is only what could come out today without touching money a
+   * pending order might still need, a refund not yet decided, a bundle
+   * still processing, a customer's wallet balance, or money already moved
+   * across to fund the DataHub float. `allTime.profit` below (revenue less
+   * every real cost) is the honest answer to "how much did the business
+   * make"; this is the honest answer to "how much of that could I take out
+   * this second," and the two are expected to disagree, sometimes by a lot.
    *
    * Deliberately not derived from `visible`/`done` below: that per-order sum
    * only ever looks at completed orders, so it silently drops real, settled
    * costs, the Paystack fee lost on an order that got refunded is the one
    * that actually surfaced this. Fetched once, unaffected by the
-   * filter/search above, a profit figure that changed depending on what you
-   * searched for would not be "your profit" any more.
+   * filter/search above, a figure that changed depending on what you
+   * searched for would not be "free to spend right now" any more.
    */
-  const [takeableProfit, setTakeableProfit] = useState<number | null>(null)
+  const [freeToSpendNow, setFreeToSpendNow] = useState<number | null>(null)
   useEffect(() => {
     let live = true
     api
       .reservePosition()
-      .then((position) => live && setTakeableProfit(position.freeToSpend))
+      .then((position) => live && setFreeToSpendNow(position.freeToSpend))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+
+  /**
+   * All-time pesewas reimbursed to DataHub beyond what bundles have
+   * actually cost it, see `FloatMonitorService.capitalSummary`'s own
+   * `overReimbursed`. Deliberately not the whole reimbursed total: most of
+   * that is honest cost-settlement, money that was always going to leave
+   * Paystack for a bundle DataHub already charged for, and calling that
+   * "profit turned into capital" would overstate the actual gap. Only this
+   * excess was never owed to anything, still inside `allTime.profit` since
+   * it was earned, just not free to withdraw at Paystack any more, it's
+   * sitting at DataHub as capital instead. See the Float panel for the
+   * full breakdown this is drawn from.
+   */
+  const [profitAtFloat, setProfitAtFloat] = useState<number | null>(null)
+  useEffect(() => {
+    let live = true
+    api
+      .supplierFloat()
+      .then((float) => live && setProfitAtFloat(float.capital.overReimbursed))
       .catch(() => undefined)
     return () => {
       live = false
@@ -155,7 +177,7 @@ export default function AdminOrders() {
 
   /**
    * All-time totals for the top row, from the ledger, not summed from
-   * `orders` below for the same reason `takeableProfit` isn't: that list is
+   * `orders` below for the same reason `freeToSpendNow` isn't: that list is
    * both capped and, worse, whatever the filter and search box currently
    * show. A customer's payment is real the moment Paystack confirms it,
    * whatever later happens to the order, "Customers paid" summing only
@@ -386,9 +408,22 @@ export default function AdminOrders() {
         />
         <StatTile
           label="Your profit"
-          value={takeableProfit === null ? '-' : cedis(takeableProfit)}
-          hint="What you could take out today without touching money a pending order might still need, the same figure as the Reserve panel's Actually free to spend, not affected by the filter, dates or search below"
+          value={
+            allTime === null || profitAtFloat === null ? '-' : cedis(allTime.profit - profitAtFloat)
+          }
+          hint="All-time. Every sale's revenue less every real cost, less whatever of it became float capital instead of staying yours to withdraw (see the tile beside this one), not affected by the filter, dates or search below"
           tone="success"
+        />
+        <StatTile
+          label="Profit that became capital"
+          value={profitAtFloat === null ? '-' : cedis(profitAtFloat)}
+          hint="All-time. Reimbursed to DataHub beyond what it was actually owed. Still earned, added back to the profit above until this happened, but DataHub cannot send it back out, so it no longer counts as yours to take. See the Float panel"
+        />
+        <StatTile
+          label="Free to withdraw now"
+          value={freeToSpendNow === null ? '-' : cedis(freeToSpendNow)}
+          hint="What you could take out today without touching money a pending order, an undecided refund, or a customer's wallet still needs, the same figure as the Reserve panel's Actually free to spend. Not the same as profit above, and usually smaller"
+          tone="brand"
         />
       </div>
 

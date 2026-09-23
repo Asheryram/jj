@@ -42,17 +42,59 @@ export default function FloatPanel() {
   const [error, setError] = useState('')
   const [logging, setLogging] = useState<'in' | 'out' | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  /**
+   * Just a count here, never the entries themselves or a button to act on
+   * them, that lives on its own page (`FloatCorrections`), off the main nav
+   * and reachable only by a deliberate click, precisely so a top-up that was
+   * actually Paystack money doesn't have a one-click action sitting in the
+   * middle of a screen someone visits for other reasons.
+   */
+  const [needsReviewCount, setNeedsReviewCount] = useState<number | null>(null)
+
+  useEffect(() => {
+    let live = true
+    api
+      .floatCapitalNeedingReview()
+      .then((rows) => live && setNeedsReviewCount(rows.length))
+      .catch(() => live && setNeedsReviewCount(null))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  /**
+   * What's actually free to move out of Paystack right now, fetched
+   * alongside the float itself so `CapitalModal` can warn before a
+   * reimbursement is logged for more than that, which would draw on money
+   * still owed to agents or customers, not the business's own money to
+   * move at all. Refreshed together with `float` below, not just once, a
+   * stale reading here would wave through exactly the reimbursement this
+   * exists to catch.
+   */
+  const [freeToSpend, setFreeToSpend] = useState<number | null>(null)
+  const refreshFreeToSpend = () =>
+    api
+      .reservePosition()
+      .then((position) => setFreeToSpend(position.freeToSpend))
+      .catch(() => undefined)
+
+  useEffect(() => {
+    void refreshFreeToSpend()
+  }, [])
 
   const refresh = () =>
-    api
-      .supplierFloat()
-      .then((result) => setFloat(result))
-      .catch(
-        (caught) =>
-          setError(
-            caught instanceof ApiError ? caught.message : 'We could not read the provider float.',
-          ),
-      )
+    Promise.all([
+      api
+        .supplierFloat()
+        .then((result) => setFloat(result))
+        .catch(
+          (caught) =>
+            setError(
+              caught instanceof ApiError ? caught.message : 'We could not read the provider float.',
+            ),
+        ),
+      refreshFreeToSpend(),
+    ])
 
   /**
    * "Should hold" is never a stored figure, it is recomputed from every
@@ -216,10 +258,26 @@ export default function FloatPanel() {
           ) : (
             <>
               <p className="text-xs text-slate-600 dark:text-slate-300">
-                You've put in <span className="font-semibold text-slate-900 dark:text-slate-50">{cedis(capital.totalIn)}</span>
+                Your own capital{' '}
+                <span className="font-semibold text-slate-900 dark:text-slate-50">{cedis(capital.ownCapital)}</span>
+                {capital.reimbursed > 0 && (
+                  <>
+                    , Paystack money moved in{' '}
+                    <span className="font-semibold text-slate-900 dark:text-slate-50">
+                      {cedis(capital.reimbursed)}
+                    </span>
+                  </>
+                )}
                 , taken out <span className="font-semibold text-slate-900 dark:text-slate-50">{cedis(capital.totalOut)}</span>,
                 since {dateTime(capital.since)}.
               </p>
+              {capital.overReimbursed > 0 && (
+                <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
+                  Of that, {cedis(capital.overReimbursed)} was paid in beyond what DataHub was
+                  actually owed for bundles bought so far. That extra is now float capital, not
+                  profit free to withdraw at Paystack.
+                </p>
+              )}
               {reconciliation?.pending && (
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   Logged, "Should hold" above will confirm against the live float once the next
@@ -238,10 +296,23 @@ export default function FloatPanel() {
           </div>
         </div>
 
+        {needsReviewCount !== null && needsReviewCount > 0 && (
+          <p className="text-center text-xs text-slate-500 dark:text-slate-400">
+            {needsReviewCount} top-up{needsReviewCount === 1 ? '' : 's'} might actually be Paystack money.{' '}
+            <Link
+              to="/admin/finance/float-corrections"
+              className="font-semibold text-brand-700 dark:text-brand-300 hover:underline"
+            >
+              Review and correct
+            </Link>
+          </p>
+        )}
       </div>
 
       <CapitalModal
         direction={logging}
+        owedToDataHub={capital.owedToDataHub}
+        freeToSpend={freeToSpend}
         onClose={() => setLogging(null)}
         onLogged={() => {
           setLogging(null)
@@ -255,10 +326,16 @@ export default function FloatPanel() {
 /** James saying he moved his own money into or out of the float, either direction. */
 function CapitalModal({
   direction,
+  owedToDataHub,
+  freeToSpend,
   onClose,
   onLogged,
 }: {
   direction: 'in' | 'out' | null
+  /** Pesewas DataHub is currently owed for bundles that no reimbursement has covered yet. */
+  owedToDataHub: number
+  /** Pesewas actually free to move out of Paystack right now, null while still loading. */
+  freeToSpend: number | null
   onClose: () => void
   onLogged: () => void
 }) {
@@ -279,6 +356,28 @@ function CapitalModal({
   }
 
   if (!direction) return null
+
+  const enteredAmount = parseCedis(value)
+  const isReimbursement = direction === 'in' && source === 'reimbursement' && enteredAmount !== null
+
+  /**
+   * Reimbursing moves money straight out of Paystack, the same balance
+   * agent earnings, customer wallets and pending refunds are sitting in
+   * too. Anything above `freeToSpend` is not the business's spare money any
+   * more, it is somebody else's, still counted as owed the instant this
+   * logs. Checked ahead of `overpayBy` below and shown instead of it when
+   * both would fire, drawing on money owed to someone else is the more
+   * serious of the two problems.
+   */
+  const touchesOwedMoney =
+    isReimbursement && freeToSpend !== null && enteredAmount! > Math.max(freeToSpend, 0)
+      ? enteredAmount! - Math.max(freeToSpend, 0)
+      : 0
+
+  const overpayBy =
+    !touchesOwedMoney && isReimbursement && enteredAmount! > owedToDataHub
+      ? enteredAmount! - owedToDataHub
+      : 0
 
   const submit = async () => {
     const amount = parseCedis(value)
@@ -330,6 +429,22 @@ function CapitalModal({
                 : 'Fresh money, from somewhere other than what this business itself has collected.'}
             </p>
           </Field>
+        )}
+
+        {touchesOwedMoney > 0 && (
+          <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
+            Only {cedis(Math.max(freeToSpend ?? 0, 0))} is actually free to move out of Paystack
+            right now. This would move {cedis(touchesOwedMoney)} that's still owed to agents,
+            customers, or a pending order, not the business's spare money.
+          </Callout>
+        )}
+
+        {overpayBy > 0 && (
+          <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
+            DataHub is currently owed {cedis(owedToDataHub)} for bundles bought so far, this is{' '}
+            {cedis(overpayBy)} more than that. The extra becomes float capital, not profit free to
+            spend at Paystack.
+          </Callout>
         )}
 
         <Field label="Amount (GHS)" htmlFor="capital-amount" error={error}>

@@ -40,6 +40,7 @@ import Users from './pages/admin/Users'
 import CostPrices from './pages/admin/CostPrices'
 import CatalogueAccuracy from './pages/admin/CatalogueAccuracy'
 import FloatRisk from './pages/admin/FloatRisk'
+import FloatCorrections from './pages/admin/FloatCorrections'
 import AdminWithdrawals from './pages/admin/AdminWithdrawals'
 import NumberApprovals from './pages/admin/NumberApprovals'
 import PaymentReturn from './pages/PaymentReturn'
@@ -340,6 +341,15 @@ export default function App() {
               <Route path="/admin/domains" element={<DomainRequests />} />
               <Route path="/admin/settings" element={<Settings />} />
               <Route path="/admin/assistant" element={<Assistant />} />
+            </Route>
+          </Route>
+
+          {/* Superadmin only, not admin: correcting a logged capital movement
+              changes what "Your profit"/"Free to withdraw now" show
+              elsewhere, one step more sensitive than logging a fresh one. */}
+          <Route element={<RequireAuth role="superadmin" />}>
+            <Route element={<AppShell />}>
+              <Route path="/admin/finance/float-corrections" element={<FloatCorrections />} />
             </Route>
           </Route>
 

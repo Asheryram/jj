@@ -375,6 +375,15 @@ export type FloatLevel = 'ok' | 'watch' | 'risk'
  * Any screen showing it has to show `observedAt` too, or it implies a live
  * number nobody can actually have.
  */
+/** One `capital_in` top-up that might have been mislabeled as personal capital. */
+export interface CapitalNeedingReview {
+  id: string
+  /** Pesewas. */
+  amount: number
+  description: string
+  occurredAt: string
+}
+
 export interface SupplierFloat {
   observation: {
     /** Pesewas. */
@@ -390,10 +399,18 @@ export interface SupplierFloat {
   riskAt: number
   /** James's own capital moved into and out of the float, self-reported. */
   capital: {
-    /** Pesewas. */
+    /** Pesewas. `ownCapital + reimbursed`, what "Should hold" actually needs. */
     totalIn: number
+    /** Pesewas actually put in from outside the business, new capital. */
+    ownCapital: number
+    /** Pesewas that were already the business's own money, moved from Paystack to settle DataHub, not new capital. */
+    reimbursed: number
     totalOut: number
     net: number
+    /** Pesewas DataHub has charged for bundles that no reimbursement has covered yet. */
+    owedToDataHub: number
+    /** Pesewas reimbursed beyond what bundles have actually cost, extra float capital, not withdrawable profit. */
+    overReimbursed: number
     since: string | null
   }
   /** Whether the float holds what the logged capital and known spending say it should. Null until there's enough to check. */
@@ -1764,6 +1781,14 @@ export const api = {
       method: 'POST',
       body: { direction, amount, note, source, idempotencyKey: newIdempotencyKey() },
     }),
+
+  /** Plain top-ups that might actually be Paystack money paying DataHub back, not yet corrected. */
+  floatCapitalNeedingReview: () =>
+    request<CapitalNeedingReview[]>('/admin/supplier/float/capital/needs-review'),
+
+  /** One click: reclassifies a mislabeled top-up as a Paystack reimbursement instead of personal capital. */
+  reclassifyFloatCapital: (id: string) =>
+    request<void>(`/admin/supplier/float/capital/${id}/reclassify`, { method: 'PATCH' }),
 
   /** Refunds sent from someone's own pocket, not yet taken back out, see the Refunds page. */
   manualRefundAdvances: () => request<ManualRefundAdvance[]>('/admin/refunds/manual-advances'),

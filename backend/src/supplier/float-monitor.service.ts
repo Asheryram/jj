@@ -3,18 +3,66 @@ import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
 import { MailerService } from '../mail/mailer.service'
 import { LedgerService } from '../finance/ledger.service'
-import { ValidationError } from '../common/domain-errors'
+import { NotFoundError, ValidationError } from '../common/domain-errors'
 import { claimTransition } from '../common/alert-flag'
 import { escape, wrap } from '../mail/templates'
 
+/** One `capital_in` top-up that might have been mislabeled as personal capital. */
+export interface CapitalNeedingReview {
+  id: string
+  amount: number
+  description: string
+  occurredAt: string
+}
+
 /** One deliberate movement of James's own money into or out of the float. */
 export interface CapitalSummary {
-  /** Pesewas James has logged putting in, all time. */
+  /**
+   * Pesewas landed in the float, all time: `ownCapital + reimbursed`. What
+   * `expectedBalance` actually needs, the float doesn't care whose money it
+   * was, only that it arrived. Kept alongside the split below rather than
+   * replaced by it, `net` (and therefore "Should hold") depends on this
+   * whole figure, not on either half alone.
+   */
   totalIn: number
+  /**
+   * Of `totalIn`, money James put in from outside the business, logged as
+   * `capital_in` (and never since reclassified, see
+   * `reclassifyAsReimbursement`). This is capital in the real sense, new
+   * money entering the business.
+   */
+  ownCapital: number
+  /**
+   * Of `totalIn`, money that was already the business's own (collected from
+   * customers, sitting in Paystack) and moved across to settle what DataHub
+   * had already charged, logged as `capital_in_reimbursement`. Not new
+   * capital, a relocation of revenue already earned, kept separate so
+   * "Your own capital" never overstates what James actually put in himself.
+   */
+  reimbursed: number
   /** Pesewas James has logged taking out, all time. */
   totalOut: number
   /** totalIn - totalOut. */
   net: number
+  /**
+   * Of everything DataHub has ever actually charged for bundles, how much is
+   * not yet covered by a reimbursement, all time. Zero once reimbursements
+   * catch up. This is the same figure `SolvencyService.spentOnBundles`
+   * reads as "already spent on bundles" on the Reserve panel, computed here
+   * from the same two sums so the two can never drift apart.
+   */
+  owedToDataHub: number
+  /**
+   * The mirror image of `owedToDataHub`: reimbursed to DataHub beyond what
+   * bundles have actually cost, all time. That excess still leaves Paystack
+   * exactly like a correctly-sized reimbursement does, but nothing owed
+   * absorbs it, so it lands as extra float capital instead of staying
+   * spendable at Paystack, quietly eating into `SolvencyService.freeToSpend`
+   * (and therefore the "Your profit" figure on the Orders page) by the same
+   * amount. Surfaced so an over-reimbursement is visible, not just felt as
+   * an unexplained drop in what's free to spend.
+   */
+  overReimbursed: number
   /** When the first entry was logged, or null before anything has been. */
   since: string | null
 }
@@ -338,30 +386,142 @@ export class FloatMonitorService {
    */
   async capitalSummary(): Promise<CapitalSummary> {
     const capitalInKinds = ['capital_in', 'capital_in_reimbursement'] as const
-    const [totals, first] = await Promise.all([
-      this.prisma.ledgerEntry.groupBy({
-        by: ['kind'],
+    const [rows, bundleCost] = await Promise.all([
+      this.prisma.ledgerEntry.findMany({
         where: { kind: { in: [...capitalInKinds, 'capital_out'] }, orderRef: null, withdrawalId: null },
-        _sum: { amount: true },
+        select: { id: true, kind: true, amount: true, idempotencyKey: true, occurredAt: true },
       }),
-      this.prisma.ledgerEntry.findFirst({
-        where: { kind: { in: [...capitalInKinds, 'capital_out'] }, orderRef: null, withdrawalId: null },
-        orderBy: { occurredAt: 'asc' },
-        select: { occurredAt: true },
-      }),
+      // supplier_cost entries are stored negative (money leaving the float),
+      // same source `SolvencyService.spentOnBundles` reads, kept in step
+      // with `owedToDataHub`/`overReimbursed` below rather than trusted to
+      // agree by coincidence.
+      this.prisma.ledgerEntry.aggregate({ where: { kind: 'supplier_cost' }, _sum: { amount: true } }),
     ])
 
-    const totalIn = totals
-      .filter((t) => (capitalInKinds as readonly string[]).includes(t.kind))
-      .reduce((sum, t) => sum + (t._sum.amount ?? 0), 0)
-    const totalOut = -(totals.find((t) => t.kind === 'capital_out')?._sum.amount ?? 0)
+    /**
+     * `reclassifyAsReimbursement` never edits the original entry, it adds a
+     * cancelling `capital_out` plus a correct `capital_in_reimbursement`
+     * instead, see that method for why. Left in the totals below as-is, a
+     * single reclassified top-up would count as money in twice (the
+     * original wrong entry, still sitting there, and the correct reissue)
+     * against only one matching "out", inflating both totals by exactly the
+     * reclassified amount even though the true net is unaffected. So both
+     * halves of a correction are excluded here: the cancel entry itself
+     * (never a real withdrawal) and whichever original entry it points at
+     * (superseded, not a real top-up any more), leaving only what actually
+     * happened.
+     */
+    const correctedOriginalIds = new Set(
+      rows
+        .filter((r) => r.kind === 'capital_out' && r.idempotencyKey.startsWith('correction:'))
+        .map((r) => r.idempotencyKey.split(':')[1]),
+    )
+    const counted = rows.filter(
+      (r) =>
+        !(r.kind === 'capital_out' && r.idempotencyKey.startsWith('correction:')) &&
+        !correctedOriginalIds.has(r.id),
+    )
+
+    const ownCapital = counted.filter((r) => r.kind === 'capital_in').reduce((sum, r) => sum + r.amount, 0)
+    const reimbursed = counted
+      .filter((r) => r.kind === 'capital_in_reimbursement')
+      .reduce((sum, r) => sum + r.amount, 0)
+    const totalIn = ownCapital + reimbursed
+    const totalOut = -counted.filter((r) => r.kind === 'capital_out').reduce((sum, r) => sum + r.amount, 0)
+    // "Since" tracks when logging began, not the corrected totals, so it is
+    // computed from every row, corrections included.
+    const first = rows.reduce<Date | null>(
+      (earliest, r) => (earliest === null || r.occurredAt < earliest ? r.occurredAt : earliest),
+      null,
+    )
+
+    const bundlesBought = -(bundleCost._sum.amount ?? 0)
 
     return {
       totalIn,
+      ownCapital,
+      reimbursed,
       totalOut,
       net: totalIn - totalOut,
-      since: first?.occurredAt.toISOString() ?? null,
+      owedToDataHub: Math.max(0, bundlesBought - reimbursed),
+      overReimbursed: Math.max(0, reimbursed - bundlesBought),
+      since: first?.toISOString() ?? null,
     }
+  }
+
+  /**
+   * Plain top-ups (`orderRef`/`withdrawalId` both null, see `capitalSummary`'s
+   * own comment for why that excludes manual refund/payout advances, a
+   * different thing that happens to share this `kind`) not yet reclassified
+   * by `reclassifyAsReimbursement`. What a "top-ups needing review" screen
+   * lists, for whoever logged a Paystack reimbursement as plain capital by
+   * mistake, easy to do since the button that distinguishes them is easy to
+   * miss.
+   */
+  async capitalInNeedingReview(): Promise<CapitalNeedingReview[]> {
+    const [candidates, corrections] = await Promise.all([
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_in', orderRef: null, withdrawalId: null },
+        orderBy: { occurredAt: 'asc' },
+      }),
+      this.prisma.ledgerEntry.findMany({
+        where: { idempotencyKey: { startsWith: 'correction:' } },
+        select: { idempotencyKey: true },
+      }),
+    ])
+    // `correction:<originalId>:capital_out`, see `reclassifyAsReimbursement`.
+    const alreadyCorrected = new Set(corrections.map((c) => c.idempotencyKey.split(':')[1]))
+
+    return candidates
+      .filter((row) => !alreadyCorrected.has(row.id))
+      .map((row) => ({
+        id: row.id,
+        amount: row.amount,
+        description: row.description,
+        occurredAt: row.occurredAt.toISOString(),
+      }))
+  }
+
+  /**
+   * One click: corrects a `capital_in` top-up that was actually Paystack
+   * money paying DataHub back, not fresh personal capital.
+   *
+   * Never edits the original row, the ledger records what happened and
+   * never rewrites it, every other settlement path here follows that rule
+   * and this is not the exception. Instead it cancels the original out with
+   * a matching `capital_out`, then reissues the same amount as
+   * `capital_in_reimbursement`, the only kind `SolvencyService.spentOnBundles`
+   * actually clears.
+   *
+   * Idempotent the same way as everywhere else: both new entries are keyed
+   * off the original entry's own id, so this is safe to click twice, or to
+   * retry after a dropped connection, without double-correcting.
+   */
+  async reclassifyAsReimbursement(entryId: string): Promise<void> {
+    const original = await this.prisma.ledgerEntry.findUnique({ where: { id: entryId } })
+    if (!original) throw new NotFoundError('No such entry.')
+    if (original.kind !== 'capital_in' || original.orderRef || original.withdrawalId) {
+      throw new ValidationError('Only a plain capital top-up can be reclassified this way.')
+    }
+
+    const cancelKey = LedgerService.key('correction', entryId, 'capital_out')
+    const alreadyDone = await this.prisma.ledgerEntry.findUnique({ where: { idempotencyKey: cancelKey } })
+    if (alreadyDone) throw new ValidationError('This one has already been reclassified.')
+
+    const ghs = (original.amount / 100).toFixed(2)
+    await this.logCapital({
+      direction: 'out',
+      amount: original.amount,
+      note: `Correcting a misclassified top-up (GHS ${ghs}): it was actually Paystack money, not personal capital`,
+      idempotencyKey: cancelKey,
+    })
+    await this.logCapital({
+      direction: 'in',
+      amount: original.amount,
+      note: `Reclassified: GHS ${ghs} moved from Paystack to pay DataHub back`,
+      idempotencyKey: LedgerService.key('correction', entryId, 'capital_in_reimbursement'),
+      source: 'reimbursement',
+    })
   }
 
   /**

@@ -766,21 +766,46 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
    * What should be sitting in Paystack's balance right now, entirely from
    * this platform's own records: everything ever collected, net of
    * Paystack's fee, less every payout and refund transfer this platform has
-   * actually sent. Always all-time, regardless of account tier or settings,
-   * no live call, ever, to compute this.
+   * actually sent, less every reimbursement James has moved across to
+   * DataHub. Always all-time, regardless of account tier or settings, no
+   * live call, ever, to compute this.
+   *
+   * The reimbursement term exists because that money genuinely leaves
+   * Paystack, James moves it out himself, outside anything this app can see
+   * or call, the same way a manually-settled refund or payout does. Without
+   * it, a logged reimbursement (`FloatMonitorService.logCapital`) landed at
+   * the float, correctly raising what it should hold, while this figure
+   * carried on as if the same cedis were still sitting in Paystack
+   * untouched. Same money, counted as present in two different pots at
+   * once, which overstated `freeToSpend` by the full reimbursed amount.
    */
   private async expectedBalance(): Promise<number> {
     if (this.expectedBalanceCache && Date.now() - this.expectedBalanceCache.computedAt < EXPECTED_BALANCE_CACHE_MS) {
       return this.expectedBalanceCache.value
     }
 
-    const [collected, transferred] = await Promise.all([
+    const [collected, transferred, reimbursedToDataHub] = await Promise.all([
       this.collectedSince(),
       this.transfersSince(),
+      this.reimbursedToDataHub(),
     ])
-    const value = collected - transferred
+    const value = collected - transferred - reimbursedToDataHub
     this.expectedBalanceCache = { value, computedAt: Date.now() }
     return value
+  }
+
+  /**
+   * All-time pesewas James has logged moving from Paystack to DataHub as a
+   * reimbursement, see `expectedBalance`'s own comment for why this has to
+   * count as money having left Paystack, the exact figure
+   * `spentOnBundles` reads to know the same debt has been settled.
+   */
+  private async reimbursedToDataHub(): Promise<number> {
+    const result = await this.prisma.ledgerEntry.aggregate({
+      where: { kind: 'capital_in_reimbursement' },
+      _sum: { amount: true },
+    })
+    return result._sum.amount ?? 0
   }
 
   /**

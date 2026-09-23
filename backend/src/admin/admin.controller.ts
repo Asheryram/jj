@@ -427,6 +427,29 @@ export class AdminController {
     return this.float.logCapital(dto)
   }
 
+  /**
+   * Plain top-ups that might actually be Paystack money paying DataHub back,
+   * not yet corrected, see `FloatMonitorService.capitalInNeedingReview`.
+   * Superadmin-only, not just admin: correcting a logged capital movement
+   * changes what "Your profit"/"Free to withdraw now" show, one step more
+   * sensitive than logging a fresh one.
+   */
+  @Get('supplier/float/capital/needs-review')
+  @Roles('superadmin')
+  capitalNeedingReview() {
+    return this.float.capitalInNeedingReview()
+  }
+
+  /**
+   * One click: reclassifies a mislabeled top-up as a Paystack reimbursement
+   * instead of personal capital, see `FloatMonitorService.reclassifyAsReimbursement`.
+   */
+  @Patch('supplier/float/capital/:id/reclassify')
+  @Roles('superadmin')
+  reclassifyCapital(@Param('id') id: string) {
+    return this.float.reclassifyAsReimbursement(id)
+  }
+
   /** Re-read every configured supplier's catalogue. */
   @Post('supplier/sync')
   sync() {

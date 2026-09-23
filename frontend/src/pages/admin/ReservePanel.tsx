@@ -91,7 +91,7 @@ export default function ReservePanel() {
             label="Should be at Paystack"
             value={expectedAtPaystack}
             strong
-            hint="Everything ever collected, less every payout and refund actually sent, from your own records, not their live balance"
+            hint="Everything ever collected, less every payout and refund actually sent, and less every reimbursement moved across to DataHub, from your own records, not their live balance"
           />
           <Row label="Owed to agents" value={liabilities.agentEarnings} negative />
           <Row

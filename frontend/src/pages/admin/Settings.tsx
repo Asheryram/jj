@@ -748,7 +748,8 @@ function PaystackPayoutSetting() {
           </label>
           <p className="mt-1 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
             "Should be at Paystack" on the Reserve panel is always everything ever collected, less
-            every payout and refund you have actually sent, this switch never changes that. Off,
+            every payout and refund you have actually sent, and less every reimbursement moved
+            across to DataHub, this switch never changes that. Off,
             nothing here ever calls Paystack in the background. On, that figure is checked every 30
             minutes against Paystack's actual live balance, and you're emailed only if it comes back
             genuinely lower, never for reading higher, which usually just means a payout landed
