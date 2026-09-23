@@ -1059,6 +1059,39 @@ export class AdminService {
     }
   }
 
+  /**
+   * Ranked by completed spend within the range, the same scope `myReport`
+   * already uses (this agent's own code plus everyone beneath them), so the
+   * two agree: whichever customers make up "Volume sold" above are the ones
+   * this ranks. Capped at 20, a glance list, not an export. A customer has no
+   * customers of their own, so this is agent-only, same as `agentEarningsByDay`.
+   */
+  async myTopCustomers(user: { id: string; role: Role; referralCode: string }, since: Date, until: Date) {
+    if (user.role !== 'agent') return []
+    const codes = await this.downlineCodes(user.referralCode)
+    const orders = await this.prisma.order.findMany({
+      where: { soldByCode: { in: codes }, createdAt: { gte: since, lte: until }, status: 'completed' },
+      select: { buyerPhone: true, buyer: true, salePrice: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    })
+
+    const byPhone = new Map<string, { buyer: string; ordersCount: number; totalSpend: number; lastOrderAt: Date }>()
+    for (const o of orders) {
+      const row = byPhone.get(o.buyerPhone) ?? { buyer: o.buyer, ordersCount: 0, totalSpend: 0, lastOrderAt: o.createdAt }
+      row.ordersCount++
+      row.totalSpend += o.salePrice
+      // Orders are read oldest-first, so whichever name/date lands last here is the most recent.
+      row.buyer = o.buyer
+      row.lastOrderAt = o.createdAt
+      byPhone.set(o.buyerPhone, row)
+    }
+
+    return [...byPhone.entries()]
+      .map(([buyerPhone, row]) => ({ buyerPhone, ...row }))
+      .sort((a, b) => b.totalSpend - a.totalSpend)
+      .slice(0, 20)
+  }
+
   /** The agent's own code plus every code beneath it. Mirrors OrdersService. */
   private async downlineCodes(rootCode: string): Promise<string[]> {
     const codes = new Set<string>([rootCode])

@@ -115,9 +115,10 @@ export function DateRangePicker({
   onCustomRange,
 }: {
   label: string
-  comparisonLabel: string
-  compareMode: 'previous' | 'lastYear'
-  onCompareModeChange: (mode: 'previous' | 'lastYear') => void
+  /** Omit all three together on a page with no "vs previous period" feature, e.g. `Reports.tsx`. */
+  comparisonLabel?: string
+  compareMode?: 'previous' | 'lastYear'
+  onCompareModeChange?: (mode: 'previous' | 'lastYear') => void
   onPreset: (preset: PresetKey) => void
   onCustomRange: (from: number, to: number) => void
 }) {
@@ -176,16 +177,18 @@ export function DateRangePicker({
         <ChevronDownIcon className="size-4 text-slate-400 dark:text-slate-500" />
       </button>
 
-      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-        vs. {comparisonLabel}
-        <button
-          type="button"
-          onClick={() => onCompareModeChange(compareMode === 'previous' ? 'lastYear' : 'previous')}
-          className="ml-2 font-medium text-brand-700 underline decoration-dotted hover:text-brand-800 dark:text-brand-300 dark:hover:text-brand-200"
-        >
-          {compareMode === 'previous' ? 'Compare to last year instead' : 'Compare to previous period instead'}
-        </button>
-      </p>
+      {comparisonLabel && compareMode && onCompareModeChange && (
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+          vs. {comparisonLabel}
+          <button
+            type="button"
+            onClick={() => onCompareModeChange(compareMode === 'previous' ? 'lastYear' : 'previous')}
+            className="ml-2 font-medium text-brand-700 underline decoration-dotted hover:text-brand-800 dark:text-brand-300 dark:hover:text-brand-200"
+          >
+            {compareMode === 'previous' ? 'Compare to last year instead' : 'Compare to previous period instead'}
+          </button>
+        </p>
+      )}
 
       <Modal open={open} onClose={() => setOpen(false)} title="Select date range">
         <div className="flex flex-col gap-4 sm:flex-row">

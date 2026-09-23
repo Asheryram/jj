@@ -329,6 +329,15 @@ export interface MyReportSummary {
   byCategory: { category: string; revenue: number; orders: number }[]
 }
 
+/** One row of `Reports.tsx`'s "Top customers" table, ranked by `totalSpend` within the chosen range. */
+export interface TopCustomer {
+  buyerPhone: string
+  buyer: string
+  ordersCount: number
+  totalSpend: number
+  lastOrderAt: string
+}
+
 export interface NeedsAttentionOrder {
   id: string
   reference: string
@@ -1437,6 +1446,11 @@ export const api = {
   myReportSummary: (from: string, to: string) =>
     request<MyReportSummary>(
       `/reports/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
+
+  myTopCustomers: (from: string, to: string) =>
+    request<TopCustomer[]>(
+      `/reports/top-customers?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     ),
 
   /**
