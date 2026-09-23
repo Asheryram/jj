@@ -269,13 +269,27 @@ export class ApprovalsService {
 
     const approved: string[] = []
     let released = 0
+    /**
+     * Distinct from "checked, still not registered", which is the ordinary,
+     * expected outcome for most of up to 60 numbers on every run and does
+     * not deserve a log line each time. This is specifically the check
+     * itself failing (a network error, DataHub unreachable), previously
+     * indistinguishable from an ordinary "not yet" via the same
+     * `.catch(() => null)`, only ever visible, if at all, as a smaller
+     * `approved.length` than expected with no way to tell why.
+     */
+    const failedChecks: string[] = []
 
     for (const [index, row] of waiting.entries()) {
       // Their limit is 30 a minute. Twenty at a time with a breath in between
       // stays well inside it even if this is run twice in quick succession.
       if (index > 0 && index % 20 === 0) await sleep(3000)
 
-      const result = await this.datahub.verify(row.networkKey, row.phone).catch(() => null)
+      const result = await this.datahub.verify(row.networkKey, row.phone).catch((error: unknown) => {
+        failedChecks.push(row.phone)
+        this.log.warn(`could not check ${row.phone}: ${String(error)}`)
+        return null
+      })
       // Only a definite yes clears a number. `unknown` leaves it pending, which is
       // right: a number is not approved because we failed to ask.
       if (result?.kind === 'registered') {
@@ -292,6 +306,9 @@ export class ApprovalsService {
       this.log.log(
         `DataHub approved ${approved.length} number(s), releasing ${released} held order(s)`,
       )
+    }
+    if (failedChecks.length > 0) {
+      this.log.warn(`${failedChecks.length} of ${waiting.length} number(s) could not be checked this run`)
     }
     return { checked: waiting.length, approved, released, lastCheckedAt: startedAt }
   }

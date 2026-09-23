@@ -351,6 +351,7 @@ export class DatahubClient {
 
       return { kind: 'found', providerStatus, raw: body }
     } catch (error) {
+      this.log.warn(`could not check order status for ${providerReference}: ${String(error)}`)
       return { kind: 'unavailable', reason: String(error) }
     }
   }
@@ -418,6 +419,7 @@ export class DatahubClient {
 
       return { kind: 'unknown', reason: said || 'They did not answer the question.' }
     } catch (error) {
+      this.log.warn(`could not verify ${recipient} on ${networkKey}: ${String(error)}`)
       return { kind: 'unknown', reason: String(error) }
     }
   }

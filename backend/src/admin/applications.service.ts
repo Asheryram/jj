@@ -87,7 +87,7 @@ export class ApplicationsService {
     const shopName = await this.platformName()
     // Told, not left to discover. An agent who is not told they are approved does
     // not start selling, which defeats the point of approving them.
-    await this.mailer.send({
+    const { sent, reason } = await this.mailer.send({
       to: user.email,
       subject: `You are approved to sell on ${shopName}`,
       text: [
@@ -104,6 +104,7 @@ export class ApplicationsService {
         <p>Your agent account on ${shopName} has been approved. You can sign in and start selling now.</p>
         <p>Your shop link carries your code <strong>${user.referralCode}</strong>, so every sale through it is yours and earns you your margin. Sign in and open <strong>Sell &amp; refer</strong> to find it.</p>`,
     })
+    if (!sent) this.log.warn(`could not tell ${user.email} about their approval: ${reason}`)
 
     this.log.log(`agent ${user.referralCode} approved by ${adminId}`)
     return { id: userId, status: 'active' as const }
@@ -134,7 +135,7 @@ export class ApplicationsService {
     })
 
     const shopName = await this.platformName()
-    await this.mailer.send({
+    const { sent, reason: sendFailureReason } = await this.mailer.send({
       to: user.email,
       subject: `About your ${shopName} agent application`,
       text: [
@@ -151,6 +152,7 @@ export class ApplicationsService {
         <p style="padding:12px 14px;background:#f8fafc;border-radius:10px">${reason}</p>
         <p>If you think this is a mistake, reply to this message or call us.</p>`,
     })
+    if (!sent) this.log.warn(`could not tell ${user.email} about their rejection: ${sendFailureReason}`)
 
     this.log.warn(`agent application ${user.referralCode} refused by ${adminId}: ${reason}`)
     return { id: userId, status: 'rejected' as const }

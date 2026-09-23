@@ -235,7 +235,14 @@ export class SupplierService implements OnModuleInit {
     // an optimisation: the purchase reply is checked for the same thing below,
     // because /verify covers MTN alone.
     if (VERIFIABLE_KEYS.includes(supplier.networkKey)) {
-      const check = await this.datahub.verify(supplier.networkKey, order.recipient).catch(() => null)
+      // `verify()` already logs its own failures internally and resolves
+      // rather than rejecting; this catch is only a defensive backstop.
+      const check = await this.datahub
+        .verify(supplier.networkKey, order.recipient)
+        .catch((error: unknown) => {
+          this.log.warn(`${order.reference}: pre-purchase verify threw unexpectedly, ${String(error)}`)
+          return null
+        })
       // Only a definite refusal holds the order. `unknown` falls through to the
       // purchase, which checks the same thing and is the authority anyway.
       if (check?.kind === 'not_registered') {

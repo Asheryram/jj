@@ -467,7 +467,10 @@ export class RefundsService {
    */
   private async sendRefund(refundId: string): Promise<void> {
     const row = await this.prisma.refundRequest.findUnique({ where: { id: refundId } })
-    if (!row || row.status !== 'approved') return
+    if (!row || row.status !== 'approved') {
+      this.log.warn(`refund ${refundId}: skipped, not in approved state (${row?.status ?? 'missing'})`)
+      return
+    }
 
     if (row.transferCode) {
       this.log.warn(`refund ${refundId} already has a transfer, not sending again`)
@@ -475,6 +478,7 @@ export class RefundsService {
     }
 
     if (!this.paystack.configured) {
+      this.log.warn(`refund ${refundId} left for manual sending, Paystack is not configured`)
       await this.prisma.refundRequest.update({
         where: { id: refundId },
         data: {

@@ -144,8 +144,20 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
 
     let resolved = 0
     for (const order of stale) {
-      const result = await this.payments.confirm(order.reference).catch(() => null)
-      if (!result || result.status === 'pending') continue
+      const result = await this.payments.confirm(order.reference).catch((error: unknown) => {
+        this.log.warn(`${order.reference}: could not check, ${String(error)}`)
+        return null
+      })
+      if (!result) continue
+      // Logged every time, not just on resolution: this is the one place that
+      // can show how many times, and over how long, an order sat waiting
+      // before Paystack actually had an answer, "how slow is this" was
+      // previously only ever answerable from the final line, with no trail
+      // of every attempt that came back "still pending" before it.
+      if (result.status === 'pending') {
+        this.log.log(`${order.reference}: still pending, checked again next sweep`)
+        continue
+      }
       this.log.log(`${order.reference}: checkout resolved as ${result.status}`)
       resolved++
     }
@@ -178,8 +190,15 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
 
     let resolved = 0
     for (const payment of stale) {
-      const result = await this.payments.confirm(payment.reference).catch(() => null)
-      if (!result || result.status === 'pending') continue
+      const result = await this.payments.confirm(payment.reference).catch((error: unknown) => {
+        this.log.warn(`top-up ${payment.reference}: could not check, ${String(error)}`)
+        return null
+      })
+      if (!result) continue
+      if (result.status === 'pending') {
+        this.log.log(`top-up ${payment.reference}: still pending, checked again next sweep`)
+        continue
+      }
       this.log.log(`top-up ${payment.reference}: resolved as ${result.status}`)
       resolved++
     }
@@ -306,7 +325,13 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     })
 
     const mapped = mapProviderStatus(result.providerStatus)
-    if (mapped === null) return false // still working on it
+    if (mapped === null) {
+      // Same reasoning as the payment-side checks above: logged every time,
+      // not just once resolved, so there's an actual trail of what DataHub
+      // was reporting at each check, not just silence until the last one.
+      this.log.log(`${order.reference}: still ${result.providerStatus}, checked again next sweep`)
+      return false
+    }
 
     await this.fulfilment.settleFromProvider(
       order.id,

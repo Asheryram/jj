@@ -188,7 +188,12 @@ export class FulfilmentService implements OnApplicationBootstrap {
       },
       data: { dispatchClaimedAt: new Date() },
     })
-    if (claim.count === 0) return
+    if (claim.count === 0) {
+      // Expected, not exceptional: lost the claim race, someone else's
+      // dispatch (or the stale-claim recovery) already has this order.
+      this.log.debug(`${order.reference}: dispatch claim lost, already being handled`)
+      return
+    }
 
     await this.dispatchAndHandle(order, 1)
   }
@@ -452,6 +457,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
         where: { id: orderId },
         data: { providerReference: result.providerReference ?? null },
       })
+      this.log.log(`${order.reference}: accepted by DataHub, awaiting webhook`)
       return
     }
 

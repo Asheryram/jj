@@ -292,6 +292,11 @@ export class AdminService {
       data: { status: row.status === 'active' ? 'suspended' : 'active' },
     })
 
+    // `WithdrawalsService.decide` gates payout approval on exactly this
+    // status, an agent unable to withdraw traces back to this action, so it
+    // needs its own trail, not just the status itself already changed.
+    this.log.warn(`user ${updated.id} (${updated.name}) → ${updated.status}`)
+
     return { id: updated.id, status: updated.status }
   }
 
@@ -722,11 +727,15 @@ export class AdminService {
     let agentsEmailed = 0
     let agentsFailed = 0
     for (const agent of byAgent.values()) {
-      const { sent } = await this.mailer.send(
+      const { sent, reason } = await this.mailer.send(
         priceChangeMail({ to: agent.email, name: agent.name, shopName, changes: agent.changes }),
       )
-      if (sent) agentsEmailed += 1
-      else agentsFailed += 1
+      if (sent) {
+        agentsEmailed += 1
+      } else {
+        agentsFailed += 1
+        this.log.warn(`price-change notice to ${agent.email} failed: ${reason}`)
+      }
     }
 
     await this.prisma.pendingPriceChange.deleteMany({ where: { productId: { in: productIds } } })

@@ -344,7 +344,10 @@ export class WithdrawalsService {
    */
   private async sendPayout(withdrawalId: string): Promise<void> {
     const row = await this.prisma.withdrawal.findUnique({ where: { id: withdrawalId } })
-    if (!row || row.status !== 'approved') return
+    if (!row || row.status !== 'approved') {
+      this.log.warn(`payout ${withdrawalId}: skipped, not in approved state (${row?.status ?? 'missing'})`)
+      return
+    }
 
     // Already handed over. Guards a double approval or a retried request from
     // creating a second transfer.
@@ -620,7 +623,12 @@ export class WithdrawalsService {
   private async failPayout(withdrawalId: string, reason: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const row = await tx.withdrawal.findUnique({ where: { id: withdrawalId } })
-      if (!row || row.status === 'failed' || row.status === 'paid') return
+      if (!row || row.status === 'failed' || row.status === 'paid') {
+        this.log.warn(
+          `payout ${withdrawalId}: not failing, already ${row?.status ?? 'missing'}`,
+        )
+        return
+      }
 
       await tx.withdrawal.update({
         where: { id: withdrawalId },

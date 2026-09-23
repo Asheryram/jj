@@ -93,7 +93,9 @@ export class DatahubWebhookController {
 
     const mapped = mapProviderStatus(status)
     if (mapped === null) {
-      // Still in flight on their side. Nothing to do but wait.
+      // Still in flight on their side. Nothing to do but wait, logged all the
+      // same, see `ReconcilerService.checkWithProvider`'s identical reasoning.
+      this.log.log(`${order.reference}: webhook reported ${status}, not terminal yet`)
       return { received: true, applied: false, reason: `not terminal (${status})` }
     }
 

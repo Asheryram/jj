@@ -910,7 +910,9 @@ export class OrdersService {
        * the refusal is worth anything: they copy it into DataHub's dashboard, and
        * that customer can come back and buy.
        */
-      await this.noteApprovalNeeded(productId, recipient).catch(() => undefined)
+      await this.noteApprovalNeeded(productId, recipient).catch((error: unknown) =>
+        this.log.error(`${recipient}: failed to record approval-needed, ${String(error)}`),
+      )
 
       return {
         checked: true,

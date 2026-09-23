@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import type { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { ValidationError } from '../common/domain-errors'
@@ -153,6 +153,8 @@ const URL_KEYS = ['whatsappChannelUrl'] as const
 
 @Injectable()
 export class SettingsService {
+  private readonly log = new Logger(SettingsService.name)
+
   constructor(private readonly prisma: PrismaService) {}
 
   async all(db: Db = this.prisma): Promise<PlatformSettings> {
@@ -210,6 +212,8 @@ export class SettingsService {
     key: keyof PlatformSettings,
     value: boolean | number | string,
   ): Promise<PlatformSettings> {
+    const previous = await this.get(key)
+
     if ((STRING_KEYS as readonly string[]).includes(key)) {
       const text = String(value ?? '').trim()
       if ((URL_KEYS as readonly string[]).includes(key) && text !== '' && !/^https?:\/\//i.test(text)) {
@@ -227,6 +231,7 @@ export class SettingsService {
         create: { key, value: text },
         update: { value: text },
       })
+      this.log.warn(`setting ${key}: ${JSON.stringify(previous)} -> ${JSON.stringify(text || null)}`)
       return this.all()
     }
 
@@ -263,6 +268,7 @@ export class SettingsService {
         create: { key, value: amount },
         update: { value: amount },
       })
+      this.log.warn(`setting ${key}: ${previous} -> ${amount}`)
       return this.all()
     }
 
@@ -281,6 +287,7 @@ export class SettingsService {
         create: { key, value: bp },
         update: { value: bp },
       })
+      this.log.warn(`setting ${key}: ${previous} -> ${bp}`)
       return this.all()
     }
 
@@ -296,14 +303,17 @@ export class SettingsService {
         create: { key, value: rate },
         update: { value: rate },
       })
+      this.log.warn(`setting ${key}: ${previous} -> ${rate}`)
       return this.all()
     }
 
+    const flag = Boolean(value)
     await this.prisma.setting.upsert({
       where: { key },
-      create: { key, value: Boolean(value) },
-      update: { value: Boolean(value) },
+      create: { key, value: flag },
+      update: { value: flag },
     })
+    this.log.warn(`setting ${key}: ${previous} -> ${flag}`)
     return this.all()
   }
 }

@@ -75,7 +75,12 @@ export class PaymentsService {
     if (agentCode && checkoutOrigin) {
       const hostname = this.hostnameOf(checkoutOrigin)
       if (hostname) {
-        const resolvedCode = await this.domains.resolve(hostname).catch(() => null)
+        const resolvedCode = await this.domains
+          .resolve(hostname)
+          .catch((error: unknown) => {
+            this.log.warn(`could not resolve custom domain ${hostname} for the checkout callback: ${String(error)}`)
+            return null
+          })
         if (resolvedCode === agentCode) {
           return `https://${hostname}/pay/return?reference=${encodeURIComponent(reference)}`
         }
@@ -135,7 +140,10 @@ export class PaymentsService {
         select: { email: true },
       })
       .then((row) => row?.email ?? null)
-      .catch(() => null)
+      .catch((error: unknown) => {
+        this.log.warn(`could not look up the buyer's email for ${order.reference}: ${String(error)}`)
+        return null
+      })
 
     await this.prisma.payment.create({
       data: {
@@ -256,6 +264,7 @@ export class PaymentsService {
     }
 
     if (result.kind === 'not_found') {
+      this.log.warn(`${reference}: Paystack does not recognise this reference (payment ${payment.status})`)
       return { status: payment.status === 'pending' ? 'pending' : 'failed' }
     }
 
@@ -507,7 +516,7 @@ export class PaymentsService {
       })
     }
 
-    this.log.log(`${reference} not paid, closed`)
+    this.log.warn(`${reference} not paid, closed`)
   }
 
   /**
