@@ -42,16 +42,24 @@ function xAxisStep(pointCount: number): number {
   return pointCount > 45 ? 14 : pointCount > 20 ? 7 : 1
 }
 
-export function BarChart({
+export function BarChart<T extends { day: string; revenue: number }>({
   data,
   height = 160,
   valueLabel = cedisCompact,
   label = 'Daily totals',
+  tooltipFor,
 }: {
-  data: { day: string; revenue: number }[]
+  data: T[]
   height?: number
   valueLabel?: (value: number) => string
   label?: string
+  /**
+   * Overrides the default `"day: amount"` hover text with something richer,
+   * e.g. a profit bar breaking itself down into same-day vs carryover. Also
+   * surfaced in the sr-only table as an extra column, so the breakdown isn't
+   * hover-only.
+   */
+  tooltipFor?: (point: T) => string
 }) {
   const rawMax = Math.max(...data.map((d) => d.revenue), 1)
   const axisMax = niceCeiling(rawMax)
@@ -106,7 +114,11 @@ export function BarChart({
                 const pct = (point.revenue / axisMax) * 100
                 const alwaysShown = labelEveryBar || highlighted.has(index)
                 return (
-                  <div key={point.day} className="group flex h-full min-w-0 flex-1 flex-col justify-end">
+                  <div
+                    key={point.day}
+                    title={tooltipFor ? tooltipFor(point) : `${point.day}: ${valueLabel(point.revenue)}`}
+                    className="group flex h-full min-w-0 flex-1 flex-col justify-end"
+                  >
                     <span
                       className={cn(
                         'tabular mb-1 text-center text-[10px] font-semibold text-slate-600 dark:text-slate-300 transition-opacity sm:text-[11px]',
@@ -154,6 +166,7 @@ export function BarChart({
             <tr>
               <th scope="col">Day</th>
               <th scope="col">Amount</th>
+              {tooltipFor && <th scope="col">Breakdown</th>}
             </tr>
           </thead>
           <tbody>
@@ -161,6 +174,7 @@ export function BarChart({
               <tr key={point.day}>
                 <th scope="row">{point.day}</th>
                 <td>{valueLabel(point.revenue)}</td>
+                {tooltipFor && <td>{tooltipFor(point)}</td>}
               </tr>
             ))}
           </tbody>
@@ -190,27 +204,42 @@ export interface ChartThreshold {
  * hover/tap target on a phone.
  *
  * `previous`, index-aligned with `data` (not date-aligned: it is the equal
- * length period immediately before), draws a second, dashed, lighter line on
- * the same axes so "this period vs last period" reads off one chart instead
- * of a number in one place and a line in another. `thresholds` draws a fixed
- * reference line, e.g. the same alert floor/ceiling used in `attentionItems`,
- * so a viewer can see how close a metric is to tripping the alert, not just
- * whether it did.
+ * length period immediately before, matched by day-of-period offset so "day
+ * 5 of this range" lines up with "day 5 of the comparison range"), draws a
+ * second, dashed, lighter line on the same axes so "this period vs last
+ * period" reads off one chart instead of a number in one place and a line
+ * in another. Its points get their own hover markers and, when `previousDays`
+ * is supplied, their own real calendar-day text, so hovering the dashed line
+ * never implies it happened on the solid line's date directly above it.
+ * `thresholds` draws a fixed reference line, e.g. the same alert
+ * floor/ceiling used in `attentionItems`, so a viewer can see how close a
+ * metric is to tripping the alert, not just whether it did.
  */
-export function LineChart({
+export function LineChart<T extends { day: string; revenue: number }>({
   data,
   previous,
+  previousDays,
   height = 160,
   valueLabel = cedisCompact,
   label = 'Daily totals',
   thresholds,
+  tooltipFor,
 }: {
-  data: { day: string; revenue: number }[]
+  data: T[]
   previous?: number[]
+  /** The previous line's own real calendar day per point, index-aligned with `previous`. */
+  previousDays?: string[]
   height?: number
   valueLabel?: (value: number) => string
   label?: string
   thresholds?: ChartThreshold[]
+  /**
+   * Overrides the default `"day: amount"` hover text with something richer,
+   * e.g. a profit point breaking itself down into same-day vs carryover.
+   * Also surfaced in the sr-only table as an extra column, so the breakdown
+   * isn't hover-only.
+   */
+  tooltipFor?: (point: T) => string
 }) {
   const width = 100
   const allValues = [...data.map((d) => d.revenue), ...(previous ?? []), ...(thresholds ?? []).map((t) => t.value)]
@@ -336,10 +365,18 @@ export function LineChart({
                 vectorEffect="non-scaling-stroke"
               />
             </svg>
+            {previousPoints.map((p, index) => (
+              <span
+                key={`previous-${index}`}
+                title={`${previousDays?.[index] ?? data[index]?.day ?? ''} (previous period): ${valueLabel(previous![index])}`}
+                className="absolute size-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-slate-400 dark:border-slate-900 dark:bg-slate-500"
+                style={{ left: `${p.x}%`, top: p.y }}
+              />
+            ))}
             {points.map((p) => (
               <span
                 key={p.day}
-                title={`${p.day}: ${valueLabel(p.revenue)}`}
+                title={tooltipFor ? tooltipFor(p) : `${p.day}: ${valueLabel(p.revenue)}`}
                 className="absolute size-[5px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-700 dark:bg-brand-300"
                 style={{ left: `${p.x}%`, top: p.y }}
               />
@@ -370,7 +407,8 @@ export function LineChart({
             <tr>
               <th scope="col">Day</th>
               <th scope="col">Amount</th>
-              {previous && <th scope="col">Same day, previous period</th>}
+              {previous && <th scope="col">Previous period{previousDays ? ' (own date)' : ', same offset'}</th>}
+              {tooltipFor && <th scope="col">Breakdown</th>}
             </tr>
           </thead>
           <tbody>
@@ -378,7 +416,14 @@ export function LineChart({
               <tr key={point.day}>
                 <th scope="row">{point.day}</th>
                 <td>{valueLabel(point.revenue)}</td>
-                {previous && <td>{previous[index] !== undefined ? valueLabel(previous[index]) : ''}</td>}
+                {previous && (
+                  <td>
+                    {previous[index] !== undefined
+                      ? `${previousDays?.[index] ? `${previousDays[index]}: ` : ''}${valueLabel(previous[index])}`
+                      : ''}
+                  </td>
+                )}
+                {tooltipFor && <td>{tooltipFor(point)}</td>}
               </tr>
             ))}
           </tbody>
@@ -411,11 +456,13 @@ const MULTI_LINE_COLOURS = [
  * elsewhere on the page; this is the one place that answers "is a specific
  * one rising or falling", which a single total can never show.
  *
- * Point markers are drawn only at each line's last value, not at every day,
- * on purpose: a marker per series per day gets unreadable fast once there's
- * more than one line, and "where did each one end up" is the actual
- * headline a viewer wants from an endpoint dot. Every exact value still
- * exists in the sr-only table below for anyone who needs it.
+ * A marker (and native hover title, `"label, day: value"`) is drawn at every
+ * point of every line, not only at each line's last value: an earlier,
+ * endpoints-only version left the middle of every line dead to hover, and
+ * gave no way to tell which line was which without already knowing the
+ * colour, both confirmed as real usability problems by direct testing.
+ * Every exact value still exists in the sr-only table below for anyone not
+ * hovering.
  */
 export function MultiLineChart({
   days,
@@ -490,22 +537,20 @@ export function MultiLineChart({
                 )
               })}
             </svg>
-            {series.map((s, i) => {
-              const lastIndex = s.values.length - 1
-              if (lastIndex < 0) return null
-              return (
+            {series.flatMap((s, i) =>
+              s.values.map((v, idx) => (
                 <span
-                  key={s.label}
-                  title={`${s.label}, ${days[lastIndex]}: ${valueLabel(s.values[lastIndex])}`}
+                  key={`${s.label}-${idx}`}
+                  title={`${s.label}, ${days[idx]}: ${valueLabel(v)}`}
                   className="absolute size-[6px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white dark:border-slate-900"
                   style={{
-                    left: `${xFor(lastIndex)}%`,
-                    top: yFor(s.values[lastIndex]),
+                    left: `${xFor(idx)}%`,
+                    top: yFor(v),
                     background: MULTI_LINE_COLOURS[i % MULTI_LINE_COLOURS.length],
                   }}
                 />
-              )
-            })}
+              )),
+            )}
           </div>
           <div className="mt-2 flex gap-1.5 sm:gap-3">
             {days.map((day, index) => (
@@ -835,7 +880,15 @@ export function RevenueMarginChart({
           <span className="size-2 rounded-full bg-accent-600" /> Profit margin %
         </span>
       </div>
-      <div className="relative" style={{ height }}>
+      {/* Fix 7: the margin dots previously had no visible axis at all (readable
+          only by hovering) and, worse, `pointer-events-none` on the dots meant
+          hovering them never fired the `title` tooltip either, so there was no
+          way at all to read a margin % off this chart. This adds a real
+          right-hand scale for the dots' own axis, the same left-hand-column
+          pattern `LineChart`/`BarChart` already use, and makes the dots real
+          hover targets. */}
+      <div className="flex gap-2">
+      <div className="relative min-w-0 flex-1" style={{ height }}>
         <div className="absolute inset-x-0 top-0 flex" style={{ height: barsHeight }}>
           {rows.map((row) => {
             const isSelected = selected === row.label
@@ -896,9 +949,8 @@ export function RevenueMarginChart({
         {rows.map((row, i) => (
           <span
             key={row.label}
-            aria-hidden="true"
             title={`${row.label}: ${row.marginPct.toFixed(1)}% margin`}
-            className="pointer-events-none absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-accent-600 dark:border-slate-900"
+            className="absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-accent-600 dark:border-slate-900"
             style={{ left: `${dotX(i)}%`, top: dotY(row.marginPct) }}
           />
         ))}
@@ -909,6 +961,16 @@ export function RevenueMarginChart({
             </span>
           ))}
         </div>
+      </div>
+      <div
+        aria-hidden="true"
+        className="flex shrink-0 flex-col justify-between pb-6 text-right text-[10px] text-slate-400 dark:text-slate-500"
+        style={{ height }}
+      >
+        <span>{marginAxisMax.toFixed(0)}%</span>
+        <span>{((marginAxisMax + marginAxisMin) / 2).toFixed(0)}%</span>
+        <span>{marginAxisMin.toFixed(0)}%</span>
+      </div>
       </div>
       {onSelect && (
         <p className="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Click a bar to see that network's top products.</p>

@@ -41,6 +41,8 @@ import { AlertIcon, CashIcon, CheckIcon, ClockIcon, ReceiptIcon, TrendUpIcon, Us
 const DISPATCH_SUCCESS_FLOOR = 85
 const NO_REPLY_ALERT_RATE = 5
 const ABANDONMENT_ALERT_RATE = 30
+const RANK_METRIC_LABEL: Record<'orders' | 'revenue' | 'profit', string> = { orders: 'Orders', revenue: 'Revenue', profit: 'Profit' }
+const rankValueLabel = (metric: 'orders' | 'revenue' | 'profit') => (metric === 'orders' ? (v: number) => String(v) : cedisCompact)
 
 /** YYYYMMDD -> "Sep 15", the label every chart and table on this page uses. */
 function dayLabel(dateInt: number): string {
@@ -381,6 +383,26 @@ export default function Analytics() {
   const [networkView, setNetworkView] = useState<'total' | 'trend'>('total')
   const [categoryView, setCategoryView] = useState<'total' | 'trend'>('total')
   const [agentsView, setAgentsView] = useState<'total' | 'trend'>('total')
+  // Fix 8: ranking by revenue alone can make a high-volume, low-cost bundle
+  // (or agent) look like the top performer over one that sells fewer but far
+  // more profitable orders. Orders, revenue, and profit are each a real,
+  // independently useful way to rank, so the ranking itself is selectable
+  // rather than fixed to whichever one happened to be picked first.
+  const [productRankMetric, setProductRankMetric] = useState<'orders' | 'revenue' | 'profit'>('revenue')
+  const [agentRankMetric, setAgentRankMetric] = useState<'orders' | 'revenue' | 'profit'>('revenue')
+  // The "By day" trend view only ever plotted revenue, with no profitability
+  // dimension at all despite the card's own "Revenue & profitability" title;
+  // this picks which of the two the trend lines plot.
+  const [networkTrendMetric, setNetworkTrendMetric] = useState<'revenue' | 'margin'>('revenue')
+  const [categoryTrendMetric, setCategoryTrendMetric] = useState<'revenue' | 'margin'>('revenue')
+  // `HourlyOrderVolume` is keyed (date, hour), stored once daily like every
+  // other Gold table, not a live poll, see the ETL's own doc comment. "Typical
+  // hours" collapses that across the whole range (which hour is usually
+  // busy); "One day" reads one specific date's own 24 rows instead, actual
+  // yy/mm/dd/hh detail, not a cross-day average.
+  const [hourlyView, setHourlyView] = useState<'typical' | 'oneDay'>('typical')
+  const [selectedHourlyDate, setSelectedHourlyDate] = useState<number | null>(null)
+  const [hourlyMetric, setHourlyMetric] = useState<'revenue' | 'profit'>('revenue')
 
   // `day`/`month`/`year` are unreachable from the new picker (see `RangeMode`'s
   // own comment) but `buildRange` still takes their driving values as
@@ -590,10 +612,32 @@ export default function Analytics() {
 
   // Fix 1: previous-period overlay, index-aligned with the current series
   // (same equal length, one calendar period earlier), not date-aligned.
+  // Fix 6: `previousDailyDays` carries the comparison period's OWN real
+  // dates, so a hovered dashed point reads its actual day, not the current
+  // period's label sitting above it at the same x position.
   const revenueChart = data.daily.map((d) => ({ day: dayLabel(d.date), revenue: d.revenue }))
   const previousRevenue = prevData?.daily.map((d) => d.revenue)
-  const profitChart = data.daily.map((d) => ({ day: dayLabel(d.date), revenue: d.profit }))
+  const previousDailyDays = prevData?.daily.map((d) => dayLabel(d.date))
+  // Profit can dip on a day that did nothing wrong, when DataHub settles a
+  // bundle's real cost days after the sale itself; each point carries its
+  // own same-day/carryover split so the hover tooltip can tell "bad day"
+  // apart from "an old sale catching up today," for whichever day the
+  // viewer is actually looking at, not just the latest one.
+  const profitChart = data.daily.map((d) => ({
+    day: dayLabel(d.date),
+    revenue: d.profit,
+    sameDayProfit: d.sameDayProfit,
+    carryoverAdjustment: d.carryoverAdjustment,
+  }))
   const previousProfit = prevData?.daily.map((d) => d.profit)
+  const profitTooltip = (p: { day: string; revenue: number; sameDayProfit: number; carryoverAdjustment: number }) =>
+    p.carryoverAdjustment === 0
+      ? `${p.day}: ${cedisCompact(p.revenue)} profit, all from that day's own sales`
+      : `${p.day}: ${cedisCompact(p.revenue)} logged — ${cedisCompact(p.sameDayProfit)} from that day's own sales, ${
+          p.carryoverAdjustment < 0 ? 'minus' : 'plus'
+        } ${cedisCompact(Math.abs(p.carryoverAdjustment))} ${
+          p.carryoverAdjustment < 0 ? 'catching up on an earlier sale' : 'settled better than expected from an earlier sale'
+        }`
 
   interface ProfitRow {
     ordersCount: number
@@ -644,21 +688,34 @@ export default function Analytics() {
 
   // The combo charts above answer "who's biggest right now"; these answer
   // "is a specific one rising or falling". Every network/category, not a
-  // top-N cut, there are only ever a handful of either.
-  const networkTrend = pivotByDay(
+  // top-N cut, there are only ever a handful of either. Fix 2: a margin-%
+  // trend alongside revenue, so "rising or falling" can be asked of
+  // profitability too, not only the money coming in.
+  const marginPctOf = (r: { revenue: number; profit: number }) => (r.revenue > 0 ? (r.profit / r.revenue) * 100 : 0)
+  const networkRevenueTrend = pivotByDay(
     data.network,
     (r) => r.network,
     (r) => r.network,
     (r) => r.revenue,
     [...networkProfit.keys()],
   )
-  const categoryTrend = pivotByDay(
+  const networkMarginTrend = pivotByDay(data.network, (r) => r.network, (r) => r.network, marginPctOf, [...networkProfit.keys()])
+  const networkTrend = networkTrendMetric === 'revenue' ? networkRevenueTrend : networkMarginTrend
+  const categoryRevenueTrend = pivotByDay(
     data.category,
     (r) => r.category,
     (r) => CATEGORY_META[r.category as keyof typeof CATEGORY_META]?.label ?? r.category,
     (r) => r.revenue,
     [...categoryProfit.keys()],
   )
+  const categoryMarginTrend = pivotByDay(
+    data.category,
+    (r) => r.category,
+    (r) => CATEGORY_META[r.category as keyof typeof CATEGORY_META]?.label ?? r.category,
+    marginPctOf,
+    [...categoryProfit.keys()],
+  )
+  const categoryTrend = categoryTrendMetric === 'revenue' ? categoryRevenueTrend : categoryMarginTrend
 
   // Drill-down from a clicked network bar (see `RevenueMarginChart`'s
   // `onSelect`) into that network's own top products, summed across the
@@ -687,10 +744,12 @@ export default function Analytics() {
     entry.ordersCount += row.ordersCount
     productTotals.set(row.productId, entry)
   }
+  const productMetricValue = (p: ProductRow, metric: 'orders' | 'revenue' | 'profit') =>
+    metric === 'orders' ? p.ordersCount : metric === 'revenue' ? p.revenue : p.profit
   const topProductsForNetwork = selectedNetwork
     ? [...productTotals.values()]
         .filter((p) => p.network === selectedNetwork)
-        .sort((a, b) => b.revenue - a.revenue)
+        .sort((a, b) => productMetricValue(b, productRankMetric) - productMetricValue(a, productRankMetric))
         .slice(0, 15)
     : []
 
@@ -702,19 +761,23 @@ export default function Analytics() {
     entry.margin += row.margin
     agentTotals.set(row.agentId, entry)
   }
-  const leaderboard = [...agentTotals.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 10)
+  const agentMetricValue = (a: { orders: number; revenue: number; margin: number }, metric: 'orders' | 'revenue' | 'profit') =>
+    metric === 'orders' ? a.orders : metric === 'revenue' ? a.revenue : a.margin
+  const leaderboard = [...agentTotals.values()]
+    .sort((a, b) => agentMetricValue(b, agentRankMetric) - agentMetricValue(a, agentRankMetric))
+    .slice(0, 10)
   // The leaderboard above is a range-wide total; capped at 5 (not 10, a
   // multi-line chart stops reading past a handful of lines) so this answers
   // whether a specific one of them is actually trending up or sliding, day by day.
   const topAgentIds = [...agentTotals.entries()]
-    .sort((a, b) => b[1].revenue - a[1].revenue)
+    .sort((a, b) => agentMetricValue(b[1], agentRankMetric) - agentMetricValue(a[1], agentRankMetric))
     .slice(0, 5)
     .map(([id]) => id)
   const agentTrend = pivotByDay(
     data.agents,
     (r) => r.agentId,
     (r) => r.agentName,
-    (r) => r.revenue,
+    (r) => (agentRankMetric === 'orders' ? r.ordersCount : agentRankMetric === 'revenue' ? r.revenue : r.margin),
     topAgentIds,
   )
 
@@ -739,15 +802,24 @@ export default function Analytics() {
   }
   // Fix 4: ranked by the metric the alert actually fires on (success rate),
   // not insertion order, so the bar chart and the table read the same way.
+  // Fix 20: manual-queue orders haven't failed, DataHub just hasn't resolved
+  // them yet, so they're left out of the denominator instead of counted as
+  // failures. A network with 3 attempts and 1 still queued reads as 100% of
+  // the 2 DataHub has actually decided on, not a misleading 67%.
   const dispatchRanked = [...dispatchByNetwork.entries()]
-    .map(([network, row]) => ({ network, row, successRate: row.totalAttempts > 0 ? (row.successful / row.totalAttempts) * 100 : 0 }))
+    .map(([network, row]) => {
+      const resolved = row.totalAttempts - row.manualQueue
+      return { network, row, successRate: resolved > 0 ? (row.successful / resolved) * 100 : 0 }
+    })
     .sort((a, b) => b.successRate - a.successRate)
 
   // Fix 1 + Fix 5: rate per day (not raw count), so a fixed alert threshold
   // and a previous-period line both mean the same thing on this axis.
   const noReplyRateSeries = dispatchRateByDate(data.dispatch)
   const noReplyTrend = noReplyRateSeries.map((r) => ({ day: dayLabel(r.date), revenue: r.rate }))
-  const previousNoReplyRateSeries = prevData ? dispatchRateByDate(prevData.dispatch).map((r) => r.rate) : undefined
+  const previousNoReplySeries = prevData ? dispatchRateByDate(prevData.dispatch) : []
+  const previousNoReplyRateSeries = prevData ? previousNoReplySeries.map((r) => r.rate) : undefined
+  const previousNoReplyDays = prevData ? previousNoReplySeries.map((r) => dayLabel(r.date)) : undefined
 
   const hourlyTotals = new Map<number, number>()
   for (const row of data.hourly) hourlyTotals.set(row.hour, (hourlyTotals.get(row.hour) ?? 0) + row.ordersCount)
@@ -756,6 +828,38 @@ export default function Analytics() {
     revenue: hourlyTotals.get(hour) ?? 0,
   }))
 
+  // Newest first: the day someone opens this for almost always wants the
+  // most recent one, not the oldest day in whatever range is picked.
+  const hourlyDates = [...new Set(data.hourly.map((r) => r.date))].sort((a, b) => b - a)
+  const effectiveHourlyDate = selectedHourlyDate ?? hourlyDates[0] ?? null
+  const oneDayRows = data.hourly.filter((r) => r.date === effectiveHourlyDate)
+  const oneDayHourlyByMetric = (metric: 'revenue' | 'profit') => {
+    const byHour = new Map(oneDayRows.map((r) => [r.hour, r]))
+    return Array.from({ length: 24 }, (_, hour) => {
+      const row = byHour.get(hour)
+      return {
+        day: `${hour}h`,
+        revenue: row ? row[metric] : 0,
+        sameDayProfit: row?.sameDayProfit ?? 0,
+        carryoverAdjustment: row?.carryoverAdjustment ?? 0,
+      }
+    })
+  }
+  const oneDayHourlyChart = oneDayHourlyByMetric(hourlyMetric)
+  // Same carryover-breakdown tooltip as the daily Profit chart (Fix 19): the
+  // hourly bucket can log a settlement for a sale made on an earlier day, so
+  // "revenue - a small loss" alone reads as a bad hour when it's really an
+  // old sale's cost catching up now.
+  const oneDayHourlyTooltip = (p: { day: string; revenue: number; sameDayProfit: number; carryoverAdjustment: number }) => {
+    if (hourlyMetric !== 'profit') return `${p.day}: ${cedisCompact(p.revenue)}`
+    if (p.carryoverAdjustment === 0) return `${p.day}: ${cedisCompact(p.revenue)} profit, all from orders sold that same day`
+    return `${p.day}: ${cedisCompact(p.revenue)} logged — ${cedisCompact(p.sameDayProfit)} from orders sold that same day, ${
+      p.carryoverAdjustment < 0 ? 'minus' : 'plus'
+    } ${cedisCompact(Math.abs(p.carryoverAdjustment))} ${
+      p.carryoverAdjustment < 0 ? 'catching up on a sale from an earlier day' : 'settled better than expected from a sale on an earlier day'
+    }`
+  }
+
   const funnelTotals = data.funnel.reduce(
     (sum, f) => ({ started: sum.started + f.started, paid: sum.paid + f.paid, abandoned: sum.abandoned + f.abandoned }),
     { started: 0, paid: 0, abandoned: 0 },
@@ -763,11 +867,18 @@ export default function Analytics() {
   const abandonmentRate = funnelTotals.started > 0 ? (funnelTotals.abandoned / funnelTotals.started) * 100 : 0
   const abandonmentTrend = prevAbandonmentRate !== null ? trendOf(abandonmentRate, prevAbandonmentRate) : null
   const abandonmentRateChart = funnelRateByDate(data.funnel).map((r) => ({ day: dayLabel(r.date), revenue: r.rate }))
-  const previousAbandonmentRateChart = prevData ? funnelRateByDate(prevData.funnel).map((r) => r.rate) : undefined
+  const previousAbandonmentSeries = prevData ? funnelRateByDate(prevData.funnel) : []
+  const previousAbandonmentRateChart = prevData ? previousAbandonmentSeries.map((r) => r.rate) : undefined
+  const previousAbandonmentDays = prevData ? previousAbandonmentSeries.map((r) => dayLabel(r.date)) : undefined
 
   const marginChart = data.margin.map((m) => ({ day: dayLabel(m.date), revenue: m.avgMarginBp / 100 }))
   const previousMargin = prevData?.margin.map((m) => m.avgMarginBp / 100)
-  const latestMargin = data.margin.length > 0 ? data.margin[data.margin.length - 1] : null
+  const previousMarginDays = prevData?.margin.map((m) => dayLabel(m.date))
+  // Fix 5: the calendar-latest day in range is frequently a day with zero
+  // completed orders (today, before anything's sold yet), which reads as a
+  // meaningless "avg sale price GHS 0" tile. The latest day that actually
+  // HAD orders is the one worth showing.
+  const latestMargin = [...data.margin].reverse().find((m) => m.ordersCount > 0) ?? null
 
   const latestDownline = (() => {
     const latestDate = Math.max(0, ...data.downline.map((d) => d.date))
@@ -791,6 +902,7 @@ export default function Analytics() {
   const previousRequested = prevData?.payouts.map((p) => p.requestedAmount)
   const paidChart = data.payouts.map((p) => ({ day: dayLabel(p.date), revenue: p.paidAmount }))
   const previousPaid = prevData?.payouts.map((p) => p.paidAmount)
+  const previousPayoutDays = prevData?.payouts.map((p) => dayLabel(p.date))
 
   const totalRefundCount = data.refunds.reduce((sum, r) => sum + r.count, 0)
   const totalRefundAmount = data.refunds.reduce((sum, r) => sum + r.amount, 0)
@@ -798,6 +910,7 @@ export default function Analytics() {
   const refundBuckets = bucketSums(data.refunds, ['decidedUnder1h', 'decided1to4h', 'decided4to24h', 'decidedOver24h'])
   const refundChart = data.refunds.map((r) => ({ day: dayLabel(r.date), revenue: r.amount }))
   const previousRefund = prevData?.refunds.map((r) => r.amount)
+  const previousRefundDays = prevData?.refunds.map((r) => dayLabel(r.date))
   const refundNetworkTotals = new Map<string, { count: number; amount: number }>()
   for (const row of data.refundsByNetwork) {
     const entry = refundNetworkTotals.get(row.network) ?? { count: 0, amount: 0 }
@@ -855,6 +968,7 @@ export default function Analytics() {
 
   const solvencyChart = data.solvency.map((s) => ({ day: dayLabel(s.date), revenue: s.freeToSpend }))
   const previousSolvency = prevData?.solvency.map((s) => s.freeToSpend)
+  const previousSolvencyDays = prevData?.solvency.map((s) => dayLabel(s.date))
   const floatBreachDays = data.float.filter((f) => f.level !== 'ok').length
 
   const totalNewlyBlocked = data.lostRevenue.reduce((sum, r) => sum + r.newlyBlocked, 0)
@@ -864,51 +978,67 @@ export default function Analytics() {
   const lostRevenueBuckets = bucketSums(data.lostRevenue, ['resolvedUnder1h', 'resolved1to4h', 'resolved4to24h', 'resolvedOver24h'])
   const lostRevenueChart = data.lostRevenue.map((r) => ({ day: dayLabel(r.date), revenue: r.newlyBlockedValue }))
   const previousLostRevenue = prevData?.lostRevenue.map((r) => r.newlyBlockedValue)
+  const previousLostRevenueDays = prevData?.lostRevenue.map((r) => dayLabel(r.date))
 
   // Everything below is a read of numbers already computed above, from the
   // same pipeline every other card on this page reads, not a separate
   // judgement invented for this list. The point is to say what to do about
   // them in one place, instead of making someone read all fifteen cards to
   // find the two that actually need a decision.
+  // Fix 11: this list mixes two different kinds of number, a day snapshot
+  // (as of the latest day with a reading) and a total summed across the
+  // whole selected range, with nothing here saying which is which. Every
+  // entry now names its own scope explicitly instead of reading as if it
+  // were all "right now".
   const attentionItems: { tone: 'danger' | 'warning'; text: string }[] = []
   if (latestSolvency && latestSolvency.freeToSpend < 0) {
     attentionItems.push({
       tone: 'danger',
-      text: `Free to spend is negative (${cedisCompact(latestSolvency.freeToSpend)}), more is owed than is currently available.`,
+      text: `Free to spend is negative (${cedisCompact(latestSolvency.freeToSpend)}) as of ${dayLabel(latestSolvency.date)}, more is owed than is currently available.`,
     })
   }
   if (latestFloat && latestFloat.level !== 'ok') {
     attentionItems.push({
       tone: latestFloat.level === 'risk' ? 'danger' : 'warning',
-      text: `DataHub float is at ${latestFloat.level} level (${cedisCompact(latestFloat.balance)} remaining).`,
+      text: `DataHub float is at ${latestFloat.level} level (${cedisCompact(latestFloat.balance)} remaining) as of ${dayLabel(latestFloat.date)}.`,
     })
   }
   if (latestLostRevenue && latestLostRevenue.stillBlocked > 0) {
     attentionItems.push({
       tone: latestLostRevenue.stillBlockedValue > 0 ? 'danger' : 'warning',
-      text: `${latestLostRevenue.stillBlocked} beneficiary number(s) still waiting on approval, worth ${cedisCompact(latestLostRevenue.stillBlockedValue)} in blocked sales.`,
+      text: `${latestLostRevenue.stillBlocked} beneficiary number(s) still waiting on approval as of ${dayLabel(latestLostRevenue.date)}, worth ${cedisCompact(latestLostRevenue.stillBlockedValue)} in blocked sales.`,
     })
   }
   // Fix 5: same named constants drawn as reference lines/bands below.
   for (const { network, row, successRate } of dispatchRanked) {
-    if (row.totalAttempts >= 5 && successRate < DISPATCH_SUCCESS_FLOOR) {
+    const resolved = row.totalAttempts - row.manualQueue
+    if (resolved >= 5 && successRate < DISPATCH_SUCCESS_FLOOR) {
       attentionItems.push({
         tone: 'warning',
-        text: `${network} dispatch success is only ${successRate.toFixed(0)}% (${row.successful} of ${row.totalAttempts}), worth raising with DataHub.`,
+        text: `${network} dispatch success is only ${successRate.toFixed(0)}% (${row.successful} of ${resolved} resolved) over ${range.label}, worth raising with DataHub.`,
       })
     }
   }
   if (noReplyRate > NO_REPLY_ALERT_RATE) {
-    attentionItems.push({ tone: 'warning', text: `${noReplyRate.toFixed(0)}% of DataHub attempts got no reply at all, not even a failure.` })
+    attentionItems.push({
+      tone: 'warning',
+      text: `${noReplyRate.toFixed(0)}% of DataHub attempts over ${range.label} got no reply at all, not even a failure.`,
+    })
   }
   if (abandonmentRate > ABANDONMENT_ALERT_RATE) {
-    attentionItems.push({ tone: 'warning', text: `${abandonmentRate.toFixed(0)}% of checkouts started but never paid.` })
+    attentionItems.push({ tone: 'warning', text: `${abandonmentRate.toFixed(0)}% of checkouts over ${range.label} started but never paid.` })
   }
   if (totalEscalated > 0) {
-    attentionItems.push({ tone: 'danger', text: `${totalEscalated} feedback item(s) escalated as a real bug, needs dev attention.` })
+    attentionItems.push({
+      tone: 'danger',
+      text: `${totalEscalated} feedback item(s) escalated as a real bug over ${range.label}, needs dev attention.`,
+    })
   }
   if (latestHealth && latestHealth.dormantAgents > 0) {
-    attentionItems.push({ tone: 'warning', text: `${latestHealth.dormantAgents} active agent(s) have never made a sale.` })
+    attentionItems.push({
+      tone: 'warning',
+      text: `${latestHealth.dormantAgents} active agent(s) have never made a sale, as of ${dayLabel(latestHealth.date)}.`,
+    })
   }
 
   return (
@@ -1094,17 +1224,19 @@ export default function Analytics() {
             value={latestSolvency ? cedisCompact(latestSolvency.liabilitiesTotal) : '-'}
             hint={latestSolvency ? `As of ${dayLabel(latestSolvency.date)}` : 'No reading in this range'}
           />
-          <StatTile
-            label="DataHub float"
-            value={latestFloat ? cedisCompact(latestFloat.balance) : latestSolvency?.floatBalance != null ? cedisCompact(latestSolvency.floatBalance) : '-'}
-            hint={
-              latestFloat
-                ? `${latestFloat.level === 'ok' ? 'Healthy' : latestFloat.level === 'watch' ? 'Watch' : 'At risk'} as of ${dayLabel(latestFloat.date)}, ${floatBreachDays} of ${data.float.length} day(s) breached in this range`
-                : 'No reading in this range'
-            }
-            tone={latestFloat?.level === 'risk' ? 'warning' : latestFloat?.level === 'watch' ? 'warning' : 'neutral'}
-            icon={<AlertIcon className="size-5" />}
-          />
+          <div title="The balance DataHub itself reports on our supplier account, an amount held over there to fund order fulfilment. This is DataHub's own number, not something computed from our ledger, so it can't be reconciled the way every other figure on this page can, it's read, not calculated.">
+            <StatTile
+              label="DataHub float"
+              value={latestFloat ? cedisCompact(latestFloat.balance) : latestSolvency?.floatBalance != null ? cedisCompact(latestSolvency.floatBalance) : '-'}
+              hint={
+                latestFloat
+                  ? `${latestFloat.level === 'ok' ? 'Healthy' : latestFloat.level === 'watch' ? 'Watch' : 'At risk'} as of ${dayLabel(latestFloat.date)}, ${floatBreachDays} of ${data.float.length} day(s) breached in this range`
+                  : 'No reading in this range'
+              }
+              tone={latestFloat?.level === 'risk' ? 'warning' : latestFloat?.level === 'watch' ? 'warning' : 'neutral'}
+              icon={<AlertIcon className="size-5" />}
+            />
+          </div>
         </div>
         {latestSolvency && (
           <div className="border-t border-slate-100 p-4 dark:border-slate-800 sm:p-5">
@@ -1134,7 +1266,7 @@ export default function Analytics() {
               Free to spend, by day, reconstructed as of each day's own end from ledger history, not just from whenever this feature shipped.
             </p>
             {/* Fix 1: previous-period overlay. */}
-            <LineChart data={solvencyChart} previous={previousSolvency} height={140} />
+            <LineChart data={solvencyChart} previous={previousSolvency} previousDays={previousSolvencyDays} height={140} />
           </div>
         )}
       </Card>
@@ -1163,17 +1295,20 @@ export default function Analytics() {
             tooltip="The solid line is this range; the dashed line is the comparison window named above the range picker (the previous period, or the same period last year). The gap between them is what the trend badge above is reporting."
           />
           <div className="p-4 sm:p-5">
-            <LineChart data={revenueChart} previous={previousRevenue} height={180} />
+            <LineChart data={revenueChart} previous={previousRevenue} previousDays={previousDailyDays} height={180} />
           </div>
         </Card>
         <Card>
           <CardHead
             title="Profit"
             subtitle="Revenue less supplier cost, Paystack's fee, and agent margins, completed orders only"
-            tooltip="Same solid-vs-dashed comparison as Revenue, but after supplier cost, Paystack's fee, and agent margins. Where the shaded area dips below the zero line, that day was a loss, not just low revenue."
+            tooltip="Same solid-vs-dashed comparison as Revenue, but after supplier cost, Paystack's fee, and agent margins. A dip below zero here isn't always a loss on that day's own sales: DataHub can settle a bundle's real cost days after the sale, and that late cost is logged on the day it's confirmed, not the sale day. Hover or tap any point for that day's own split between the two."
           />
           <div className="p-4 sm:p-5">
-            <LineChart data={profitChart} previous={previousProfit} height={180} />
+            <LineChart data={profitChart} previous={previousProfit} previousDays={previousDailyDays} height={180} tooltipFor={profitTooltip} />
+            <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+              Hover or tap a point to split same-day sales from an earlier sale's late settlement.
+            </p>
           </div>
         </Card>
       </div>
@@ -1190,14 +1325,25 @@ export default function Analytics() {
             tooltip={
               networkView === 'total'
                 ? "Bar height is revenue; the connected dots are profit margin %, on their own scale. A tall bar with a low dot is a network that sells a lot but keeps little of it."
-                : "The total view only shows each network's total for the whole range. This is the same money, day by day, so a network quietly losing share shows up before it shows up in the total."
+                : networkTrendMetric === 'revenue'
+                  ? "The total view only shows each network's total for the whole range. This is the same money, day by day, so a network quietly losing share shows up before it shows up in the total."
+                  : "Profit as a % of that day's revenue, day by day, per network. A falling line here with a flat or rising Revenue line means the network is still selling fine but keeping less of each sale, the exact thing the total-only view can't show."
             }
             action={
-              <Segmented<'total' | 'trend'>
-                options={[{ value: 'total', label: 'Total' }, { value: 'trend', label: 'By day' }]}
-                value={networkView}
-                onChange={setNetworkView}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                {networkView === 'trend' && (
+                  <Segmented<'revenue' | 'margin'>
+                    options={[{ value: 'revenue', label: 'Revenue' }, { value: 'margin', label: 'Margin %' }]}
+                    value={networkTrendMetric}
+                    onChange={setNetworkTrendMetric}
+                  />
+                )}
+                <Segmented<'total' | 'trend'>
+                  options={[{ value: 'total', label: 'Total' }, { value: 'trend', label: 'By day' }]}
+                  value={networkView}
+                  onChange={setNetworkView}
+                />
+              </div>
             }
           />
           <div className="p-4 sm:p-5">
@@ -1214,7 +1360,12 @@ export default function Analytics() {
             ) : networkTrend.series.length === 0 ? (
               <p className="text-sm text-slate-500 dark:text-slate-400">No data yet.</p>
             ) : (
-              <MultiLineChart days={networkTrend.days} series={networkTrend.series} height={160} />
+              <MultiLineChart
+                days={networkTrend.days}
+                series={networkTrend.series}
+                height={160}
+                valueLabel={networkTrendMetric === 'margin' ? (v) => `${v.toFixed(0)}%` : cedisCompact}
+              />
             )}
           </div>
         </Card>
@@ -1225,14 +1376,25 @@ export default function Analytics() {
             tooltip={
               categoryView === 'total'
                 ? "Same reading as the network chart: bar height is revenue, the dots are profit margin %. A tall bar with a low dot sells well but isn't very profitable."
-                : "Same reading as the network trend: each category's revenue, day by day, instead of one total for the whole range."
+                : categoryTrendMetric === 'revenue'
+                  ? "Same reading as the network trend: each category's revenue, day by day, instead of one total for the whole range."
+                  : "Profit as a % of that day's revenue, day by day, per category. A falling line here alongside flat revenue means that category is keeping less of each sale."
             }
             action={
-              <Segmented<'total' | 'trend'>
-                options={[{ value: 'total', label: 'Total' }, { value: 'trend', label: 'By day' }]}
-                value={categoryView}
-                onChange={setCategoryView}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                {categoryView === 'trend' && (
+                  <Segmented<'revenue' | 'margin'>
+                    options={[{ value: 'revenue', label: 'Revenue' }, { value: 'margin', label: 'Margin %' }]}
+                    value={categoryTrendMetric}
+                    onChange={setCategoryTrendMetric}
+                  />
+                )}
+                <Segmented<'total' | 'trend'>
+                  options={[{ value: 'total', label: 'Total' }, { value: 'trend', label: 'By day' }]}
+                  value={categoryView}
+                  onChange={setCategoryView}
+                />
+              </div>
             }
           />
           <div className="p-4 sm:p-5">
@@ -1245,7 +1407,12 @@ export default function Analytics() {
             ) : categoryTrend.series.length === 0 ? (
               <p className="text-sm text-slate-500 dark:text-slate-400">No data yet.</p>
             ) : (
-              <MultiLineChart days={categoryTrend.days} series={categoryTrend.series} height={160} />
+              <MultiLineChart
+                days={categoryTrend.days}
+                series={categoryTrend.series}
+                height={160}
+                valueLabel={categoryTrendMetric === 'margin' ? (v) => `${v.toFixed(0)}%` : cedisCompact}
+              />
             )}
           </div>
         </Card>
@@ -1255,17 +1422,28 @@ export default function Analytics() {
         <Card className="mt-3">
           <CardHead
             title={`Top products, ${selectedNetwork}`}
-            subtitle={`By revenue, ${range.label}`}
-            tooltip="Bar length is revenue for this one network's products, ranked highest first. The table alongside has the exact orders, revenue, and profit behind each bar."
+            subtitle={`By ${RANK_METRIC_LABEL[productRankMetric].toLowerCase()}, ${range.label}`}
+            tooltip="Bar length is whichever metric is selected for this one network's products, ranked highest first. A bundle can lead on orders or revenue without leading on profit (a high-volume, low-margin bundle) or the reverse, the table alongside always has all three."
             action={
-              <button
-                type="button"
-                onClick={() => setSelectedNetwork(null)}
-                aria-label="Close"
-                className="relative -mr-1 rounded-lg p-1.5 text-slate-500 before:absolute before:-inset-1.5 before:content-[''] hover:bg-slate-100 hover:text-slate-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-300"
-              >
-                <XIcon className="size-5" />
-              </button>
+              <div className="flex items-center gap-2">
+                <Segmented<'orders' | 'revenue' | 'profit'>
+                  options={[
+                    { value: 'orders', label: 'Orders' },
+                    { value: 'revenue', label: 'Revenue' },
+                    { value: 'profit', label: 'Profit' },
+                  ]}
+                  value={productRankMetric}
+                  onChange={setProductRankMetric}
+                />
+                <button
+                  type="button"
+                  onClick={() => setSelectedNetwork(null)}
+                  aria-label="Close"
+                  className="relative -mr-1 rounded-lg p-1.5 text-slate-500 before:absolute before:-inset-1.5 before:content-[''] hover:bg-slate-100 hover:text-slate-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-300"
+                >
+                  <XIcon className="size-5" />
+                </button>
+              </div>
             }
           />
           <div className="grid gap-0 sm:grid-cols-2">
@@ -1273,7 +1451,10 @@ export default function Analytics() {
               {topProductsForNetwork.length === 0 ? (
                 <p className="text-sm text-slate-500 dark:text-slate-400">No paid orders for this network in this range.</p>
               ) : (
-                <RankedBarChart rows={topProductsForNetwork.map((p) => ({ label: p.productName, value: p.revenue }))} valueLabel={cedisCompact} />
+                <RankedBarChart
+                  rows={topProductsForNetwork.map((p) => ({ label: p.productName, value: productMetricValue(p, productRankMetric) }))}
+                  valueLabel={rankValueLabel(productRankMetric)}
+                />
               )}
             </div>
             <div className="overflow-x-auto">
@@ -1281,9 +1462,15 @@ export default function Analytics() {
                 <thead className="border-b border-slate-200 text-left text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
                   <tr>
                     <th className="px-4 py-2 sm:px-5">Product</th>
-                    <th className="px-4 py-2 text-right sm:px-5">Orders</th>
-                    <th className="px-4 py-2 text-right sm:px-5">Revenue</th>
-                    <th className="px-4 py-2 text-right sm:px-5">Profit</th>
+                    <th className={cn('px-4 py-2 text-right sm:px-5', productRankMetric === 'orders' && 'font-bold text-slate-700 dark:text-slate-200')}>
+                      Orders
+                    </th>
+                    <th className={cn('px-4 py-2 text-right sm:px-5', productRankMetric === 'revenue' && 'font-bold text-slate-700 dark:text-slate-200')}>
+                      Revenue
+                    </th>
+                    <th className={cn('px-4 py-2 text-right sm:px-5', productRankMetric === 'profit' && 'font-bold text-slate-700 dark:text-slate-200')}>
+                      Profit
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1396,7 +1583,7 @@ export default function Analytics() {
         <CardHead
           title="DataHub reliability"
           subtitle="How often the delivery partner actually answers, by network"
-          tooltip="Bar length is each network's delivery success rate; the vertical line marks the 85% floor that triggers a 'Needs attention' flag. The table has the exact counts behind each bar."
+          tooltip="Bar length is each network's delivery success rate among attempts DataHub has actually decided on; the vertical line marks the 85% floor that triggers a 'Needs attention' flag. A manual-queue attempt is still pending, not failed, so it's left out of the rate until DataHub resolves it. The table has the exact counts behind each bar."
         />
         {/* Fix 4 (ranked bar, beside the table) + Fix 5 (the same
             DISPATCH_SUCCESS_FLOOR line drawn here as `threshold`, not just
@@ -1438,7 +1625,7 @@ export default function Analytics() {
                     <tr key={network}>
                       <td className="px-4 py-2.5 font-medium text-slate-900 dark:text-slate-50 sm:px-5">{network}</td>
                       <td className="tabular px-4 py-2.5 text-right sm:px-5">
-                        {row.totalAttempts >= 5 && successRate < DISPATCH_SUCCESS_FLOOR ? (
+                        {row.totalAttempts - row.manualQueue >= 5 && successRate < DISPATCH_SUCCESS_FLOOR ? (
                           <Badge tone="warning">{successRate.toFixed(0)}%</Badge>
                         ) : (
                           `${successRate.toFixed(0)}%`
@@ -1463,6 +1650,7 @@ export default function Analytics() {
             <LineChart
               data={noReplyTrend}
               previous={previousNoReplyRateSeries}
+              previousDays={previousNoReplyDays}
               height={100}
               valueLabel={(v) => `${v.toFixed(0)}%`}
               label="No-reply rate"
@@ -1488,6 +1676,7 @@ export default function Analytics() {
               <LineChart
                 data={abandonmentRateChart}
                 previous={previousAbandonmentRateChart}
+                previousDays={previousAbandonmentDays}
                 height={100}
                 valueLabel={(v) => `${v.toFixed(0)}%`}
                 label="Abandonment rate"
@@ -1518,18 +1707,29 @@ export default function Analytics() {
       <Card className="mt-3 lg:mt-0">
         <CardHead
           title="Top agents"
-          subtitle={`By revenue, ${range.label}`}
+          subtitle={`By ${RANK_METRIC_LABEL[agentRankMetric].toLowerCase()}, ${range.label}`}
           tooltip={
             agentsView === 'total'
-              ? "Bar length is revenue, ranked highest first. The table alongside has the exact orders, revenue, and margin behind each bar."
-              : "The totals view is one number for the whole range. This is the top 5 of that same leaderboard, day by day, so a slide by any one of them shows up before the range total quietly absorbs it."
+              ? "Bar length is whichever metric is selected, ranked highest first. An agent can lead on orders or revenue without leading on margin earned (many small-margin sales) or the reverse, the table alongside always has all three."
+              : "The totals view is one number for the whole range. This is the top 5 of that same leaderboard by the selected metric, day by day, so a slide by any one of them shows up before the range total quietly absorbs it."
           }
           action={
-            <Segmented<'total' | 'trend'>
-              options={[{ value: 'total', label: 'Total' }, { value: 'trend', label: 'By day' }]}
-              value={agentsView}
-              onChange={setAgentsView}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented<'orders' | 'revenue' | 'profit'>
+                options={[
+                  { value: 'orders', label: 'Orders' },
+                  { value: 'revenue', label: 'Revenue' },
+                  { value: 'profit', label: 'Margin' },
+                ]}
+                value={agentRankMetric}
+                onChange={setAgentRankMetric}
+              />
+              <Segmented<'total' | 'trend'>
+                options={[{ value: 'total', label: 'Total' }, { value: 'trend', label: 'By day' }]}
+                value={agentsView}
+                onChange={setAgentsView}
+              />
+            </div>
           }
         />
         {agentsView === 'total' ? (
@@ -1539,7 +1739,10 @@ export default function Analytics() {
               {leaderboard.length === 0 ? (
                 <p className="text-sm text-slate-500 dark:text-slate-400">No sales through an agent in this range.</p>
               ) : (
-                <RankedBarChart rows={leaderboard.map((a) => ({ label: a.name, value: a.revenue }))} valueLabel={cedisCompact} />
+                <RankedBarChart
+                  rows={leaderboard.map((a) => ({ label: a.name, value: agentMetricValue(a, agentRankMetric) }))}
+                  valueLabel={rankValueLabel(agentRankMetric)}
+                />
               )}
             </div>
             <div className="overflow-x-auto">
@@ -1547,9 +1750,15 @@ export default function Analytics() {
                 <thead className="border-b border-slate-200 text-left text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
                   <tr>
                     <th className="px-4 py-2 sm:px-5">Agent</th>
-                    <th className="px-4 py-2 text-right sm:px-5">Orders</th>
-                    <th className="px-4 py-2 text-right sm:px-5">Revenue</th>
-                    <th className="px-4 py-2 text-right sm:px-5">Margin earned</th>
+                    <th className={cn('px-4 py-2 text-right sm:px-5', agentRankMetric === 'orders' && 'font-bold text-slate-700 dark:text-slate-200')}>
+                      Orders
+                    </th>
+                    <th className={cn('px-4 py-2 text-right sm:px-5', agentRankMetric === 'revenue' && 'font-bold text-slate-700 dark:text-slate-200')}>
+                      Revenue
+                    </th>
+                    <th className={cn('px-4 py-2 text-right sm:px-5', agentRankMetric === 'profit' && 'font-bold text-slate-700 dark:text-slate-200')}>
+                      Margin earned
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1578,7 +1787,7 @@ export default function Analytics() {
             {agentTrend.series.length === 0 ? (
               <p className="text-sm text-slate-500 dark:text-slate-400">No sales through an agent in this range.</p>
             ) : (
-              <MultiLineChart days={agentTrend.days} series={agentTrend.series} height={160} />
+              <MultiLineChart days={agentTrend.days} series={agentTrend.series} height={160} valueLabel={rankValueLabel(agentRankMetric)} />
             )}
           </div>
         )}
@@ -1612,11 +1821,11 @@ export default function Analytics() {
         <div className="grid gap-4 border-t border-slate-100 p-4 dark:border-slate-800 sm:grid-cols-2 sm:p-5">
           <div>
             <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">Requested, by day</p>
-            <LineChart data={requestedChart} previous={previousRequested} height={100} />
+            <LineChart data={requestedChart} previous={previousRequested} previousDays={previousPayoutDays} height={100} />
           </div>
           <div>
             <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">Actually paid, by day</p>
-            <LineChart data={paidChart} previous={previousPaid} height={100} />
+            <LineChart data={paidChart} previous={previousPaid} previousDays={previousPayoutDays} height={100} />
           </div>
         </div>
       </Card>
@@ -1644,7 +1853,7 @@ export default function Analytics() {
         {totalRefundCount > 0 && (
           <div className="border-t border-slate-100 p-4 dark:border-slate-800 sm:p-5">
             <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">Refunded amount, by day</p>
-            <LineChart data={refundChart} previous={previousRefund} height={100} />
+            <LineChart data={refundChart} previous={previousRefund} previousDays={previousRefundDays} height={100} />
           </div>
         )}
         <div className="grid gap-0 border-t border-slate-100 dark:border-slate-800 sm:grid-cols-2">
@@ -1754,7 +1963,7 @@ export default function Analytics() {
         {lostRevenueChart.some((p) => p.revenue > 0) && (
           <div className="border-t border-slate-100 p-4 dark:border-slate-800 sm:p-5">
             <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">Newly blocked sales value, by day</p>
-            <LineChart data={lostRevenueChart} previous={previousLostRevenue} height={100} />
+            <LineChart data={lostRevenueChart} previous={previousLostRevenue} previousDays={previousLostRevenueDays} height={100} />
           </div>
         )}
       </Card>
@@ -1766,26 +1975,40 @@ export default function Analytics() {
         <Card>
           <CardHead
             title="Agent network health"
-            subtitle="Latest snapshot"
-            tooltip="A live read of the agent roster as it stands today, not something that can be recomputed for a past day the way the trend charts elsewhere on this page are."
+            subtitle={latestHealth ? `Roster snapshot as of ${dayLabel(latestHealth.date)}` : 'No reading in this range'}
+            tooltip="A roster snapshot as of the latest day in the selected range with a reading, not something that can be recomputed for an older day the way the trend charts elsewhere on this page are. 'New signups' is the one exception here, that's a real total summed across the whole range, not a snapshot, which is why it's labelled separately below."
           />
           <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 sm:p-5">
-            <StatTile label="Total agents" value={String(latestHealth?.totalAgents ?? 0)} />
-            <StatTile label="Active" value={String(latestHealth?.activeAgents ?? 0)} tone="success" />
+            <StatTile
+              label="Total agents"
+              value={String(latestHealth?.totalAgents ?? 0)}
+              hint={latestHealth ? `As of ${dayLabel(latestHealth.date)}` : undefined}
+            />
+            <StatTile
+              label="Active"
+              value={String(latestHealth?.activeAgents ?? 0)}
+              hint={latestHealth ? `As of ${dayLabel(latestHealth.date)}` : undefined}
+              tone="success"
+            />
             <StatTile
               label="Never sold anything"
               value={String(latestHealth?.dormantAgents ?? 0)}
+              hint={latestHealth ? `As of ${dayLabel(latestHealth.date)}` : undefined}
               tone={latestHealth && latestHealth.dormantAgents > 0 ? 'warning' : 'neutral'}
             />
-            <StatTile label="Awaiting approval" value={String(latestHealth?.pendingApplications ?? 0)} />
-            <StatTile label="New signups" value={String(totalNewSignups)} hint={range.label} tone="brand" />
+            <StatTile
+              label="Awaiting approval"
+              value={String(latestHealth?.pendingApplications ?? 0)}
+              hint={latestHealth ? `As of ${dayLabel(latestHealth.date)}` : undefined}
+            />
+            <StatTile label="New signups" value={String(totalNewSignups)} hint={`Total over ${range.label}`} tone="brand" />
           </div>
         </Card>
         <Card>
           <CardHead
             title="Referral tree depth"
-            subtitle="How deep the downline actually goes, latest snapshot"
-            tooltip="Each row is one level of the referral tree; bar length is how many agents sit at that depth. A long tail of thin bars past depth 2 to 3 usually means referrals aren't compounding."
+            subtitle="How many agent-to-agent hops deep the network goes, latest snapshot"
+            tooltip="Depth 0 is an agent recruited directly, their own upline isn't another agent. Depth 1 is an agent recruited by a depth-0 agent, depth 2 by a depth-1 agent, and so on: each depth is one more agent-to-agent hop. Bar length is how many agents sit at that depth. Real bars past depth 2-3 mean agents are recruiting agents who go on to recruit their own, not just direct signups piling up at depth 0."
           />
           <div className="space-y-2 p-4 sm:p-5">
             {latestDownline.length === 0 ? (
@@ -1912,12 +2135,64 @@ export default function Analytics() {
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <Card>
           <CardHead
-            title="Order volume by hour of day"
-            subtitle={`${range.label}, when float and staffing actually matter`}
-            tooltip="Bar height is total orders in that hour, summed across every day in the range, so a tall bar means that hour is consistently busy, not busy just once."
+            title={hourlyView === 'typical' ? 'Order volume by hour of day' : `${hourlyMetric === 'revenue' ? 'Revenue' : 'Profit'} by hour, one day`}
+            subtitle={
+              hourlyView === 'typical'
+                ? `${range.label}, when float and staffing actually matter`
+                : effectiveHourlyDate
+                  ? dayLabel(effectiveHourlyDate)
+                  : 'No day with data in this range'
+            }
+            tooltip={
+              hourlyView === 'typical'
+                ? 'Bar height is total orders in that hour, summed across every day in the range, so a tall bar means that hour is consistently busy, not busy just once.'
+                : hourlyMetric === 'revenue'
+                  ? "Every hour is stored, not just the day total, this reads one specific date's own 24 hours rather than an average across the whole range."
+                  : "Same per-hour detail, but profit: useful for checking whether a day that logged a loss was one specific bad hour, or a late supplier-cost settlement landing in a single hour rather than spread across the day."
+            }
+            action={
+              <div className="flex flex-wrap items-center gap-2">
+                {hourlyView === 'oneDay' && hourlyDates.length > 0 && (
+                  <>
+                    <select
+                      aria-label="Which day"
+                      value={effectiveHourlyDate ?? ''}
+                      onChange={(e) => setSelectedHourlyDate(Number(e.target.value))}
+                      className="h-9 rounded-lg border border-slate-300 bg-white px-2 text-sm dark:border-slate-600 dark:bg-slate-900"
+                    >
+                      {hourlyDates.map((d) => (
+                        <option key={d} value={d}>
+                          {dayLabel(d)}
+                        </option>
+                      ))}
+                    </select>
+                    <Segmented<'revenue' | 'profit'>
+                      options={[{ value: 'revenue', label: 'Revenue' }, { value: 'profit', label: 'Profit' }]}
+                      value={hourlyMetric}
+                      onChange={setHourlyMetric}
+                    />
+                  </>
+                )}
+                <Segmented<'typical' | 'oneDay'>
+                  options={[{ value: 'typical', label: 'Typical hours' }, { value: 'oneDay', label: 'One day' }]}
+                  value={hourlyView}
+                  onChange={setHourlyView}
+                />
+              </div>
+            }
           />
           <div className="p-4 sm:p-5">
-            <BarChart data={hourlyChart} height={160} valueLabel={(v) => String(v)} label="Orders by hour" />
+            {hourlyView === 'typical' ? (
+              <BarChart data={hourlyChart} height={160} valueLabel={(v) => String(v)} label="Orders by hour" />
+            ) : (
+              <BarChart
+                data={oneDayHourlyChart}
+                height={160}
+                valueLabel={cedisCompact}
+                label={hourlyMetric === 'revenue' ? 'Revenue by hour' : 'Profit by hour'}
+                tooltipFor={oneDayHourlyTooltip}
+              />
+            )}
           </div>
         </Card>
         <Card>
@@ -1928,6 +2203,9 @@ export default function Analytics() {
           />
           {latestMargin && (
             <div className="grid grid-cols-2 gap-3 border-b border-slate-100 p-4 dark:border-slate-800 sm:p-5">
+              <div className="col-span-2 -mb-1 text-xs text-slate-400 dark:text-slate-500">
+                As of {dayLabel(latestMargin.date)}, the latest day in range with a completed order
+              </div>
               <div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Avg. sale price</p>
                 <p className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">{cedis(latestMargin.avgSalePrice)}</p>
@@ -1940,7 +2218,14 @@ export default function Analytics() {
           )}
           <div className="p-4 sm:p-5">
             {/* Fix 1: previous-period overlay. */}
-            <LineChart data={marginChart} previous={previousMargin} height={160} valueLabel={(v) => `${v.toFixed(1)}%`} label="Average margin" />
+            <LineChart
+              data={marginChart}
+              previous={previousMargin}
+              previousDays={previousMarginDays}
+              height={160}
+              valueLabel={(v) => `${v.toFixed(1)}%`}
+              label="Average margin"
+            />
           </div>
         </Card>
       </div>

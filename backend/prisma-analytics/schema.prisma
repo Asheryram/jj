@@ -363,6 +363,8 @@ model SilverLedgerFact {
   productId     String? @map("product_id")
   productName   String? @map("product_name")
   agentId       String? @map("agent_id")
+  /// 0-23, UTC, the same clock `SilverOrderFact.hour` uses.
+  hour          Int
 
   @@index([dateKey])
   @@map("silver_ledger_facts")
@@ -410,6 +412,20 @@ model DailySummary {
   refundsAmount Int @default(0) @map("refunds_amount")
   /// revenue - supplierCost - paystackFees - agentMargins, completed orders only.
   profit        Int @default(0)
+
+  /// The slice of `profit` from orders both sold AND cost-settled this same
+  /// day. DataHub doesn't always confirm a bundle's real charge instantly,
+  /// see `carryoverAdjustment`'s own comment for what the rest of `profit` is.
+  sameDayProfit Int @default(0) @map("same_day_profit")
+  /// The rest of `profit`: supplier-cost/margin/fee entries logged today
+  /// whose matching sale (`revenue`) was recognised on an earlier day, DataHub
+  /// settling a bundle's real charge after the sale itself. A day heavy with
+  /// these can read as a loss even though the sales behind them were fine,
+  /// their profit is just sitting on the day they were actually sold, not
+  /// today. Negative here means "catching up on earlier sales", not "today
+  /// lost money"; see the equivalent split with a live example on why this
+  /// column exists at all in `EtlService.computeDailySummary`'s own comment.
+  carryoverAdjustment Int @default(0) @map("carryover_adjustment")
 
   computedAt DateTime @default(now()) @map("computed_at")
 
@@ -569,14 +585,29 @@ model DailyDownlineDepth {
   @@map("daily_downline_depth")
 }
 
-/// Order volume by hour of day, the one rollup at a finer grain than a day:
-/// a daily total cannot show whether sales cluster at lunchtime or at night.
+/// `DailySummary`'s own fields, at a finer grain: a day total can't show
+/// whether a loss-looking day was actually bad, or one bad hour (or a
+/// carryover settlement) inside an otherwise fine one. Same day-scoped
+/// checkpointing as everything else, computed once as part of that day's
+/// own run, never polled hourly, see `EtlService`'s own doc comment.
 model HourlyOrderVolume {
   date Int @map("date")
-  hour Int /// 0-23, local time.
+  hour Int /// 0-23, UTC, which is also Ghana local time year-round.
 
-  ordersCount Int @default(0) @map("orders_count")
-  revenue     Int @default(0)
+  ordersCount    Int @default(0) @map("orders_count")
+  completedCount Int @default(0) @map("completed_count")
+  failedCount    Int @default(0) @map("failed_count")
+
+  revenue       Int @default(0)
+  supplierCost  Int @default(0) @map("supplier_cost")
+  paystackFees  Int @default(0) @map("paystack_fees")
+  agentMargins  Int @default(0) @map("agent_margins")
+  refundsAmount Int @default(0) @map("refunds_amount")
+  profit        Int @default(0)
+  /// Same split as `DailySummary.sameDayProfit`/`carryoverAdjustment`, applied
+  /// per hour instead of per day.
+  sameDayProfit       Int @default(0) @map("same_day_profit")
+  carryoverAdjustment Int @default(0) @map("carryover_adjustment")
 
   computedAt DateTime @default(now()) @map("computed_at")
 

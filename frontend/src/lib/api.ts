@@ -930,6 +930,15 @@ export interface AnalyticsDailySummary {
   agentMargins: number
   refundsAmount: number
   profit: number
+  /** The slice of `profit` from orders both sold and cost-settled this same day. */
+  sameDayProfit: number
+  /**
+   * The rest of `profit`: cost/margin/fee entries logged today for a sale
+   * recognised on an earlier day, DataHub settling a bundle's real charge
+   * after the sale itself. Negative here means "catching up on an earlier
+   * sale", not "today lost money".
+   */
+  carryoverAdjustment: number
 }
 
 export interface AnalyticsNetworkSummary {
@@ -1008,7 +1017,16 @@ export interface AnalyticsHourlyVolume {
   date: number
   hour: number
   ordersCount: number
+  completedCount: number
+  failedCount: number
   revenue: number
+  supplierCost: number
+  paystackFees: number
+  agentMargins: number
+  refundsAmount: number
+  profit: number
+  sameDayProfit: number
+  carryoverAdjustment: number
 }
 
 export interface AnalyticsCheckoutFunnel {

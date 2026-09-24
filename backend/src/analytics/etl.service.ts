@@ -826,6 +826,9 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
         productId: order?.productId ?? (order ? 'UNKNOWN' : null),
         productName: order?.productName ?? (order ? 'UNKNOWN' : null),
         agentId,
+        // UTC, the same clock `SilverOrderFact.hour` already uses, so an
+        // hourly Gold rollup can join the two without a timezone mismatch.
+        hour: e.occurredAt.getUTCHours(),
       }
       await this.warehouse.silverLedgerFact.upsert({
         where: { entryId: e.id },
@@ -1177,6 +1180,13 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     })
     const ledger = await this.warehouse.silverLedgerFact.findMany({ where: { dateKey: dateInt } })
     const byKind = this.sumLedgerByKind(ledger)
+    const profit = ledger.filter((e) => e.affectsProfit).reduce((sum, e) => sum + e.amount, 0)
+
+    const orderRefs = [
+      ...new Set(ledger.filter((e) => e.affectsProfit && e.kind !== 'revenue' && e.orderRef).map((e) => e.orderRef as string)),
+    ]
+    const saleDates = await this.saleDateByOrderRef(orderRefs)
+    const carryoverAdjustment = this.carryoverAdjustmentFor(ledger, dateInt, saleDates)
 
     const row = {
       ordersCount: orders.length,
@@ -1187,7 +1197,9 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       paystackFees: -(byKind.get('payment_fee') ?? 0),
       agentMargins: -(byKind.get('agent_margin') ?? 0),
       refundsAmount: -(byKind.get('refund') ?? 0),
-      profit: ledger.filter((e) => e.affectsProfit).reduce((sum, e) => sum + e.amount, 0),
+      profit,
+      sameDayProfit: profit - carryoverAdjustment,
+      carryoverAdjustment,
     }
     await this.warehouse.dailySummary.upsert({
       where: { date: dateInt },
@@ -1475,24 +1487,122 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
+  /**
+   * `DailySummary`'s own fields, at the finer (date, hour) grain, so a day
+   * that reads as a loss can be checked: one bad hour, or spread evenly, or
+   * (per `carryoverAdjustment`'s own comment) not really that day's own
+   * sales at all. Same source split as `computeDailySummary`: order counts
+   * from `SilverOrderFact` (`isPaid` scoped, matching that table's existing
+   * meaning), every money figure from `SilverLedgerFact`, never
+   * `salePrice`, for the same "the ledger is the settled truth" reason
+   * `computeDailySummary`'s own comment already gives.
+   */
   private async computeHourlyVolume(dateInt: number): Promise<void> {
     const orders = await this.warehouse.silverOrderFact.findMany({ where: { dateKey: dateInt, isPaid: true } })
+    const ledger = await this.warehouse.silverLedgerFact.findMany({ where: { dateKey: dateInt } })
+    const orderRefs = [
+      ...new Set(ledger.filter((e) => e.affectsProfit && e.kind !== 'revenue' && e.orderRef).map((e) => e.orderRef as string)),
+    ]
+    const saleDates = await this.saleDateByOrderRef(orderRefs)
 
-    const byHour = new Map<number, { ordersCount: number; revenue: number }>()
+    interface HourRow {
+      ordersCount: number
+      completedCount: number
+      failedCount: number
+      revenue: number
+      supplierCost: number
+      paystackFees: number
+      agentMargins: number
+      refundsAmount: number
+    }
+    const emptyHourRow = (): HourRow => ({
+      ordersCount: 0,
+      completedCount: 0,
+      failedCount: 0,
+      revenue: 0,
+      supplierCost: 0,
+      paystackFees: 0,
+      agentMargins: 0,
+      refundsAmount: 0,
+    })
+
+    const byHour = new Map<number, HourRow>()
     for (const o of orders) {
-      const row = byHour.get(o.hour) ?? { ordersCount: 0, revenue: 0 }
+      const row = byHour.get(o.hour) ?? emptyHourRow()
       row.ordersCount++
-      row.revenue += o.salePrice
+      if (o.status === 'completed') row.completedCount++
+      if (o.status === 'failed') row.failedCount++
       byHour.set(o.hour, row)
     }
 
+    const ledgerByHour = new Map<number, typeof ledger>()
+    for (const e of ledger) {
+      const list = ledgerByHour.get(e.hour) ?? []
+      list.push(e)
+      ledgerByHour.set(e.hour, list)
+    }
+
+    for (const [hour, entries] of ledgerByHour) {
+      const row = byHour.get(hour) ?? emptyHourRow()
+      const byKind = this.sumLedgerByKind(entries)
+      row.revenue = byKind.get('revenue') ?? 0
+      row.supplierCost = -(byKind.get('supplier_cost') ?? 0)
+      row.paystackFees = -(byKind.get('payment_fee') ?? 0)
+      row.agentMargins = -(byKind.get('agent_margin') ?? 0)
+      row.refundsAmount = -(byKind.get('refund') ?? 0)
+      byHour.set(hour, row)
+    }
+
     for (const [hour, row] of byHour) {
+      const entries = ledgerByHour.get(hour) ?? []
+      const profit = entries.filter((e) => e.affectsProfit).reduce((sum, e) => sum + e.amount, 0)
+      const carryoverAdjustment = this.carryoverAdjustmentFor(entries, dateInt, saleDates)
+      const data = { ...row, profit, sameDayProfit: profit - carryoverAdjustment, carryoverAdjustment }
       await this.warehouse.hourlyOrderVolume.upsert({
         where: { date_hour: { date: dateInt, hour } },
-        create: { date: dateInt, hour, ...row },
-        update: row,
+        create: { date: dateInt, hour, ...data },
+        update: data,
       })
     }
+  }
+
+  /**
+   * The true sale-day for each `orderRef`, read from the primary `LedgerEntry`
+   * table (never pruned), not `SilverLedgerFact` (pruned once its own day
+   * finalizes, see `pruneRawHistory`). A late-settling cost can point back to
+   * a sale from any earlier day, long since pruned from the warehouse, so
+   * this has to go to the one place that still remembers.
+   */
+  private async saleDateByOrderRef(orderRefs: string[]): Promise<Map<string, number>> {
+    if (orderRefs.length === 0) return new Map()
+    const revenueEntries = await this.prisma.ledgerEntry.findMany({
+      where: { kind: 'revenue', orderRef: { in: orderRefs } },
+      select: { orderRef: true, occurredAt: true },
+    })
+    return new Map(revenueEntries.map((r) => [r.orderRef as string, toDateInt(r.occurredAt)]))
+  }
+
+  /**
+   * Splits a set of profit-affecting ledger entries into "this day's own
+   * sales" vs "catching up on a sale from an earlier day", see
+   * `DailySummary.carryoverAdjustment`'s own comment for what that means and
+   * why it exists. Returns the carryover half; `profit - carryover` is the
+   * same-day half.
+   */
+  private carryoverAdjustmentFor(
+    entries: { kind: string; amount: number; affectsProfit: boolean; orderRef: string | null }[],
+    dateInt: number,
+    saleDateByOrderRef: Map<string, number>,
+  ): number {
+    let carryover = 0
+    for (const e of entries) {
+      if (!e.affectsProfit || e.kind === 'revenue' || !e.orderRef) continue
+      // No revenue row found at all reads the same as a different day: an
+      // order's revenue always exists by the time its cost settles, so a
+      // miss here is the same "not this day's own sale" signal.
+      if (saleDateByOrderRef.get(e.orderRef) !== dateInt) carryover += e.amount
+    }
+    return carryover
   }
 
   private async computeCheckoutFunnel(dateInt: number): Promise<void> {
