@@ -1092,6 +1092,39 @@ export class AdminService {
       .slice(0, 20)
   }
 
+  /**
+   * Completed revenue by calendar day within the range, same scope as
+   * `myReport`. Every day in the range appears, including a zero, so
+   * `Reports.tsx`'s trend chart shows an honest quiet stretch rather than
+   * compressing it away. `Reports.tsx` used to fetch a separate, always
+   * "last 7 days" endpoint here regardless of whatever range its own picker
+   * was set to, this replaces that mismatch.
+   */
+  async myDailyRevenue(user: { id: string; role: Role; referralCode: string; phone: string }, since: Date, until: Date) {
+    const scope =
+      user.role === 'agent'
+        ? { soldByCode: { in: await this.downlineCodes(user.referralCode) } }
+        : { OR: [{ buyerUserId: user.id }, { buyerPhone: user.phone }] }
+
+    const orders = await this.prisma.order.findMany({
+      where: { ...scope, createdAt: { gte: since, lte: until }, status: 'completed' },
+      select: { createdAt: true, salePrice: true },
+    })
+
+    const byDay = new Map<string, number>()
+    for (const o of orders) {
+      const key = o.createdAt.toISOString().slice(0, 10)
+      byDay.set(key, (byDay.get(key) ?? 0) + o.salePrice)
+    }
+
+    const days: { date: string; revenue: number }[] = []
+    for (const d = new Date(since); d <= until; d.setUTCDate(d.getUTCDate() + 1)) {
+      const key = d.toISOString().slice(0, 10)
+      days.push({ date: key, revenue: byDay.get(key) ?? 0 })
+    }
+    return days
+  }
+
   /** The agent's own code plus every code beneath it. Mirrors OrdersService. */
   private async downlineCodes(rootCode: string): Promise<string[]> {
     const codes = new Set<string>([rootCode])

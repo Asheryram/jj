@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../../state/store'
 import { api, type MyReportSummary, type TopCustomer } from '../../lib/api'
-import { cedis } from '../../lib/format'
+import { cedis, shortDate } from '../../lib/format'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
-import { BarChart, Donut } from '../../components/charts'
+import { Donut, LineChart } from '../../components/charts'
 import { Button, Card, CardHead, EmptyState, PageHead, StatTile, TableWrap, Td, Th } from '../../components/ui'
 import { DateRangePicker, type PresetKey } from '../../components/DateRangePicker'
-import { CashIcon, DownloadIcon, ReceiptIcon, TrendUpIcon, UsersIcon } from '../../components/icons'
+import { CashIcon, ChevronDownIcon, ChevronRightIcon, DownloadIcon, ReceiptIcon, TrendUpIcon, UsersIcon } from '../../components/icons'
 
 function toDateInt(date: Date): number {
   return date.getUTCFullYear() * 10_000 + (date.getUTCMonth() + 1) * 100 + date.getUTCDate()
@@ -70,11 +70,16 @@ function buildRange(mode: RangeMode, recentDays: number, customRange: { from: nu
 
 /** FR-8.2, an agent's own sales summary for a chosen date range, same range picker as `Analytics.tsx`. */
 export default function Reports() {
-  const { orders, session, myShareOf, agentEarningsByDay } = useStore()
+  const { orders, session, myShareOf } = useStore()
   const isAgent = session?.role === 'agent'
   const [mode, setMode] = useState<RangeMode>('recent')
   const [recentDays, setRecentDays] = useState(7)
   const [customRange, setCustomRange] = useState<{ from: number; to: number } | null>(null)
+
+  // Daily sales and top customers are behind this, not shown by default: the
+  // stat tiles, the category split and this toggle are the whole "how am I
+  // doing" glance, the rest is detail worth one click, not six more scrolls.
+  const [showDetail, setShowDetail] = useState(false)
 
   const range = useMemo(() => buildRange(mode, recentDays, customRange), [mode, recentDays, customRange])
   const handlePreset = (preset: PresetKey) => {
@@ -129,6 +134,21 @@ export default function Reports() {
       live = false
     }
   }, [isAgent, windowFrom, windowTo])
+
+  // Revenue by day, for the actual selected range, not a fixed last-7-days
+  // fetched independently of whatever the range picker above is set to.
+  const [dailyRevenue, setDailyRevenue] = useState<{ date: string; revenue: number }[]>([])
+  useEffect(() => {
+    let live = true
+    api
+      .myDailyRevenue(windowFrom, windowTo)
+      .then((result) => live && setDailyRevenue(result))
+      .catch(() => live && setDailyRevenue([]))
+    return () => {
+      live = false
+    }
+  }, [windowFrom, windowTo])
+  const dailyRevenueChart = dailyRevenue.map((d) => ({ day: shortDate(d.date), revenue: d.revenue }))
 
   // NFR-2.5, this report covers only the signed-in user's own book.
   const mine = useMemo(() => {
@@ -237,13 +257,6 @@ export default function Reports() {
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-5">
-        <Card className="lg:col-span-3">
-          <CardHead title="Daily sales" subtitle="Last 7 days" />
-          <div className="p-4 sm:p-5">
-            <BarChart data={agentEarningsByDay} />
-          </div>
-        </Card>
-
         <Card className="lg:col-span-2">
           <CardHead title="What sells" subtitle="Share of revenue by category" />
           <div className="p-4 sm:p-5">
@@ -255,75 +268,96 @@ export default function Reports() {
             />
           </div>
         </Card>
+
+        <Card className="lg:col-span-3">
+          <CardHead title="Breakdown by category" />
+          <TableWrap caption="Revenue breakdown by category">
+            <thead>
+              <tr>
+                <Th>Category</Th>
+                <Th align="right">Orders</Th>
+                <Th align="right">Revenue</Th>
+                <Th align="right">Share</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {byCategory.map((row) => (
+                <tr key={row.label} className="hover:bg-slate-50 dark:hover:bg-slate-800">
+                  <Td className="font-medium text-slate-900 dark:text-slate-50">{row.label}</Td>
+                  <Td align="right" className="tabular">
+                    {row.orders}
+                  </Td>
+                  <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
+                    {cedis(row.value)}
+                  </Td>
+                  <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
+                    {revenue > 0 ? Math.round((row.value / revenue) * 100) : 0}%
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </TableWrap>
+        </Card>
       </div>
 
-      <Card className="mt-3">
-        <CardHead title="Breakdown by category" />
-        <TableWrap caption="Revenue breakdown by category">
-          <thead>
-            <tr>
-              <Th>Category</Th>
-              <Th align="right">Orders</Th>
-              <Th align="right">Revenue</Th>
-              <Th align="right">Share</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {byCategory.map((row) => (
-              <tr key={row.label} className="hover:bg-slate-50 dark:hover:bg-slate-800">
-                <Td className="font-medium text-slate-900 dark:text-slate-50">{row.label}</Td>
-                <Td align="right" className="tabular">
-                  {row.orders}
-                </Td>
-                <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                  {cedis(row.value)}
-                </Td>
-                <Td align="right" className="tabular text-slate-500 dark:text-slate-400">
-                  {revenue > 0 ? Math.round((row.value / revenue) * 100) : 0}%
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </TableWrap>
-      </Card>
+      <button
+        type="button"
+        onClick={() => setShowDetail((v) => !v)}
+        aria-expanded={showDetail}
+        className="mt-3 flex w-full items-center justify-between rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+      >
+        {isAgent ? 'Daily sales and top customers' : 'Daily spending'}
+        {showDetail ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}
+      </button>
 
-      {isAgent && (
-        <Card className="mt-3">
-          <CardHead title="Top customers" subtitle="Ranked by completed spend in this range" />
-          {topCustomers.length === 0 ? (
-            <EmptyState
-              icon={<UsersIcon className="size-6" />}
-              title="No completed sales in this range yet"
-              detail="Top customers will show up here once orders complete."
-            />
-          ) : (
-            <TableWrap caption="Top customers by spend">
-              <thead>
-                <tr>
-                  <Th>Customer</Th>
-                  <Th align="right">Orders</Th>
-                  <Th align="right">Spent</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {topCustomers.map((c) => (
-                  <tr key={c.buyerPhone} className="hover:bg-slate-50 dark:hover:bg-slate-800">
-                    <Td className="font-medium text-slate-900 dark:text-slate-50">
-                      {c.buyer}
-                      <span className="block text-xs font-normal text-slate-500 dark:text-slate-400">{c.buyerPhone}</span>
-                    </Td>
-                    <Td align="right" className="tabular">
-                      {c.ordersCount}
-                    </Td>
-                    <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                      {cedis(c.totalSpend)}
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </TableWrap>
+      {showDetail && (
+        <>
+          <Card className="mt-3">
+            <CardHead title="Daily sales" subtitle={range.label} />
+            <div className="p-4 sm:p-5">
+              <LineChart data={dailyRevenueChart} height={160} />
+            </div>
+          </Card>
+
+          {isAgent && (
+            <Card className="mt-3">
+              <CardHead title="Top customers" subtitle="Ranked by completed spend in this range" />
+              {topCustomers.length === 0 ? (
+                <EmptyState
+                  icon={<UsersIcon className="size-6" />}
+                  title="No completed sales in this range yet"
+                  detail="Top customers will show up here once orders complete."
+                />
+              ) : (
+                <TableWrap caption="Top customers by spend">
+                  <thead>
+                    <tr>
+                      <Th>Customer</Th>
+                      <Th align="right">Orders</Th>
+                      <Th align="right">Spent</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topCustomers.map((c) => (
+                      <tr key={c.buyerPhone} className="hover:bg-slate-50 dark:hover:bg-slate-800">
+                        <Td className="font-medium text-slate-900 dark:text-slate-50">
+                          {c.buyer}
+                          <span className="block text-xs font-normal text-slate-500 dark:text-slate-400">{c.buyerPhone}</span>
+                        </Td>
+                        <Td align="right" className="tabular">
+                          {c.ordersCount}
+                        </Td>
+                        <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
+                          {cedis(c.totalSpend)}
+                        </Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </TableWrap>
+              )}
+            </Card>
           )}
-        </Card>
+        </>
       )}
     </div>
   )

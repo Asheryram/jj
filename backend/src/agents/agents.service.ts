@@ -97,6 +97,7 @@ export class AgentsService {
         where: { soldByCode: { in: codes }, status: 'completed' },
         _count: { _all: true },
         _sum: { salePrice: true },
+        _max: { createdAt: true },
       }),
       // What this agent has earned from the downline's activity.
       this.prisma.earning.aggregate({
@@ -126,10 +127,34 @@ export class AgentsService {
         // this is the honest approximation and it sums to the real total.
         earnedForUpline:
           totalDownlineVolume > 0 ? Math.round((volume / totalDownlineVolume) * totalEarned) : 0,
+        lastSaleAt: stats?._max.createdAt?.toISOString() ?? null,
         markupPercent: agent.markupPercent,
         status: agent.status,
       }
     })
+  }
+
+  /**
+   * How each priced product has actually sold, last 30 days, this agent's
+   * own sales only (an agent earns only from their own sales, see
+   * `downline`'s own comment, so a recruit's sales tell this agent nothing
+   * about whether their own price is working). Pairs with `prices()` so
+   * Pricing.tsx can show "you priced this at X" beside "and it sold N times"
+   * instead of a margin number with no connection to what actually happened.
+   */
+  async productPerformance(referralCode: string) {
+    const since = new Date(Date.now() - 30 * 86_400_000)
+    const rows = await this.prisma.order.groupBy({
+      by: ['productId'],
+      where: { soldByCode: referralCode, status: 'completed', createdAt: { gte: since } },
+      _count: { _all: true },
+      _sum: { salePrice: true },
+    })
+    return rows.map((row) => ({
+      productId: row.productId,
+      ordersCount: row._count._all,
+      revenue: row._sum.salePrice ?? 0,
+    }))
   }
 
   /** The default markup applied to any product the agent has not priced. */

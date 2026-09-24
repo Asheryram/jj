@@ -164,6 +164,70 @@ export default function Dashboard() {
         </div>
       </Card>
 
+      {/* ── Stat tiles, right after the balance so the headline numbers don't
+          sit below every notice card on every single visit ── */}
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {isAgent ? (
+          <>
+            <StatTile
+              label="Earned today"
+              value={cedis(earnedToday)}
+              hint={`${plural(ordersToday, 'order')} in your chain`}
+              tone="brand"
+              icon={<TrendUpIcon className="size-5" />}
+            />
+            <StatTile
+              label="Earned all time"
+              value={cedis(earnedAllTime)}
+              hint={
+                (mySummary?.earnedTrend
+                  ? trendText(mySummary.earnedTrend.thisWeek, mySummary.earnedTrend.lastWeek, 'last week')
+                  : null) ?? 'Your price minus your cost'
+              }
+              icon={<CashIcon className="size-5" />}
+            />
+            <StatTile
+              label="Orders completed"
+              value={String(ordersCompleted)}
+              hint={`${ordersTotal} total`}
+              icon={<ReceiptIcon className="size-5" />}
+            />
+            <StatTile
+              label="Agents under you"
+              value={String(activeSubAgents)}
+              hint={`${subAgents.length - activeSubAgents} suspended`}
+              icon={<UsersIcon className="size-5" />}
+            />
+          </>
+        ) : (
+          <>
+            <StatTile
+              label="Spent today"
+              value={cedis(spendToday)}
+              hint={plural(ordersToday, 'order')}
+              tone="brand"
+              icon={<CashIcon className="size-5" />}
+            />
+            <StatTile
+              label="Orders completed"
+              value={String(ordersCompleted)}
+              icon={<ReceiptIcon className="size-5" />}
+            />
+            <StatTile
+              label="Data bought"
+              value={`${mine.filter((o) => o.status === 'completed' && o.category === 'data').length} bundles`}
+              hint="In your recent orders"
+              icon={<DataIcon className="size-5" />}
+            />
+            <StatTile
+              label="Wallet balance"
+              value={cedis(customerBalance)}
+              icon={<WalletIcon className="size-5" />}
+            />
+          </>
+        )}
+      </div>
+
       {/* ── The sell link, right where an agent will look for it ── */}
       {isAgent && (
         <Card className="mt-3 p-4">
@@ -258,69 +322,6 @@ export default function Dashboard() {
         </Callout>
       )}
 
-      {/* ── Stat tiles ── */}
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {isAgent ? (
-          <>
-            <StatTile
-              label="Earned today"
-              value={cedis(earnedToday)}
-              hint={`${plural(ordersToday, 'order')} in your chain`}
-              tone="brand"
-              icon={<TrendUpIcon className="size-5" />}
-            />
-            <StatTile
-              label="Earned all time"
-              value={cedis(earnedAllTime)}
-              hint={
-                (mySummary?.earnedTrend
-                  ? trendText(mySummary.earnedTrend.thisWeek, mySummary.earnedTrend.lastWeek, 'last week')
-                  : null) ?? 'Your price minus your cost'
-              }
-              icon={<CashIcon className="size-5" />}
-            />
-            <StatTile
-              label="Orders completed"
-              value={String(ordersCompleted)}
-              hint={`${ordersTotal} total`}
-              icon={<ReceiptIcon className="size-5" />}
-            />
-            <StatTile
-              label="Agents under you"
-              value={String(activeSubAgents)}
-              hint={`${subAgents.length - activeSubAgents} suspended`}
-              icon={<UsersIcon className="size-5" />}
-            />
-          </>
-        ) : (
-          <>
-            <StatTile
-              label="Spent today"
-              value={cedis(spendToday)}
-              hint={plural(ordersToday, 'order')}
-              tone="brand"
-              icon={<CashIcon className="size-5" />}
-            />
-            <StatTile
-              label="Orders completed"
-              value={String(ordersCompleted)}
-              icon={<ReceiptIcon className="size-5" />}
-            />
-            <StatTile
-              label="Data bought"
-              value={`${mine.filter((o) => o.status === 'completed' && o.category === 'data').length} bundles`}
-              hint="In your recent orders"
-              icon={<DataIcon className="size-5" />}
-            />
-            <StatTile
-              label="Wallet balance"
-              value={cedis(customerBalance)}
-              icon={<WalletIcon className="size-5" />}
-            />
-          </>
-        )}
-      </div>
-
       <div className="mt-3 grid gap-3 lg:grid-cols-3">
         {/* ── Recent orders ── */}
         <Card className="lg:col-span-2">
@@ -351,7 +352,7 @@ export default function Dashboard() {
               }
             />
           ) : (
-            <ul className="divide-y divide-slate-100">
+            <ul className="divide-y divide-slate-100 dark:divide-slate-800">
               {mine.slice(0, 6).map((order) => {
                 const share = myShareOf(order)
                 return (
@@ -410,7 +411,7 @@ export default function Dashboard() {
 
           <Card>
             <CardHead title="Quick actions" />
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-slate-100 dark:divide-slate-800">
               {/* Keyed by label, not route, two agent actions deliberately
                   point at the same page from different angles. */}
               {quickActions(isAgent, shopPath).map((action) => (
@@ -536,7 +537,7 @@ function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
         // only, at the same price no matter who is above them. See Referrals.tsx.
         hint: 'Grow your chain, no cut of their sales',
         icon: UsersIcon,
-        accent: 'bg-violet-50 text-violet-700',
+        accent: 'bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400',
       },
       {
         to: '/app/withdrawals?open=1',
@@ -576,7 +577,7 @@ function quickActions(isAgent: boolean, shopPath: (path: string) => string) {
       label: 'Become an agent',
       hint: 'Sell at your own prices',
       icon: TrendUpIcon,
-      accent: 'bg-violet-50 text-violet-700',
+      accent: 'bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400',
     },
   ]
 }

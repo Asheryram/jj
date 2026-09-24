@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../../state/store'
 import { referralLinkFor, sellLinkFor } from '../../lib/origin'
-import { cedis, longDate } from '../../lib/format'
+import { cedis, longDate, shortDate } from '../../lib/format'
 import { STATUS_LABEL, STATUS_TONE } from '../../lib/userStatus'
 import { api, type MyDomainStatus } from '../../lib/api'
 import {
@@ -21,6 +21,13 @@ import {
 } from '../../components/ui'
 import { GlobeIcon, SearchIcon, StoreIcon, UsersIcon, WhatsAppIcon } from '../../components/icons'
 
+
+/** A recruit who hasn't sold in this long reads as gone quiet, not just "not today". */
+const DORMANT_DAYS = 30
+
+function daysSince(iso: string): number {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+}
 
 /** FR-1.7, FR-5.1, FR-5.2, FR-5.4, FR-5.6, FR-5.7 */
 export default function Referrals() {
@@ -51,6 +58,7 @@ export default function Referrals() {
   const indirect = subAgents.filter((a) => a.uplineCode !== session.referralCode)
   const active = subAgents.filter((a) => a.status === 'active')
   const totalVolume = subAgents.reduce((sum, a) => sum + a.volume, 0)
+  const dormantCount = active.filter((a) => a.lastSaleAt === null || daysSince(a.lastSaleAt) > DORMANT_DAYS).length
 
   const needle = query.trim().toLowerCase()
   const visibleAgents = needle
@@ -138,7 +146,7 @@ export default function Referrals() {
         </div>
       </Card>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
         <StatTile
           label="Agents under you"
           value={String(active.length)}
@@ -147,6 +155,12 @@ export default function Referrals() {
           icon={<UsersIcon className="size-5" />}
         />
         <StatTile label="Their total volume" value={cedis(totalVolume)} hint="For your own visibility only, not tied to your earnings" />
+        <StatTile
+          label="Gone quiet"
+          value={String(dormantCount)}
+          hint={`No sale in ${DORMANT_DAYS}+ days`}
+          tone={dormantCount > 0 ? 'warning' : 'neutral'}
+        />
       </div>
 
       {/* What inviting somebody does, and what it does not.
@@ -203,12 +217,15 @@ export default function Referrals() {
                 <Th>Joined via</Th>
                 <Th align="right">Orders</Th>
                 <Th align="right">Volume</Th>
+                <Th align="right">Earned from them</Th>
+                <Th>Last sale</Th>
                 <Th>Status</Th>
               </tr>
             </thead>
             <tbody>
               {visibleAgents.map((agent) => {
                 const isDirect = agent.uplineCode === session.referralCode
+                const dormant = agent.lastSaleAt === null || daysSince(agent.lastSaleAt) > DORMANT_DAYS
                 return (
                   <tr key={agent.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                     <Td>
@@ -234,6 +251,18 @@ export default function Referrals() {
                     </Td>
                     <Td align="right" className="tabular text-slate-600 dark:text-slate-300">
                       {cedis(agent.volume)}
+                    </Td>
+                    <Td align="right" className="tabular font-semibold text-brand-700 dark:text-brand-300">
+                      {cedis(agent.earnedForUpline)}
+                    </Td>
+                    <Td>
+                      {agent.lastSaleAt === null ? (
+                        <Badge tone="warning">Never sold</Badge>
+                      ) : dormant ? (
+                        <Badge tone="warning">{shortDate(agent.lastSaleAt)}</Badge>
+                      ) : (
+                        <span className="text-sm text-slate-600 dark:text-slate-300">{shortDate(agent.lastSaleAt)}</span>
+                      )}
                     </Td>
                     <Td>
                       <Badge tone={STATUS_TONE[agent.status]}>

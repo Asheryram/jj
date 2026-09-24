@@ -291,7 +291,7 @@ export default function Overview() {
               detail="Volume shows up here once a customer buys through an agent's own shop link."
             />
           ) : (
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {topAgents.map((agent, index) => (
                 <li key={agent.id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
                   <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400">

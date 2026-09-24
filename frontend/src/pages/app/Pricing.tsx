@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../../state/store'
 import { useSearchParamState } from '../../lib/useSearchParamState'
+import { api, type ProductPerformance } from '../../lib/api'
 import { cedis, parseCedis } from '../../lib/format'
 import { validateResalePrice, type PriceBand } from '../../lib/pricing'
 import { NETWORKS } from '../../lib/networks'
@@ -50,6 +51,19 @@ export default function Pricing() {
   const [editing, setEditing] = useState<Product | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
   const [bulkBusy, setBulkBusy] = useState(false)
+
+  const [performance, setPerformance] = useState<ProductPerformance[]>([])
+  useEffect(() => {
+    let live = true
+    api
+      .productPerformance()
+      .then((rows) => live && setPerformance(rows))
+      .catch(() => live && setPerformance([]))
+    return () => {
+      live = false
+    }
+  }, [])
+  const performanceByProduct = new Map(performance.map((p) => [p.productId, p]))
 
   const isChecker = category === 'checker'
   const inCategory = products.filter((p) => p.category === category && p.active)
@@ -158,6 +172,7 @@ export default function Pricing() {
               <Th align="right">You pay</Th>
               <Th align="right">Your price</Th>
               <Th align="right">Your margin</Th>
+              <Th align="right">Sold, last 30 days</Th>
               <Th align="right" />
             </tr>
           </thead>
@@ -167,6 +182,7 @@ export default function Pricing() {
               const mine = myResalePrice(product)
               const margin = mine - band.floor
               const own = hasOwnPrice(product.id)
+              const sold = performanceByProduct.get(product.id)
               return (
                 <tr key={product.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                   <Td>
@@ -195,6 +211,18 @@ export default function Pricing() {
                     >
                       {margin > 0 ? cedis(margin, { sign: true }) : 'at cost'}
                     </span>
+                  </Td>
+                  <Td align="right">
+                    {sold && sold.ordersCount > 0 ? (
+                      <>
+                        <span className="tabular font-semibold text-slate-900 dark:text-slate-50">
+                          {sold.ordersCount} order{sold.ordersCount === 1 ? '' : 's'}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{cedis(sold.revenue)}</span>
+                      </>
+                    ) : (
+                      <span className="text-sm text-amber-700 dark:text-amber-400">Nothing sold</span>
+                    )}
                   </Td>
                   <Td align="right">
                     <div className="flex justify-end gap-2">

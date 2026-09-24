@@ -3,7 +3,6 @@ import type { Prisma } from '@prisma-analytics/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { mapProviderStatus } from '../supplier/datahub.client'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
-import { SolvencyService } from '../finance/solvency.service'
 import { AnalyticsPrismaService } from './analytics-prisma.service'
 import { addDays, dayBounds, toDateInt } from './date'
 
@@ -109,9 +108,15 @@ function resolveDispatchOutcome(d: {
  *   submitted, so one that resolves after its own day is already checkpointed will not
  *   retroactively update that day, the same trade-off dispatch resolution
  *   already makes. Both normally resolve in hours, not days.
- * - Solvency and float are daily *snapshots* of a live computation, not an
- *   event stream, they cannot be backfilled at all: a past day with no row is
- *   an honest gap, not a bug, the trend only starts from when this was added.
+ * - The float half of `DailyFloatSnapshot`/`DailySolvencySnapshot.floatBalance`
+ *   is a live reading of a computation with no historical source at all
+ *   (DataHub publishes no balance endpoint, a reading only ever exists for
+ *   the moment an order happened to get one back), so it is a daily
+ *   *snapshot*, "today" only, and cannot be backfilled, see
+ *   `computeFloatSnapshot`'s own comment. Everything else on
+ *   `DailySolvencySnapshot` is reconstructed as of each day's own end from
+ *   already-existing ledger history instead, see `computeHistoricalSolvency`,
+ *   so that half backfills like any other Gold table.
  */
 @Injectable()
 export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
@@ -129,7 +134,6 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly warehouse: AnalyticsPrismaService,
-    private readonly solvency: SolvencyService,
     private readonly floatMonitor: FloatMonitorService,
   ) {}
 
@@ -195,7 +199,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     const dates: number[] = []
     for (let d = startDate; d <= today; d = addDays(d, 1)) dates.push(d)
 
-    // The agent dimension, applications, solvency and float all reflect
+    // The agent dimension, applications and beneficiary requests all reflect
     // current state, not a per-day event stream, so each is refreshed once
     // per run rather than once per historical day, see this class's own doc
     // comment for the consequence of that.
@@ -204,7 +208,6 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     await this.refreshSilverApplications()
     await this.ingestBronzeBeneficiaryRequests(today)
     await this.refreshSilverBeneficiaryFacts()
-    await this.computeLiveSnapshots(today)
 
     for (const dateInt of dates) {
       await this.computeDay(dateInt)
@@ -217,6 +220,11 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
         await this.pruneRawHistory(dateInt)
       }
     }
+
+    // After the loop: needs today's own `DailySolvencySnapshot` row to
+    // already exist (written inside `computeDay(today)` above) to attach its
+    // denormalised float reading onto, see `computeFloatSnapshot`'s own comment.
+    await this.computeFloatSnapshot(today)
 
     this.log.log(`ETL: computed ${dates.length} day(s) up to ${today}`)
     return { daysProcessed: dates.length }
@@ -327,6 +335,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     await this.computeDailyFeedbackSummary(dateInt)
     await this.computeDailyApplicationFunnel(dateInt)
     await this.computeLostRevenueSummary(dateInt)
+    await this.computeHistoricalSolvency(dateInt, end)
   }
 
   // ─── Bronze ─────────────────────────────────────────────────────────────
@@ -943,42 +952,201 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   /**
-   * `SolvencyService.position()` and `FloatMonitorService.latest()`, the same
-   * two computations `ReservePanel.tsx`/`FloatPanel.tsx` already call live,
-   * snapshotted once a day so their trend becomes visible. Always for
-   * `today` only, see this class's own doc comment for why neither can be
-   * backfilled.
+   * `FloatMonitorService.latest()`, the same read `FloatPanel.tsx` already
+   * calls live, snapshotted once a day so its trend becomes visible. Always
+   * for `today` only: DataHub publishes no balance endpoint at all, a
+   * reading only ever exists for the moment an order happened to get one
+   * back, so there is no historical source to reconstruct a past day from,
+   * unlike `computeHistoricalSolvency` below.
+   *
+   * Also copies today's own reading onto today's `DailySolvencySnapshot` row
+   * (a plain `update`, never `upsert`: that row already exists by the time
+   * this runs, `computeHistoricalSolvency` inside `computeDay` always
+   * processes today first), the same denormalised convenience field the
+   * Reserve position card falls back to when `DailyFloatSnapshot` itself has
+   * no reading yet for the day being displayed.
    */
-  private async computeLiveSnapshots(today: number): Promise<void> {
-    const [position, float] = await Promise.all([this.solvency.position(), this.floatMonitor.latest()])
-
-    const solvencyRow = {
-      expectedAtPaystack: position.expectedAtPaystack,
-      spentOnBundles: position.spentOnBundles,
-      freeToSpend: position.freeToSpend,
-      owedToAgents: position.liabilities.agentEarnings,
-      owedToCustomers: position.liabilities.customerMoney,
-      undeliveredOrders: position.liabilities.undeliveredOrders,
-      queuedPayouts: position.liabilities.queuedPayouts,
-      manualRefundAdvances: position.liabilities.manualRefundAdvances,
-      manualPayoutAdvances: position.liabilities.manualPayoutAdvances,
-      liabilitiesTotal: position.liabilities.total,
-      floatBalance: float?.balance ?? null,
-    }
-    await this.warehouse.dailySolvencySnapshot.upsert({
-      where: { date: today },
-      create: { date: today, ...solvencyRow },
-      update: solvencyRow,
-    })
-
+  private async computeFloatSnapshot(today: number): Promise<void> {
+    const float = await this.floatMonitor.latest()
     // No live reading yet (a fresh install before the first purchase) leaves
     // nothing meaningful to snapshot.
     if (!float) return
+
     const floatRow = { balance: float.balance, reference: float.reference, level: float.level, observedAt: new Date(float.observedAt) }
     await this.warehouse.dailyFloatSnapshot.upsert({
       where: { date: today },
       create: { date: today, ...floatRow },
       update: floatRow,
+    })
+    await this.warehouse.dailySolvencySnapshot.update({
+      where: { date: today },
+      data: { floatBalance: float.balance },
+    })
+  }
+
+  /**
+   * `SolvencyService.position()`'s own arithmetic, reconstructed as of the
+   * end of this one day instead of right now, entirely from already-existing,
+   * immutable, timestamped history (`Payment`/`Withdrawal`/`RefundRequest`/
+   * `Earning`/`Transaction`/`LedgerEntry`), so, unlike the float half above,
+   * this is genuinely backfillable for every past day, not only from
+   * whenever this feature happened to ship. Mirrors `SolvencyService`'s own
+   * fields one for one; where that service reads `User.balance` (a live
+   * running total with no date to cut off at), this sums the ledger it is
+   * derived from instead, which does carry one.
+   *
+   * One genuine approximation: `ClaimableCredit` has no `claimedAt`, only a
+   * current `claimed` flag, so a credit already claimed by today reads as
+   * resolved for every past day too, even on ones where it was still
+   * genuinely unclaimed. This understates history by a small, bounded
+   * amount rather than overstating it; the table is a rare edge case (a
+   * guest Mobile Money refund with no wallet to credit), never the bulk of
+   * `owedToCustomers`.
+   */
+  private async computeHistoricalSolvency(dateInt: number, end: Date): Promise<void> {
+    const [
+      earningsAsOf,
+      walletAsOf,
+      unclaimedCredits,
+      withdrawalsUpTo,
+      heldOrders,
+      refundsUpTo,
+      manualAdvances,
+      manualReimbursements,
+      collected,
+      transferredPayouts,
+      transferredRefunds,
+      reimbursements,
+    ] = await Promise.all([
+      this.prisma.earning.aggregate({ where: { createdAt: { lt: end } }, _sum: { amount: true } }),
+      this.prisma.transaction.aggregate({ where: { createdAt: { lt: end } }, _sum: { amount: true } }),
+      this.prisma.claimableCredit.aggregate({
+        where: { claimed: false, createdAt: { lt: end } },
+        _sum: { amount: true },
+      }),
+      this.prisma.withdrawal.findMany({
+        where: { requestedAt: { lt: end } },
+        select: { amount: true, status: true, decidedAt: true, paidAt: true },
+      }),
+      // Same live-only "still literally in flight right now" reading the
+      // current query uses, no as-of-X equivalent: an order's exact
+      // resolution moment isn't recorded for every outcome (only `completedAt`
+      // is), and this state is transient (minutes to hours), never material
+      // for a day more than a day or two in the past either way.
+      dateInt === toDateInt(new Date())
+        ? this.prisma.order.aggregate({
+            where: { status: { in: ['awaiting_approval', 'processing'] } },
+            _sum: { salePrice: true },
+          })
+        : Promise.resolve({ _sum: { salePrice: 0 } }),
+      this.prisma.refundRequest.findMany({
+        where: { createdAt: { lt: end } },
+        select: { amount: true, method: true, status: true, decidedAt: true, paidAt: true },
+      }),
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_in', occurredAt: { lt: end }, OR: [{ orderRef: { not: null } }, { withdrawalId: { not: null } }] },
+        select: { orderRef: true, withdrawalId: true, amount: true },
+      }),
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: 'capital_out', occurredAt: { lt: end }, OR: [{ orderRef: { not: null } }, { withdrawalId: { not: null } }] },
+        select: { orderRef: true, withdrawalId: true },
+      }),
+      this.prisma.payment.aggregate({ where: { status: 'paid', paidAt: { lt: end } }, _sum: { amount: true, fee: true } }),
+      this.prisma.withdrawal.aggregate({
+        where: { paidAt: { lt: end }, transferCode: { not: null } },
+        _sum: { amount: true },
+      }),
+      this.prisma.refundRequest.aggregate({
+        where: { method: 'transfer', paidAt: { lt: end }, transferCode: { not: null } },
+        _sum: { amount: true },
+      }),
+      this.prisma.ledgerEntry.findMany({
+        where: { kind: { in: ['capital_in_reimbursement', 'capital_out'] }, occurredAt: { lt: end } },
+        select: { id: true, kind: true, amount: true, idempotencyKey: true },
+      }),
+    ])
+
+    // "Owed as of end" for a withdrawal: requested by then, not yet actually
+    // paid by then, and not yet rejected/failed by then either (that returns
+    // the amount to the agent's balance, already reflected in `earningsAsOf`).
+    const queuedPayouts = withdrawalsUpTo
+      .filter((w) => {
+        if (w.paidAt && w.paidAt < end) return false
+        if ((w.status === 'rejected' || w.status === 'failed') && w.decidedAt && w.decidedAt < end) return false
+        return true
+      })
+      .reduce((sum, w) => sum + w.amount, 0)
+
+    // Same reasoning, refund-shaped: a wallet-method refund's money moves at
+    // approval (already reflected in `walletAsOf` from that moment on), a
+    // transfer-method refund's at `paidAt`; a rejected one never moved at all.
+    const owedForRefunds = refundsUpTo
+      .filter((r) => {
+        if (r.status === 'rejected' && r.decidedAt && r.decidedAt < end) return false
+        if (r.method === 'wallet' && r.status === 'approved' && r.decidedAt && r.decidedAt < end) return false
+        if (r.method === 'transfer' && r.paidAt && r.paidAt < end) return false
+        return true
+      })
+      .reduce((sum, r) => sum + r.amount, 0)
+
+    const reimbursedByOrder = new Map<string, number>()
+    const reimbursedByWithdrawal = new Map<string, number>()
+    for (const advance of manualAdvances) {
+      if (advance.orderRef) reimbursedByOrder.set(advance.orderRef, (reimbursedByOrder.get(advance.orderRef) ?? 0) + 1)
+      if (advance.withdrawalId) reimbursedByWithdrawal.set(advance.withdrawalId, (reimbursedByWithdrawal.get(advance.withdrawalId) ?? 0) + 1)
+    }
+    const reimbursedOrderRefs = new Set(manualReimbursements.filter((r) => r.orderRef).map((r) => r.orderRef as string))
+    const reimbursedWithdrawalIds = new Set(manualReimbursements.filter((r) => r.withdrawalId).map((r) => r.withdrawalId as string))
+    const manualRefundAdvances = manualAdvances
+      .filter((a) => a.orderRef && !reimbursedOrderRefs.has(a.orderRef))
+      .reduce((sum, a) => sum + a.amount, 0)
+    const manualPayoutAdvances = manualAdvances
+      .filter((a) => a.withdrawalId && !reimbursedWithdrawalIds.has(a.withdrawalId))
+      .reduce((sum, a) => sum + a.amount, 0)
+
+    const reversedReimbursementIds = new Set(
+      reimbursements
+        .filter((r) => r.kind === 'capital_out' && r.idempotencyKey.startsWith('correction:'))
+        .map((r) => r.idempotencyKey.split(':')[1]),
+    )
+    const reimbursedToDataHub = reimbursements
+      .filter((r) => r.kind === 'capital_in_reimbursement' && !reversedReimbursementIds.has(r.id))
+      .reduce((sum, r) => sum + r.amount, 0)
+    const bundlesBought = await this.prisma.ledgerEntry.aggregate({
+      where: { kind: 'supplier_cost', occurredAt: { lt: end } },
+      _sum: { amount: true },
+    })
+    const spentOnBundles = Math.max(0, -(bundlesBought._sum.amount ?? 0) - reimbursedToDataHub)
+
+    const expectedAtPaystack =
+      (collected._sum.amount ?? 0) -
+      (collected._sum.fee ?? 0) -
+      (transferredPayouts._sum.amount ?? 0) -
+      (transferredRefunds._sum.amount ?? 0) -
+      reimbursedToDataHub
+
+    const owedToAgents = earningsAsOf._sum.amount ?? 0
+    const owedToCustomers = (walletAsOf._sum.amount ?? 0) + (unclaimedCredits._sum.amount ?? 0) + owedForRefunds
+    const undeliveredOrders = heldOrders._sum.salePrice ?? 0
+    const liabilitiesTotal =
+      owedToAgents + owedToCustomers + undeliveredOrders + queuedPayouts + manualRefundAdvances + manualPayoutAdvances
+
+    const solvencyRow = {
+      expectedAtPaystack,
+      spentOnBundles,
+      freeToSpend: expectedAtPaystack - liabilitiesTotal - spentOnBundles,
+      owedToAgents,
+      owedToCustomers,
+      undeliveredOrders,
+      queuedPayouts,
+      manualRefundAdvances,
+      manualPayoutAdvances,
+      liabilitiesTotal,
+    }
+    await this.warehouse.dailySolvencySnapshot.upsert({
+      where: { date: dateInt },
+      create: { date: dateInt, ...solvencyRow, floatBalance: null },
+      update: solvencyRow,
     })
   }
 

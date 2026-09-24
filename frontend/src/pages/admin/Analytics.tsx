@@ -27,8 +27,8 @@ import {
 import { useStore } from '../../state/store'
 import { cedis, cedisCompact } from '../../lib/format'
 import { CATEGORY_META } from '../../components/categories'
-import { BarChart, DistributionBar, LineChart, RankedBarChart, RevenueMarginChart } from '../../components/charts'
-import { Badge, Button, Card, CardHead, cn, Modal, PageHead, Spinner, StatTile, TextInput } from '../../components/ui'
+import { BarChart, DistributionBar, LineChart, MultiLineChart, RankedBarChart, RevenueMarginChart } from '../../components/charts'
+import { Badge, Button, Card, CardHead, cn, Modal, PageHead, Segmented, Spinner, StatTile, TextInput } from '../../components/ui'
 import { DateRangePicker, type PresetKey } from '../../components/DateRangePicker'
 import { AlertIcon, CashIcon, CheckIcon, ClockIcon, ReceiptIcon, TrendUpIcon, UsersIcon, XIcon } from '../../components/icons'
 
@@ -130,6 +130,48 @@ function TrendBadge({ trend, goodDirection }: { trend: { pct: number; up: boolea
  * a horizontal reference line, and the previous period compares like for
  * like even across days with different attempt volumes.
  */
+/**
+ * Reshapes a per-(day, key) rollup (network/category/agent revenue, one row
+ * per day per segment) into `MultiLineChart`'s shared-day-axis shape: every
+ * day in the data, once, and one aligned value series per `keys` entry
+ * (0 for a day that segment had nothing). `keys` is the caller's own
+ * selection of which segments to plot, e.g. every network (there are only a
+ * handful) or the top 5 agents by revenue, not everything the range contains,
+ * multi-line only reads once the line count stays small.
+ */
+function pivotByDay<T extends { date: number }>(
+  rows: T[],
+  keyOf: (row: T) => string,
+  labelOf: (row: T) => string,
+  valueOf: (row: T) => number,
+  keys: string[],
+): { days: string[]; series: { label: string; values: number[] }[] } {
+  const dates = [...new Set(rows.map((r) => r.date))].sort((a, b) => a - b)
+  const wanted = new Set(keys)
+  const byKey = new Map<string, { label: string; byDate: Map<number, number> }>()
+  for (const row of rows) {
+    const key = keyOf(row)
+    if (!wanted.has(key)) continue
+    const entry = byKey.get(key) ?? { label: labelOf(row), byDate: new Map<number, number>() }
+    entry.byDate.set(row.date, (entry.byDate.get(row.date) ?? 0) + valueOf(row))
+    byKey.set(key, entry)
+  }
+  const series = keys
+    .filter((k) => byKey.has(k))
+    .map((key) => {
+      const entry = byKey.get(key)!
+      return { label: entry.label, values: dates.map((d) => entry.byDate.get(d) ?? 0) }
+    })
+  return { days: dates.map((d) => dayLabel(d)), series }
+}
+
+/** The checkout-abandonment rate per day, the same "rate not raw count" reasoning as `dispatchRateByDate`. */
+function funnelRateByDate(rows: AnalyticsCheckoutFunnel[]): { date: number; rate: number }[] {
+  return rows
+    .map((row) => ({ date: row.date, rate: row.started > 0 ? (row.abandoned / row.started) * 100 : 0 }))
+    .sort((a, b) => a.date - b.date)
+}
+
 function dispatchRateByDate(rows: AnalyticsDispatchReliability[]): { date: number; rate: number }[] {
   const byDate = new Map<number, { noReply: number; total: number }>()
   for (const row of rows) {
@@ -334,6 +376,11 @@ export default function Analytics() {
   const [recomputeDate, setRecomputeDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [recomputing, setRecomputing] = useState(false)
   const [selectedNetwork, setSelectedNetwork] = useState<string | null>(null)
+  // Consolidated total/trend cards (network, category, agents): one toggle
+  // each, not two permanent cards, see the "too plenty" feedback this replaced.
+  const [networkView, setNetworkView] = useState<'total' | 'trend'>('total')
+  const [categoryView, setCategoryView] = useState<'total' | 'trend'>('total')
+  const [agentsView, setAgentsView] = useState<'total' | 'trend'>('total')
 
   // `day`/`month`/`year` are unreachable from the new picker (see `RangeMode`'s
   // own comment) but `buildRange` still takes their driving values as
@@ -500,6 +547,10 @@ export default function Analytics() {
 
   const totalRevenue = data.daily.reduce((sum, d) => sum + d.revenue, 0)
   const totalProfit = data.daily.reduce((sum, d) => sum + d.profit, 0)
+  const totalOrdersCount = data.daily.reduce((sum, d) => sum + d.ordersCount, 0)
+  const totalCompletedCount = data.daily.reduce((sum, d) => sum + d.completedCount, 0)
+  const totalFailedCount = data.daily.reduce((sum, d) => sum + d.failedCount, 0)
+  const totalRefundsAmount = data.daily.reduce((sum, d) => sum + d.refundsAmount, 0)
   const totalDispatches = data.dispatch.reduce((sum, d) => sum + d.totalAttempts, 0)
   const totalNoReply = data.dispatch.reduce((sum, d) => sum + d.noReply, 0)
   const noReplyRate = totalDispatches > 0 ? (totalNoReply / totalDispatches) * 100 : 0
@@ -508,7 +559,16 @@ export default function Analytics() {
     latestBehavior && latestBehavior.uniqueBuyers > 0
       ? (latestBehavior.repeatBuyers / latestBehavior.uniqueBuyers) * 100
       : 0
+  // No comparison-period overlay here, `PrevData` doesn't carry `customers`.
+  const repeatRateChart = data.customers.map((c) => ({
+    day: dayLabel(c.date),
+    revenue: c.uniqueBuyers > 0 ? (c.repeatBuyers / c.uniqueBuyers) * 100 : 0,
+  }))
   const latestHealth = data.agentHealth[data.agentHealth.length - 1]
+  // Unlike the rest of this card (a live snapshot), `newSignups` is one of
+  // the few fields on `AnalyticsAgentHealth` computed per day, not as
+  // current state, so it sums across the range instead of reading `latestHealth`.
+  const totalNewSignups = data.agentHealth.reduce((sum, h) => sum + h.newSignups, 0)
   const latestSolvency = data.solvency[data.solvency.length - 1]
   const latestFloat = data.float[data.float.length - 1]
   const latestLostRevenue = data.lostRevenue[data.lostRevenue.length - 1]
@@ -582,6 +642,24 @@ export default function Analytics() {
       marginPct: row.revenue > 0 ? (row.profit / row.revenue) * 100 : 0,
     }))
 
+  // The combo charts above answer "who's biggest right now"; these answer
+  // "is a specific one rising or falling". Every network/category, not a
+  // top-N cut, there are only ever a handful of either.
+  const networkTrend = pivotByDay(
+    data.network,
+    (r) => r.network,
+    (r) => r.network,
+    (r) => r.revenue,
+    [...networkProfit.keys()],
+  )
+  const categoryTrend = pivotByDay(
+    data.category,
+    (r) => r.category,
+    (r) => CATEGORY_META[r.category as keyof typeof CATEGORY_META]?.label ?? r.category,
+    (r) => r.revenue,
+    [...categoryProfit.keys()],
+  )
+
   // Drill-down from a clicked network bar (see `RevenueMarginChart`'s
   // `onSelect`) into that network's own top products, summed across the
   // whole selected range rather than day by day, the same rollup pattern
@@ -625,6 +703,20 @@ export default function Analytics() {
     agentTotals.set(row.agentId, entry)
   }
   const leaderboard = [...agentTotals.values()].sort((a, b) => b.revenue - a.revenue).slice(0, 10)
+  // The leaderboard above is a range-wide total; capped at 5 (not 10, a
+  // multi-line chart stops reading past a handful of lines) so this answers
+  // whether a specific one of them is actually trending up or sliding, day by day.
+  const topAgentIds = [...agentTotals.entries()]
+    .sort((a, b) => b[1].revenue - a[1].revenue)
+    .slice(0, 5)
+    .map(([id]) => id)
+  const agentTrend = pivotByDay(
+    data.agents,
+    (r) => r.agentId,
+    (r) => r.agentName,
+    (r) => r.revenue,
+    topAgentIds,
+  )
 
   const dispatchByNetwork = new Map<
     string,
@@ -670,9 +762,12 @@ export default function Analytics() {
   )
   const abandonmentRate = funnelTotals.started > 0 ? (funnelTotals.abandoned / funnelTotals.started) * 100 : 0
   const abandonmentTrend = prevAbandonmentRate !== null ? trendOf(abandonmentRate, prevAbandonmentRate) : null
+  const abandonmentRateChart = funnelRateByDate(data.funnel).map((r) => ({ day: dayLabel(r.date), revenue: r.rate }))
+  const previousAbandonmentRateChart = prevData ? funnelRateByDate(prevData.funnel).map((r) => r.rate) : undefined
 
   const marginChart = data.margin.map((m) => ({ day: dayLabel(m.date), revenue: m.avgMarginBp / 100 }))
   const previousMargin = prevData?.margin.map((m) => m.avgMarginBp / 100)
+  const latestMargin = data.margin.length > 0 ? data.margin[data.margin.length - 1] : null
 
   const latestDownline = (() => {
     const latestDate = Math.max(0, ...data.downline.map((d) => d.date))
@@ -738,6 +833,14 @@ export default function Analytics() {
   const totalFeedback = feedbackRows.reduce((sum, [, r]) => sum + r.total, 0)
   const totalEscalated = feedbackRows.reduce((sum, [, r]) => sum + r.escalatedCount, 0)
 
+  // Summed across every category for that day, `feedbackRows` above merges
+  // across days instead, the two answer different questions ("what kind" vs "is it rising").
+  const feedbackByDate = new Map<number, number>()
+  for (const row of data.feedback) feedbackByDate.set(row.date, (feedbackByDate.get(row.date) ?? 0) + row.total)
+  const feedbackVolumeChart = [...feedbackByDate.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([date, total]) => ({ day: dayLabel(date), revenue: total }))
+
   const applicationTotals = data.applications.reduce(
     (sum, a) => ({ applied: sum.applied + a.applied, approved: sum.approved + a.approved, rejected: sum.rejected + a.rejected }),
     { applied: 0, approved: 0, rejected: 0 },
@@ -748,6 +851,7 @@ export default function Analytics() {
   const applicationBuckets = bucketSums(data.applications, ['decidedUnder1h', 'decided1to4h', 'decided4to24h', 'decidedOver24h'])
   const decidedCount = applicationTotals.approved + applicationTotals.rejected
   const approvalRate = decidedCount > 0 ? (applicationTotals.approved / decidedCount) * 100 : 0
+  const applicationsPerDayChart = data.applications.map((a) => ({ day: dayLabel(a.date), revenue: a.applied }))
 
   const solvencyChart = data.solvency.map((s) => ({ day: dayLabel(s.date), revenue: s.freeToSpend }))
   const previousSolvency = prevData?.solvency.map((s) => s.freeToSpend)
@@ -1002,15 +1106,50 @@ export default function Analytics() {
             icon={<AlertIcon className="size-5" />}
           />
         </div>
+        {latestSolvency && (
+          <div className="border-t border-slate-100 p-4 dark:border-slate-800 sm:p-5">
+            <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
+              What "owed to other people" is made of, as of {dayLabel(latestSolvency.date)}.
+            </p>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+              {[
+                ['Owed to agents', latestSolvency.owedToAgents],
+                ['Owed to customers', latestSolvency.owedToCustomers],
+                ['Undelivered orders', latestSolvency.undeliveredOrders],
+                ['Queued payouts', latestSolvency.queuedPayouts],
+                ['Manual refund advances', latestSolvency.manualRefundAdvances],
+                ['Manual payout advances', latestSolvency.manualPayoutAdvances],
+              ].map(([label, value]) => (
+                <div key={label as string} className="flex items-baseline justify-between gap-2 sm:block">
+                  <dt className="text-xs text-slate-500 dark:text-slate-400">{label}</dt>
+                  <dd className="tabular text-sm font-semibold text-slate-800 dark:text-slate-100">{cedisCompact(value as number)}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
         {data.solvency.length > 0 && (
           <div className="border-t border-slate-100 p-4 dark:border-slate-800 sm:p-5">
             <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-              Free to spend, by day. Cannot be backfilled before this feature shipped, so a range that starts earlier than that will show a gap, not missing data.
+              Free to spend, by day, reconstructed as of each day's own end from ledger history, not just from whenever this feature shipped.
             </p>
             {/* Fix 1: previous-period overlay. */}
             <LineChart data={solvencyChart} previous={previousSolvency} height={140} />
           </div>
         )}
+      </Card>
+
+      <Card className="mt-3">
+        <CardHead title="Order volume & refunds" subtitle={range.label} />
+        <div className="grid gap-3 p-4 sm:grid-cols-3 sm:p-5">
+          <StatTile label="Orders placed" value={String(totalOrdersCount)} icon={<ReceiptIcon className="size-5" />} />
+          <StatTile
+            label="Completed vs failed"
+            value={`${totalCompletedCount} / ${totalFailedCount}`}
+            tone={totalFailedCount > 0 ? 'warning' : 'success'}
+          />
+          <StatTile label="Refunded" value={cedisCompact(totalRefundsAmount)} />
+        </div>
       </Card>
 
       {/* Fix 1 (overlay) applied to both; paired side by side, not stacked,
@@ -1048,17 +1187,34 @@ export default function Analytics() {
           <CardHead
             title="Revenue & profitability by network"
             subtitle={range.label}
-            tooltip="Bar height is revenue; the connected dots are profit margin %, on their own scale. A tall bar with a low dot is a network that sells a lot but keeps little of it."
+            tooltip={
+              networkView === 'total'
+                ? "Bar height is revenue; the connected dots are profit margin %, on their own scale. A tall bar with a low dot is a network that sells a lot but keeps little of it."
+                : "The total view only shows each network's total for the whole range. This is the same money, day by day, so a network quietly losing share shows up before it shows up in the total."
+            }
+            action={
+              <Segmented<'total' | 'trend'>
+                options={[{ value: 'total', label: 'Total' }, { value: 'trend', label: 'By day' }]}
+                value={networkView}
+                onChange={setNetworkView}
+              />
+            }
           />
           <div className="p-4 sm:p-5">
-            {networkComboRows.length === 0 ? (
+            {networkView === 'total' ? (
+              networkComboRows.length === 0 ? (
+                <p className="text-sm text-slate-500 dark:text-slate-400">No data yet.</p>
+              ) : (
+                <RevenueMarginChart
+                  rows={networkComboRows}
+                  selected={selectedNetwork}
+                  onSelect={(label) => setSelectedNetwork((prev) => (prev === label ? null : label))}
+                />
+              )
+            ) : networkTrend.series.length === 0 ? (
               <p className="text-sm text-slate-500 dark:text-slate-400">No data yet.</p>
             ) : (
-              <RevenueMarginChart
-                rows={networkComboRows}
-                selected={selectedNetwork}
-                onSelect={(label) => setSelectedNetwork((prev) => (prev === label ? null : label))}
-              />
+              <MultiLineChart days={networkTrend.days} series={networkTrend.series} height={160} />
             )}
           </div>
         </Card>
@@ -1066,13 +1222,30 @@ export default function Analytics() {
           <CardHead
             title="Revenue & profitability by category"
             subtitle={range.label}
-            tooltip="Same reading as the network chart: bar height is revenue, the dots are profit margin %. A tall bar with a low dot sells well but isn't very profitable."
+            tooltip={
+              categoryView === 'total'
+                ? "Same reading as the network chart: bar height is revenue, the dots are profit margin %. A tall bar with a low dot sells well but isn't very profitable."
+                : "Same reading as the network trend: each category's revenue, day by day, instead of one total for the whole range."
+            }
+            action={
+              <Segmented<'total' | 'trend'>
+                options={[{ value: 'total', label: 'Total' }, { value: 'trend', label: 'By day' }]}
+                value={categoryView}
+                onChange={setCategoryView}
+              />
+            }
           />
           <div className="p-4 sm:p-5">
-            {categoryComboRows.length === 0 ? (
+            {categoryView === 'total' ? (
+              categoryComboRows.length === 0 ? (
+                <p className="text-sm text-slate-500 dark:text-slate-400">No data yet.</p>
+              ) : (
+                <RevenueMarginChart rows={categoryComboRows} />
+              )
+            ) : categoryTrend.series.length === 0 ? (
               <p className="text-sm text-slate-500 dark:text-slate-400">No data yet.</p>
             ) : (
-              <RevenueMarginChart rows={categoryComboRows} />
+              <MultiLineChart days={categoryTrend.days} series={categoryTrend.series} height={160} />
             )}
           </div>
         </Card>
@@ -1298,6 +1471,45 @@ export default function Analytics() {
           </div>
         )}
       </Card>
+
+      {/* Paired side by side, same reasoning as Hourly volume/Margin accuracy
+          below: each is one small chart, a hero tile above already shows the
+          range-wide total, so a card-height apiece here is the trend behind
+          it, not a second copy of the same number. */}
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <Card>
+          <CardHead
+            title="Checkout abandonment"
+            subtitle="Started a checkout but never paid, by day."
+            tooltip="The hero stat above this page only shows one number for the whole range. This is the same rate, day by day, so a one-off bad day doesn't get lost in the average."
+          />
+          {abandonmentRateChart.some((p) => p.revenue > 0) && (
+            <div className="p-4 sm:p-5">
+              <LineChart
+                data={abandonmentRateChart}
+                previous={previousAbandonmentRateChart}
+                height={100}
+                valueLabel={(v) => `${v.toFixed(0)}%`}
+                label="Abandonment rate"
+                thresholds={[{ value: ABANDONMENT_ALERT_RATE, label: 'Alert threshold', tone: 'warning' }]}
+              />
+            </div>
+          )}
+        </Card>
+
+        <Card>
+          <CardHead
+            title="Repeat buyer rate"
+            subtitle="Of everyone who bought that day, how many had bought before, by day."
+            tooltip="The hero stat above shows only the latest day. A rising line means customers are coming back more often, not just that today happened to have a lot of repeat buyers."
+          />
+          {repeatRateChart.some((p) => p.revenue > 0) && (
+            <div className="p-4 sm:p-5">
+              <LineChart data={repeatRateChart} height={100} valueLabel={(v) => `${v.toFixed(0)}%`} label="Repeat buyer rate" />
+            </div>
+          )}
+        </Card>
+      </div>
       </>
       )}
 
@@ -1307,48 +1519,69 @@ export default function Analytics() {
         <CardHead
           title="Top agents"
           subtitle={`By revenue, ${range.label}`}
-          tooltip="Bar length is revenue, ranked highest first. The table alongside has the exact orders, revenue, and margin behind each bar."
+          tooltip={
+            agentsView === 'total'
+              ? "Bar length is revenue, ranked highest first. The table alongside has the exact orders, revenue, and margin behind each bar."
+              : "The totals view is one number for the whole range. This is the top 5 of that same leaderboard, day by day, so a slide by any one of them shows up before the range total quietly absorbs it."
+          }
+          action={
+            <Segmented<'total' | 'trend'>
+              options={[{ value: 'total', label: 'Total' }, { value: 'trend', label: 'By day' }]}
+              value={agentsView}
+              onChange={setAgentsView}
+            />
+          }
         />
-        {/* Fix 4: ranked bar beside the table, exact values stay in the table. */}
-        <div className="grid gap-0 sm:grid-cols-2">
-          <div className="border-slate-100 p-4 dark:border-slate-800 sm:border-r sm:p-5">
-            {leaderboard.length === 0 ? (
+        {agentsView === 'total' ? (
+          // Fix 4: ranked bar beside the table, exact values stay in the table.
+          <div className="grid gap-0 sm:grid-cols-2">
+            <div className="border-slate-100 p-4 dark:border-slate-800 sm:border-r sm:p-5">
+              {leaderboard.length === 0 ? (
+                <p className="text-sm text-slate-500 dark:text-slate-400">No sales through an agent in this range.</p>
+              ) : (
+                <RankedBarChart rows={leaderboard.map((a) => ({ label: a.name, value: a.revenue }))} valueLabel={cedisCompact} />
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-slate-200 text-left text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                  <tr>
+                    <th className="px-4 py-2 sm:px-5">Agent</th>
+                    <th className="px-4 py-2 text-right sm:px-5">Orders</th>
+                    <th className="px-4 py-2 text-right sm:px-5">Revenue</th>
+                    <th className="px-4 py-2 text-right sm:px-5">Margin earned</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {leaderboard.length === 0 ? (
+                    <tr>
+                      <td className="px-4 py-4 text-slate-500 dark:text-slate-400 sm:px-5" colSpan={4}>
+                        No sales through an agent in this range.
+                      </td>
+                    </tr>
+                  ) : (
+                    leaderboard.map((agent) => (
+                      <tr key={agent.name}>
+                        <td className="px-4 py-2.5 font-medium text-slate-900 dark:text-slate-50 sm:px-5">{agent.name}</td>
+                        <td className="tabular px-4 py-2.5 text-right sm:px-5">{agent.orders}</td>
+                        <td className="tabular px-4 py-2.5 text-right sm:px-5">{cedis(agent.revenue)}</td>
+                        <td className="tabular px-4 py-2.5 text-right sm:px-5">{cedis(agent.margin)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 sm:p-5">
+            {agentTrend.series.length === 0 ? (
               <p className="text-sm text-slate-500 dark:text-slate-400">No sales through an agent in this range.</p>
             ) : (
-              <RankedBarChart rows={leaderboard.map((a) => ({ label: a.name, value: a.revenue }))} valueLabel={cedisCompact} />
+              <MultiLineChart days={agentTrend.days} series={agentTrend.series} height={160} />
             )}
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="border-b border-slate-200 text-left text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                <tr>
-                  <th className="px-4 py-2 sm:px-5">Agent</th>
-                  <th className="px-4 py-2 text-right sm:px-5">Orders</th>
-                  <th className="px-4 py-2 text-right sm:px-5">Revenue</th>
-                  <th className="px-4 py-2 text-right sm:px-5">Margin earned</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {leaderboard.length === 0 ? (
-                  <tr>
-                    <td className="px-4 py-4 text-slate-500 dark:text-slate-400 sm:px-5" colSpan={4}>
-                      No sales through an agent in this range.
-                    </td>
-                  </tr>
-                ) : (
-                  leaderboard.map((agent) => (
-                    <tr key={agent.name}>
-                      <td className="px-4 py-2.5 font-medium text-slate-900 dark:text-slate-50 sm:px-5">{agent.name}</td>
-                      <td className="tabular px-4 py-2.5 text-right sm:px-5">{agent.orders}</td>
-                      <td className="tabular px-4 py-2.5 text-right sm:px-5">{cedis(agent.revenue)}</td>
-                      <td className="tabular px-4 py-2.5 text-right sm:px-5">{cedis(agent.margin)}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        )}
       </Card>
       </>
       )}
@@ -1536,7 +1769,7 @@ export default function Analytics() {
             subtitle="Latest snapshot"
             tooltip="A live read of the agent roster as it stands today, not something that can be recomputed for a past day the way the trend charts elsewhere on this page are."
           />
-          <div className="grid grid-cols-2 gap-3 p-4 sm:p-5">
+          <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 sm:p-5">
             <StatTile label="Total agents" value={String(latestHealth?.totalAgents ?? 0)} />
             <StatTile label="Active" value={String(latestHealth?.activeAgents ?? 0)} tone="success" />
             <StatTile
@@ -1545,6 +1778,7 @@ export default function Analytics() {
               tone={latestHealth && latestHealth.dormantAgents > 0 ? 'warning' : 'neutral'}
             />
             <StatTile label="Awaiting approval" value={String(latestHealth?.pendingApplications ?? 0)} />
+            <StatTile label="New signups" value={String(totalNewSignups)} hint={range.label} tone="brand" />
           </div>
         </Card>
         <Card>
@@ -1606,6 +1840,12 @@ export default function Analytics() {
             <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">Time to decide, distribution</p>
             <DistributionBar buckets={applicationBuckets} />
           </div>
+          {applicationsPerDayChart.some((p) => p.revenue > 0) && (
+            <div className="border-t border-slate-100 p-4 dark:border-slate-800 sm:p-5">
+              <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">Applications received, by day</p>
+              <LineChart data={applicationsPerDayChart} height={100} valueLabel={(v) => String(Math.round(v))} label="Applications" />
+            </div>
+          )}
         </Card>
       </>
       )}
@@ -1659,6 +1899,12 @@ export default function Analytics() {
               {totalFeedback} total, {totalEscalated} escalated as a real bug rather than resolved as business-as-usual.
             </p>
           )}
+          {feedbackVolumeChart.some((p) => p.revenue > 0) && (
+            <div className="border-t border-slate-100 p-4 dark:border-slate-800 sm:p-5">
+              <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">Feedback volume, by day, every category</p>
+              <LineChart data={feedbackVolumeChart} height={100} valueLabel={(v) => String(Math.round(v))} label="Feedback reports" />
+            </div>
+          )}
         </Card>
 
       {/* Paired side by side (not stacked) to cut a card-height off the page,
@@ -1678,8 +1924,20 @@ export default function Analytics() {
           <CardHead
             title="Margin accuracy"
             subtitle="Average margin as a percentage of sale price, completed orders. A falling line means DataHub's real cost is creeping up on the catalogue price."
-            tooltip="Compare the dashed previous-period line against the solid one to see whether a falling margin is a new trend or one that's already recovering."
+            tooltip="A percentage alone can't tell you whether a small drift is a real cedi increase or just noise, the two figures below give the actual amounts behind it. Compare the dashed previous-period line against the solid one to see whether a falling margin is a new trend or one that's already recovering."
           />
+          {latestMargin && (
+            <div className="grid grid-cols-2 gap-3 border-b border-slate-100 p-4 dark:border-slate-800 sm:p-5">
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Avg. sale price</p>
+                <p className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">{cedis(latestMargin.avgSalePrice)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Avg. supplier cost</p>
+                <p className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">{cedis(latestMargin.avgSupplierCost)}</p>
+              </div>
+            </div>
+          )}
           <div className="p-4 sm:p-5">
             {/* Fix 1: previous-period overlay. */}
             <LineChart data={marginChart} previous={previousMargin} height={160} valueLabel={(v) => `${v.toFixed(1)}%`} label="Average margin" />

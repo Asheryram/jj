@@ -388,6 +388,170 @@ export function LineChart({
   )
 }
 
+/**
+ * One colour per line, reusing `Donut`'s palette so the app has one consistent
+ * vocabulary for "these are the chart colours" rather than a second one.
+ * Callers cap how many series they pass (a top-N agents cut, or a bounded set
+ * like network/category); beyond this palette's length, colours repeat.
+ */
+const MULTI_LINE_COLOURS = [
+  'var(--color-brand-700)',
+  'var(--color-accent-600)',
+  'var(--color-teal-600)',
+  'var(--color-violet-500)',
+  'var(--color-rose-500)',
+  'var(--color-slate-500)',
+]
+
+/**
+ * Several named trends on one shared day axis, e.g. each network's or each
+ * top agent's revenue by day, where `LineChart` above only ever draws one
+ * series (plus an optional previous-period ghost of the same metric). A
+ * range-aggregated total table already answers "who's biggest right now"
+ * elsewhere on the page; this is the one place that answers "is a specific
+ * one rising or falling", which a single total can never show.
+ *
+ * Point markers are drawn only at each line's last value, not at every day,
+ * on purpose: a marker per series per day gets unreadable fast once there's
+ * more than one line, and "where did each one end up" is the actual
+ * headline a viewer wants from an endpoint dot. Every exact value still
+ * exists in the sr-only table below for anyone who needs it.
+ */
+export function MultiLineChart({
+  days,
+  series,
+  height = 180,
+  valueLabel = cedisCompact,
+}: {
+  days: string[]
+  series: { label: string; values: number[] }[]
+  height?: number
+  valueLabel?: (value: number) => string
+}) {
+  const width = 100
+  const allValues = series.flatMap((s) => s.values)
+  const { axisMin, axisMax } = niceAxisBounds(Math.min(...allValues, 0), Math.max(...allValues, 0))
+  const span = axisMax - axisMin
+
+  const yFor = (value: number) => height - 6 - ((value - axisMin) / span) * (height - 12)
+  const xFor = (index: number) => (days.length > 1 ? (index / (days.length - 1)) * width : width / 2)
+
+  const xLabelStep = xAxisStep(days.length)
+  const showXLabel = (index: number) => xLabelStep === 1 || index % xLabelStep === 0 || index === days.length - 1
+
+  return (
+    <figure className="m-0">
+      <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+        {series.map((s, i) => (
+          <span key={s.label} className="flex items-center gap-1.5">
+            <span
+              className="h-0.5 w-4 rounded-full"
+              style={{ background: MULTI_LINE_COLOURS[i % MULTI_LINE_COLOURS.length] }}
+            />
+            {s.label}
+          </span>
+        ))}
+      </div>
+      {/* `overflow-x-hidden`: see the identical note in `LineChart`. */}
+      <div aria-hidden="true" className="flex gap-2 overflow-x-hidden">
+        <div className="flex shrink-0 flex-col justify-between text-right text-[10px] text-slate-400 dark:text-slate-500" style={{ height }}>
+          <span>{valueLabel(axisMax)}</span>
+          <span>{valueLabel((axisMax + axisMin) / 2)}</span>
+          <span>{valueLabel(axisMin)}</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="relative">
+            <div className="absolute inset-0 flex flex-col justify-between" style={{ height }}>
+              <div className="border-t border-slate-100 dark:border-slate-800" />
+              <div className="border-t border-slate-100 dark:border-slate-800" />
+              <div className="border-t border-slate-200 dark:border-slate-700" />
+            </div>
+            <svg
+              viewBox={`0 0 ${width} ${height}`}
+              preserveAspectRatio="none"
+              style={{ height }}
+              className="relative w-full overflow-visible"
+            >
+              {series.map((s, i) => {
+                const path = s.values
+                  .map((v, idx) => `${idx === 0 ? 'M' : 'L'}${xFor(idx).toFixed(2)},${yFor(v).toFixed(2)}`)
+                  .join(' ')
+                return (
+                  <path
+                    key={s.label}
+                    d={path}
+                    fill="none"
+                    stroke={MULTI_LINE_COLOURS[i % MULTI_LINE_COLOURS.length]}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                )
+              })}
+            </svg>
+            {series.map((s, i) => {
+              const lastIndex = s.values.length - 1
+              if (lastIndex < 0) return null
+              return (
+                <span
+                  key={s.label}
+                  title={`${s.label}, ${days[lastIndex]}: ${valueLabel(s.values[lastIndex])}`}
+                  className="absolute size-[6px] -translate-x-1/2 -translate-y-1/2 rounded-full border border-white dark:border-slate-900"
+                  style={{
+                    left: `${xFor(lastIndex)}%`,
+                    top: yFor(s.values[lastIndex]),
+                    background: MULTI_LINE_COLOURS[i % MULTI_LINE_COLOURS.length],
+                  }}
+                />
+              )
+            })}
+          </div>
+          <div className="mt-2 flex gap-1.5 sm:gap-3">
+            {days.map((day, index) => (
+              <span
+                key={day}
+                className={cn(
+                  'min-w-0 flex-1 text-center text-[11px] text-slate-500 dark:text-slate-400',
+                  xLabelStep === 1 ? 'truncate' : 'overflow-visible whitespace-nowrap',
+                )}
+              >
+                {showXLabel(index) ? day : ''}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <figcaption className="sr-only">
+        <table>
+          <caption>{series.map((s) => s.label).join(', ')}, by day</caption>
+          <thead>
+            <tr>
+              <th scope="col">Day</th>
+              {series.map((s) => (
+                <th scope="col" key={s.label}>
+                  {s.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {days.map((day, index) => (
+              <tr key={day}>
+                <th scope="row">{day}</th>
+                {series.map((s) => (
+                  <td key={s.label}>{valueLabel(s.values[index] ?? 0)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </figcaption>
+    </figure>
+  )
+}
+
 export function Sparkline({
   values,
   className,

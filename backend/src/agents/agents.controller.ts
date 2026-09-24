@@ -25,6 +25,11 @@ export class AgentsController {
     return this.agents.prices(user.id)
   }
 
+  @Get('product-performance')
+  productPerformance(@CurrentUser() user: AuthUser) {
+    return this.agents.productPerformance(user.referralCode)
+  }
+
   @Put('prices/:productId')
   setPrice(
     @CurrentUser() user: AuthUser,

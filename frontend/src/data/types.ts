@@ -304,6 +304,8 @@ export interface SubAgent {
   volume: Pesewas
   /** What their upline has earned from that volume. */
   earnedForUpline: Pesewas
+  /** Last completed order, or null if they have never sold anything. */
+  lastSaleAt: string | null
   /** Markup this agent adds over their own cost, as a percentage. */
   markupPercent: number
   status: UserStatus

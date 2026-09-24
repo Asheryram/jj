@@ -788,4 +788,13 @@ export class ReportsController {
     const since = from ? new Date(`${from}T00:00:00.000Z`) : new Date(until.getTime() - 7 * 86_400_000)
     return this.admin.myTopCustomers(user, since, until)
   }
+
+  /** Same range parsing as `myReportSummary`. See `AdminService.myDailyRevenue`. */
+  @Get('daily-revenue')
+  @Roles('agent', 'customer')
+  myDailyRevenue(@CurrentUser() user: AuthUser, @Query('from') from?: string, @Query('to') to?: string) {
+    const until = to ? new Date(`${to}T23:59:59.999Z`) : new Date()
+    const since = from ? new Date(`${from}T00:00:00.000Z`) : new Date(until.getTime() - 7 * 86_400_000)
+    return this.admin.myDailyRevenue(user, since, until)
+  }
 }

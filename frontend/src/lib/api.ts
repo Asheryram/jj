@@ -329,6 +329,13 @@ export interface MyReportSummary {
   byCategory: { category: string; revenue: number; orders: number }[]
 }
 
+/** One row of `Pricing.tsx`'s per-product sales feedback, last 30 days, this agent's own sales only. */
+export interface ProductPerformance {
+  productId: string
+  ordersCount: number
+  revenue: number
+}
+
 /** One row of `Reports.tsx`'s "Top customers" table, ranked by `totalSpend` within the chosen range. */
 export interface TopCustomer {
   buyerPhone: string
@@ -1426,6 +1433,9 @@ export const api = {
 
   agentPrices: () => request<AgentPrice[]>('/agents/me/prices'),
 
+  /** How each product actually sold, last 30 days, this agent's own sales only. */
+  productPerformance: () => request<ProductPerformance[]>('/agents/me/product-performance'),
+
   setAgentPrice: (productId: string, resalePrice: number) =>
     request<{ productId: string; resalePrice: number }>(
       `/agents/me/prices/${encodeURIComponent(productId)}`,
@@ -1451,6 +1461,11 @@ export const api = {
   myTopCustomers: (from: string, to: string) =>
     request<TopCustomer[]>(
       `/reports/top-customers?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
+
+  myDailyRevenue: (from: string, to: string) =>
+    request<{ date: string; revenue: number }[]>(
+      `/reports/daily-revenue?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
     ),
 
   /**

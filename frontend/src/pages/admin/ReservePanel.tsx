@@ -86,7 +86,7 @@ export default function ReservePanel() {
       />
 
       <div className="space-y-3 p-4 sm:p-5">
-        <dl className="divide-y divide-slate-100 rounded-xl border border-slate-200 dark:border-slate-700">
+        <dl className="divide-y divide-slate-100 dark:divide-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
           <Row
             label="Should be at Paystack"
             value={expectedAtPaystack}
