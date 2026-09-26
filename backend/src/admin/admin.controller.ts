@@ -155,7 +155,13 @@ export class SettleRefundManuallyDto {
 }
 
 /** Keys whose value is a number rather than a switch. */
-const NUMERIC_SETTING_KEYS = ['floatWatchAt', 'floatRiskAt', 'paystackFeeBp', 'minWithdrawal'] as const
+const NUMERIC_SETTING_KEYS = [
+  'floatWatchAt',
+  'floatRiskAt',
+  'paystackFeeBp',
+  'minWithdrawal',
+  'payoutTransferFee',
+] as const
 
 /** Keys whose value is free text rather than a number or a switch. */
 const STRING_SETTING_KEYS = ['whatsappChannelUrl', 'siteNotice'] as const
@@ -169,6 +175,7 @@ export class SetSettingDto {
     'floatRiskAt',
     'paystackFeeBp',
     'paystackBusinessAccount',
+    'payoutTransferFee',
     'minWithdrawal',
     'whatsappChannelUrl',
     'siteNotice',
@@ -182,6 +189,7 @@ export class SetSettingDto {
     | 'floatRiskAt'
     | 'paystackFeeBp'
     | 'paystackBusinessAccount'
+    | 'payoutTransferFee'
     | 'minWithdrawal'
     | 'whatsappChannelUrl'
     | 'siteNotice'

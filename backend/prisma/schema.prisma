@@ -670,6 +670,14 @@ model Withdrawal {
   agentPhone String @map("agent_phone")
 
   amount      Int
+  /// Paystack's flat transfer fee, frozen at request time from the
+  /// `payoutTransferFee` setting, same reasoning as `agentName`/`agentPhone`
+  /// above: a fee the admin changes later must not silently reprice a
+  /// request already sitting in the queue. Held from the agent's balance
+  /// alongside `amount` the moment they ask (see `WithdrawalsService.request`),
+  /// not discovered as a shortfall at approval, so a payout can never reach
+  /// decision time owing more than what was actually reserved for it.
+  transferFee Int              @default(0) @map("transfer_fee")
   momoNetwork Network          @map("momo_network")
   status      WithdrawalStatus @default(pending)
 

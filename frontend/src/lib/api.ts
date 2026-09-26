@@ -249,6 +249,13 @@ export interface CatalogueSnapshot {
      */
     whatsappChannelUrl?: string | null
     /**
+     * Paystack's flat fee on a Mobile Money payout, in pesewas, charged to the
+     * agent at approval, not the business. Absent for the same reason
+     * `whatsappChannelUrl` is, a customer or guest session has no withdrawal
+     * to be warned about.
+     */
+    payoutTransferFee?: number
+    /**
      * A warning banner for the whole site. Sent to every role, guests
      * included, unlike the WhatsApp link above, this is exactly the
      * audience it's for. Null means nothing is set, so no banner shows.
@@ -485,13 +492,18 @@ export interface PlatformSettings {
   /** What Paystack keeps on a Mobile Money payment, in basis points. */
   paystackFeeBp: number
   /**
-   * Whether Paystack's live balance is actually being watched for a real
-   * shortfall. Off by default, does not change what "Should be at Paystack"
-   * means on the Reserve panel (always all-time, from this platform's own
-   * records); it only decides whether the background check ever calls
-   * Paystack's live balance at all, and so whether an email can ever fire.
+   * Whether this is a real, live, upgraded Paystack business account. Off by
+   * default, and drives two things at once: whether the background check
+   * ever calls Paystack's live balance to watch for a mismatch (never
+   * changes what "Should be at Paystack" means on the Reserve panel, always
+   * all-time from this platform's own records, only whether it's checked
+   * against reality), and whether an approved withdrawal attempts a real
+   * Paystack transfer at all, off, it goes straight to needing
+   * `settle-manually`, a Starter account refuses every third-party transfer.
    */
   paystackBusinessAccount: boolean
+  /** Paystack's flat fee on a Mobile Money payout, in pesewas, on top of the amount sent. */
+  payoutTransferFee: number
   /** The smallest amount worth a manual MoMo transfer, in pesewas (FR-2.6). */
   minWithdrawal: number
   /** The admin's WhatsApp channel invite link, shown to agents. Null = not set. */

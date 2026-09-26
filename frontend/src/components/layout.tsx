@@ -8,6 +8,7 @@ import { isAdmin } from '../lib/roles'
 import { useTheme } from '../lib/theme'
 import type { Role } from '../data/types'
 import { Badge, Button, Modal, cn } from './ui'
+import { UnreadAnnouncementsModal } from './UnreadAnnouncementsModal'
 import { api, apiAsset } from '../lib/api'
 import {
   AlertIcon,
@@ -608,6 +609,7 @@ export function AppShell() {
       </header>
 
       <SiteNotice />
+      <UnreadAnnouncementsModal />
 
       <div className="mx-auto flex max-w-7xl gap-6 px-3 sm:px-4">
         {/*

@@ -612,6 +612,14 @@ export function Modal({
   children,
   footer,
   dismissable = true,
+  /**
+   * Every modal defaults to the same stacking layer, so whichever happens to
+   * mount later in the DOM paints on top of an earlier one, hiding its
+   * buttons behind an invisible click-blocker with no visual sign anything
+   * is wrong. Raise this only for a modal that must always win that contest,
+   * such as the unread-announcements dialog over a page's own popup.
+   */
+  zIndex = 50,
 }: {
   open: boolean
   onClose: () => void
@@ -626,6 +634,7 @@ export function Modal({
    * which reads as a frozen app.
    */
   dismissable?: boolean
+  zIndex?: number
 }) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const titleId = useRef(`dialog-${Math.random().toString(36).slice(2, 8)}`).current
@@ -699,7 +708,7 @@ export function Modal({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" style={{ zIndex }}>
       <button
         type="button"
         aria-label="Close"

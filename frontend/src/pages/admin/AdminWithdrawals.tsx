@@ -28,13 +28,17 @@ type Filter = 'pending' | 'all'
  * FR-2.6, FR-6.4, FR-7.3, the payout queue.
  *
  * Approving sends the transfer through Paystack automatically once this
- * server has real, transfer-capable credentials configured, the balance is
- * checked first, so an agent is never told they have been paid out of money
- * that is not there. Until then, or if Paystack itself refuses every
- * third-party payout outright (a Starter Business account does this by
- * design, not as a bug), the row stays "Decided" with a "Paid another way?"
- * link (see `SettleManuallyModal` below) so a request never has no way
- * forward at all.
+ * server has real, transfer-capable credentials configured AND
+ * `paystackBusinessAccount` is on (Settings → "Is this a live Paystack
+ * business account?"), the balance is checked first, so an agent is never
+ * told they have been paid out of money that is not there. Until then, a
+ * Starter Business account refuses every third-party payout outright by
+ * design, not as a bug, so that setting stays off, and the row goes straight
+ * to "Decided" with a "Paid another way?" link (see `SettleManuallyModal`
+ * below) rather than being attempted and bounced back. Paystack's flat
+ * transfer fee is charged to the agent, not the business, but it is held
+ * from their balance the moment they request, not deducted here, approving
+ * only settles a fee already reserved, see `WithdrawalsService.request`.
  */
 export default function AdminWithdrawals() {
   const { withdrawals, decideWithdrawal, users, pushToast } = useStore()
@@ -43,6 +47,18 @@ export default function AdminWithdrawals() {
   const [decidingId, setDecidingId] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
+  const [payoutTransferFee, setPayoutTransferFee] = useState(0)
+
+  useEffect(() => {
+    let live = true
+    api
+      .adminSettings()
+      .then((s) => live && setPayoutTransferFee(s.payoutTransferFee))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
 
   /**
    * Inline, not behind a review modal, every sibling queue (Refunds,
@@ -163,6 +179,14 @@ export default function AdminWithdrawals() {
           directly. It is checked against your Paystack balance first, so nobody is marked paid
           against money that is not there, and if a transfer is refused or reversed, the amount
           goes straight back to their balance.
+          {payoutTransferFee > 0 && (
+            <>
+              {' '}
+              A flat transfer fee (currently {cedis(payoutTransferFee)}) is already held from each
+              agent&apos;s own balance the moment they request, on top of the amount, not charged to
+              you, approving just settles it.
+            </>
+          )}
         </Callout>
       </div>
 
@@ -257,6 +281,11 @@ export default function AdminWithdrawals() {
                   </Td>
                   <Td align="right" className="tabular font-bold text-slate-900 dark:text-slate-50">
                     {cedis(request.amount)}
+                    {request.transferFee > 0 && (
+                      <p className="mt-0.5 text-xs font-normal text-slate-500 dark:text-slate-400">
+                        +{cedis(request.transferFee)} fee held
+                      </p>
+                    )}
                   </Td>
                   <Td>
                     <Badge

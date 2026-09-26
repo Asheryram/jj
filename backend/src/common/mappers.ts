@@ -173,6 +173,8 @@ export function toWithdrawal(row: Withdrawal) {
     agentName: row.agentName,
     agentPhone: row.agentPhone,
     amount: row.amount,
+    /** Frozen at request time, see `WithdrawalsService.request`. What's actually held is `amount + transferFee`. */
+    transferFee: row.transferFee,
     momoNetwork: row.momoNetwork,
     status: row.status,
     requestedAt: row.requestedAt.toISOString(),

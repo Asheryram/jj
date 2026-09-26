@@ -336,6 +336,8 @@ export interface WithdrawalRequest {
   agentName: string
   agentPhone: string
   amount: Pesewas
+  /** Frozen at request time, held on top of `amount`. What's actually reserved is `amount + transferFee`. */
+  transferFee: Pesewas
   momoNetwork: Network
   status: WithdrawalStatus
   requestedAt: string

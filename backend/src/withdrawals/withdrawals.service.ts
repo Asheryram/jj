@@ -8,12 +8,7 @@ import { SettingsService } from '../settings/settings.service'
 import { momoCodeFor } from '../payments/momo'
 
 import { toWithdrawal } from '../common/mappers'
-import {
-  ConflictError,
-  InsufficientBalanceError,
-  NotFoundError,
-  ValidationError,
-} from '../common/domain-errors'
+import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import type { AuthUser } from '../common/auth'
 import { momoLabel } from '../wallet/wallet.service'
 import { isAdminRole } from '../common/auth'
@@ -52,6 +47,16 @@ export class WithdrawalsService {
    * The balance is held the moment the request is made, not when James approves
    * it. Otherwise an agent could request their whole balance twice and, if both
    * were approved, be paid twice for money they only earned once.
+   *
+   * The hold is `amount + transferFee`, not `amount` alone, and `transferFee`
+   * is frozen here from the current `payoutTransferFee` setting, the same
+   * reasoning as `agentName`/`agentPhone` freezing what they were at request
+   * time. Reserving the fee now, rather than discovering at approval that
+   * what's left of the balance can't cover it, is the whole point: it used to
+   * only be checked (and only best-effort charged) at approval, so an agent
+   * withdrawing their entire balance could have their request approved with
+   * nothing left to actually take the fee from. Now it is impossible to reach
+   * approval owing more than what was reserved for it.
    */
   async request(user: AuthUser, amount: number, momoNetwork: Network, momoNumber: string) {
     const minWithdrawal = await this.settings.get('minWithdrawal')
@@ -60,6 +65,9 @@ export class WithdrawalsService {
         `The smallest withdrawal is GHS ${(minWithdrawal / 100).toFixed(2)}.`,
       )
     }
+
+    const transferFee = await this.settings.get('payoutTransferFee')
+    const hold = amount + transferFee
 
     return this.prisma.$transaction(async (tx) => {
       const pending = await tx.withdrawal.count({
@@ -77,8 +85,8 @@ export class WithdrawalsService {
       // pass a stale check.
       // `id` is TEXT, not uuid, Prisma maps String @id to text, so no cast here.
       const affected = await tx.$executeRaw`
-        UPDATE users SET balance = balance - ${amount}
-        WHERE id = ${user.id} AND balance >= ${amount}
+        UPDATE users SET balance = balance - ${hold}
+        WHERE id = ${user.id} AND balance >= ${hold}
       `
 
       if (affected === 0) {
@@ -86,7 +94,15 @@ export class WithdrawalsService {
           where: { id: user.id },
           select: { balance: true },
         })
-        throw new InsufficientBalanceError(current?.balance ?? 0, amount, 'withdrawal')
+        const available = current?.balance ?? 0
+        throw new ConflictError(
+          'INSUFFICIENT_BALANCE',
+          transferFee > 0
+            ? `You have GHS ${(available / 100).toFixed(2)} available. Withdrawing GHS ` +
+              `${(amount / 100).toFixed(2)} needs GHS ${(hold / 100).toFixed(2)} held, once Paystack's ` +
+              `GHS ${(transferFee / 100).toFixed(2)} transfer fee is included, which is more than you have.`
+            : `You have ${(available / 100).toFixed(2)} available and asked to withdraw ${(amount / 100).toFixed(2)}.`,
+        )
       }
 
       const after = await tx.user.findUniqueOrThrow({
@@ -102,24 +118,40 @@ export class WithdrawalsService {
           // says, see RequestWithdrawalDto.momoNumber.
           agentPhone: momoNumber,
           amount,
+          transferFee,
           momoNetwork,
           status: 'pending',
         },
       })
 
       // The debit is recorded now, described as held rather than paid, the agent
-      // must be able to see where the money went in their own ledger.
+      // must be able to see where the money went in their own ledger. Two lines,
+      // not one lump sum, so the fee is visible as its own thing rather than
+      // buried inside a bigger number the agent has to take on faith.
       await tx.earning.create({
         data: {
           userId: user.id,
           type: 'withdrawal',
           amount: -amount,
-          balanceAfter: after.balance,
+          balanceAfter: transferFee > 0 ? after.balance + transferFee : after.balance,
           description: `Withdrawal requested · ${momoLabel(momoNetwork)} ${after.phone}`,
           reference: `WDR-${row.id.slice(0, 8).toUpperCase()}`,
           depth: 0,
         },
       })
+      if (transferFee > 0) {
+        await tx.earning.create({
+          data: {
+            userId: user.id,
+            type: 'withdrawal',
+            amount: -transferFee,
+            balanceAfter: after.balance,
+            description: `Transfer fee held for this withdrawal · GHS ${(transferFee / 100).toFixed(2)}`,
+            reference: `WDR-${row.id.slice(0, 8).toUpperCase()}-FEE`,
+            depth: 0,
+          },
+        })
+      }
 
       return toWithdrawal(row)
     })
@@ -153,9 +185,13 @@ export class WithdrawalsService {
         data: { status: 'rejected', decidedAt: new Date() },
       })
 
+      // The hold was `amount + transferFee` (see `request()`), so the reversal
+      // returns both, not just `amount`, or the frozen fee would stay stuck
+      // on the agent's balance forever with nothing left pending to release it.
+      const total = row.amount + row.transferFee
       const after = await tx.user.update({
         where: { id: row.userId },
-        data: { balance: { increment: row.amount } },
+        data: { balance: { increment: total } },
         select: { balance: true },
       })
 
@@ -163,7 +199,7 @@ export class WithdrawalsService {
         data: {
           userId: row.userId,
           type: 'withdrawal',
-          amount: row.amount,
+          amount: total,
           balanceAfter: after.balance,
           description: 'Withdrawal request cancelled, amount returned to your balance',
           reference: `WDR-${row.id.slice(0, 8).toUpperCase()}-C`,
@@ -193,10 +229,17 @@ export class WithdrawalsService {
 
     // Checked before the transaction, because it is an outbound HTTP call and a
     // transaction must never be held open across one.
-    if (status === 'approved') {
+    //
+    // Only when transfers are actually going through Paystack. Off
+    // (`paystackBusinessAccount` false, a Starter account, see `sendPayout`),
+    // this payout never touches Paystack's balance at all, it is sent by
+    // hand from the admin's own pocket and reimbursed later, so checking
+    // Paystack's live balance first would block an approval on a constraint
+    // that plain does not apply to how the money is actually leaving.
+    if (status === 'approved' && (await this.settings.get('paystackBusinessAccount'))) {
       const pending = await this.prisma.withdrawal.findUnique({ where: { id } })
       if (pending?.status === 'pending') {
-        const check = await this.solvency.canPayout(pending.amount)
+        const check = await this.solvency.canPayout(pending.amount, pending.transferFee)
         if (!check.ok && check.reason) {
           throw new ConflictError('INSUFFICIENT_PAYOUT_BALANCE', check.reason)
         }
@@ -250,9 +293,12 @@ export class WithdrawalsService {
       }
 
       if (status === 'rejected') {
+        // The hold was `amount + transferFee` (see `request()`), both are
+        // returned, same reasoning as `cancel()`'s own identical reversal.
+        const total = row.amount + row.transferFee
         const after = await tx.user.update({
           where: { id: row.userId },
-          data: { balance: { increment: row.amount } },
+          data: { balance: { increment: total } },
           select: { balance: true },
         })
 
@@ -263,7 +309,7 @@ export class WithdrawalsService {
           data: {
             userId: row.userId,
             type: 'withdrawal',
-            amount: row.amount,
+            amount: total,
             balanceAfter: after.balance,
             description: 'Withdrawal rejected, amount returned to your balance',
             reference: `WDR-${row.id.slice(0, 8).toUpperCase()}-R`,
@@ -292,6 +338,34 @@ export class WithdrawalsService {
           ],
           tx,
         )
+
+        /**
+         * The flat transfer fee, charged to the agent, not absorbed by the
+         * business. Already reserved out of their balance at request time
+         * (`row.transferFee`, see `request()`), nothing more to debit here,
+         * this only books the ledger side of what already happened. Not
+         * booked as a business cost (`affectsProfit: false`): this money
+         * comes out of what the agent was owed, not out of James's margin,
+         * it is a transfer between what the agent keeps and what the
+         * business keeps, not a new expense.
+         */
+        if (row.transferFee > 0) {
+          await this.ledger.record(
+            [
+              {
+                idempotencyKey: LedgerService.key('withdrawal', row.id, 'payout_fee'),
+                kind: 'payout_fee',
+                amount: -row.transferFee,
+                affectsProfit: false,
+                description: `Transfer fee charged to ${row.agentName} on this payout`,
+                withdrawalId: row.id,
+                userId: row.userId,
+                occurredAt: new Date(),
+              },
+            ],
+            tx,
+          )
+        }
       }
 
       this.log.log(`withdrawal ${id} ${status}`)
@@ -366,6 +440,34 @@ export class WithdrawalsService {
         },
       })
       this.log.warn(`payout ${withdrawalId} left for manual sending, Paystack is not configured`)
+      return
+    }
+
+    /**
+     * A Starter Paystack account (not yet verified/upgraded to a full business
+     * account) refuses every third-party transfer outright, regardless of
+     * balance. Attempting it anyway would run straight into `paystack.transfer`
+     * failing, and a plain refusal is treated below as `failPayout`, which
+     * reverses the approval back to `failed` and returns the agent's balance,
+     * exactly as if nothing had been decided. That undoes the approval instead
+     * of leaving it there for a human to actually send, the whole point of
+     * `settleManually`, which needs `status: 'approved'` to still be true.
+     *
+     * So this is checked before ever calling Paystack, not after being refused
+     * by them: known in advance, not discovered by a failed attempt.
+     */
+    if (!(await this.settings.get('paystackBusinessAccount'))) {
+      await this.prisma.withdrawal.update({
+        where: { id: withdrawalId },
+        data: {
+          transferStatus: 'manual',
+          transferNote:
+            "This Paystack account can't send transfers yet (not registered/upgraded as a " +
+            'business account), so this one has to be sent by hand, on Mobile Money, then ' +
+            'confirmed below once it is.',
+        },
+      })
+      this.log.warn(`payout ${withdrawalId} left for manual sending, Paystack transfers are not enabled`)
       return
     }
 
@@ -635,9 +737,13 @@ export class WithdrawalsService {
         data: { status: 'failed', transferStatus: 'failed', transferNote: reason },
       })
 
+      // The hold was `amount + transferFee` (see `request()`), both come back:
+      // the transfer never went out at all, so nothing was actually spent on
+      // Paystack's fee either, there is nothing left to keep it for.
+      const total = row.amount + row.transferFee
       const after = await tx.user.update({
         where: { id: row.userId },
-        data: { balance: { increment: row.amount } },
+        data: { balance: { increment: total } },
         select: { balance: true },
       })
 
@@ -645,7 +751,7 @@ export class WithdrawalsService {
         data: {
           userId: row.userId,
           type: 'withdrawal',
-          amount: row.amount,
+          amount: total,
           balanceAfter: after.balance,
           description: 'Payout could not be sent, amount returned to your balance',
           reference: `WDR-${row.id.slice(0, 8).toUpperCase()}-F`,
@@ -653,9 +759,17 @@ export class WithdrawalsService {
         },
       })
 
-      // The payout line comes back off the books too: no money left the platform.
+      // The payout and its fee line come back off the books too: no money
+      // left the platform, in either direction.
       await tx.ledgerEntry.deleteMany({
-        where: { idempotencyKey: LedgerService.key('withdrawal', row.id, 'payout') },
+        where: {
+          idempotencyKey: {
+            in: [
+              LedgerService.key('withdrawal', row.id, 'payout'),
+              LedgerService.key('withdrawal', row.id, 'payout_fee'),
+            ],
+          },
+        },
       })
     })
 

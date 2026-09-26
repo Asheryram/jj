@@ -34,7 +34,14 @@ import { AlertIcon, CashIcon, ClockIcon } from '../../components/icons'
 const PLACEHOLDER_PHONE = '0000000000'
 
 export default function Withdrawals() {
-  const { agentBalance: balance, withdrawals, requestWithdrawal, cancelWithdrawal, session } = useStore()
+  const {
+    agentBalance: balance,
+    withdrawals,
+    requestWithdrawal,
+    cancelWithdrawal,
+    session,
+    payoutTransferFee,
+  } = useStore()
   const [params] = useSearchParams()
   // `?open=1`, the "Withdraw" buttons on Dashboard/Earnings used to land here
   // and stop, one more click away from the thing they were actually for.
@@ -61,7 +68,7 @@ export default function Withdrawals() {
         title="Withdraw earnings"
         subtitle="Move your earnings to your Mobile Money account."
         action={
-          <Button size="lg" onClick={() => setOpen(true)} disabled={balance <= 0}>
+          <Button size="lg" onClick={() => setOpen(true)} disabled={balance <= payoutTransferFee}>
             <CashIcon className="size-4" /> Request withdrawal
           </Button>
         }
@@ -82,6 +89,13 @@ export default function Withdrawals() {
         <Callout tone="info" title="How payouts work right now" icon={<AlertIcon className="size-4" />}>
           James reviews and pays each request by hand, usually within 24 hours. You will get an SMS
           once the money has been sent. Automatic payouts are planned for a later version.
+          {payoutTransferFee > 0 && (
+            <>
+              {' '}
+              A flat {cedis(payoutTransferFee)} transfer fee is deducted from your balance when a
+              request is approved, on top of the amount you asked for.
+            </>
+          )}
         </Callout>
       </div>
 
@@ -175,6 +189,7 @@ export default function Withdrawals() {
         onClose={() => setOpen(false)}
         balance={balance}
         defaultPhone={session?.phone ?? ''}
+        payoutTransferFee={payoutTransferFee}
         onSubmit={async (amount, network, number) => {
           // Reported back to the modal, only closing and clearing on success
           // is the point; the server validates the minimum and the current
@@ -194,12 +209,14 @@ function RequestModal({
   onClose,
   balance,
   defaultPhone,
+  payoutTransferFee,
   onSubmit,
 }: {
   open: boolean
   onClose: () => void
   balance: number
   defaultPhone: string
+  payoutTransferFee: number
   onSubmit: (amount: number, network: Network, number: string) => Promise<boolean>
 }) {
   const [value, setValue] = useState('')
@@ -216,6 +233,18 @@ function RequestModal({
 
   const parsed = value.trim() ? parseCedis(value) : null
 
+  /**
+   * The real ceiling on what can be requested, not the raw balance.
+   *
+   * Approving a withdrawal reserves `amount + payoutTransferFee` the moment
+   * it is asked for (see `WithdrawalsService.request`), so requesting the
+   * whole balance would leave nothing to hold the fee against and the
+   * request would be refused outright, not approved-then-silently-short.
+   * Capped here so that refusal is never reached: what's offered as
+   * "everything" already accounts for it.
+   */
+  const maxRequestable = Math.max(0, balance - payoutTransferFee)
+
   const submit = async () => {
     if (parsed === null) {
       setError('Enter an amount like 50 or 50.00.')
@@ -225,8 +254,12 @@ function RequestModal({
     // withdrawal), so it is not guessed here, the server's own rejection
     // carries the real, current amount rather than a number that could drift
     // from it.
-    if (parsed > balance) {
-      setError(`You only have ${cedis(balance)} available.`)
+    if (parsed > maxRequestable) {
+      setError(
+        payoutTransferFee > 0
+          ? `You can withdraw at most ${cedis(maxRequestable)}, GHS ${(payoutTransferFee / 100).toFixed(2)} of your ${cedis(balance)} is held back for the transfer fee.`
+          : `You only have ${cedis(balance)} available.`,
+      )
       return
     }
     if (!/^0\d{9}$/.test(phone.trim())) {
@@ -251,9 +284,19 @@ function RequestModal({
   return (
     <Modal open={open} onClose={onClose} title="Request a withdrawal">
       <div className="space-y-4">
-        <div className="flex items-baseline justify-between rounded-xl bg-slate-50 dark:bg-slate-800 px-3.5 py-3">
-          <span className="text-sm text-slate-600 dark:text-slate-300">Available</span>
-          <span className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">{cedis(balance)}</span>
+        <div className="rounded-xl bg-slate-50 dark:bg-slate-800 px-3.5 py-3">
+          <div className="flex items-baseline justify-between">
+            <span className="text-sm text-slate-600 dark:text-slate-300">Available to withdraw</span>
+            <span className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">
+              {cedis(maxRequestable)}
+            </span>
+          </div>
+          {payoutTransferFee > 0 && (
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {cedis(balance)} total, GHS {(payoutTransferFee / 100).toFixed(2)} of it is held back to
+              cover Paystack's transfer fee.
+            </p>
+          )}
         </div>
 
         <Field label="Amount to withdraw" htmlFor="wd-amount" error={error}>
@@ -278,11 +321,18 @@ function RequestModal({
 
         <button
           type="button"
-          onClick={() => setValue((balance / 100).toFixed(2))}
+          onClick={() => setValue((maxRequestable / 100).toFixed(2))}
           className="text-sm font-semibold text-brand-700 dark:text-brand-300 hover:underline"
         >
-          Withdraw everything ({cedis(balance)})
+          Withdraw the max ({cedis(maxRequestable)})
         </button>
+
+        {payoutTransferFee > 0 && (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            A flat {cedis(payoutTransferFee)} transfer fee is held on top of whatever you request
+            here, and kept when this is approved.
+          </p>
+        )}
 
         <Field label="Mobile Money network" htmlFor="wd-network">
           <Select

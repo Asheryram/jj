@@ -186,6 +186,8 @@ export default function Settings() {
 
       <PaystackPayoutSetting />
 
+      <PayoutTransferFeeSetting />
+
       <FloatThresholds />
 
       <MinWithdrawalSetting />
@@ -693,75 +695,157 @@ function AgentApproval() {
 }
 
 /**
- * Whether Paystack's live balance is actually being watched for a real
- * shortfall.
+ * Whether this is a real, live, upgraded Paystack business account, as
+ * opposed to a Starter account. Off by default, and drives two things at
+ * once, because both hinge on the exact same real-world fact:
  *
- * Off by default, and off does not mean "less accurate." "Should be at
- * Paystack" on the Reserve panel is always the same all-time figure,
- * everything ever collected, less every payout and refund actually sent,
- * computed entirely from this platform's own records, whatever this is set
- * to. All this decides is whether the background check ever asks Paystack
- * for its live balance at all: off, and it never does, so no email can ever
- * fire; on, and every 30 minutes the live balance is compared against that
- * same figure, and a real shortfall, the live balance reading lower than
- * expected, reaches an admin's inbox. See `SolvencyService.reconcile`.
+ *  - **Live balance watching.** Off, nothing here ever calls Paystack in the
+ *    background, so no mismatch email can ever fire. "Should be at Paystack"
+ *    on the Reserve panel is always the same all-time figure regardless,
+ *    everything ever collected, less every payout and refund actually sent,
+ *    computed entirely from this platform's own records; this only decides
+ *    whether that figure is ever checked against Paystack's actual live
+ *    balance. On, it's checked every 30 minutes, and you're emailed only if
+ *    it comes back genuinely lower, never for reading higher.
+ *  - **Automatic transfers.** Off, an approved withdrawal never attempts a
+ *    real Paystack transfer at all, a Starter account refuses every
+ *    third-party payout outright, so it goes straight to "Sent by hand" and
+ *    waits for you to confirm it below. On, approving one tries to send it
+ *    through Paystack immediately.
+ *
+ * See `SolvencyService.reconcile` and `WithdrawalsService.sendPayout`.
  */
 function PaystackPayoutSetting() {
   const { pushToast } = useStore()
-  const [watching, setWatching] = useState<boolean | null>(null)
+  const [businessAccount, setBusinessAccount] = useState<boolean | null>(null)
 
   useEffect(() => {
     let live = true
     api
       .adminSettings()
-      .then((s) => live && setWatching(s.paystackBusinessAccount))
-      .catch(() => live && setWatching(null))
+      .then((s) => live && setBusinessAccount(s.paystackBusinessAccount))
+      .catch(() => live && setBusinessAccount(null))
     return () => {
       live = false
     }
   }, [])
 
   const change = async (next: boolean) => {
-    setWatching(next)
+    setBusinessAccount(next)
     try {
       await api.setSetting('paystackBusinessAccount', next)
       pushToast({
         tone: 'success',
-        title: next ? 'Now watching your live Paystack balance' : 'No longer checking Paystack live',
+        title: next ? 'Treating this as a live business account' : 'Treating this as a Starter account',
         detail: next
-          ? "You'll get an email if it ever reads lower than your own records expect."
-          : 'Nothing here calls Paystack in the background any more.',
+          ? "Payouts will try to send through Paystack automatically, and you'll get an email if its live balance ever reads lower than your own records expect."
+          : 'Payouts will always wait to be sent by hand, and nothing here calls Paystack in the background any more.',
       })
     } catch {
-      setWatching(!next)
+      setBusinessAccount(!next)
       pushToast({ tone: 'error', title: 'We could not change that.' })
     }
   }
 
   return (
     <Card className="mt-3">
-      <CardHead title="Watch your live Paystack balance?" subtitle="Only changes background alerting, never what 'Should be at Paystack' shows" />
+      <CardHead
+        title="Is this a live Paystack business account?"
+        subtitle="Turns on automatic payouts and live-balance alerting together, turn on only once it's upgraded"
+      />
       <div className="flex items-start justify-between gap-4 px-4 pb-4">
         <div>
           <label htmlFor="paystack-watch" className="block font-semibold text-slate-900 dark:text-slate-50">
-            Email me if Paystack's live balance is lower than my records expect
+            This account can send transfers and is worth watching live
           </label>
           <p className="mt-1 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
-            "Should be at Paystack" on the Reserve panel is always everything ever collected, less
-            every payout and refund you have actually sent, and less every reimbursement moved
-            across to DataHub, this switch never changes that. Off,
-            nothing here ever calls Paystack in the background. On, that figure is checked every 30
-            minutes against Paystack's actual live balance, and you're emailed only if it comes back
-            genuinely lower, never for reading higher, which usually just means a payout landed
-            without being logged here.
+            A Starter Paystack account cannot send Mobile Money transfers to agents at all, whatever
+            the balance, and nobody has confirmed it's worth watching live yet. Off, approving a
+            withdrawal is always marked "Sent by hand" for you to confirm yourself, and nothing here
+            calls Paystack in the background. On, approvals try to send through Paystack immediately,
+            and every 30 minutes its live balance is compared against "Should be at Paystack" (which
+            never changes with this switch, only whether it's checked), emailing you only on a real
+            shortfall.
           </p>
         </div>
         <Toggle
           id="paystack-watch"
-          label="Email me if Paystack's live balance is lower than my records expect"
-          checked={watching ?? false}
+          label="This account can send transfers and is worth watching live"
+          checked={businessAccount ?? false}
           onChange={(next) => void change(next)}
         />
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * Paystack's flat fee on a Mobile Money payout, charged on top of the amount
+ * actually sent, checked by `SolvencyService.canPayout` before an approval so
+ * "the balance covers the payout" also means "and the fee on top of it," not
+ * just the raw amount.
+ */
+function PayoutTransferFeeSetting() {
+  const { pushToast } = useStore()
+  const [draft, setDraft] = useState('')
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api
+      .adminSettings()
+      .then((settings) => {
+        if (!live) return
+        setDraft((settings.payoutTransferFee / 100).toFixed(2))
+        setLoaded(true)
+      })
+      .catch(() => live && setLoaded(true))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const save = async () => {
+    const cedisValue = draft.trim() === '' ? 0 : Number(draft)
+    if (!Number.isFinite(cedisValue) || cedisValue < 0) {
+      pushToast({ tone: 'error', title: 'Enter an amount like 1 or 1.00.' })
+      return
+    }
+    try {
+      await api.setSetting('payoutTransferFee', Math.round(cedisValue * 100))
+      pushToast({
+        tone: 'success',
+        title: `Transfer fee set to ${cedis(Math.round(cedisValue * 100))}`,
+      })
+    } catch (error) {
+      pushToast({
+        tone: 'error',
+        title: error instanceof Error ? error.message : 'We could not save that.',
+      })
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Paystack's payout transfer fee"
+        subtitle="What Paystack keeps on top of the amount for every Mobile Money payout"
+      />
+      <div className="space-y-3 px-4 pb-4">
+        <Field
+          label="Flat transfer fee (GHS)"
+          htmlFor="payout-transfer-fee"
+          hint="Check this against your Paystack dashboard, it is their published rate, not something computed here."
+        >
+          <TextInput
+            id="payout-transfer-fee"
+            inputMode="decimal"
+            disabled={!loaded}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value.replace(/[^0-9.]/g, ''))}
+            onBlur={() => void save()}
+          />
+        </Field>
       </div>
     </Card>
   )

@@ -60,19 +60,41 @@ export interface PlatformSettings {
    */
   paystackFeeBp: number
   /**
-   * Whether Paystack's live balance is actually being watched for a real
-   * shortfall.
+   * Whether this is a real, live, upgraded Paystack business account, as
+   * opposed to a Starter account not yet verified for one. Off by default.
+   * Two things hang off this one flag, both because they hinge on the exact
+   * same real-world fact:
    *
-   * Off by default. This does not change what "should be at Paystack" means
-   * anywhere, that is always all-time, from this platform's own records,
-   * everywhere, regardless of this setting (see `SolvencyService`). All this
-   * decides is whether the background check ever calls Paystack's live
-   * balance at all: off, and it never does, and no email can ever fire. On,
-   * and every 30 minutes the live balance is compared against that same
-   * all-time figure, and a real shortfall, the live balance reading lower
-   * than expected, reaches an admin's inbox.
+   *  - **Live balance watching.** Off, the background check never calls
+   *    Paystack's live balance at all, so no mismatch email can ever fire.
+   *    On, the live balance is compared every 30 minutes against the same
+   *    all-time "should be at Paystack" figure (see `SolvencyService`), which
+   *    itself never changes with this setting, only whether it is checked
+   *    against reality. A real shortfall reaches an admin's inbox.
+   *  - **Automatic transfers.** Off, `WithdrawalsService.sendPayout` never
+   *    calls Paystack's Transfer API at all, a Starter account refuses every
+   *    third-party payout outright, so trying anyway would just get refused
+   *    and reversed back to `failed`, undoing the approval. An approval goes
+   *    straight to `transferStatus: 'manual'` and waits for `settleManually`
+   *    instead, the same treatment already given to a server with no Paystack
+   *    key configured. On, payouts go out automatically again.
    */
   paystackBusinessAccount: boolean
+  /**
+   * What Paystack keeps for itself on a Mobile Money payout, in pesewas, on top of
+   * whatever amount is actually sent.
+   *
+   * `paystackFeeBp` is the fee on money coming in from a customer; this is the fee
+   * on money going out to an agent, a flat rate rather than a percentage, this is
+   * how Paystack prices Ghana Mobile Money transfers. Used by `SolvencyService.canPayout`
+   * so approving a payout checks Paystack's balance can cover the amount sent AND
+   * this fee, not just the amount, a transfer that is refused for want of the fee
+   * alone would otherwise look identical to one refused for want of the payout itself.
+   * Defaults to GHS 1.00, confirm the real number against your own Paystack dashboard
+   * and adjust here, it is their published rate to change, not a figure this platform
+   * computes.
+   */
+  payoutTransferFee: number
   /**
    * The smallest amount worth a manual MoMo transfer, in pesewas (FR-2.6).
    *
@@ -125,6 +147,7 @@ const DEFAULTS: PlatformSettings = {
   floatRiskAt: 0,
   paystackFeeBp: 200,
   paystackBusinessAccount: false,
+  payoutTransferFee: 100,
   minWithdrawal: 1000,
   whatsappChannelUrl: null,
   siteNotice: null,
@@ -140,7 +163,7 @@ const DEFAULTS: PlatformSettings = {
 const NUMERIC_KEYS = [] as readonly string[]
 
 /** Keys holding an amount of money in pesewas, which has no upper bound. */
-const MONEY_KEYS = ['floatWatchAt', 'floatRiskAt', 'minWithdrawal'] as const
+const MONEY_KEYS = ['floatWatchAt', 'floatRiskAt', 'minWithdrawal', 'payoutTransferFee'] as const
 
 /** Keys holding a fee rate in basis points, bounded, unlike a plain amount. */
 const FEE_BP_KEYS = ['paystackFeeBp'] as const
@@ -168,6 +191,7 @@ export class SettingsService {
       floatRiskAt: money(stored.floatRiskAt, DEFAULTS.floatRiskAt),
       paystackFeeBp: feeBp(stored.paystackFeeBp, DEFAULTS.paystackFeeBp),
       paystackBusinessAccount: bool(stored.paystackBusinessAccount, DEFAULTS.paystackBusinessAccount),
+      payoutTransferFee: money(stored.payoutTransferFee, DEFAULTS.payoutTransferFee),
       minWithdrawal: money(stored.minWithdrawal, DEFAULTS.minWithdrawal),
       whatsappChannelUrl: str(stored.whatsappChannelUrl, DEFAULTS.whatsappChannelUrl),
       siteNotice: str(stored.siteNotice, DEFAULTS.siteNotice),

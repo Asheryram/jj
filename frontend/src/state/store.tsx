@@ -159,6 +159,8 @@ interface Store {
   whatsappChannelUrl: string | null
   /** Call once the popup has been acted on or dismissed, so it does not return. */
   markWhatsappChannelSeen: () => Promise<void>
+  /** Paystack's flat fee on a Mobile Money payout, in pesewas, charged to the agent at approval. */
+  payoutTransferFee: number
   /** A warning banner for the whole site, agents and guests alike. Null = not set. */
   siteNotice: string | null
   retailPrice: (product: Product, sellerCode?: string | null) => number
@@ -272,6 +274,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    */
   const [whatsappChannelUrl, setWhatsappChannelUrl] = useState<string | null>(null)
 
+  /**
+   * Paystack's flat payout transfer fee, in pesewas, charged to the agent at
+   * approval, sent alongside the WhatsApp link with the same audience and the
+   * same "absent means not sent" reasoning. Defaults to 0 until the first
+   * snapshot arrives.
+   */
+  const [payoutTransferFee, setPayoutTransferFee] = useState(0)
+
   /** A warning banner for the whole site, sent to every role including guests. */
   const [siteNotice, setSiteNotice] = useState<string | null>(null)
 
@@ -323,6 +333,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (snapshot.admin) setAdmin(snapshot.admin)
     setPaystackFeeBp(snapshot.settings.paystackFeeBp)
     setWhatsappChannelUrl(snapshot.settings.whatsappChannelUrl ?? null)
+    setPayoutTransferFee(snapshot.settings.payoutTransferFee ?? 0)
     setSiteNotice(snapshot.settings.siteNotice)
   }, [])
 
@@ -1138,6 +1149,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       paystackFeeBp,
       whatsappChannelUrl,
       markWhatsappChannelSeen,
+      payoutTransferFee,
       siteNotice,
       retailPrice,
       myBand,
@@ -1196,6 +1208,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       paystackFeeBp,
       whatsappChannelUrl,
       markWhatsappChannelSeen,
+      payoutTransferFee,
       siteNotice,
       products,
       pushToast,

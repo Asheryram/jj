@@ -73,6 +73,15 @@ export class CatalogueService {
          */
         ...(role === 'agent' || isAdminRole(role) ? { whatsappChannelUrl: settings.whatsappChannelUrl } : {}),
         /**
+         * Paystack's flat fee on a Mobile Money payout, charged to the agent
+         * at approval (see `WithdrawalsService.decide`), not absorbed by the
+         * business. Sent so the withdrawal form can say so up front, rather
+         * than an agent only discovering it once it is already deducted.
+         * Same audience as the WhatsApp link above, a customer has no wallet
+         * to withdraw from and no reason to see it.
+         */
+        ...(role === 'agent' || isAdminRole(role) ? { payoutTransferFee: settings.payoutTransferFee } : {}),
+        /**
          * A warning banner for the whole site, unlike the WhatsApp link
          * above, sent to every role, guests included: this is exactly the
          * audience James wants it seen by, right down to a customer landing

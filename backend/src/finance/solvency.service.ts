@@ -668,8 +668,17 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
    * marked paid against money that is not there. Deliberately advisory: it
    * reports, and the caller decides, refusing outright would let an unreachable
    * Paystack block every payout, and the agent is owed the money either way.
+   *
+   * Checked against the payout amount PLUS `fee`, not the amount alone.
+   * Paystack keeps its own flat fee out of the same balance a transfer pays
+   * from, a balance that covers the amount exactly but not the fee on top of
+   * it still gets the transfer refused, and this would otherwise have said
+   * "fine" right up until it wasn't. `fee` is the caller's own frozen
+   * `Withdrawal.transferFee` (see `WithdrawalsService.request`), not read
+   * fresh from settings here, a fee the admin changes after this request was
+   * already made must not retroactively change what it needs.
    */
-  async canPayout(amount: number): Promise<{ ok: boolean; reason: string | null }> {
+  async canPayout(amount: number, fee: number): Promise<{ ok: boolean; reason: string | null }> {
     const result = await this.paystack.balance()
     if (!result.ok) {
       // Unknown, not "no". Blocking on our own inability to check would be the
@@ -678,12 +687,15 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       return { ok: true, reason: null }
     }
 
-    if (result.balance < amount) {
+    const required = amount + fee
+
+    if (result.balance < required) {
       return {
         ok: false,
         reason:
-          `Paystack is holding GHS ${(result.balance / 100).toFixed(2)}, and this payout is ` +
-          `GHS ${(amount / 100).toFixed(2)}. Top up before approving it, or the transfer will fail.`,
+          `Paystack is holding GHS ${(result.balance / 100).toFixed(2)}, and this payout needs ` +
+          `GHS ${(amount / 100).toFixed(2)} plus Paystack's own GHS ${(fee / 100).toFixed(2)} transfer ` +
+          `fee, GHS ${(required / 100).toFixed(2)} in all. Top up before approving it, or the transfer will fail.`,
       }
     }
 
