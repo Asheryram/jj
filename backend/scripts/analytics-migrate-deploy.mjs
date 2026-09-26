@@ -4,16 +4,19 @@
  * `ANALYTICS_DATABASE_URL` isn't set yet, in which case it skips instead of
  * failing.
  *
- * The main database's own migration in `release` fails closed on purpose,
- * see that script's own comment: an API serving requests against a
+ * The main database's own migration in `release` still fails closed on
+ * purpose, see that script's own comment: an API serving requests against a
  * half-migrated money database is worse than one that is down and says so.
- * The warehouse is the opposite case. It is documented everywhere in
- * `prisma-analytics/schema.prisma` as disposable and never a source of
- * truth, so a platform that hasn't set up the second database yet should
- * still deploy and serve real orders, just without `/analytics` working
- * until that's configured. Once the variable IS set, a failure to migrate
- * against it still fails the release, that's a real misconfiguration worth
- * knowing about immediately, not something to silently limp past.
+ * The warehouse is the opposite case, and this now actually behaves that
+ * way: it is documented everywhere in `prisma-analytics/schema.prisma` as
+ * disposable and never a source of truth, so a failure here is loud (still
+ * printed in full, never swallowed) but never fatal to the release. This
+ * used to fail closed too, until a stuck migration on the live warehouse
+ * (`silver_ledger_facts.hour` added `NOT NULL` with no default onto a
+ * non-empty table) took the entire API down on every restart for two days,
+ * over a table nothing but `/analytics` reads. Real orders, payouts and
+ * everything else this platform actually runs on must never wait on this
+ * database's migrations succeeding.
  */
 import { spawnSync } from 'node:child_process'
 
@@ -26,4 +29,10 @@ const result = spawnSync('npx', ['prisma', 'migrate', 'deploy', '--schema', 'pri
   stdio: 'inherit',
   shell: true,
 })
-process.exit(result.status ?? 1)
+if (result.status !== 0) {
+  console.error(
+    `Analytics warehouse migration failed (exit ${result.status}). Continuing the release anyway, ` +
+      '/analytics will be unavailable until this is fixed, nothing else on the platform depends on it.',
+  )
+}
+process.exit(0)

@@ -1,9 +1,3 @@
-/*
-  Warnings:
-
-  - Added the required column `hour` to the `silver_ledger_facts` table without a default value. This is not possible if the table is not empty.
-
-*/
 -- AlterTable
 ALTER TABLE "daily_summary" ADD COLUMN     "carryover_adjustment" INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN     "same_day_profit" INTEGER NOT NULL DEFAULT 0;
@@ -20,4 +14,11 @@ ADD COLUMN     "same_day_profit" INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN     "supplier_cost" INTEGER NOT NULL DEFAULT 0;
 
 -- AlterTable
-ALTER TABLE "silver_ledger_facts" ADD COLUMN     "hour" INTEGER NOT NULL;
+-- DEFAULT 0 added by hand: the generated statement had no default at all,
+-- which Postgres refuses outright the moment this table holds a single row
+-- (see the P3009 incident this fix resolves). 0 is a safe placeholder for
+-- any pre-existing row, this warehouse is fully derived, never a source of
+-- truth (see AnalyticsPrismaService's own doc comment), and the ETL job's
+-- delete-then-reinsert cycle (etl.service.ts) overwrites every row it
+-- touches with the real computed hour on its next run regardless.
+ALTER TABLE "silver_ledger_facts" ADD COLUMN     "hour" INTEGER NOT NULL DEFAULT 0;

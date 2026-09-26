@@ -363,8 +363,10 @@ model SilverLedgerFact {
   productId     String? @map("product_id")
   productName   String? @map("product_name")
   agentId       String? @map("agent_id")
-  /// 0-23, UTC, the same clock `SilverOrderFact.hour` uses.
-  hour          Int
+  /// 0-23, UTC, the same clock `SilverOrderFact.hour` uses. Defaults to 0
+  /// only to let this column exist on rows written before it did, the ETL
+  /// job overwrites it with the real value on every row it touches.
+  hour          Int     @default(0)
 
   @@index([dateKey])
   @@map("silver_ledger_facts")
