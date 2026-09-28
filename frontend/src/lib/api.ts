@@ -256,6 +256,13 @@ export interface CatalogueSnapshot {
      */
     payoutTransferFee?: number
     /**
+     * The wildcard root a free subdomain is composed against, e.g.
+     * "jkbkdatahub.com". Absent for the same reason `whatsappChannelUrl` is;
+     * null (present but empty) means subdomains aren't set up on this
+     * server yet, an agent's own BYO domain still works either way.
+     */
+    domainSubdomainRoot?: string | null
+    /**
      * A warning banner for the whole site. Sent to every role, guests
      * included, unlike the WhatsApp link above, this is exactly the
      * audience it's for. Null means nothing is set, so no banner shows.
@@ -616,13 +623,23 @@ export interface BrandingRequestRow {
   decidedAt: string | null
 }
 
+export type DomainMode = 'subdomain' | 'custom'
+export type BillingInterval = 'monthly' | 'yearly'
+
 export interface MyDomainStatus {
   domain: string
+  mode: DomainMode
   allowed: boolean
   active: boolean
   requestedAt: string
   reviewedAt: string | null
   reason: string | null
+  billingInterval: BillingInterval
+  /** Pesewas, per `billingInterval`, frozen at request/last-renewal time. */
+  priceAmount: number
+  nextRenewalAt: string | null
+  /** Set while a renewal charge has failed and this is running on borrowed time. */
+  graceEndsAt: string | null
 }
 
 export interface AdminDomainRow extends MyDomainStatus {
@@ -630,6 +647,14 @@ export interface AdminDomainRow extends MyDomainStatus {
   userId: string
   agentName: string
   agentCode: string
+}
+
+export interface DomainPrice {
+  mode: DomainMode
+  interval: BillingInterval
+  /** Only present for an admin/superadmin caller. */
+  costAmount?: number
+  priceAmount: number
 }
 
 export type FeedbackCategory = 'suggestion' | 'issue'
@@ -1208,10 +1233,25 @@ export const api = {
   // Custom domains, an agent's own request, and its status
   myDomain: () => request<MyDomainStatus | null>('/domains/mine'),
 
-  requestDomain: (domain: string) =>
-    request<MyDomainStatus>('/domains/request', { method: 'POST', body: { domain } }),
+  /** Agent-facing, never carries `costAmount`. */
+  domainPricing: () => request<DomainPrice[]>('/domains/pricing'),
+
+  requestDomain: (input: { mode: DomainMode; label?: string; domain?: string; billingInterval: BillingInterval }) =>
+    request<MyDomainStatus>('/domains/request', { method: 'POST', body: input }),
 
   removeDomain: () => request<void>('/domains/mine', { method: 'DELETE' }),
+
+  /** Retry this cycle's charge from balance, usable in grace or once already deactivated. */
+  payDomainByBalance: () => request<{ ok: boolean }>('/domains/mine/renew/pay-balance', { method: 'POST' }),
+
+  /** Starts a live Paystack charge for the same, returns where to send the agent to pay. */
+  startDomainPaystackPayment: () =>
+    request<{ authorizationUrl: string; reference: string }>('/domains/mine/renew/pay-paystack', {
+      method: 'POST',
+    }),
+
+  confirmDomainPaystackPayment: (reference: string) =>
+    request<{ ok: boolean }>(`/domains/mine/renew/pay-paystack/confirm?reference=${encodeURIComponent(reference)}`),
 
   // Custom domains, superadmin review queue
   adminDomains: (pending: boolean) =>
@@ -1222,6 +1262,15 @@ export const api = {
 
   adminDomainsPendingCount: () =>
     request<{ count: number }>('/admin/domains/pending-count').then((r) => r.count),
+
+  // Domain pricing, admin sees costAmount too (needed to know the floor on price)
+  adminDomainPricing: () => request<DomainPrice[]>('/admin/domain-pricing'),
+
+  setDomainCost: (mode: DomainMode, interval: BillingInterval, amount: number) =>
+    request<DomainPrice[]>('/admin/domain-pricing/cost', { method: 'PATCH', body: { mode, interval, amount } }),
+
+  setDomainPrice: (mode: DomainMode, interval: BillingInterval, amount: number) =>
+    request<DomainPrice[]>('/admin/domain-pricing/price', { method: 'PATCH', body: { mode, interval, amount } }),
 
   // Feedback: an agent's own suggestions/issue reports, sent in from inside the app
   submitFeedback: (category: FeedbackCategory, message: string) =>

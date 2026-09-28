@@ -161,6 +161,8 @@ interface Store {
   markWhatsappChannelSeen: () => Promise<void>
   /** Paystack's flat fee on a Mobile Money payout, in pesewas, charged to the agent at approval. */
   payoutTransferFee: number
+  /** The wildcard root a free subdomain is composed against. Null means subdomains are not set up yet. */
+  domainSubdomainRoot: string | null
   /** A warning banner for the whole site, agents and guests alike. Null = not set. */
   siteNotice: string | null
   retailPrice: (product: Product, sellerCode?: string | null) => number
@@ -282,6 +284,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    */
   const [payoutTransferFee, setPayoutTransferFee] = useState(0)
 
+  /** The wildcard root a free subdomain is composed against. Null until the first snapshot arrives, or if unset. */
+  const [domainSubdomainRoot, setDomainSubdomainRoot] = useState<string | null>(null)
+
   /** A warning banner for the whole site, sent to every role including guests. */
   const [siteNotice, setSiteNotice] = useState<string | null>(null)
 
@@ -334,6 +339,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setPaystackFeeBp(snapshot.settings.paystackFeeBp)
     setWhatsappChannelUrl(snapshot.settings.whatsappChannelUrl ?? null)
     setPayoutTransferFee(snapshot.settings.payoutTransferFee ?? 0)
+    setDomainSubdomainRoot(snapshot.settings.domainSubdomainRoot ?? null)
     setSiteNotice(snapshot.settings.siteNotice)
   }, [])
 
@@ -1150,6 +1156,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       whatsappChannelUrl,
       markWhatsappChannelSeen,
       payoutTransferFee,
+      domainSubdomainRoot,
       siteNotice,
       retailPrice,
       myBand,
@@ -1209,6 +1216,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       whatsappChannelUrl,
       markWhatsappChannelSeen,
       payoutTransferFee,
+      domainSubdomainRoot,
       siteNotice,
       products,
       pushToast,

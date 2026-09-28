@@ -1,8 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common'
 import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger'
-import { IsBoolean, IsOptional, IsString, Matches, MaxLength } from 'class-validator'
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min, ValidateIf } from 'class-validator'
+import type { BillingInterval, DomainMode } from '@prisma/client'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { DomainsService } from './domains.service'
+import { DomainRenewalsService } from './domain-renewals.service'
 
 /**
  * A reasonable domain shape, labels of letters/digits/hyphens (never
@@ -13,10 +15,36 @@ import { DomainsService } from './domains.service'
 const DOMAIN_PATTERN = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))*\.[a-z]{2,}$/i
 
 export class RequestDomainDto {
+  @IsIn(['subdomain', 'custom'])
+  mode!: DomainMode
+
+  /** Only read when `mode` is `subdomain`. */
+  @ValidateIf((dto: RequestDomainDto) => dto.mode === 'subdomain')
+  @IsString()
+  @MaxLength(63)
+  label?: string
+
+  /** Only read when `mode` is `custom`. */
+  @ValidateIf((dto: RequestDomainDto) => dto.mode === 'custom')
   @IsString()
   @MaxLength(253)
   @Matches(DOMAIN_PATTERN, { message: 'Enter a valid domain, like blayshop.com.' })
-  domain!: string
+  domain?: string
+
+  @IsIn(['monthly', 'yearly'])
+  billingInterval!: BillingInterval
+}
+
+export class SetDomainPriceDto {
+  @IsIn(['subdomain', 'custom'])
+  mode!: DomainMode
+
+  @IsIn(['monthly', 'yearly'])
+  interval!: BillingInterval
+
+  @IsInt()
+  @Min(0)
+  amount!: number
 }
 
 export class ReviewDomainDto {
@@ -39,12 +67,27 @@ export class ReviewDomainDto {
 @ApiTags('domains')
 @Controller('domains')
 export class DomainsController {
-  constructor(private readonly domains: DomainsService) {}
+  constructor(
+    private readonly domains: DomainsService,
+    private readonly renewals: DomainRenewalsService,
+  ) {}
+
+  /** What a subdomain or a domain of their own would cost, agent-facing, never `costAmount`. */
+  @Roles('agent')
+  @Get('pricing')
+  pricing() {
+    return this.domains.pricingList(false)
+  }
 
   @Roles('agent')
   @Post('request')
   request(@CurrentUser() user: AuthUser, @Body() dto: RequestDomainDto) {
-    return this.domains.request(user.id, dto.domain)
+    return this.domains.request(user.id, {
+      mode: dto.mode,
+      label: dto.label,
+      domain: dto.domain,
+      billingInterval: dto.billingInterval,
+    })
   }
 
   @Roles('agent')
@@ -58,6 +101,27 @@ export class DomainsController {
   @Delete('mine')
   remove(@CurrentUser() user: AuthUser) {
     return this.domains.remove(user.id)
+  }
+
+  /** Retry this cycle's charge from balance, usable in grace or once already deactivated. */
+  @Roles('agent')
+  @Post('mine/renew/pay-balance')
+  payByBalance(@CurrentUser() user: AuthUser) {
+    return this.renewals.payByBalance(user.id)
+  }
+
+  /** Start a live Paystack charge for the same, when balance alone can't cover it. */
+  @Roles('agent')
+  @Post('mine/renew/pay-paystack')
+  startPaystack(@CurrentUser() user: AuthUser, @Headers('origin') origin?: string) {
+    return this.renewals.startPaystackPayment(user.id, origin)
+  }
+
+  /** The return-page verify, the same "never trust the redirect" pattern `PaymentsController.confirm` uses. */
+  @Roles('agent')
+  @Get('mine/renew/pay-paystack/confirm')
+  confirmPaystack(@Query('reference') reference: string) {
+    return this.renewals.confirmPaystackPayment(reference)
   }
 
   /**
@@ -105,5 +169,38 @@ export class AdminDomainsController {
   @Patch(':id')
   review(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ReviewDomainDto) {
     return this.domains.review(id, user.id, dto)
+  }
+}
+
+/**
+ * What a domain costs, split by who is allowed to set which half, see
+ * `CustomDomain.mode`/`DomainPricing`'s own doc comment. No class-level
+ * `@Roles` here, unlike the two controllers above, exactly because the two
+ * writes below need different ones.
+ */
+@ApiTags('admin')
+@Controller('admin/domain-pricing')
+export class DomainPricingController {
+  constructor(private readonly domains: DomainsService) {}
+
+  /** Admin sees this to know what floor `price` has to clear; superadmin sees it because it's theirs. */
+  @Get()
+  @Roles('admin', 'superadmin')
+  list() {
+    return this.domains.pricingList(true)
+  }
+
+  /** Asher's own wholesale cost. */
+  @Patch('cost')
+  @Roles('superadmin')
+  setCost(@Body() dto: SetDomainPriceDto) {
+    return this.domains.setCost(dto.mode, dto.interval, dto.amount)
+  }
+
+  /** James's own retail price, must clear `costAmount`. */
+  @Patch('price')
+  @Roles('admin')
+  setPrice(@Body() dto: SetDomainPriceDto) {
+    return this.domains.setPrice(dto.mode, dto.interval, dto.amount)
   }
 }

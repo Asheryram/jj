@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, ApiError, type AdminDomainRow } from '../../lib/api'
+import {
+  api,
+  ApiError,
+  type AdminDomainRow,
+  type BillingInterval,
+  type DomainMode,
+  type DomainPrice,
+} from '../../lib/api'
 import { useStore } from '../../state/store'
-import { dateTime } from '../../lib/format'
+import { cedis, dateTime } from '../../lib/format'
 import {
   Badge,
   Button,
@@ -18,6 +25,9 @@ import {
   TextInput,
 } from '../../components/ui'
 import { AlertIcon, GlobeIcon } from '../../components/icons'
+
+const MODE_LABEL: Record<DomainMode, string> = { subdomain: 'Subdomain', custom: 'Own domain' }
+const INTERVAL_LABEL: Record<BillingInterval, string> = { monthly: 'monthly', yearly: 'yearly' }
 
 type Filter = 'pending' | 'all'
 
@@ -40,9 +50,126 @@ export default function DomainRequests() {
         title="Custom domains"
         subtitle="Domains agents have asked to point at their own shop."
       />
+      <DomainPricingCard />
       <ActionLegend />
       <DomainQueue />
     </div>
+  )
+}
+
+/**
+ * What a domain costs, split by who sets which half, see the backend's own
+ * `DomainPricing` model doc comment. Each role only ever sees, and can only
+ * ever save, its own column, `PATCH /admin/domain-pricing/cost` and
+ * `/price` are separately role-gated server-side regardless of what this
+ * renders, this is just not showing a control that would 403 anyway.
+ */
+function DomainPricingCard() {
+  const { session, pushToast } = useStore()
+  const [rows, setRows] = useState<DomainPrice[] | null>(null)
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [savingKey, setSavingKey] = useState<string | null>(null)
+
+  const isSuperadmin = session?.role === 'superadmin'
+  const isAdmin = session?.role === 'admin'
+  const canEditCost = isSuperadmin
+
+  const load = useCallback(async () => {
+    try {
+      const priceRows = await api.adminDomainPricing()
+      setRows(priceRows)
+      const next: Record<string, string> = {}
+      for (const row of priceRows) {
+        next[`${row.mode}:${row.interval}:cost`] = ((row.costAmount ?? 0) / 100).toFixed(2)
+        next[`${row.mode}:${row.interval}:price`] = (row.priceAmount / 100).toFixed(2)
+      }
+      setDrafts(next)
+    } catch {
+      setRows(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  if (!isSuperadmin && !isAdmin) return null
+
+  const save = async (mode: DomainMode, interval: BillingInterval, field: 'cost' | 'price') => {
+    const key = `${mode}:${interval}:${field}`
+    const cedisValue = Number(drafts[key])
+    if (!Number.isFinite(cedisValue) || cedisValue < 0) {
+      pushToast({ tone: 'error', title: 'Enter an amount like 20 or 20.00.' })
+      return
+    }
+    const amount = Math.round(cedisValue * 100)
+    setSavingKey(key)
+    try {
+      const updated = field === 'cost' ? await api.setDomainCost(mode, interval, amount) : await api.setDomainPrice(mode, interval, amount)
+      setRows(updated)
+      pushToast({ tone: 'success', title: `${MODE_LABEL[mode]} ${INTERVAL_LABEL[interval]} ${field} set to ${cedis(amount)}` })
+    } catch (caught) {
+      pushToast({
+        tone: 'error',
+        title: caught instanceof ApiError ? caught.message : 'We could not save that.',
+      })
+    } finally {
+      setSavingKey(null)
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Domain pricing"
+        subtitle={
+          canEditCost
+            ? "Your own wholesale cost. James's price must clear it."
+            : "What an agent pays. Must clear Asher's own cost."
+        }
+      />
+      <div className="p-4 sm:p-5">
+        {rows === null ? (
+          <div className="py-6 text-center">
+            <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {(['subdomain', 'custom'] as const).map((mode) => (
+              <div key={mode} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
+                <p className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">{MODE_LABEL[mode]}</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {(['monthly', 'yearly'] as const).map((interval) => {
+                    const row = rows.find((r) => r.mode === mode && r.interval === interval)
+                    const field = canEditCost ? 'cost' : 'price'
+                    const key = `${mode}:${interval}:${field}`
+                    return (
+                      <Field
+                        key={interval}
+                        label={`${INTERVAL_LABEL[interval]} (GHS)`}
+                        htmlFor={`price-${key}`}
+                        hint={canEditCost && row ? `James's price: ${cedis(row.priceAmount)}` : undefined}
+                      >
+                        <TextInput
+                          id={`price-${key}`}
+                          inputMode="decimal"
+                          value={drafts[key] ?? '0.00'}
+                          disabled={savingKey === key}
+                          onChange={(event) =>
+                            setDrafts((prev) => ({ ...prev, [key]: event.target.value.replace(/[^0-9.]/g, '') }))
+                          }
+                          onBlur={() => void save(mode, interval, field)}
+                        />
+                      </Field>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
   )
 }
 
@@ -59,7 +186,7 @@ const LEGEND: { term: string; meaning: string }[] = [
   {
     term: 'Mark as live',
     meaning:
-      'Flips an approved domain active, use this once you have actually confirmed it resolves here. This is what makes it start serving the agent\'s shop.',
+      "Flips an approved domain active straight away, this is what makes it start serving the agent's shop. Usually you won't need this button at all, an approved domain is checked automatically every 6 hours and flips itself live the moment it actually resolves here. Use it only to skip that wait once you've confirmed it yourself.",
   },
   {
     term: 'Suspend',
@@ -219,9 +346,22 @@ function DomainRow({
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="font-mono font-semibold text-slate-900 dark:text-slate-50">{row.domain}</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="font-mono font-semibold text-slate-900 dark:text-slate-50">{row.domain}</p>
+            <Badge tone="neutral">{MODE_LABEL[row.mode]}</Badge>
+          </div>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
             {row.agentName} · {row.agentCode} · requested {dateTime(row.requestedAt)}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            {cedis(row.priceAmount)} {INTERVAL_LABEL[row.billingInterval]}
+            {row.nextRenewalAt && !row.graceEndsAt && <> · renews {dateTime(row.nextRenewalAt)}</>}
+            {row.graceEndsAt && (
+              <span className="font-semibold text-amber-700 dark:text-amber-400">
+                {' '}
+                · payment overdue, grace until {dateTime(row.graceEndsAt)}
+              </span>
+            )}
           </p>
         </div>
 

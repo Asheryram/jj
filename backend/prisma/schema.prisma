@@ -24,8 +24,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   // Neon's pooled endpoint (the `-pooler` hostname) multiplexes connections
   // through PgBouncer, which does not preserve session state, `migrate
   // deploy` takes a `pg_advisory_lock` to stop two deploys racing each
@@ -128,6 +128,10 @@ enum EarningType {
   downline
   reversal
   withdrawal
+  /// A recurring domain charge, `DomainsService.chargeCycle`. Its own type
+  /// rather than `withdrawal`: nothing is being withdrawn, the agent is
+  /// paying for something, the same distinction `sale` already draws.
+  domain_fee
 }
 
 enum WithdrawalStatus {
@@ -211,28 +215,26 @@ model User {
 
   joinedAt DateTime @default(now()) @map("joined_at")
 
-  prices           AgentPrice[]
-  orders           Order[]
-  transactions     Transaction[]
-  earnings         Earning[]
-  withdrawals      Withdrawal[]
-  payments         Payment[]
-  branding         Branding?
-  brandingRequests BrandingRequest[]
-  setupTokens      SetupToken[]
-  customDomain     CustomDomain?
-  ledgerEntries    LedgerEntry[]
-  feedbackReports  FeedbackReport[]
+  prices                AgentPrice[]
+  orders                Order[]
+  transactions          Transaction[]
+  earnings              Earning[]
+  withdrawals           Withdrawal[]
+  payments              Payment[]
+  branding              Branding?
+  brandingRequests      BrandingRequest[]
+  setupTokens           SetupToken[]
+  customDomain          CustomDomain?
+  ledgerEntries         LedgerEntry[]
+  feedbackReports       FeedbackReport[]
   announcementsReceived AnnouncementRecipient[]
 
   /**
    * One profile per role per person.
-   *
    * James runs the business and also wants to sell as an agent, to see what his
    * agents see. Those cannot be the same row: an agent owns a balance, a referral
    * code, a downline and earnings that the platform's own margin must never be
    * mixed with. So they are separate users who happen to be the same human.
-   *
    * Uniqueness moved from the column to the pair. What stops a stranger claiming
    * somebody's address is now application code, registration rejects an email
    * already present under any role, and only the account's owner can add a
@@ -446,7 +448,7 @@ model PendingPriceChange {
   baselinePrice Int @map("baseline_price")
   /// `adminPrice` right now, after however many edits happened since the
   /// baseline. What actually goes in the email.
-  currentPrice Int @map("current_price")
+  currentPrice  Int @map("current_price")
 
   firstChangedAt DateTime @default(now()) @map("first_changed_at")
   lastChangedAt  DateTime @updatedAt @map("last_changed_at")
@@ -1072,7 +1074,7 @@ model RefundRequest {
   /// same event was the actual bug: a cascade here would silently destroy
   /// proof that a real payout was authorised and sent, the one thing this
   /// table exists to keep. Nothing deletes an order today.
-  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
   /// Denormalised so the queue still renders if the order is later archived.
   orderRef    String @map("order_ref")
@@ -1263,23 +1265,147 @@ model CustomDomain {
 
   domain String @unique
 
+  /// A platform subdomain (`kwame.jkbkdatahub.com`, free of any DNS work,
+  /// live the moment it's approved) versus the agent's own domain name
+  /// (needs the agent's own DNS pointed here, and a real ownership check).
+  /// Both are billed and reviewed exactly the same way; this only changes
+  /// what the request/review screens show and whether DNS instructions are
+  /// relevant at all.
+  mode DomainMode @default(custom)
+
   /// Superadmin approval gate, is this agent permitted to use this domain
   /// at all. Never true on creation; only a review can set it.
   allowed Boolean @default(false)
   /// Live switch, DNS confirmed and the domain currently serving traffic.
   /// Meaningless without `allowed`; the public resolve endpoint requires
   /// both.
-  active Boolean @default(false)
+  active  Boolean @default(false)
 
   requestedAt DateTime  @default(now()) @map("requested_at")
   /// Set whenever `allowed` is decided, approved or refused.
-  reviewedAt DateTime? @map("reviewed_at")
-  reviewedBy String?   @map("reviewed_by")
+  reviewedAt  DateTime? @map("reviewed_at")
+  reviewedBy  String?   @map("reviewed_by")
   /// Kept on a refusal, the same pattern as `BrandingRequest.note`, the
   /// agent is told why, and the record survives being asked about later.
-  reason String?
+  reason      String?
+
+  /// The agent's own choice at request time, monthly or yearly, same
+  /// reasoning as `Withdrawal.transferFee` freezing what applied then:
+  /// `priceAmount` below is copied from `DomainPricing` the moment this is
+  /// requested (or last renewed at a new price), never read live, so an
+  /// admin raising prices later never silently reprices a live domain out
+  /// from under the agent already on it.
+  billingInterval BillingInterval @default(monthly) @map("billing_interval")
+  /// Pesewas, per `billingInterval`, frozen from `DomainPricing` at request
+  /// time and again at every successful renewal (a price change only ever
+  /// takes effect on the agent's own next renewal, never mid-cycle).
+  priceAmount     Int             @default(0) @map("price_amount")
+  /// When the next charge is due. Set to `requestedAt + billingInterval` on
+  /// approval (not on request, an unapproved domain serves nothing and
+  /// owes nothing yet), and to `paidAt + billingInterval` on every
+  /// successful renewal after that.
+  nextRenewalAt   DateTime?       @map("next_renewal_at")
+  /// Null means current. Set the instant a renewal charge fails (see
+  /// `DomainRenewalsService`); the domain keeps serving through this
+  /// window, cleared back to null the moment any renewal for it succeeds,
+  /// whichever of the balance or Paystack path actually paid it.
+  graceEndsAt     DateTime?       @map("grace_ends_at")
+
+  renewals DomainRenewal[]
 
   @@map("custom_domains")
+}
+
+enum DomainMode {
+  subdomain
+  custom
+}
+
+enum BillingInterval {
+  monthly
+  yearly
+}
+
+/// What a domain costs, one row per (mode, interval) pair, so four rows in
+/// total: subdomain/monthly, subdomain/yearly, custom/monthly,
+/// custom/yearly. Two prices on each, not one, because two different
+/// people set them and mean two different things by "price": `costAmount`
+/// is Asher's own wholesale cost for running this at all (wildcard
+/// hosting, cert issuance, the registrar relationship), only he can set
+/// it, the same review authority as `CustomDomain` itself
+/// (`AdminDomainsController`). `priceAmount` is what James actually
+/// charges an agent, his own retail markup on top, and must never be set
+/// below `costAmount`, the exact `sale_price = supplier_cost + margin`
+/// invariant `domain/pricing.ts` already enforces for catalogue products,
+/// applied here to a recurring charge instead of a one-off sale.
+model DomainPricing {
+  id String @id @default(uuid())
+
+  mode     DomainMode
+  interval BillingInterval
+
+  costAmount  Int @default(0) @map("cost_amount")
+  priceAmount Int @default(0) @map("price_amount")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([mode, interval])
+  @@map("domain_pricing")
+}
+
+enum DomainRenewalMethod {
+  /// Deducted from the agent's own earnings, the same conditional-update
+  /// debit `WithdrawalsService.request` uses.
+  balance
+  /// A live Mobile Money/card charge through Paystack, offered when the
+  /// balance path can't cover it, see `DomainRenewalsService.payByPaystack`.
+  paystack
+}
+
+enum DomainRenewalStatus {
+  /// A Paystack charge was started and is waiting on the agent to actually
+  /// pay it, see `DomainRenewal.paystackReference`. Never the outcome of a
+  /// balance attempt, that resolves to `paid` or `failed` immediately.
+  pending
+  paid
+  failed
+}
+
+/// One row per billing cycle actually attempted, the same "one row per
+/// event, not a mutated running total" shape as `Withdrawal`/`RefundRequest`,
+/// so a domain's full billing history is a plain query rather than
+/// something reconstructed from `CustomDomain`'s own current state.
+model DomainRenewal {
+  id String @id @default(uuid())
+
+  domainId String       @map("domain_id")
+  domain   CustomDomain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+
+  /// Pesewas, copied from `CustomDomain.priceAmount` at the moment this
+  /// cycle's charge was attempted, not read live, for the same reason that
+  /// field itself is frozen rather than a live join.
+  amount Int
+  method DomainRenewalMethod
+
+  status DomainRenewalStatus @default(pending)
+
+  /// The period this charge actually covers, so "when does the NEXT one
+  /// fall due" is always `periodEnd`, never derived from `createdAt` (which
+  /// is when the attempt happened, not when the period it is paying for
+  /// starts, those two drift apart the moment a renewal is even a day late).
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+
+  /// Set only on the `paystack` method, unique so Paystack's own
+  /// duplicate-reference rejection is exactly what stops this from ever
+  /// being started twice for the same cycle.
+  paystackReference String? @unique @map("paystack_reference")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  paidAt    DateTime? @map("paid_at")
+
+  @@index([domainId])
+  @@map("domain_renewals")
 }
 
 enum FeedbackCategory {
@@ -1438,18 +1564,18 @@ model ServiceSubscription {
   /// domain, an API plan, a mail provider) is a business fact this schema
   /// has no fixed list of, and will not have to be extended in code every
   /// time a new one is added.
-  name     String
-  provider String?
+  name       String
+  provider   String?
   /// Where to actually go renew it, so the alert email is one click from
   /// action rather than a name someone has to go search for.
   renewalUrl String? @map("renewal_url")
   notes      String?
 
-  expiresAt DateTime @map("expires_at")
+  expiresAt       DateTime @map("expires_at")
   /// How many days out the alert email fires. Not the same for every
   /// service: a domain worth transferring elsewhere needs more lead time
   /// than a monthly plan that just needs a card on file.
-  alertDaysBefore Int @default(14) @map("alert_days_before")
+  alertDaysBefore Int      @default(14) @map("alert_days_before")
 
   /// Set once the "expiring soon" email has gone out for the *current*
   /// `expiresAt`. Cleared back to null whenever `expiresAt` itself changes,

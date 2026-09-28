@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { ConfigService } from '@nestjs/config'
 import { PrismaService } from '../prisma/prisma.service'
 import { PricingService } from '../pricing/pricing.service'
 import { SettingsService } from '../settings/settings.service'
@@ -28,6 +29,7 @@ export class CatalogueService {
     private readonly prisma: PrismaService,
     private readonly pricing: PricingService,
     private readonly settings: SettingsService,
+    private readonly config: ConfigService,
   ) {}
 
   async snapshot(role: Role | undefined) {
@@ -81,6 +83,17 @@ export class CatalogueService {
          * to withdraw from and no reason to see it.
          */
         ...(role === 'agent' || isAdminRole(role) ? { payoutTransferFee: settings.payoutTransferFee } : {}),
+        /**
+         * The wildcard root a free subdomain is composed against, e.g.
+         * "jkbkdatahub.com" -> "kwame.jkbkdatahub.com", so the request form
+         * can preview it live before submitting. Null (not sent) means
+         * subdomains are not set up on this server (`PLATFORM_ROOT_DOMAIN`
+         * unset), same "absent means not offered" treatment `whatsappChannelUrl`
+         * gets, an agent's own BYO domain still works either way.
+         */
+        ...(role === 'agent' || isAdminRole(role)
+          ? { domainSubdomainRoot: this.config.get<string>('PLATFORM_ROOT_DOMAIN')?.trim() || null }
+          : {}),
         /**
          * A warning banner for the whole site, unlike the WhatsApp link
          * above, sent to every role, guests included: this is exactly the
