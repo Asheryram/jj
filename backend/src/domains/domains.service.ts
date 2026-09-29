@@ -38,7 +38,13 @@ export interface DomainPriceView {
    * catalogue product, see `toPublicProduct`.
    */
   costAmount?: number
-  /** What an agent actually pays, pesewas. Always present. */
+  /**
+   * James's own markup on top of `costAmount`, pesewas. Present only for an
+   * admin/superadmin caller, same as `costAmount`, an agent has no reason to
+   * see the two halves separately, only the total below.
+   */
+  markup?: number
+  /** What an agent actually pays, pesewas, `costAmount + markup`. Always present. */
   priceAmount: number
 }
 
@@ -151,12 +157,14 @@ export class DomainsService {
           mode: input.mode,
           billingInterval: input.billingInterval,
           priceAmount: price.priceAmount,
+          costAmount: price.costAmount,
         },
         update: {
           domain,
           mode: input.mode,
           billingInterval: input.billingInterval,
           priceAmount: price.priceAmount,
+          costAmount: price.costAmount,
           allowed: false,
           active: false,
           requestedAt: new Date(),
@@ -400,6 +408,9 @@ export class DomainsService {
       })
       // Real revenue, the agent paying to keep serving from this domain,
       // not a cost or a pass-through the way `Withdrawal`'s own payout_fee is.
+      // `developer_fee` carves the superadmin's own cut out of it, the same
+      // way `agent_margin` carves an agent's cut out of a bundle sale's own
+      // `revenue` leg, see `LedgerKind.developer_fee`'s own doc comment.
       await this.ledger.record(
         [
           {
@@ -411,6 +422,19 @@ export class DomainsService {
             userId: domain.userId,
             occurredAt: periodStart,
           },
+          ...(domain.costAmount > 0
+            ? [
+                {
+                  idempotencyKey: LedgerService.key('domain_renewal', renewal.id, 'developer_fee'),
+                  kind: 'developer_fee' as const,
+                  amount: -domain.costAmount,
+                  affectsProfit: true,
+                  description: `Developer fee · ${domain.domain}`,
+                  userId: domain.userId,
+                  occurredAt: periodStart,
+                },
+              ]
+            : []),
         ],
         tx,
       )
@@ -428,11 +452,16 @@ export class DomainsService {
     return modes.flatMap((mode) =>
       intervals.map((interval) => {
         const row = byKey.get(`${mode}:${interval}`)
+        const costAmount = row?.costAmount ?? 0
+        const markup = row?.priceAmount ?? 0
         return {
           mode,
           interval,
-          priceAmount: row?.priceAmount ?? 0,
-          ...(includeCost ? { costAmount: row?.costAmount ?? 0 } : {}),
+          // What an agent actually pays: Asher's own cost, plus James's own
+          // markup on top of it, see `setPrice`'s own doc comment for why
+          // this is a sum now, not `markup` alone.
+          priceAmount: costAmount + markup,
+          ...(includeCost ? { costAmount, markup } : {}),
         }
       }),
     )
@@ -453,21 +482,17 @@ export class DomainsService {
   }
 
   /**
-   * James's own retail price, admin only. Never below `costAmount`, the same
-   * `sale_price = supplier_cost + margin` invariant `domain/pricing.ts`
-   * enforces for a catalogue product, applied here to what an agent pays
-   * per billing cycle instead of per sale.
+   * James's own markup, admin (or superadmin) only, added ON TOP of Asher's
+   * own cost, not a floor-checked retail total. What an agent actually pays
+   * is `costAmount + priceAmount`, see `pricingList`. A markup of zero is
+   * fine, James passing cost straight through with no cut of his own; there
+   * is nothing here for it to clear, unlike a catalogue product's own
+   * `adminPrice`, which is a real floor-checked retail price in its own
+   * right.
    */
   async setPrice(mode: DomainMode, interval: BillingInterval, priceAmount: number): Promise<DomainPriceView[]> {
     if (!Number.isInteger(priceAmount) || priceAmount < 0) {
-      throw new ValidationError('A price is a whole number of pesewas, 0 or more.')
-    }
-    const existing = await this.prisma.domainPricing.findUnique({ where: { mode_interval: { mode, interval } } })
-    const cost = existing?.costAmount ?? 0
-    if (priceAmount < cost) {
-      throw new ValidationError(
-        `That's below Asher's own cost for this, GHS ${(cost / 100).toFixed(2)}. Ask him to lower it first, or set a price at or above it.`,
-      )
+      throw new ValidationError('A markup is a whole number of pesewas, 0 or more.')
     }
     await this.prisma.domainPricing.upsert({
       where: { mode_interval: { mode, interval } },
@@ -478,10 +503,18 @@ export class DomainsService {
     return this.pricingList(true)
   }
 
-  /** `priceFor` reads the same table `pricingList` does, just one row, for `request()`'s own snapshot. */
-  private async priceFor(mode: DomainMode, interval: BillingInterval): Promise<{ priceAmount: number }> {
+  /**
+   * `priceFor` reads the same table `pricingList` does, just one row, for
+   * `request()`'s own snapshot. `priceAmount` here is the TOTAL an agent
+   * pays (cost + markup, see `pricingList`), frozen onto `CustomDomain` as
+   * its own `priceAmount`; `costAmount` is frozen alongside it unchanged,
+   * still the raw cost `chargeCycle`'s own `developer_fee` split needs.
+   */
+  private async priceFor(mode: DomainMode, interval: BillingInterval): Promise<{ priceAmount: number; costAmount: number }> {
     const row = await this.prisma.domainPricing.findUnique({ where: { mode_interval: { mode, interval } } })
-    return { priceAmount: row?.priceAmount ?? 0 }
+    const costAmount = row?.costAmount ?? 0
+    const markup = row?.priceAmount ?? 0
+    return { priceAmount: costAmount + markup, costAmount }
   }
 
   /**

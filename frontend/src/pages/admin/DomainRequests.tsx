@@ -59,8 +59,13 @@ export default function DomainRequests() {
 
 /**
  * What a domain costs, split by who sets which half, see the backend's own
- * `DomainPricing` model doc comment. Each role only ever sees, and can only
- * ever save, its own column, `PATCH /admin/domain-pricing/cost` and
+ * `DomainPricing` model doc comment. Cost is Asher's own wholesale floor;
+ * markup is James's own cut on top of it; what an agent actually pays is
+ * the sum of the two, never just one alone. Superadmin can set both, cost
+ * because it's theirs, and markup too, on a platform where the same person
+ * wears both roles, requiring a profile switch just to set a markup nobody
+ * else touches is friction with no real separation-of-duties behind it.
+ * Admin can only ever set markup, `PATCH /admin/domain-pricing/cost` and
  * `/price` are separately role-gated server-side regardless of what this
  * renders, this is just not showing a control that would 403 anyway.
  */
@@ -73,6 +78,7 @@ function DomainPricingCard() {
   const isSuperadmin = session?.role === 'superadmin'
   const isAdmin = session?.role === 'admin'
   const canEditCost = isSuperadmin
+  const canEditPrice = isSuperadmin || isAdmin
 
   const load = useCallback(async () => {
     try {
@@ -81,7 +87,7 @@ function DomainPricingCard() {
       const next: Record<string, string> = {}
       for (const row of priceRows) {
         next[`${row.mode}:${row.interval}:cost`] = ((row.costAmount ?? 0) / 100).toFixed(2)
-        next[`${row.mode}:${row.interval}:price`] = (row.priceAmount / 100).toFixed(2)
+        next[`${row.mode}:${row.interval}:price`] = ((row.markup ?? row.priceAmount) / 100).toFixed(2)
       }
       setDrafts(next)
     } catch {
@@ -107,7 +113,10 @@ function DomainPricingCard() {
     try {
       const updated = field === 'cost' ? await api.setDomainCost(mode, interval, amount) : await api.setDomainPrice(mode, interval, amount)
       setRows(updated)
-      pushToast({ tone: 'success', title: `${MODE_LABEL[mode]} ${INTERVAL_LABEL[interval]} ${field} set to ${cedis(amount)}` })
+      pushToast({
+        tone: 'success',
+        title: `${MODE_LABEL[mode]} ${INTERVAL_LABEL[interval]} ${field === 'cost' ? 'cost' : 'markup'} set to ${cedis(amount)}`,
+      })
     } catch (caught) {
       pushToast({
         tone: 'error',
@@ -123,9 +132,9 @@ function DomainPricingCard() {
       <CardHead
         title="Domain pricing"
         subtitle={
-          canEditCost
-            ? "Your own wholesale cost. James's price must clear it."
-            : "What an agent pays. Must clear Asher's own cost."
+          isSuperadmin
+            ? "Your own wholesale cost, and James's markup on top of it. An agent pays the sum of both."
+            : "Your own markup on top of Asher's cost. An agent pays the sum of both."
         }
       />
       <div className="p-4 sm:p-5">
@@ -141,26 +150,41 @@ function DomainPricingCard() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   {(['monthly', 'yearly'] as const).map((interval) => {
                     const row = rows.find((r) => r.mode === mode && r.interval === interval)
-                    const field = canEditCost ? 'cost' : 'price'
-                    const key = `${mode}:${interval}:${field}`
+                    const fields = canEditCost ? (['cost', 'price'] as const) : (['price'] as const)
                     return (
-                      <Field
-                        key={interval}
-                        label={`${INTERVAL_LABEL[interval]} (GHS)`}
-                        htmlFor={`price-${key}`}
-                        hint={canEditCost && row ? `James's price: ${cedis(row.priceAmount)}` : undefined}
-                      >
-                        <TextInput
-                          id={`price-${key}`}
-                          inputMode="decimal"
-                          value={drafts[key] ?? '0.00'}
-                          disabled={savingKey === key}
-                          onChange={(event) =>
-                            setDrafts((prev) => ({ ...prev, [key]: event.target.value.replace(/[^0-9.]/g, '') }))
-                          }
-                          onBlur={() => void save(mode, interval, field)}
-                        />
-                      </Field>
+                      <div key={interval} className="space-y-2">
+                        {fields.map((field) => {
+                          const key = `${mode}:${interval}:${field}`
+                          return (
+                            <Field
+                              key={field}
+                              label={`${INTERVAL_LABEL[interval]} ${field === 'cost' ? 'cost' : 'markup'} (GHS)`}
+                              htmlFor={`price-${key}`}
+                              hint={
+                                field === 'price' && !canEditCost && row
+                                  ? `Asher's own cost: ${cedis(row.costAmount ?? 0)}`
+                                  : undefined
+                              }
+                            >
+                              <TextInput
+                                id={`price-${key}`}
+                                inputMode="decimal"
+                                value={drafts[key] ?? '0.00'}
+                                disabled={savingKey === key || (field === 'price' && !canEditPrice)}
+                                onChange={(event) =>
+                                  setDrafts((prev) => ({ ...prev, [key]: event.target.value.replace(/[^0-9.]/g, '') }))
+                                }
+                                onBlur={() => void save(mode, interval, field)}
+                              />
+                            </Field>
+                          )
+                        })}
+                        {row && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Agent pays <span className="font-semibold text-slate-700 dark:text-slate-200">{cedis(row.priceAmount)}</span>
+                          </p>
+                        )}
+                      </div>
                     )
                   })}
                 </div>

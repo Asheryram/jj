@@ -660,6 +660,9 @@ export interface DomainPrice {
   interval: BillingInterval
   /** Only present for an admin/superadmin caller. */
   costAmount?: number
+  /** James's own markup on top of `costAmount`. Only present for an admin/superadmin caller. */
+  markup?: number
+  /** What an agent actually pays, `costAmount + markup`. Always present. */
   priceAmount: number
 }
 
@@ -844,6 +847,8 @@ export interface ReservePosition {
     manualRefundAdvances: number
     /** Owed to whoever personally covered a payout with nowhere automatic to send it from. */
     manualPayoutAdvances: number
+    /** Accrued from domain fees, not yet logged as withdrawn by the superadmin. */
+    developerFees: number
     total: number
   }
   /** Same total as `spentOnBundles`, split by which supplier actually charged it. */
@@ -1760,6 +1765,13 @@ export const api = {
     request<{ id: string; status: string }>(`/platform/team/${id}/restore`, { method: 'POST' }),
 
   reservePosition: () => request<ReservePosition>('/admin/finance/position'),
+
+  /** Log that the superadmin has actually moved their accrued domain-fee cut out of Paystack themselves. */
+  settleDeveloperFee: (amount: number, note?: string) =>
+    request<void>('/admin/finance/developer-fees/settle', {
+      method: 'POST',
+      body: { amount, note, idempotencyKey: newIdempotencyKey() },
+    }),
 
   /**
    * Money owed back to customers, waiting on a decision.

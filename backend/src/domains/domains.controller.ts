@@ -197,9 +197,16 @@ export class DomainPricingController {
     return this.domains.setCost(dto.mode, dto.interval, dto.amount)
   }
 
-  /** James's own retail price, must clear `costAmount`. */
+  /**
+   * James's own markup, added on top of `costAmount`, not a floor-checked
+   * retail total, see `DomainsService.setPrice`. Superadmin can set this
+   * too, not just admin: on a platform run by one person wearing both
+   * roles, day to day domain administration is superadmin's own job, and
+   * requiring a profile switch just to set a price nobody else is going to
+   * touch is friction with no actual separation-of-duties behind it.
+   */
   @Patch('price')
-  @Roles('admin')
+  @Roles('admin', 'superadmin')
   setPrice(@Body() dto: SetDomainPriceDto) {
     return this.domains.setPrice(dto.mode, dto.interval, dto.amount)
   }

@@ -969,6 +969,19 @@ enum LedgerKind {
   /// requested (`Payment.amount`), so the difference is genuinely extra,
   /// not owed to anyone. See `PaymentsService.applyPaid`.
   overpayment
+  /// The superadmin's own cut of a domain fee, carved out of `revenue` the
+  /// same way `agent_margin` carves an agent's cut out of a bundle sale,
+  /// negative, accrued the moment a domain charge completes. Unlike
+  /// `agent_margin`, nothing credits a personal `User.balance` for this,
+  /// see `SolvencyService.position()`'s `owedToSuperadmin` for how it stays
+  /// tracked instead. See `DomainsService.chargeCycle`.
+  developer_fee
+  /// Settles `developer_fee` the same way `payout` settles `agent_margin`,
+  /// logged by hand once the superadmin has actually moved that money out of
+  /// Paystack themselves, the same manual, outside-the-app withdrawal every
+  /// other profit figure on this platform already uses. Never a new cost,
+  /// `affectsProfit: false`, same reasoning as `payout`.
+  developer_payout
 }
 
 /// Every movement of money, once.
@@ -1339,6 +1352,11 @@ model CustomDomain {
   /// time and again at every successful renewal (a price change only ever
   /// takes effect on the agent's own next renewal, never mid-cycle).
   priceAmount     Int             @default(0) @map("price_amount")
+  /// The superadmin's own cut, pesewas, frozen from `DomainPricing` at the
+  /// same moment as `priceAmount` and for the same reason: a cost change
+  /// later must not retroactively re-split a charge already on the books.
+  /// See `LedgerKind.developer_fee`.
+  costAmount      Int             @default(0) @map("cost_amount")
   /// When the next charge is due. Set to `requestedAt + billingInterval` on
   /// approval (not on request, an unapproved domain serves nothing and
   /// owes nothing yet), and to `paidAt + billingInterval` on every

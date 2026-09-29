@@ -7,6 +7,7 @@ import { escape, wrap } from '../mail/templates'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
 import { claimTransition } from '../common/alert-flag'
 import { bundleCostByProvider, reimbursedByProvider } from '../supplier/provider-resolution'
+import { ValidationError } from '../common/domain-errors'
 
 /**
  * What is owed, against what there is to pay it with, plus whether Paystack's
@@ -98,6 +99,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
   private timer: NodeJS.Timeout | null = null
   private expectedBalanceCache: { value: number; computedAt: number } | null = null
   private spentOnBundlesCache: { value: number; computedAt: number } | null = null
+  private developerFeeOwedCache: { value: number; computedAt: number } | null = null
 
   constructor(
     private readonly prisma: PrismaService,
@@ -528,8 +530,15 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     const owedForManualPayouts = manualPayoutAdvances
       .filter((advance) => !reimbursedWithdrawalIds.has(advance.withdrawalId))
       .reduce((sum, advance) => sum + advance.amount, 0)
+    const owedToSuperadmin = await this.developerFeeOwed()
     const liabilities =
-      owedToAgents + owedToCustomers + undelivered + queuedPayouts + owedForManualRefunds + owedForManualPayouts
+      owedToAgents +
+      owedToCustomers +
+      undelivered +
+      queuedPayouts +
+      owedForManualRefunds +
+      owedForManualPayouts +
+      owedToSuperadmin
     const spentOnBundles = await this.spentOnBundles()
 
     const expectedAtPaystack = await this.expectedBalance()
@@ -570,6 +579,8 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         manualRefundAdvances: owedForManualRefunds,
         /** Owed to whoever personally covered a payout with nowhere automatic to send it from. */
         manualPayoutAdvances: owedForManualPayouts,
+        /** Accrued from domain fees, not yet logged as withdrawn, see `developerFeeOwed`. */
+        developerFees: owedToSuperadmin,
         total: liabilities,
       },
       pendingPayouts: {
@@ -860,5 +871,77 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     const value = Object.values(byProvider).reduce((sum, v) => sum + v, 0)
     this.spentOnBundlesCache = { value, computedAt: Date.now() }
     return value
+  }
+
+  /**
+   * The superadmin's own accrued cut of domain fees, all-time
+   * `developer_fee` less all-time `developer_payout`, see those kinds' own
+   * doc comments. Unlike `owedToAgents`, there is no live `User.balance`
+   * column backing this, nothing credits a personal balance for it on
+   * purpose, so it has to be summed from the ledger directly. Same
+   * all-time, only-ever-grows shape as `expectedBalance()`, same short
+   * memo for the same reason, EXCEPT for `settleDeveloperFee`'s own check,
+   * which always forces a fresh read: a display figure being briefly stale
+   * is fine, but gating an actual withdrawal on one is not, a fee accrued
+   * moments ago must never look unavailable to withdraw for up to two
+   * minutes just because something else happened to read this first.
+   */
+  async developerFeeOwed(fresh = false): Promise<number> {
+    if (
+      !fresh &&
+      this.developerFeeOwedCache &&
+      Date.now() - this.developerFeeOwedCache.computedAt < EXPECTED_BALANCE_CACHE_MS
+    ) {
+      return this.developerFeeOwedCache.value
+    }
+
+    const [accrued, paidOut] = await Promise.all([
+      this.prisma.ledgerEntry.aggregate({ where: { kind: 'developer_fee' }, _sum: { amount: true } }),
+      this.prisma.ledgerEntry.aggregate({ where: { kind: 'developer_payout' }, _sum: { amount: true } }),
+    ])
+    // Both kinds are recorded negative (see their own doc comments), so
+    // negating the sum turns each into its own positive total before the
+    // subtraction.
+    const value = -(accrued._sum.amount ?? 0) - -(paidOut._sum.amount ?? 0)
+    this.developerFeeOwedCache = { value, computedAt: Date.now() }
+    return value
+  }
+
+  /**
+   * Log that the superadmin has actually moved their accrued developer fee
+   * out of Paystack themselves, the same manual, outside-the-app withdrawal
+   * every other profit figure on this platform already uses, see
+   * `LedgerKind.developer_payout`'s own doc comment. Locked to what is
+   * actually owed, the same discipline `FloatMonitorService.logCapital`
+   * applies to a reimbursement: this is real money leaving, not an amount
+   * typed in freely. `idempotencyKey` is the caller's own, minted once per
+   * click the same way `logCapital`'s callers already do, so a retried or
+   * double-submitted request can never log the same withdrawal twice.
+   */
+  async settleDeveloperFee(amount: number, idempotencyKey: string, note?: string): Promise<void> {
+    if (!Number.isInteger(amount) || amount <= 0) {
+      throw new ValidationError('Enter an amount greater than zero.')
+    }
+    const owed = await this.developerFeeOwed(true)
+    if (amount > owed) {
+      throw new ValidationError(
+        `That's more than the GHS ${(owed / 100).toFixed(2)} currently owed as developer fees.`,
+      )
+    }
+
+    await this.prisma.ledgerEntry.createMany({
+      data: [
+        {
+          idempotencyKey,
+          kind: 'developer_payout',
+          amount: -amount,
+          affectsProfit: false,
+          description: note?.trim() || `Developer fee withdrawn: GHS ${(amount / 100).toFixed(2)}`,
+          occurredAt: new Date(),
+        },
+      ],
+      skipDuplicates: true,
+    })
+    this.developerFeeOwedCache = null
   }
 }

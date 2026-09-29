@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError, type ReservePosition } from '../../lib/api'
-import { cedis } from '../../lib/format'
-import { Button, Callout, Card, CardHead, Spinner, cn } from '../../components/ui'
+import { useStore } from '../../state/store'
+import { cedis, parseCedis } from '../../lib/format'
+import { Button, Callout, Card, CardHead, Field, Modal, Spinner, TextInput, cn } from '../../components/ui'
 import { AlertIcon, CashIcon, CheckIcon, RefreshIcon } from '../../components/icons'
 
 /**
@@ -16,9 +17,11 @@ import { AlertIcon, CashIcon, CheckIcon, RefreshIcon } from '../../components/ic
  * panel.
  */
 export default function ReservePanel() {
+  const { session } = useStore()
   const [position, setPosition] = useState<ReservePosition | null>(null)
   const [error, setError] = useState('')
   const [refreshing, setRefreshing] = useState(false)
+  const [settlingFee, setSettlingFee] = useState(false)
 
   /**
    * `position()` on the server recomputes every figure here fresh from the
@@ -153,6 +156,27 @@ export default function ReservePanel() {
               }
             />
           )}
+          {liabilities.developerFees > 0 && (
+            <Row
+              label="Owed as developer fees"
+              value={liabilities.developerFees}
+              negative
+              hint={
+                <>
+                  Your own cut of custom-domain fees, separate from the shop's own profit above.{' '}
+                  {session?.role === 'superadmin' && (
+                    <button
+                      type="button"
+                      className="font-semibold underline"
+                      onClick={() => setSettlingFee(true)}
+                    >
+                      Log a withdrawal
+                    </button>
+                  )}
+                </>
+              }
+            />
+          )}
           <Row label="Total owed to other people" value={liabilities.total} negative strong />
         </dl>
 
@@ -271,7 +295,90 @@ export default function ReservePanel() {
           </Callout>
         )}
       </div>
+
+      {settlingFee && (
+        <SettleDeveloperFeeModal
+          owed={liabilities.developerFees}
+          onClose={() => setSettlingFee(false)}
+          onSettled={async () => {
+            setSettlingFee(false)
+            await load()
+          }}
+        />
+      )}
     </Card>
+  )
+}
+
+/**
+ * Purely a log, the same as `FloatMonitorService.logCapital`'s own
+ * withdrawal side: this never touches Paystack itself, it records that the
+ * superadmin already moved the money out by hand, so `owedToSuperadmin`
+ * stops counting it against the shop's own free-to-spend.
+ */
+function SettleDeveloperFeeModal({
+  owed,
+  onClose,
+  onSettled,
+}: {
+  owed: number
+  onClose: () => void
+  onSettled: () => Promise<void>
+}) {
+  const [amount, setAmount] = useState(() => (owed / 100).toFixed(2))
+  const [note, setNote] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async () => {
+    const pesewas = parseCedis(amount)
+    if (pesewas === null || pesewas <= 0) {
+      setError('Enter an amount greater than zero.')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await api.settleDeveloperFee(pesewas, note.trim() || undefined)
+      await onSettled()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'We could not log that.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Log a developer fee withdrawal">
+      <div className="space-y-4">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          This only records that you already moved {cedis(owed)} (or part of it) out of Paystack
+          yourself. It does not send anything.
+        </p>
+        <Field label="Amount" htmlFor="fee-amount" error={error}>
+          <TextInput
+            id="fee-amount"
+            invalid={Boolean(error)}
+            value={amount}
+            onChange={(event) => {
+              setAmount(event.target.value)
+              setError('')
+            }}
+          />
+        </Field>
+        <Field label="Note (optional)" htmlFor="fee-note">
+          <TextInput id="fee-note" value={note} onChange={(event) => setNote(event.target.value)} />
+        </Field>
+        <div className="flex gap-2">
+          <Button block loading={busy} onClick={() => void submit()}>
+            Log it
+          </Button>
+          <Button block variant="outline" disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 

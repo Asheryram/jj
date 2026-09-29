@@ -95,6 +95,20 @@ export class LogCapitalDto {
   idempotencyKey!: string
 }
 
+export class SettleDeveloperFeeDto {
+  @IsInt({ message: 'Enter an amount like 500.00.' })
+  @Min(1)
+  amount!: number
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(280)
+  note?: string
+
+  @IsString()
+  idempotencyKey!: string
+}
+
 export class ApplyMarkupDto {
   /**
    * Percentage over supplier cost. Fractional is allowed, a price of GHS 6.40
@@ -740,6 +754,18 @@ export class AdminController {
     return { ...position, spentOnBundlesByProvider, floats }
   }
 
+  /**
+   * Log that the superadmin has actually moved their accrued domain-fee
+   * cut out of Paystack themselves, see `SolvencyService.settleDeveloperFee`.
+   * Superadmin-only: this is Asher's own money, not the shop's, the same
+   * split as every other superadmin-only write here.
+   */
+  @Post('finance/developer-fees/settle')
+  @Roles('superadmin')
+  settleDeveloperFee(@Body() dto: SettleDeveloperFeeDto) {
+    return this.solvency.settleDeveloperFee(dto.amount, dto.idempotencyKey, dto.note)
+  }
+
   @Get('finance/entries')
   ledgerEntries(
     @Query('limit') limit?: string,
@@ -764,6 +790,8 @@ export class AdminController {
       'capital_in_reimbursement',
       'capital_out',
       'agent_margin_writeoff',
+      'developer_fee',
+      'developer_payout',
     ]
     const parsedKind = validKinds.find((k) => k === kind)
     return this.ledger.entries({
