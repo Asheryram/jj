@@ -38,7 +38,7 @@ function MoneyBand({
 /**
  * Everything Overview used to carry about where the money actually is and
  * where it actually went: what's held versus owed (`ReservePanel`), the
- * prepaid DataHub float (`FloatPanel`), and the ledger-derived cost
+ * prepaid supplier floats (`FloatPanel`), and the ledger-derived cost
  * breakdown ("Where the money goes"). Split out because Overview's job is
  * "what needs my attention and how's today going", not a full financial
  * statement, three dense money panels stacked between a revenue chart and a
@@ -127,7 +127,7 @@ export default function Finance() {
           </div>
           <dl className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <MoneyBand label="Customers paid" value={cedis(trackedRevenue)} />
-            <MoneyBand label="To DataHub GH" value={cedis(supplierSpend)} dot="bg-slate-400" />
+            <MoneyBand label="To suppliers" value={cedis(supplierSpend)} dot="bg-slate-400" />
             <MoneyBand label="Paystack fee" value={cedis(paystackFee)} dot="bg-amber-400" />
             <MoneyBand label="Your margin" value={cedis(myMargin)} dot="bg-brand-600" strong />
             <MoneyBand label="To your agents" value={cedis(agentShare)} dot="bg-brand-300" />
@@ -137,8 +137,8 @@ export default function Finance() {
             )}
           </dl>
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            From the ledger, not the price you were quoted at sale time, so it reflects what
-            DataHub actually charged and what Paystack actually kept, not the catalogue estimate.
+            From the ledger, not the price you were quoted at sale time, so it reflects what your
+            suppliers actually charged and what Paystack actually kept, not the catalogue estimate.
           </p>
         </div>
       </Card>

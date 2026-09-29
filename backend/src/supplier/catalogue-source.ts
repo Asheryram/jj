@@ -32,11 +32,13 @@ export interface SourceSku {
 /**
  * Somewhere we buy from.
  *
- * DataHub GH is the only one implemented, and it sells data bundles only, so
- * airtime, voice and SMS will have to come from somewhere else, and this is the
- * seam they arrive through. A source owns its own vocabulary, its own network
- * mapping and its own idea of what a SKU is called; the importer owns what
- * happens to the rows afterwards, identically for all of them.
+ * DataHub GH and GMPL are both implemented, and both sell data bundles only,
+ * so airtime, voice and SMS will have to come from somewhere else, and this is
+ * the seam they arrive through. A source owns its own vocabulary, its own
+ * network mapping and its own idea of what a SKU is called; the importer owns
+ * what happens to the rows afterwards, identically for all of them, including
+ * which of two sources selling the same network is actually allowed to be on
+ * sale (`CatalogueImportService`'s own routing gate).
  */
 export interface CatalogueSource {
   /** Stored on every SKU as `supplier_products.provider`. */

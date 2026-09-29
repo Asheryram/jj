@@ -1,19 +1,35 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
-import type { PlatformSettings } from '../settings/settings.service'
-import { SettingsService } from '../settings/settings.service'
+import type { NetworkProviderRouting, PlatformSettings } from '../settings/settings.service'
+import { SettingsService, KNOWN_PROVIDERS } from '../settings/settings.service'
 import { toProduct, PRODUCT_INCLUDE } from '../common/mappers'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
-import { markupFromPrice, priceFromMarkup, type OrderSplit } from '../domain/pricing'
+import { floorAtCost, markupFromPrice, priceFromMarkup, type OrderSplit } from '../domain/pricing'
 import { CatalogueImportService } from '../supplier/catalogue-import.service'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
+import { hasAutomatedFulfilment } from '../supplier/supplier.service'
 import { lastRealCost } from '../common/real-cost'
 import { recordPriceChange } from '../common/pending-price-change'
 import { MailerService } from '../mail/mailer.service'
 import { priceChangeMail } from '../mail/templates'
-import type { Category, Role } from '@prisma/client'
+import type { Category, Network, Prisma, Role } from '@prisma/client'
 
 export type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice'
+
+/**
+ * A bundle's data size in GB, parsed from its own name ("5GB Data", "MTN
+ * 5GB", "5GB iShare" → 5). Both DataHub's and GMPL's product names always
+ * carry this, it is the one size vocabulary every supplier's name actually
+ * agrees on. `SupplierProduct.capacityGb` cannot be used for this instead:
+ * it is DataHub-shaped (a bare whole-GB string their own purchase call
+ * needs) and GMPL's own source never fills it in at all (their purchase
+ * call needs only a bundle id, see `GmplSource`'s own comment), so it is
+ * null for every GMPL row and useless as a cross-provider match key.
+ */
+function parseBundleSizeGb(name: string): number | null {
+  const match = name.match(/(\d+(?:\.\d+)?)\s*GB/i)
+  return match ? Number(match[1]) : null
+}
 
 @Injectable()
 export class AdminService {
@@ -26,6 +42,107 @@ export class AdminService {
     private readonly float: FloatMonitorService,
     private readonly mailer: MailerService,
   ) {}
+
+  /**
+   * When a product goes on sale for the first time, carry over any agent's
+   * existing resale price from the old product for the same real-world
+   * bundle (same network, category, and parsed GB size) it just superseded —
+   * the shape a supplier routing switch produces: a brand-new `Product.id`,
+   * with no relation at all to whichever id an agent already priced under
+   * the old supplier. Without this, an agent who had carefully set their own
+   * margin on, say, DataHub's "MTN 5GB" silently falls back to their
+   * generic default markup the moment GMPL's "MTN 5GB" goes live, with
+   * nothing telling them their price changed.
+   *
+   * Preserves the agent's flat cedi margin, not their percentage: an agent
+   * earning a fixed GHS 0.50 on a bundle keeps earning GHS 0.50 even if the
+   * new supplier's own cost for it differs from the old one, rather than
+   * their price moving with a cost neither they nor this migration chose.
+   *
+   * Never overwrites an agent's own price if they already have one on the
+   * new product — only fills in agents who don't — so a fresh choice an
+   * agent already made on the new bundle is never clobbered by this running
+   * after the fact. Silent no-op for anything unmatchable: no network (a
+   * checker/AFA product isn't routable at all), or a name with no parseable
+   * GB size.
+   */
+  private async carryOverAgentPrices(
+    tx: Prisma.TransactionClient,
+    newProduct: {
+      id: string
+      network: Network | null
+      category: Category
+      name: string
+      adminPrice: number
+      provider: string | null
+    },
+  ): Promise<void> {
+    if (!newProduct.network) return
+    const sizeGb = parseBundleSizeGb(newProduct.name)
+    if (sizeGb == null) return
+
+    /**
+     * "Old" means "not this bundle, same real-world size" — deliberately not
+     * `active: false`. Routing switches are enforced at read time only (see
+     * `CatalogueService.snapshot`'s own comment on why), so the DataHub
+     * product a routing flip just superseded stays `active: true` — it's
+     * merely hidden from customers — and would never match here if this
+     * required it to be off. A candidate counts if it's properly withdrawn
+     * (`active: false`) or if it's still active but under a different
+     * provider than the one just activated, which is exactly the
+     * just-superseded case.
+     */
+    const candidates = await tx.product.findMany({
+      where: {
+        id: { not: newProduct.id },
+        network: newProduct.network,
+        category: newProduct.category,
+        OR: [
+          { active: false },
+          ...(newProduct.provider ? [{ supplier: { provider: { not: newProduct.provider } } }] : []),
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        adminPrice: true,
+        prices: { select: { userId: true, resalePrice: true } },
+      },
+    })
+    const oldProducts = candidates.filter(
+      (p) => p.prices.length > 0 && parseBundleSizeGb(p.name) === sizeGb,
+    )
+    if (oldProducts.length === 0) return
+
+    const already = await tx.agentPrice.findMany({
+      where: { productId: newProduct.id },
+      select: { userId: true },
+    })
+    const alreadyPriced = new Set(already.map((row) => row.userId))
+
+    let migrated = 0
+    for (const old of oldProducts) {
+      for (const price of old.prices) {
+        if (alreadyPriced.has(price.userId)) continue
+        alreadyPriced.add(price.userId) // first match wins if more than one old product shares this size
+        const margin = price.resalePrice - old.adminPrice
+        const resalePrice = floorAtCost(newProduct.adminPrice + margin, newProduct.adminPrice)
+        await tx.agentPrice.upsert({
+          where: { userId_productId: { userId: price.userId, productId: newProduct.id } },
+          create: { userId: price.userId, productId: newProduct.id, resalePrice },
+          update: {},
+        })
+        migrated++
+      }
+    }
+
+    if (migrated > 0) {
+      this.log.log(
+        `${newProduct.id}: carried over ${migrated} agent price(s) from ${oldProducts.length} matching ` +
+          `superseded product(s) at ${sizeGb}GB on ${newProduct.network}, same flat margin preserved`,
+      )
+    }
+  }
 
   // ── Users (FR-6.4) ────────────────────────────────────────────────────────
 
@@ -215,33 +332,48 @@ export class AdminService {
    * inactive list is context to look at alongside the float, not a claim
    * that any particular row is safe to turn back on.
    *
-   * Null `floatReference` (nothing logged yet, no capital move has ever been
-   * recorded) means there is nothing to judge a cost against, so nothing is
-   * flagged rather than everything.
+   * A float with nothing logged yet (no capital move has ever been recorded
+   * for that provider) judges nothing against it, so that provider's
+   * products are never flagged rather than everything being flagged.
+   *
+   * Checked per provider: DataHub's float running low says nothing about
+   * whether GMPL's bundles are still safely covered, the two are entirely
+   * separate real balances, so a product is only ever judged against the
+   * float of whichever supplier actually sells it.
    */
   async floatRisk() {
-    const expected = await this.float.expectedBalance()
-    if (!expected) {
-      return { floatReference: null, trackedSince: null, atRisk: [], inactive: [] }
-    }
+    const floats = await Promise.all(
+      KNOWN_PROVIDERS.map(async (provider) => {
+        const expected = await this.float.expectedBalance(provider)
+        return {
+          provider,
+          floatReference: expected?.balance ?? null,
+          trackedSince: expected?.capturedAt.toISOString() ?? null,
+        }
+      }),
+    )
 
-    const [atRisk, inactive] = await Promise.all([
-      this.prisma.product.findMany({
-        where: { active: true, supplierCost: { gt: expected.balance } },
-        include: PRODUCT_INCLUDE,
-        orderBy: { supplierCost: 'desc' },
-      }),
-      this.prisma.product.findMany({
-        where: { active: false },
-        include: PRODUCT_INCLUDE,
-        orderBy: { supplierCost: 'desc' },
-      }),
-    ])
+    const atRiskByProvider = await Promise.all(
+      floats
+        .filter((f) => f.floatReference != null)
+        .map((f) =>
+          this.prisma.product.findMany({
+            where: { active: true, supplierCost: { gt: f.floatReference as number }, supplier: { provider: f.provider } },
+            include: PRODUCT_INCLUDE,
+            orderBy: { supplierCost: 'desc' },
+          }),
+        ),
+    )
+
+    const inactive = await this.prisma.product.findMany({
+      where: { active: false },
+      include: PRODUCT_INCLUDE,
+      orderBy: { supplierCost: 'desc' },
+    })
 
     return {
-      floatReference: expected.balance,
-      trackedSince: expected.capturedAt.toISOString(),
-      atRisk: atRisk.map(toProduct),
+      floats,
+      atRisk: atRiskByProvider.flat().map(toProduct),
       inactive: inactive.map(toProduct),
     }
   }
@@ -437,6 +569,10 @@ export class AdminService {
         await recordPriceChange(tx, productId, row.adminPrice, value)
       }
 
+      if (!row.active && bothPricesClearCost) {
+        await this.carryOverAgentPrices(tx, { ...row2, provider: row2.supplier?.provider ?? null })
+      }
+
       return row2
     })
 
@@ -480,10 +616,16 @@ export class AdminService {
       }
     }
 
-    const updated = await this.prisma.product.update({
-      where: { id: productId },
-      data: { active },
-      include: PRODUCT_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row2 = await tx.product.update({
+        where: { id: productId },
+        data: { active },
+        include: PRODUCT_INCLUDE,
+      })
+      if (active && !row.active) {
+        await this.carryOverAgentPrices(tx, { ...row2, provider: row2.supplier?.provider ?? null })
+      }
+      return row2
     })
     this.log.log(`${productId} is ${active ? 'on sale' : 'off sale'}`)
     return toProduct(updated)
@@ -545,7 +687,7 @@ export class AdminService {
         networkKey: row.networkKey,
         capacityGb: row.capacityGb,
         /** Whether the supplier can actually deliver this without a human. */
-        autoFulfillable: Boolean(row.networkKey && row.capacityGb),
+        autoFulfillable: hasAutomatedFulfilment(row),
       }
     })
   }
@@ -592,7 +734,16 @@ export class AdminService {
         // deliberate re-pricing of a whole category.
         ...(scope === 'unpriced' ? { active: false } : {}),
       },
-      select: { id: true, supplierCost: true, adminPrice: true, active: true },
+      select: {
+        id: true,
+        supplierCost: true,
+        adminPrice: true,
+        active: true,
+        network: true,
+        category: true,
+        name: true,
+        supplier: { select: { provider: true } },
+      },
     })
 
     if (targets.length === 0) return { updated: 0 }
@@ -621,6 +772,12 @@ export class AdminService {
         // `where` above), so this only ever fires for `scope: 'all'`.
         if (product.active) {
           await recordPriceChange(tx, product.id, product.adminPrice, newAdminPrice)
+        } else {
+          await this.carryOverAgentPrices(tx, {
+            ...product,
+            adminPrice: newAdminPrice,
+            provider: product.supplier?.provider ?? null,
+          })
         }
       }
     })
@@ -803,6 +960,19 @@ export class AdminService {
   /** Keyed off PlatformSettings, so a new setting needs no change here. */
   setSetting(key: keyof PlatformSettings, value: boolean | number | string) {
     return this.settings.set(key, value)
+  }
+
+  /**
+   * Saves which supplier fulfils each network+category. Takes effect
+   * immediately with no further step needed: `CatalogueService.snapshot`
+   * and `OrdersService.priceInside` both read this setting live, so a
+   * change is visible on the very next storefront load or order attempt,
+   * without ever touching any `Product.active` flag (an earlier version did,
+   * and collided with `setTier`/`applyMarkup` silently reactivating a
+   * routed-away product the moment its price next got touched).
+   */
+  setNetworkProviderRouting(routing: NetworkProviderRouting) {
+    return this.settings.set('networkProviderRouting', routing)
   }
 
   // ── Reports (FR-8.1, FR-8.2) ──────────────────────────────────────────────

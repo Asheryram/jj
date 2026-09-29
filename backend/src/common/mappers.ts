@@ -28,7 +28,7 @@ import type { OrderSplit } from '../domain/pricing'
  * Null rather than a guess when nothing is linked yet, an unfulfillable product
  * saying "datahub-gh" would be a claim nobody checked.
  */
-type ProductRow = Product & { supplier?: { provider: string; updatedAt: Date } | null }
+type ProductRow = Product & { supplier?: { provider: string; updatedAt: Date; available: boolean } | null }
 
 /**
  * What every product read must include for `toProduct` to be complete.
@@ -39,7 +39,7 @@ type ProductRow = Product & { supplier?: { provider: string; updatedAt: Date } |
  * redrew as "no supplier". The data was fine; the response was simply missing a
  * join, which is the kind of bug that looks like data loss.
  */
-export const PRODUCT_INCLUDE = { supplier: { select: { provider: true, updatedAt: true } } } as const
+export const PRODUCT_INCLUDE = { supplier: { select: { provider: true, updatedAt: true, available: true } } } as const
 
 export function toProduct(row: ProductRow) {
   return {
@@ -72,6 +72,17 @@ export function toProduct(row: ProductRow) {
     pricedAgainstRealCost: row.pricedAgainstRealCost,
     pricedAgainstRealCostAt: row.pricedAgainstRealCostAt?.toISOString() ?? null,
     active: row.active,
+    /**
+     * The supplier's own stock signal, true when nothing is linked at all
+     * (a checker/voucher product has no automated supplier to report
+     * against, so there is nothing to call "out of stock"). Kept on the
+     * PUBLIC shape too, unlike `provider`: a customer being told a bundle
+     * they can see is out of stock is not a secret the way who supplies it
+     * is, it is the whole reason `CatalogueService.snapshot` can filter a
+     * still-`active` product out of the storefront without pretending it
+     * was never on sale.
+     */
+    available: row.supplier?.available ?? true,
   }
 }
 

@@ -1,7 +1,9 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common'
 import type { Order, Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
-import { SupplierService } from '../supplier/supplier.service'
+import { SupplierService, hasAutomatedFulfilment, resolveSupplierProvider } from '../supplier/supplier.service'
+import { toGmplNetwork } from '../supplier/gmpl.client'
+import type { SupplierProviderCode } from '../settings/settings.service'
 import { LedgerService, type LedgerDraft } from '../finance/ledger.service'
 import { lastRealCost } from '../common/real-cost'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
@@ -309,7 +311,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
     if (!supplier.available) {
       throw new ValidationError(`${supplier.name} is currently out of stock at ${supplier.provider}.`)
     }
-    if (!supplier.networkKey || !supplier.capacityGb) {
+    if (!hasAutomatedFulfilment(supplier)) {
       throw new ValidationError(`${supplier.name} has no automated fulfilment, choose a data bundle.`)
     }
 
@@ -433,17 +435,25 @@ export class FulfilmentService implements OnApplicationBootstrap {
        * settles, and `LedgerService.record` skips a duplicate rather than
        * writing it again, so whichever of the two runs first is the one
        * that sticks, and the amount is identical either way since both read
-       * the same `SupplierDispatch.providerCharged`.
+       * the same `SupplierDispatch.providerCharged`. This one always runs
+       * first for an order that ever passes through here, so its own
+       * description is the one a reader ends up seeing, permanently, not
+       * just until settlement, deliberately worded to already be true
+       * either way: the provider told us what it charged the moment it
+       * accepted the order, not at delivery, so there is no later number
+       * this could still turn out to disagree with.
        */
       if (result.providerCharged != null) {
         const believedCost = (order.split as unknown as OrderSplit).supplierCost
+        const provider = await resolveSupplierProvider(this.prisma, order.supplierCodeAtSale)
+        const providerLabel = provider === 'gmpl' ? 'GMPL' : 'DataHub'
         await this.ledger.record([
           {
             idempotencyKey: LedgerService.key('order', order.reference, 'supplier_cost'),
             kind: 'supplier_cost',
             amount: -result.providerCharged,
             description:
-              `Bundle cost · ${order.productName} (charged by DataHub; not yet settled)` +
+              `Bundle cost · ${order.productName} (charged by ${providerLabel})` +
               (result.providerCharged !== believedCost
                 ? ` (expected ${(believedCost / 100).toFixed(2)}, charged ${(result.providerCharged / 100).toFixed(2)})`
                 : ''),
@@ -455,9 +465,12 @@ export class FulfilmentService implements OnApplicationBootstrap {
 
       await this.prisma.order.update({
         where: { id: orderId },
-        data: { providerReference: result.providerReference ?? null },
+        data: {
+          providerReference: result.providerReference ?? null,
+          gmplInternalOrderId: result.secondaryProviderReference ?? null,
+        },
       })
-      this.log.log(`${order.reference}: accepted by DataHub, awaiting webhook`)
+      this.log.log(`${order.reference}: accepted by the provider, awaiting webhook`)
       return
     }
 
@@ -502,20 +515,28 @@ export class FulfilmentService implements OnApplicationBootstrap {
       data: { status: 'awaiting_approval' },
     })
 
-    const supplier = await this.prisma.order
+    const product = await this.prisma.order
       .findUnique({
         where: { id: order.id },
-        select: { product: { select: { supplier: { select: { networkKey: true } } } } },
+        select: { product: { select: { network: true, supplier: { select: { networkKey: true, provider: true } } } } },
       })
-      .then((row) => row?.product?.supplier ?? null)
+      .then((row) => row?.product ?? null)
+
+    const provider: SupplierProviderCode = (product?.supplier?.provider as SupplierProviderCode | undefined) ?? 'datahub-gh'
+    // GMPL's own bundle id lives in `supplier.networkKey` for a GMPL SKU, not
+    // a network name (see `GmplSource`'s own comment), so a GMPL row is
+    // written from `product.network` mapped through `toGmplNetwork` instead.
+    const networkKey =
+      provider === 'gmpl' ? toGmplNetwork(product?.network ?? 'MTN') : (product?.supplier?.networkKey ?? 'YELLO')
 
     // The registry the admin screen reads. Upserted rather than inserted because
     // one number can hold up several orders.
     await this.prisma.beneficiaryRequest.upsert({
-      where: { phone: order.recipient },
+      where: { phone_provider: { phone: order.recipient, provider } },
       create: {
         phone: order.recipient,
-        networkKey: supplier?.networkKey ?? 'YELLO',
+        provider,
+        networkKey,
         lastProduct: order.productName,
         lastValue: order.salePrice,
       },
@@ -528,7 +549,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
     })
 
     this.log.warn(
-      `${order.reference} held: ${order.recipient} needs DataHub approval (${reason})`,
+      `${order.reference} held: ${order.recipient} needs ${provider === 'gmpl' ? 'GMPL' : 'DataHub'} approval (${reason})`,
     )
   }
 

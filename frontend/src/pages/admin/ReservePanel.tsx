@@ -75,7 +75,8 @@ export default function ReservePanel() {
     )
   }
 
-  const { expectedAtPaystack, freeToSpend, spentOnBundles, liabilities, floatBalance } = position
+  const { expectedAtPaystack, freeToSpend, spentOnBundles, spentOnBundlesByProvider, liabilities, floats } = position
+  const providerLabel = (provider: 'datahub-gh' | 'gmpl') => (provider === 'gmpl' ? 'GMPL' : 'DataHub GH')
 
   return (
     <Card className="mt-3">
@@ -91,7 +92,7 @@ export default function ReservePanel() {
             label="Should be at Paystack"
             value={expectedAtPaystack}
             strong
-            hint="Everything ever collected, less every payout and refund actually sent, and less every reimbursement moved across to DataHub, from your own records, not their live balance"
+            hint="Everything ever collected, less every payout and refund actually sent, and less every reimbursement moved across to a supplier float, from your own records, not their live balance"
           />
           <Row label="Owed to agents" value={liabilities.agentEarnings} negative />
           <Row
@@ -125,8 +126,8 @@ export default function ReservePanel() {
               negative
               hint={
                 <>
-                  Someone covered these personally, money still sitting at Paystack, never the
-                  DataHub float. Settle them on the{' '}
+                  Someone covered these personally, money still sitting at Paystack, never a
+                  supplier float. Settle them on the{' '}
                   <Link to="/admin/refunds" className="font-semibold underline">
                     Refunds
                   </Link>{' '}
@@ -142,8 +143,8 @@ export default function ReservePanel() {
               negative
               hint={
                 <>
-                  Someone covered these personally, money still sitting at Paystack, never the
-                  DataHub float. Settle them on the{' '}
+                  Someone covered these personally, money still sitting at Paystack, never a
+                  supplier float. Settle them on the{' '}
                   <Link to="/admin/withdrawals" className="font-semibold underline">
                     Withdrawals
                   </Link>{' '}
@@ -156,19 +157,30 @@ export default function ReservePanel() {
         </dl>
 
         {spentOnBundles > 0 && (
-          <div className="flex items-start justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                Already spent on bundles
-              </p>
-              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                Came out of the DataHub float, not Paystack, but the float doesn't refill itself, so
-                this much will need to move across from here sooner or later
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  Already spent on bundles
+                </p>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  Came out of a supplier float, not Paystack, but a float doesn't refill itself, so
+                  this much will need to move across from here sooner or later
+                </p>
+              </div>
+              <p className="tabular shrink-0 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                −{cedis(spentOnBundles)}
               </p>
             </div>
-            <p className="tabular shrink-0 text-sm font-semibold text-slate-700 dark:text-slate-200">
-              −{cedis(spentOnBundles)}
-            </p>
+            {(['datahub-gh', 'gmpl'] as const).map(
+              (provider) =>
+                spentOnBundlesByProvider[provider] > 0 && (
+                  <p key={provider} className="mt-1.5 flex justify-between text-xs text-slate-500 dark:text-slate-400">
+                    <span>{providerLabel(provider)}</span>
+                    <span className="tabular">−{cedis(spentOnBundlesByProvider[provider])}</span>
+                  </p>
+                ),
+            )}
           </div>
         )}
 
@@ -209,20 +221,27 @@ export default function ReservePanel() {
           </p>
         </div>
 
-        <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 px-4 py-3">
           <div className="flex items-center gap-2.5">
             <CashIcon className="size-4 shrink-0 text-slate-400 dark:text-slate-500" />
             <div>
-              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Your other pot: the DataHub float</p>
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Your other pots: each supplier's float</p>
               <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                Not a claim on the money above, a separate prepaid balance you top up yourself. See
-                the Float panel below for the full picture.
+                Not a claim on the money above, separate prepaid balances you top up yourself, one per
+                supplier. See the Float panel below for the full picture.
               </p>
             </div>
           </div>
-          <p className="tabular shrink-0 text-sm font-bold text-slate-800 dark:text-slate-100">
-            {floatBalance === null ? 'Not known yet' : cedis(floatBalance)}
-          </p>
+          <div className="mt-2 space-y-1">
+            {floats.map((f) => (
+              <p key={f.provider} className="flex items-center justify-between text-sm">
+                <span className="text-slate-600 dark:text-slate-300">{providerLabel(f.provider)}</span>
+                <span className="tabular font-bold text-slate-800 dark:text-slate-100">
+                  {f.floatBalance === null ? 'Not known yet' : cedis(f.floatBalance)}
+                </span>
+              </p>
+            ))}
+          </div>
         </div>
 
         {position.pendingRefunds.count > 0 && (

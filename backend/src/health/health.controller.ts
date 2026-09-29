@@ -60,6 +60,7 @@ export class HealthController {
         // does not make an integration exist, and saying "live" when nothing is
         // sent would be the most expensive kind of wrong.
         datahub: this.supplier.providerState,
+        gmpl: this.supplier.gmplProviderState,
         paystack: process.env.PAYSTACK_SECRET_KEY ? 'live' : 'simulated',
       },
       uptimeSeconds: Math.round(process.uptime()),

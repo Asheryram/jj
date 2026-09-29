@@ -126,6 +126,15 @@ export interface Product {
    */
   provider?: string | null
   active: boolean
+  /**
+   * The supplier's own stock signal, unlike `provider` this is sent to
+   * everyone: a customer being told a bundle is out of stock isn't a secret,
+   * it's why an `active` (on-sale) bundle can still be absent from their own
+   * storefront listing (`CatalogueService.snapshot` filters on it), and why
+   * placing an order for one anyway is refused. True when nothing is linked
+   * at all (a checker/voucher has no automated supplier to report against).
+   */
+  available: boolean
 }
 
 /** An agent's chosen resale price for one product (FR-3.4). */

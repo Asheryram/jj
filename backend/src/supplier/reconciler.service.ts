@@ -3,8 +3,9 @@ import { ConfigService } from '@nestjs/config'
 import { PrismaService } from '../prisma/prisma.service'
 import { FulfilmentService } from '../orders/fulfilment.service'
 import { PaymentsService } from '../payments/payments.service'
-import { SupplierService } from './supplier.service'
+import { SupplierService, resolveSupplierProvider } from './supplier.service'
 import { DatahubClient, mapProviderStatus } from './datahub.client'
+import { GmplClient, mapGmplOrderStatus } from './gmpl.client'
 import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
 import { appUrl } from '../common/app-links'
@@ -96,12 +97,18 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   constructor(
     private readonly prisma: PrismaService,
     private readonly datahub: DatahubClient,
+    private readonly gmpl: GmplClient,
     private readonly supplier: SupplierService,
     private readonly fulfilment: FulfilmentService,
     private readonly payments: PaymentsService,
     private readonly mailer: MailerService,
     private readonly config: ConfigService,
   ) {}
+
+  /** The provider a `SupplierProduct.code` belongs to, DataHub for anything unmapped. */
+  private resolveProvider(supplierCode: string | null) {
+    return resolveSupplierProvider(this.prisma, supplierCode)
+  }
 
   onApplicationBootstrap(): void {
     this.timer = setInterval(() => {
@@ -256,7 +263,11 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
 
     await this.alertStuckOrders()
 
-    if (!this.supplier.isLive) return { checked: 0, settled }
+    // Neither provider live means nothing real to ask either of them, same
+    // early return as before, just no longer gated on DataHub alone.
+    if (!this.supplier.isLiveFor('datahub-gh') && !this.supplier.isLiveFor('gmpl')) {
+      return { checked: 0, settled }
+    }
 
     const cutoff = new Date(Date.now() - this.graceMs)
     const waiting = await this.prisma.order.findMany({
@@ -280,7 +291,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
         NOT: { providerReference: { startsWith: 'manual_' } },
         createdAt: { lt: cutoff },
       },
-      select: { id: true, reference: true, providerReference: true },
+      select: { id: true, reference: true, providerReference: true, supplierCodeAtSale: true },
       // Bounded so a large backlog cannot blow their rate limit in one sweep.
       take: 25,
       orderBy: { createdAt: 'asc' },
@@ -296,13 +307,19 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     return { checked: waiting.length, settled }
   }
 
-  /** Ask DataHub about one order and settle it if they now have an answer. Returns whether it settled. */
+  /** Ask the order's own provider about it and settle it if they now have an answer. Returns whether it settled. */
   private async checkWithProvider(order: {
     id: string
     reference: string
     providerReference: string | null
+    supplierCodeAtSale: string | null
   }): Promise<boolean> {
-    const result = await this.datahub.orderStatus(order.providerReference as string)
+    const provider = await this.resolveProvider(order.supplierCodeAtSale)
+    const providerLabel = provider === 'gmpl' ? 'GMPL' : 'DataHub'
+    const result =
+      provider === 'gmpl'
+        ? await this.gmpl.orderStatus(order.providerReference as string)
+        : await this.datahub.orderStatus(order.providerReference as string)
 
     if (result.kind === 'unavailable') {
       this.log.warn(`could not check ${order.reference}: ${result.reason}`)
@@ -314,7 +331,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       // automatically, refunding risks paying back a delivered bundle, and
       // completing risks crediting a sale that never happened.
       this.log.error(
-        `${order.reference}: DataHub does not recognise ${order.providerReference}, needs manual checking`,
+        `${order.reference}: ${providerLabel} does not recognise ${order.providerReference}, needs manual checking`,
       )
       return false
     }
@@ -324,11 +341,11 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       data: { providerStatus: result.providerStatus },
     })
 
-    const mapped = mapProviderStatus(result.providerStatus)
+    const mapped = provider === 'gmpl' ? mapGmplOrderStatus(result.providerStatus) : mapProviderStatus(result.providerStatus)
     if (mapped === null) {
       // Same reasoning as the payment-side checks above: logged every time,
-      // not just once resolved, so there's an actual trail of what DataHub
-      // was reporting at each check, not just silence until the last one.
+      // not just once resolved, so there's an actual trail of what the
+      // provider was reporting at each check, not just silence until the last one.
       this.log.log(`${order.reference}: still ${result.providerStatus}, checked again next sweep`)
       return false
     }
@@ -336,10 +353,10 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     await this.fulfilment.settleFromProvider(
       order.id,
       mapped === 'completed' ? 'delivered' : 'rejected',
-      `Reconciled: DataHub GH reported ${result.providerStatus}`,
+      `Reconciled: ${providerLabel} reported ${result.providerStatus}`,
     )
     this.log.log(
-      `reconciled ${order.reference} → ${mapped} (webhook never arrived; DataHub said ${result.providerStatus})`,
+      `reconciled ${order.reference} → ${mapped} (webhook never arrived; ${providerLabel} said ${result.providerStatus})`,
     )
     return true
   }
@@ -364,11 +381,12 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     status: string
     providerReference: string | null
     createdAt: Date
+    supplierCodeAtSale: string | null
   }): Promise<boolean> {
-    if (!this.supplier.isLive) return false
     if (order.status !== 'pending' && order.status !== 'processing') return false
     if (!order.providerReference || order.providerReference.startsWith('manual_')) return false
     if (Date.now() - order.createdAt.getTime() < this.graceMs) return false
+    if (!this.supplier.isLiveFor(await this.resolveProvider(order.supplierCodeAtSale))) return false
 
     const lastChecked = this.lastProviderCheckAt.get(order.id)
     if (lastChecked !== undefined && Date.now() - lastChecked < ReconcilerService.MIN_PROVIDER_CHECK_GAP_MS) {
@@ -394,19 +412,20 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   async checkOrderByAdmin(orderId: string): Promise<{ settled: boolean }> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true, reference: true, status: true, providerReference: true },
+      select: { id: true, reference: true, status: true, providerReference: true, supplierCodeAtSale: true },
     })
     if (!order) throw new NotFoundError('We could not find that order.')
     if (order.status !== 'pending' && order.status !== 'processing') {
       throw new ConflictError('ALREADY_SETTLED', `That order is already ${order.status}, there is nothing to check.`)
     }
     if (!order.providerReference) {
-      throw new ValidationError('DataHub never gave this order a reference, there is nothing to ask them about.')
+      throw new ValidationError('The provider never gave this order a reference, there is nothing to ask them about.')
     }
     if (order.providerReference.startsWith('manual_')) {
       throw new ValidationError("Routed to DataHub's manual queue, only their own staff can clear it.")
     }
-    if (!this.supplier.isLive) {
+    const provider = await this.resolveProvider(order.supplierCodeAtSale)
+    if (!this.supplier.isLiveFor(provider)) {
       throw new ValidationError('The supplier integration is simulated right now, there is nothing real to check.')
     }
 

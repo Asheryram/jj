@@ -42,10 +42,14 @@ export default function FloatRisk() {
     api
       .floatRisk()
       .then(setData)
-      .catch(() => setData({ floatReference: null, trackedSince: null, atRisk: [], inactive: [] }))
+      .catch(() => setData({ floats: [], atRisk: [], inactive: [] }))
   }
 
   useEffect(load, [])
+
+  const providerLabel = (provider: string | null | undefined) => (provider === 'gmpl' ? 'GMPL' : 'DataHub GH')
+  const floatFor = (provider: string | null | undefined) =>
+    data?.floats.find((f) => f.provider === (provider ?? 'datahub-gh'))?.floatReference ?? null
 
   const toggle = async (id: string, active: boolean) => {
     setBusyId(id)
@@ -61,29 +65,35 @@ export default function FloatRisk() {
     <div>
       <PageHead
         title="Float risk"
-        subtitle="Products priced above what DataHub's float can currently cover, and what's sitting inactive alongside it."
+        subtitle="Products priced above what each supplier's float can currently cover, and what's sitting inactive alongside it."
       />
 
       <Card className="mt-3">
-        <CardHead title="What the float can cover right now" />
-        <div className="px-4 pb-4 sm:px-5">
+        <CardHead title="What each float can cover right now" />
+        <div className="space-y-3 px-4 pb-4 sm:px-5">
           {data === null ? (
             <div className="py-4 text-center">
               <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
             </div>
-          ) : data.floatReference === null ? (
-            <Callout tone="info" title="Nothing logged yet">
-              This is judged against your tracked capital, once you've logged at least one top-up on
-              the Float panel, this page can compare it against your catalogue.
-            </Callout>
           ) : (
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              Judged against <strong className="tabular font-semibold">{cedis(data.floatReference)}</strong>
-              {' '}- what your logged top-ups and costs say the float should hold right now
-              {data.trackedSince && <>, tracked since {dateTime(data.trackedSince)}</>}. Deliberately not
-              the live reading from DataHub, which only refreshes on an order and can sit stale for
-              days, this instead moves the moment you log a top-up or a sale books its real cost.
-            </p>
+            data.floats.map((f) =>
+              f.floatReference === null ? (
+                <Callout key={f.provider} tone="info" title={`${providerLabel(f.provider)}: nothing logged yet`}>
+                  This is judged against your tracked capital, once you've logged at least one top-up
+                  on the Float panel for {providerLabel(f.provider)}, this page can compare it against
+                  your catalogue.
+                </Callout>
+              ) : (
+                <p key={f.provider} className="text-sm text-slate-600 dark:text-slate-300">
+                  <strong>{providerLabel(f.provider)}</strong> judged against{' '}
+                  <strong className="tabular font-semibold">{cedis(f.floatReference)}</strong>
+                  {' '}- what your logged top-ups and costs say its float should hold right now
+                  {f.trackedSince && <>, tracked since {dateTime(f.trackedSince)}</>}. Deliberately not
+                  the live reading, which only refreshes on an order and can sit stale for days, this
+                  instead moves the moment you log a top-up or a sale books its real cost.
+                </p>
+              ),
+            )
           )}
         </div>
       </Card>
@@ -104,10 +114,11 @@ export default function FloatRisk() {
             detail="Every product on sale costs less than what the float can currently cover."
           />
         ) : (
-          <TableWrap caption="Products priced above the current float">
+          <TableWrap caption="Products priced above their supplier's current float">
             <thead>
               <tr>
                 <Th>Product</Th>
+                <Th>Supplier</Th>
                 <Th align="right">Cost</Th>
                 <Th align="center">Status</Th>
               </tr>
@@ -121,6 +132,7 @@ export default function FloatRisk() {
                       <span className="font-medium text-slate-900 dark:text-slate-50">{product.name}</span>
                     </div>
                   </Td>
+                  <Td className="text-slate-600 dark:text-slate-300">{providerLabel(product.provider)}</Td>
                   <Td align="right" className="tabular font-semibold text-red-700 dark:text-red-400">
                     {cedis(product.supplierCost)}
                   </Td>
@@ -160,10 +172,11 @@ export default function FloatRisk() {
             detail="Every product in the catalogue is currently on sale."
           />
         ) : (
-          <TableWrap caption="Inactive products, cost shown next to the current float">
+          <TableWrap caption="Inactive products, cost shown next to their supplier's current float">
             <thead>
               <tr>
                 <Th>Product</Th>
+                <Th>Supplier</Th>
                 <Th align="right">Cost</Th>
                 <Th align="center">Status</Th>
               </tr>
@@ -172,6 +185,7 @@ export default function FloatRisk() {
               {data.inactive.map((product) => {
                 const flatOrLoss =
                   product.adminPrice <= product.supplierCost || product.standardPrice <= product.supplierCost
+                const reference = floatFor(product.provider)
                 return (
                   <tr key={product.id}>
                     <Td>
@@ -180,10 +194,11 @@ export default function FloatRisk() {
                         <span className="font-medium text-slate-900 dark:text-slate-50">{product.name}</span>
                       </div>
                     </Td>
+                    <Td className="text-slate-600 dark:text-slate-300">{providerLabel(product.provider)}</Td>
                     <Td
                       align="right"
                       className={`tabular font-semibold ${
-                        data.floatReference !== null && product.supplierCost > data.floatReference
+                        reference !== null && product.supplierCost > reference
                           ? 'text-red-700 dark:text-red-400'
                           : 'text-slate-600 dark:text-slate-300'
                       }`}

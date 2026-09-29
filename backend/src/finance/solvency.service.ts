@@ -1,11 +1,12 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { PaystackClient } from '../payments/paystack.client'
-import { SettingsService } from '../settings/settings.service'
+import { SettingsService, KNOWN_PROVIDERS, type SupplierProviderCode } from '../settings/settings.service'
 import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
 import { claimTransition } from '../common/alert-flag'
+import { bundleCostByProvider, reimbursedByProvider } from '../supplier/provider-resolution'
 
 /**
  * What is owed, against what there is to pay it with, plus whether Paystack's
@@ -550,8 +551,8 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       /**
        * What's actually free to spend: `expectedAtPaystack` less every claim
        * already on it, and less everything already spent buying bundles,
-       * that money came out of the DataHub float, not Paystack, but keeping
-       * the float funded means moving Paystack money across to replace it
+       * that money came out of a supplier float, not Paystack, but keeping
+       * that float funded means moving Paystack money across to replace it
        * sooner or later, so it is not free for anything else. Safe to show
        * now in a way the old "Free to spend" figure was not, every part of
        * this is this platform's own tracked records, never Paystack's live
@@ -778,9 +779,9 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
    * What should be sitting in Paystack's balance right now, entirely from
    * this platform's own records: everything ever collected, net of
    * Paystack's fee, less every payout and refund transfer this platform has
-   * actually sent, less every reimbursement James has moved across to
-   * DataHub. Always all-time, regardless of account tier or settings, no
-   * live call, ever, to compute this.
+   * actually sent, less every reimbursement James has moved across to any
+   * supplier float. Always all-time, regardless of account tier or settings,
+   * no live call, ever, to compute this.
    *
    * The reimbursement term exists because that money genuinely leaves
    * Paystack, James moves it out himself, outside anything this app can see
@@ -796,68 +797,67 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       return this.expectedBalanceCache.value
     }
 
-    const [collected, transferred, reimbursedToDataHub] = await Promise.all([
+    const [collected, transferred, reimbursedAcrossProviders] = await Promise.all([
       this.collectedSince(),
       this.transfersSince(),
-      this.reimbursedToDataHub(),
+      this.reimbursedAcrossProviders(),
     ])
-    const value = collected - transferred - reimbursedToDataHub
+    const value = collected - transferred - reimbursedAcrossProviders
     this.expectedBalanceCache = { value, computedAt: Date.now() }
     return value
   }
 
   /**
-   * All-time pesewas James has logged moving from Paystack to DataHub as a
-   * reimbursement, less whatever of that has since been reversed entirely
-   * (see `FloatMonitorService.reverseCapitalEntry`, for a duplicate
-   * submission or a plain logging mistake, an entry that was never a real
-   * movement at all, not one that happened but needs relabelling). See
-   * `expectedBalance`'s own comment for why a real reimbursement counts as
-   * money having left Paystack; a reversed one never left in the first
-   * place, so it must not still count here just because the row exists.
-   *
-   * Mirrors `FloatMonitorService.capitalSummary()`'s own exclusion of a
-   * `correction:`-prefixed `capital_out` and whatever original entry it
-   * points at, this is the same rule, applied here because this method
-   * reads `capital_in_reimbursement` independently rather than through
-   * that one.
+   * All-time pesewas James has logged moving from Paystack to a supplier
+   * float as a reimbursement, summed across every provider — the combined
+   * figure `expectedBalance` needs, since a reimbursement leaves Paystack
+   * the same way regardless of which provider's float it lands in. See
+   * `reimbursedByProvider` for the per-provider version this is built from,
+   * and `expectedBalance`'s own comment for why a real reimbursement counts
+   * as money having left Paystack at all.
    */
-  private async reimbursedToDataHub(): Promise<number> {
-    const rows = await this.prisma.ledgerEntry.findMany({
-      where: { kind: { in: ['capital_in_reimbursement', 'capital_out'] } },
-      select: { id: true, kind: true, amount: true, idempotencyKey: true },
-    })
-    const reversedIds = new Set(
-      rows
-        .filter((r) => r.kind === 'capital_out' && r.idempotencyKey.startsWith('correction:'))
-        .map((r) => r.idempotencyKey.split(':')[1]),
-    )
-    return rows
-      .filter((r) => r.kind === 'capital_in_reimbursement' && !reversedIds.has(r.id))
-      .reduce((sum, r) => sum + r.amount, 0)
+  private async reimbursedAcrossProviders(): Promise<number> {
+    const perProvider = await Promise.all(KNOWN_PROVIDERS.map((p) => reimbursedByProvider(this.prisma, p)))
+    return perProvider.reduce((sum, v) => sum + v, 0)
   }
 
   /**
    * Every bundle ever bought, all-time, less whatever has already been
-   * reimbursed to the float for it. Same "no date bound, only ever grows"
-   * shape as `expectedBalance()`, and the same short memo for the same
-   * reason, see `EXPECTED_BALANCE_CACHE_MS`'s own comment.
+   * reimbursed to the relevant float for it, broken down by supplier — what
+   * the Float/Reserve UI shows per provider, and what
+   * `FloatMonitorService.capitalSummary`'s own `owedToProvider` is built
+   * from, so the two can never drift apart.
+   */
+  async spentOnBundlesByProvider(): Promise<Record<SupplierProviderCode, number>> {
+    const entries = await Promise.all(
+      KNOWN_PROVIDERS.map(async (provider) => {
+        const [bundleCost, reimbursed] = await Promise.all([
+          bundleCostByProvider(this.prisma, provider),
+          reimbursedByProvider(this.prisma, provider),
+        ])
+        // Floored at zero: logging more reimbursement than has ever been
+        // spent should not turn "already spent on bundles" into a negative
+        // number that would add back onto `freeToSpend` instead of merely
+        // clearing it.
+        return [provider, Math.max(0, bundleCost - reimbursed)] as const
+      }),
+    )
+    return Object.fromEntries(entries) as Record<SupplierProviderCode, number>
+  }
+
+  /**
+   * Every bundle ever bought, all-time, less whatever has already been
+   * reimbursed, summed across every provider. Same "no date bound, only
+   * ever grows" shape as `expectedBalance()`, and the same short memo for
+   * the same reason, see `EXPECTED_BALANCE_CACHE_MS`'s own comment.
    */
   private async spentOnBundles(): Promise<number> {
     if (this.spentOnBundlesCache && Date.now() - this.spentOnBundlesCache.computedAt < EXPECTED_BALANCE_CACHE_MS) {
       return this.spentOnBundlesCache.value
     }
 
-    const [bundlesBought, reimbursedToDataHub] = await Promise.all([
-      this.prisma.ledgerEntry.aggregate({ where: { kind: 'supplier_cost' }, _sum: { amount: true } }),
-      this.reimbursedToDataHub(),
-    ])
-
-    // supplier_cost entries are stored negative (money leaving the float).
-    // Floored at zero: logging more reimbursement than has ever been spent
-    // should not turn "already spent on bundles" into a negative number that
-    // would add back onto `freeToSpend` instead of merely clearing it.
-    const value = Math.max(0, -(bundlesBought._sum.amount ?? 0) - reimbursedToDataHub)
+    const byProvider = await this.spentOnBundlesByProvider()
+    const value = Object.values(byProvider).reduce((sum, v) => sum + v, 0)
     this.spentOnBundlesCache = { value, computedAt: Date.now() }
     return value
   }

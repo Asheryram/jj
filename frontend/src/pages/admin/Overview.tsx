@@ -380,6 +380,26 @@ export default function Overview() {
                       : 'neutral',
             },
             {
+              name: 'GMPL API',
+              detail: 'Bundle fulfilment (MTN/Telecel)',
+              label:
+                health?.providers.gmpl === 'live'
+                  ? 'Live, real orders'
+                  : health?.providers.gmpl === 'live-requested-no-key'
+                    ? 'Misconfigured'
+                    : health
+                      ? 'Simulated'
+                      : 'Checking…',
+              tone:
+                health?.providers.gmpl === 'live'
+                  ? 'success'
+                  : health?.providers.gmpl === 'live-requested-no-key'
+                    ? 'danger'
+                    : health
+                      ? 'warning'
+                      : 'neutral',
+            },
+            {
               name: 'Paystack',
               detail: 'Checkout & agent payouts',
               label: health ? (health.providers.paystack === 'live' ? 'Configured' : 'Not configured') : 'Checking…',
@@ -416,9 +436,9 @@ export default function Overview() {
  * What has to happen before selling actually works, checked off as it
  * becomes true rather than asked once and forgotten.
  *
- * DataHub debits a prepaid float on every order, so a shop that has never
- * logged a top-up can still take a customer's payment and then fail to
- * deliver, the money and the mistake both land after the fact. A banner
+ * Each supplier debits its own prepaid float on every order, so a shop that
+ * has never logged a top-up can still take a customer's payment and then
+ * fail to deliver, the money and the mistake both land after the fact. A banner
  * that only nags on day one would be missed the moment it is dismissed, so
  * this reads the platform's own state instead: still incomplete, it stays
  * here; complete, it renders nothing and never comes back.
@@ -434,7 +454,7 @@ export default function Overview() {
  * The one number that used to require the full `ReservePanel` to find:
  * what's actually free to spend, held and owed, minus everything already
  * committed. Overview's job is a headline, not the full statement, the
- * complete breakdown (this, the DataHub float, and where every cedi went)
+ * complete breakdown (this, each supplier's float, and where every cedi went)
  * now lives on its own Finance page, linked from here.
  */
 function FinanceSummaryCard() {
@@ -631,9 +651,14 @@ function GettingStartedCard() {
 
   useEffect(() => {
     let live = true
-    api
-      .supplierFloat()
-      .then((float) => live && setFloatLogged(float.capital.since !== null))
+    // Done the moment EITHER provider's float has capital tracked — a shop
+    // routing everything through GMPL and never touching DataHub has just as
+    // real a need for this step, and just as real a way to satisfy it, as
+    // one that only ever uses DataHub. Checking one provider alone (this
+    // used to check only DataHub) left the checklist permanently "not done"
+    // for a GMPL-only setup even after the float was properly funded.
+    Promise.all([api.supplierFloat('datahub-gh'), api.supplierFloat('gmpl')])
+      .then(([datahub, gmpl]) => live && setFloatLogged(datahub.capital.since !== null || gmpl.capital.since !== null))
       .catch(() => undefined)
     return () => {
       live = false
@@ -646,9 +671,9 @@ function GettingStartedCard() {
   const steps = [
     {
       done: floatLogged,
-      label: 'Add money to your DataHub float, then log it here',
+      label: 'Add money to a supplier float, then log it here',
       detail:
-        'Every order spends from this prepaid balance, without it, a paid order can still fail to deliver.',
+        'Every order spends from a prepaid balance, without it, a paid order can still fail to deliver.',
       to: '/admin/finance#float-panel',
       cta: 'Log it on Finance',
     },

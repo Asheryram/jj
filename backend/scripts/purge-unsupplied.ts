@@ -17,16 +17,17 @@
  * Run with: npx tsx scripts/purge-unsupplied.ts
  */
 import { PrismaClient } from '@prisma/client'
+import { KNOWN_PROVIDERS } from '../src/settings/settings.service'
 
 const prisma = new PrismaClient()
 
 async function main() {
   const supplied = await prisma.supplierProduct.findMany({
-    where: { provider: 'datahub-gh', available: true },
+    where: { provider: { in: [...KNOWN_PROVIDERS] }, available: true },
     select: { code: true },
   })
   const suppliedCodes = new Set(supplied.map((s) => s.code))
-  console.log(`${suppliedCodes.size} SKUs are currently listed by DataHub GH.`)
+  console.log(`${suppliedCodes.size} SKUs are currently listed across ${KNOWN_PROVIDERS.join(', ')}.`)
 
   const products = await prisma.product.findMany({
     select: { id: true, name: true, category: true, supplierCode: true, active: true },
@@ -74,7 +75,7 @@ async function main() {
   // Now the supplier rows nothing references.
   const orphans = await prisma.supplierProduct.findMany({
     where: {
-      OR: [{ provider: { not: 'datahub-gh' } }, { available: false }],
+      OR: [{ provider: { notIn: [...KNOWN_PROVIDERS] } }, { available: false }],
       products: { none: {} },
       dispatches: { none: {} },
     },

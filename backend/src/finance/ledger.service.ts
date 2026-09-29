@@ -19,6 +19,8 @@ export interface LedgerDraft {
   paymentRef?: string | null
   withdrawalId?: string | null
   userId?: string | null
+  /** Which supplier float this concerns, see `LedgerEntry.provider`'s own doc comment. */
+  provider?: string | null
 }
 
 /**
@@ -81,6 +83,7 @@ export class LedgerService {
           paymentRef: entry.paymentRef ?? null,
           withdrawalId: entry.withdrawalId ?? null,
           userId: entry.userId ?? null,
+          provider: entry.provider ?? null,
           occurredAt: entry.occurredAt,
         })),
         skipDuplicates: true,

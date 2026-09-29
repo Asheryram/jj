@@ -35,7 +35,20 @@ export class CatalogueService {
   async snapshot(role: Role | undefined) {
     const [products, agents, admin, settings] = await Promise.all([
       this.prisma.product.findMany({
-        where: isAdminRole(role) ? {} : { active: true },
+        where: isAdminRole(role)
+          ? {}
+          : {
+              active: true,
+              // A supplier reporting out of stock is independent of the
+              // admin's own on/off-sale choice, `active` alone said nothing
+              // about it, so a bundle stayed sellable and orderable right up
+              // until `OrdersService.priceInside`'s own supplier check
+              // refused it, or, if that provider wasn't live, all the way
+              // past payment. `supplierCode: null` (a checker/voucher with
+              // no automated supplier) has no stock signal to check at all,
+              // so it is never excluded by this on its own account.
+              OR: [{ supplierCode: null }, { supplier: { available: true } }],
+            },
         orderBy: [{ category: 'asc' }, { supplierCost: 'asc' }],
         // Only the admin payload keeps `provider`, but loading it costs one join
         // either way and `toPublicProduct` strips it.
@@ -49,8 +62,30 @@ export class CatalogueService {
       this.settings.all(),
     ])
 
+    /**
+     * Which supplier fulfils a network is enforced here, at read time, not by
+     * ever touching `Product.active`. `active` is the admin's own on/off-sale
+     * signal, and two unrelated features (`AdminService.setTier`/`applyMarkup`)
+     * silently reactivate a product the moment its price next clears cost,
+     * with no idea whether it was off because of routing or because the admin
+     * meant it. An earlier version deactivated the non-selected provider's
+     * products on every catalogue sync, which collided with exactly that and
+     * quietly undid the routing choice. Filtering the read instead means
+     * flipping the setting back and forth can never lose or restore anyone's
+     * own on/off-sale decision.
+     *
+     * Admin still sees everything regardless, same as the `active` filter
+     * above: managing prices for a provider that isn't currently live to
+     * customers is still a real, ordinary thing to do.
+     */
+    const visible = isAdminRole(role)
+      ? products
+      : products.filter(
+          (p) => (p.supplier?.provider ?? 'datahub-gh') === this.settings.providerFor(settings.networkProviderRouting, p.network, p.category),
+        )
+
     return {
-      products: products.map(isAdminRole(role) ? toProduct : toPublicProduct),
+      products: visible.map(isAdminRole(role) ? toProduct : toPublicProduct),
       pricingAgents: agents,
       admin,
       settings: {

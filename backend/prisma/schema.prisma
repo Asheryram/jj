@@ -564,6 +564,15 @@ model Order {
   /// ambiguity here means crediting the wrong agent.
   providerReference String? @unique @map("provider_reference")
 
+  /// GMPL's own internal order id, distinct from `providerReference` (which
+  /// holds their `publicId`, used for `GET /agent/orders/:id` and every
+  /// `order.*` webhook event). Their `purchase.success`/`purchase.failed`
+  /// events key on THIS id instead, the one inconsistency in their event
+  /// schema, so both ids have to be kept to match every event back to an
+  /// order. Null for a DataHub order, and for any order placed before GMPL
+  /// existed.
+  gmplInternalOrderId String? @unique @map("gmpl_internal_order_id")
+
   createdAt   DateTime  @default(now()) @map("created_at")
   completedAt DateTime? @map("completed_at")
 
@@ -765,9 +774,25 @@ model Setting {
 /// nothing on any admin screen said a sale had just been lost or whose number to
 /// go and approve. Each row is one person waiting.
 model BeneficiaryRequest {
-  /// The recipient number. One row per number, however many times it is tried.
-  phone      String @id
-  /// Which DataHub network it needs approving on, YELLO or mtn_xpress.
+  /// The recipient number. Paired with `provider` below, not a key on its own:
+  /// the same number can genuinely need separate approval at DataHub and at
+  /// GMPL at different times (a routing switch moves a network from one to
+  /// the other, and the phone's old, still-unapproved row from the previous
+  /// provider does not just vanish). A single-column `phone` key would
+  /// collide the two into one row and corrupt both: mismatched `networkKey`
+  /// vocabularies, `attempts` counted across two unrelated approval
+  /// processes, `approvedAt`/`copiedAt` meaning different things depending
+  /// on which provider last wrote it.
+  phone String
+  /// Which supplier this number needs approving with. `'datahub-gh'` or
+  /// `'gmpl'`, see `SupplierProviderCode`. Defaults to DataHub for every row
+  /// that predates GMPL, which matches reality.
+  provider String @default("datahub-gh")
+  /// The network key in the vocabulary of whichever `provider` owns this row:
+  /// DataHub's own (YELLO or mtn_xpress) for a `'datahub-gh'` row, GMPL's own
+  /// (`MTN`/`TELECEL`, from `Product.network`) for a `'gmpl'` row. Never
+  /// `SupplierProduct.networkKey` for a GMPL SKU — that column holds their
+  /// bundle id, not a network name.
   networkKey String @map("network_key")
 
   /// How many purchases this number has cost so far. A high count is a customer
@@ -780,16 +805,19 @@ model BeneficiaryRequest {
 
   firstSeenAt DateTime  @default(now()) @map("first_seen_at")
   lastSeenAt  DateTime  @updatedAt @map("last_seen_at")
-  /// Set once /verify confirms DataHub accepted it. Kept rather than deleted so
+  /// Set once the provider confirms it accepted this number (DataHub's
+  /// `/verify`, GMPL's precheck `known:true`). Kept rather than deleted so
   /// the same number is not re-submitted on a later attempt.
   approvedAt  DateTime? @map("approved_at")
-  /// The last time an admin copied this number to paste into DataHub's own
-  /// dashboard, by hand, not confirmation DataHub received or actioned it,
-  /// only that it was handed over. Null means never copied at all, which is
-  /// exactly the number that's easy to lose track of once a few more have
-  /// come in since the last copy, see `ApprovalsService.pending`.
+  /// The last time an admin copied this number to paste into the provider's
+  /// own dashboard by hand (DataHub only — GMPL's own submission is an API
+  /// call, see `ApprovalsService.submit`), not confirmation it was received
+  /// or actioned, only that it was handed over. Null means never copied at
+  /// all, which is exactly the number that's easy to lose track of once a
+  /// few more have come in since the last copy, see `ApprovalsService.pending`.
   copiedAt    DateTime? @map("copied_at")
 
+  @@id([phone, provider])
   @@index([approvedAt])
   @@map("beneficiary_requests")
 }
@@ -1005,6 +1033,17 @@ model LedgerEntry {
   /// The agent or customer this entry concerns, when it concerns one.
   userId       String?     @map("user_id")
   user         User?       @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  /// Which supplier float this entry moved money into or out of. Only ever
+  /// set by `FloatMonitorService.logCapital` (`capital_in` /
+  /// `capital_in_reimbursement` / `capital_out`) — a manual top-up or
+  /// reimbursement has no order to derive a provider from, unlike a
+  /// `supplier_cost` entry, which stays resolved live via
+  /// `orderRef → Order.supplierCodeAtSale → SupplierProduct.provider`
+  /// (see `resolveSupplierProvider`), never denormalized here. Null on every
+  /// entry logged before GMPL existed — there is no honest way to
+  /// retroactively attribute those.
+  provider String? @map("provider")
 
   /// When the money actually moved, which is not always when this was written:
   /// a backfilled or reconciled entry is dated by its event.

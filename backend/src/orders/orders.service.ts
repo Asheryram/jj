@@ -6,8 +6,10 @@ import { PricingService } from '../pricing/pricing.service'
 import { SettingsService } from '../settings/settings.service'
 import { FulfilmentService } from './fulfilment.service'
 import { PaymentsService } from '../payments/payments.service'
-import { SupplierService } from '../supplier/supplier.service'
+import { SupplierService, hasAutomatedFulfilment } from '../supplier/supplier.service'
 import { DatahubClient } from '../supplier/datahub.client'
+import { GmplClient, toGmplNetwork } from '../supplier/gmpl.client'
+import type { SupplierProviderCode } from '../settings/settings.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
 import { toOrder, toTrackedOrder } from '../common/mappers'
@@ -41,6 +43,7 @@ export class OrdersService {
     private readonly payments: PaymentsService,
     private readonly supplier: SupplierService,
     private readonly datahub: DatahubClient,
+    private readonly gmpl: GmplClient,
     private readonly reconciler: ReconcilerService,
   ) {}
 
@@ -252,24 +255,37 @@ export class OrdersService {
   }
 
   /**
-   * Remember a number DataHub has not approved, so somebody can go and approve it.
+   * Remember a number the provider has not approved, so somebody can go and
+   * approve it.
    *
-   * Their `/beneficiaries` endpoint 502s, so this cannot be automated, the only
-   * route is James doing it by hand in their dashboard, and he can only do that
-   * if he knows which numbers to enter. `attempts` counts how many sales each
-   * one has cost, which is the order to work through them in.
+   * DataHub's `/beneficiaries` endpoint 502s, so approving one there cannot be
+   * automated, the only route is James doing it by hand in their dashboard,
+   * and he can only do that if he knows which numbers to enter. GMPL's own
+   * queue is submitted through their API instead, see
+   * `ApprovalsService.submit`. Either way, `attempts` counts how many sales
+   * each one has cost, which is the order to work through them in.
+   *
+   * `networkKey` is written in whichever vocabulary `provider` actually
+   * speaks: DataHub's own (`product.supplier.networkKey`, e.g. YELLO) for a
+   * DataHub row, GMPL's (`MTN`/`TELECEL`, derived from `product.network`) for
+   * a GMPL one — never `product.supplier.networkKey` there, that column
+   * holds GMPL's *bundle id* for a GMPL SKU, not a network name.
    */
   private async noteApprovalNeeded(productId: string, recipient: string): Promise<void> {
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
-      select: { name: true, standardPrice: true, supplier: { select: { networkKey: true } } },
+      select: { name: true, standardPrice: true, network: true, supplier: { select: { networkKey: true, provider: true } } },
     })
+    const provider: SupplierProviderCode = (product?.supplier?.provider as SupplierProviderCode | undefined) ?? 'datahub-gh'
+    const networkKey =
+      provider === 'gmpl' ? toGmplNetwork(product?.network ?? 'MTN') : (product?.supplier?.networkKey ?? 'YELLO')
 
     await this.prisma.beneficiaryRequest.upsert({
-      where: { phone: recipient },
+      where: { phone_provider: { phone: recipient, provider } },
       create: {
         phone: recipient,
-        networkKey: product?.supplier?.networkKey ?? 'YELLO',
+        provider,
+        networkKey,
         lastProduct: product?.name ?? null,
         lastValue: product?.standardPrice ?? null,
       },
@@ -282,7 +298,7 @@ export class OrdersService {
       },
     })
 
-    this.log.warn(`${recipient} needs DataHub approval, sale refused`)
+    this.log.warn(`${recipient} needs ${provider === 'gmpl' ? 'GMPL' : 'DataHub'} approval, sale refused`)
   }
 
   /**
@@ -317,26 +333,65 @@ export class OrdersService {
     // it refuses what it cannot send, and a refused order refunds.
     // Do not take money for something we cannot deliver.
     //
-    // While live, a product whose provider SKU has no network/capacity mapping
-    // can never be fulfilled, DataHub sells whole-GB data bundles and nothing
-    // else. Dispatch used to catch this, but only after the buyer had paid: the
-    // order failed, the money came back, and the customer was left wondering
-    // what they had done wrong. Refusing here costs them nothing.
-    if (this.supplier.isLive) {
-      const supplier = await tx.product
-        .findUnique({ where: { id: productId }, select: { supplier: true } })
-        .then((r) => r?.supplier ?? null)
+    // While live, a product whose provider SKU has no automated-fulfilment
+    // mapping can never be fulfilled. Dispatch used to catch this, but only
+    // after the buyer had paid: the order failed, the money came back, and
+    // the customer was left wondering what they had done wrong. Refusing
+    // here costs them nothing.
+    const supplierRow = await tx.product
+      .findUnique({ where: { id: productId }, select: { supplier: true } })
+      .then((r) => r?.supplier ?? null)
 
-      if (!supplier?.networkKey || !supplier?.capacityGb) {
+    /**
+     * Defence in depth behind `CatalogueService.snapshot`'s own routing
+     * filter: that's what keeps a non-selected provider's bundle off the
+     * storefront in the first place, this is what stops an order for one
+     * anyway, a stale cached listing, a direct API call, a sell link saved
+     * from before the last routing change. Checked regardless of whether
+     * either provider is live, routing is a catalogue decision, not a
+     * money-is-real one. `network: null` products (checkers, AFA) are never
+     * routable at all, see `providerFor`'s own comment, so this is a no-op
+     * for them.
+     */
+    if (supplierRow) {
+      const settingsNow = await this.settings.all(tx)
+      const selectedProvider = this.settings.providerFor(settingsNow.networkProviderRouting, row.network, row.category)
+      if (supplierRow.provider !== selectedProvider) {
         throw new ConflictError(
-          'NO_AUTOMATED_FULFILMENT',
-          `${row.name} cannot be delivered automatically at the moment. Please choose another bundle.`,
+          'PRODUCT_INACTIVE',
+          `${row.name} is not on sale at the moment. Pick another bundle.`,
         )
       }
-      if (!supplier.available) {
+
+      /**
+       * Same reasoning as the routing check just above: a supplier reporting
+       * out of stock is a catalogue fact, not a real-money one, so it is
+       * refused here regardless of whether this provider is live, not only
+       * gated behind it. `CatalogueService.snapshot` already keeps an
+       * out-of-stock bundle out of the storefront for a browsing customer;
+       * this is what stops an order placed anyway, the same defence in depth
+       * as the routing check above it.
+       */
+      if (!supplierRow.available) {
         throw new ConflictError(
           'PRODUCT_OUT_OF_STOCK',
           `${row.name} is out of stock with our delivery partner right now. Please choose another bundle.`,
+        )
+      }
+    }
+
+    // The provider `SupplierService.dispatch()` would actually resolve to for
+    // this order, defaulting to DataHub the same way it does, so an entirely
+    // unmapped product (no supplier row at all) is still refused here exactly
+    // as before, not silently let through because there is no `.provider` to
+    // check liveness against.
+    const effectiveProvider = supplierRow?.provider ?? 'datahub-gh'
+
+    if (this.supplier.isLiveFor(effectiveProvider)) {
+      if (!supplierRow || !hasAutomatedFulfilment(supplierRow)) {
+        throw new ConflictError(
+          'NO_AUTOMATED_FULFILMENT',
+          `${row.name} cannot be delivered automatically at the moment. Please choose another bundle.`,
         )
       }
 
@@ -876,14 +931,41 @@ export class OrdersService {
       .findUnique({ where: { id: productId }, select: { supplier: true } })
       .then((p) => p?.supplier ?? null)
 
-    // Only meaningful when we are actually going to call them, and only for the
-    // networks their /verify covers.
-    const checkable =
-      this.supplier.isLive &&
-      supplier?.networkKey !== undefined &&
-      supplier?.networkKey !== null &&
-      VERIFIABLE_NETWORK_KEYS.includes(supplier.networkKey)
+    // Only meaningful when we are actually going to call somebody real.
+    if (!supplier || !this.supplier.isLiveFor(supplier.provider)) {
+      return { checked: false, verified: true, message: '' }
+    }
 
+    if (supplier.provider === 'gmpl') {
+      // Their MTN Up2U precheck, the same role DataHub's /verify plays
+      // below, but a different provider with a different check. TELECEL
+      // never blocks, so nothing here is worth asking about.
+      if (supplier.network !== 'MTN') return { checked: false, verified: true, message: '' }
+
+      const result = await this.gmpl.precheckBeneficiary('MTN', [recipient])
+      const entry = result.kind === 'ok' ? result.results[0] : null
+      if (entry && entry.valid && !entry.known) {
+        // Same reasoning as the DataHub refusal below: this is the only
+        // point in the flow that sees a refused number, so it is recorded
+        // here, into the same `BeneficiaryRequest` table (now provider-aware,
+        // see `noteApprovalNeeded`), or GMPL's own queue is just as invisible
+        // to an admin as DataHub's would be if this call were skipped.
+        await this.noteApprovalNeeded(productId, recipient).catch((error: unknown) =>
+          this.log.error(`${recipient}: failed to record approval-needed, ${String(error)}`),
+        )
+        return {
+          checked: true,
+          verified: false,
+          message:
+            `${prettyGhanaPhone(recipient)} is not yet approved by our delivery partner for MTN, so ` +
+            'this bundle cannot be sent to it yet. Please try again a little later, or contact support.',
+        }
+      }
+      return { checked: true, verified: true, message: '' }
+    }
+
+    // Only meaningful for the networks DataHub's /verify covers.
+    const checkable = supplier.networkKey !== null && VERIFIABLE_NETWORK_KEYS.includes(supplier.networkKey)
     if (!checkable) {
       return { checked: false, verified: true, message: '' }
     }
