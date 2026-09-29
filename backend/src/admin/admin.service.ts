@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import type { NetworkProviderRouting, PlatformSettings } from '../settings/settings.service'
-import { SettingsService } from '../settings/settings.service'
+import { SettingsService, KNOWN_PROVIDERS } from '../settings/settings.service'
 import { toProduct, PRODUCT_INCLUDE } from '../common/mappers'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import { floorAtCost, markupFromPrice, priceFromMarkup, type OrderSplit } from '../domain/pricing'
@@ -332,33 +332,48 @@ export class AdminService {
    * inactive list is context to look at alongside the float, not a claim
    * that any particular row is safe to turn back on.
    *
-   * Null `floatReference` (nothing logged yet, no capital move has ever been
-   * recorded) means there is nothing to judge a cost against, so nothing is
-   * flagged rather than everything.
+   * A float with nothing logged yet (no capital move has ever been recorded
+   * for that provider) judges nothing against it, so that provider's
+   * products are never flagged rather than everything being flagged.
+   *
+   * Checked per provider: DataHub's float running low says nothing about
+   * whether GMPL's bundles are still safely covered, the two are entirely
+   * separate real balances, so a product is only ever judged against the
+   * float of whichever supplier actually sells it.
    */
   async floatRisk() {
-    const expected = await this.float.expectedBalance()
-    if (!expected) {
-      return { floatReference: null, trackedSince: null, atRisk: [], inactive: [] }
-    }
+    const floats = await Promise.all(
+      KNOWN_PROVIDERS.map(async (provider) => {
+        const expected = await this.float.expectedBalance(provider)
+        return {
+          provider,
+          floatReference: expected?.balance ?? null,
+          trackedSince: expected?.capturedAt.toISOString() ?? null,
+        }
+      }),
+    )
 
-    const [atRisk, inactive] = await Promise.all([
-      this.prisma.product.findMany({
-        where: { active: true, supplierCost: { gt: expected.balance } },
-        include: PRODUCT_INCLUDE,
-        orderBy: { supplierCost: 'desc' },
-      }),
-      this.prisma.product.findMany({
-        where: { active: false },
-        include: PRODUCT_INCLUDE,
-        orderBy: { supplierCost: 'desc' },
-      }),
-    ])
+    const atRiskByProvider = await Promise.all(
+      floats
+        .filter((f) => f.floatReference != null)
+        .map((f) =>
+          this.prisma.product.findMany({
+            where: { active: true, supplierCost: { gt: f.floatReference as number }, supplier: { provider: f.provider } },
+            include: PRODUCT_INCLUDE,
+            orderBy: { supplierCost: 'desc' },
+          }),
+        ),
+    )
+
+    const inactive = await this.prisma.product.findMany({
+      where: { active: false },
+      include: PRODUCT_INCLUDE,
+      orderBy: { supplierCost: 'desc' },
+    })
 
     return {
-      floatReference: expected.balance,
-      trackedSince: expected.capturedAt.toISOString(),
-      atRisk: atRisk.map(toProduct),
+      floats,
+      atRisk: atRiskByProvider.flat().map(toProduct),
       inactive: inactive.map(toProduct),
     }
   }

@@ -127,7 +127,7 @@ export default function AdminOrders() {
    * profit: it is only what could come out today without touching money a
    * pending order might still need, a refund not yet decided, a bundle
    * still processing, a customer's wallet balance, or money already moved
-   * across to fund the DataHub float. `allTime.profit` below (revenue less
+   * across to fund a supplier float. `allTime.profit` below (revenue less
    * every real cost) is the honest answer to "how much did the business
    * make"; this is the honest answer to "how much of that could I take out
    * this second," and the two are expected to disagree, sometimes by a lot.
@@ -152,23 +152,23 @@ export default function AdminOrders() {
   }, [])
 
   /**
-   * All-time pesewas reimbursed to DataHub beyond what bundles have
-   * actually cost it, see `FloatMonitorService.capitalSummary`'s own
-   * `overReimbursed`. Deliberately not the whole reimbursed total: most of
-   * that is honest cost-settlement, money that was always going to leave
-   * Paystack for a bundle DataHub already charged for, and calling that
-   * "profit turned into capital" would overstate the actual gap. Only this
-   * excess was never owed to anything, still inside `allTime.profit` since
-   * it was earned, just not free to withdraw at Paystack any more, it's
-   * sitting at DataHub as capital instead. See the Float panel for the
-   * full breakdown this is drawn from.
+   * All-time pesewas reimbursed to either supplier's float beyond what its
+   * bundles have actually cost it, summed across both, see
+   * `FloatMonitorService.capitalSummary`'s own `overReimbursed`.
+   * Deliberately not the whole reimbursed total: most of that is honest
+   * cost-settlement, money that was always going to leave Paystack for a
+   * bundle a supplier already charged for, and calling that "profit turned
+   * into capital" would overstate the actual gap. Only this excess was
+   * never owed to anything, still inside `allTime.profit` since it was
+   * earned, just not free to withdraw at Paystack any more, it's sitting at
+   * a supplier float as capital instead. See the Float panel for the full,
+   * per-provider breakdown this is drawn from.
    */
   const [profitAtFloat, setProfitAtFloat] = useState<number | null>(null)
   useEffect(() => {
     let live = true
-    api
-      .supplierFloat()
-      .then((float) => live && setProfitAtFloat(float.capital.overReimbursed))
+    Promise.all([api.supplierFloat('datahub-gh'), api.supplierFloat('gmpl')])
+      .then(([datahub, gmpl]) => live && setProfitAtFloat(datahub.capital.overReimbursed + gmpl.capital.overReimbursed))
       .catch(() => undefined)
     return () => {
       live = false
@@ -445,7 +445,7 @@ export default function AdminOrders() {
         <StatTile
           label="Profit that became capital"
           value={profitAtFloat === null ? '-' : cedis(profitAtFloat)}
-          hint="All-time. Reimbursed to DataHub beyond what it was actually owed. Still earned, added back to the profit above until this happened, but DataHub cannot send it back out, so it no longer counts as yours to take. See the Float panel"
+          hint="All-time. Reimbursed to a supplier's float beyond what it was actually owed. Still earned, added back to the profit above until this happened, but a supplier float cannot send it back out, so it no longer counts as yours to take. See the Float panel"
         />
       </div>
 

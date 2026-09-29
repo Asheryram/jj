@@ -618,7 +618,7 @@ export default function Analytics() {
   const revenueChart = data.daily.map((d) => ({ day: dayLabel(d.date), revenue: d.revenue }))
   const previousRevenue = prevData?.daily.map((d) => d.revenue)
   const previousDailyDays = prevData?.daily.map((d) => dayLabel(d.date))
-  // Profit can dip on a day that did nothing wrong, when DataHub settles a
+  // Profit can dip on a day that did nothing wrong, when a supplier settles a
   // bundle's real cost days after the sale itself; each point carries its
   // own same-day/carryover split so the hover tooltip can tell "bad day"
   // apart from "an old sale catching up today," for whichever day the
@@ -802,10 +802,11 @@ export default function Analytics() {
   }
   // Fix 4: ranked by the metric the alert actually fires on (success rate),
   // not insertion order, so the bar chart and the table read the same way.
-  // Fix 20: manual-queue orders haven't failed, DataHub just hasn't resolved
-  // them yet, so they're left out of the denominator instead of counted as
-  // failures. A network with 3 attempts and 1 still queued reads as 100% of
-  // the 2 DataHub has actually decided on, not a misleading 67%.
+  // Fix 20: manual-queue orders haven't failed, the provider just hasn't
+  // resolved them yet, so they're left out of the denominator instead of
+  // counted as failures. A network with 3 attempts and 1 still queued reads
+  // as 100% of the 2 the provider has actually decided on, not a misleading
+  // 67%.
   const dispatchRanked = [...dispatchByNetwork.entries()]
     .map(([network, row]) => {
       const resolved = row.totalAttempts - row.manualQueue
@@ -1000,7 +1001,7 @@ export default function Analytics() {
   if (latestFloat && latestFloat.level !== 'ok') {
     attentionItems.push({
       tone: latestFloat.level === 'risk' ? 'danger' : 'warning',
-      text: `DataHub float is at ${latestFloat.level} level (${cedisCompact(latestFloat.balance)} remaining) as of ${dayLabel(latestFloat.date)}.`,
+      text: `The DataHub float is at ${latestFloat.level} level (${cedisCompact(latestFloat.balance)} remaining) as of ${dayLabel(latestFloat.date)}. GMPL's own float isn't tracked here yet, check the Float panel directly.`,
     })
   }
   if (latestLostRevenue && latestLostRevenue.stillBlocked > 0) {
@@ -1015,14 +1016,14 @@ export default function Analytics() {
     if (resolved >= 5 && successRate < DISPATCH_SUCCESS_FLOOR) {
       attentionItems.push({
         tone: 'warning',
-        text: `${network} dispatch success is only ${successRate.toFixed(0)}% (${row.successful} of ${resolved} resolved) over ${range.label}, worth raising with DataHub.`,
+        text: `${network} dispatch success is only ${successRate.toFixed(0)}% (${row.successful} of ${resolved} resolved) over ${range.label}, worth raising with whichever supplier currently handles ${network}.`,
       })
     }
   }
   if (noReplyRate > NO_REPLY_ALERT_RATE) {
     attentionItems.push({
       tone: 'warning',
-      text: `${noReplyRate.toFixed(0)}% of DataHub attempts over ${range.label} got no reply at all, not even a failure.`,
+      text: `${noReplyRate.toFixed(0)}% of dispatch attempts over ${range.label} got no reply at all, not even a failure.`,
     })
   }
   if (abandonmentRate > ABANDONMENT_ALERT_RATE) {
@@ -1113,7 +1114,7 @@ export default function Analytics() {
           icon={<TrendUpIcon className="size-5" />}
         />
         <StatTile
-          label="DataHub no-reply rate"
+          label="Dispatch no-reply rate"
           value={`${noReplyRate.toFixed(1)}%`}
           hint={
             <>
@@ -1224,7 +1225,7 @@ export default function Analytics() {
             value={latestSolvency ? cedisCompact(latestSolvency.liabilitiesTotal) : '-'}
             hint={latestSolvency ? `As of ${dayLabel(latestSolvency.date)}` : 'No reading in this range'}
           />
-          <div title="The balance DataHub itself reports on our supplier account, an amount held over there to fund order fulfilment. This is DataHub's own number, not something computed from our ledger, so it can't be reconciled the way every other figure on this page can, it's read, not calculated.">
+          <div title="The balance DataHub itself reports on our supplier account, an amount held over there to fund order fulfilment. This is DataHub's own number, not something computed from our ledger, so it can't be reconciled the way every other figure on this page can, it's read, not calculated. GMPL's own float isn't tracked here (their API reports no balance at all), see the Float panel for it directly.">
             <StatTile
               label="DataHub float"
               value={latestFloat ? cedisCompact(latestFloat.balance) : latestSolvency?.floatBalance != null ? cedisCompact(latestSolvency.floatBalance) : '-'}
@@ -1302,7 +1303,7 @@ export default function Analytics() {
           <CardHead
             title="Profit"
             subtitle="Revenue less supplier cost, Paystack's fee, and agent margins, completed orders only"
-            tooltip="Same solid-vs-dashed comparison as Revenue, but after supplier cost, Paystack's fee, and agent margins. A dip below zero here isn't always a loss on that day's own sales: DataHub can settle a bundle's real cost days after the sale, and that late cost is logged on the day it's confirmed, not the sale day. Hover or tap any point for that day's own split between the two."
+            tooltip="Same solid-vs-dashed comparison as Revenue, but after supplier cost, Paystack's fee, and agent margins. A dip below zero here isn't always a loss on that day's own sales: a supplier can settle a bundle's real cost days after the sale, and that late cost is logged on the day it's confirmed, not the sale day. Hover or tap any point for that day's own split between the two."
           />
           <div className="p-4 sm:p-5">
             <LineChart data={profitChart} previous={previousProfit} previousDays={previousDailyDays} height={180} tooltipFor={profitTooltip} />
@@ -1581,9 +1582,9 @@ export default function Analytics() {
       <>
       <Card className="mt-3 lg:mt-0">
         <CardHead
-          title="DataHub reliability"
-          subtitle="How often the delivery partner actually answers, by network"
-          tooltip="Bar length is each network's delivery success rate among attempts DataHub has actually decided on; the vertical line marks the 85% floor that triggers a 'Needs attention' flag. A manual-queue attempt is still pending, not failed, so it's left out of the rate until DataHub resolves it. The table has the exact counts behind each bar."
+          title="Dispatch reliability"
+          subtitle="How often your suppliers actually answer, by network"
+          tooltip="Bar length is each network's delivery success rate among attempts the supplier has actually decided on; the vertical line marks the 85% floor that triggers a 'Needs attention' flag. A manual-queue attempt is still pending, not failed, so it's left out of the rate until the supplier resolves it. Each network is served by exactly one supplier at a time (see Settings' provider routing), so a network's own bar reflects whichever one currently handles it. The table has the exact counts behind each bar."
         />
         {/* Fix 4 (ranked bar, beside the table) + Fix 5 (the same
             DISPATCH_SUCCESS_FLOOR line drawn here as `threshold`, not just
@@ -1932,7 +1933,7 @@ export default function Analytics() {
       <Card className="mt-3 lg:mt-0">
         <CardHead
           title="Lost revenue: numbers waiting on approval"
-          subtitle="DataHub blocks a sale to a beneficiary number until it's approved. Every number here is a real sale that couldn't go through, not a hypothetical one."
+          subtitle="A supplier blocks a sale to a beneficiary number until it's approved. Every number here is a real sale that couldn't go through, not a hypothetical one."
           tooltip="'Still blocked' is a live count right now; 'Newly blocked' and 'Resolved' are counted per day in the range, so they can be safely added up across days without double-counting."
         />
         <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4 sm:p-5">
@@ -2198,7 +2199,7 @@ export default function Analytics() {
         <Card>
           <CardHead
             title="Margin accuracy"
-            subtitle="Average margin as a percentage of sale price, completed orders. A falling line means DataHub's real cost is creeping up on the catalogue price."
+            subtitle="Average margin as a percentage of sale price, completed orders. A falling line means a supplier's real cost is creeping up on the catalogue price."
             tooltip="A percentage alone can't tell you whether a small drift is a real cedi increase or just noise, the two figures below give the actual amounts behind it. Compare the dashed previous-period line against the solid one to see whether a falling margin is a new trend or one that's already recovering."
           />
           {latestMargin && (

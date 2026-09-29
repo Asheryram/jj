@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import { PrismaService } from '../prisma/prisma.service'
 import { FulfilmentService } from '../orders/fulfilment.service'
 import { PaymentsService } from '../payments/payments.service'
-import { SupplierService } from './supplier.service'
+import { SupplierService, resolveSupplierProvider } from './supplier.service'
 import { DatahubClient, mapProviderStatus } from './datahub.client'
 import { GmplClient, mapGmplOrderStatus } from './gmpl.client'
 import { MailerService } from '../mail/mailer.service'
@@ -106,13 +106,8 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   ) {}
 
   /** The provider a `SupplierProduct.code` belongs to, DataHub for anything unmapped. */
-  private async resolveProvider(supplierCode: string | null): Promise<string> {
-    if (!supplierCode) return 'datahub-gh'
-    const row = await this.prisma.supplierProduct.findUnique({
-      where: { code: supplierCode },
-      select: { provider: true },
-    })
-    return row?.provider ?? 'datahub-gh'
+  private resolveProvider(supplierCode: string | null) {
+    return resolveSupplierProvider(this.prisma, supplierCode)
   }
 
   onApplicationBootstrap(): void {

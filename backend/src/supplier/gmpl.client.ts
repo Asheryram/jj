@@ -47,7 +47,7 @@ export type StatusOutcome =
   | { kind: 'unavailable'; reason: string }
 
 export type PrecheckOutcome =
-  | { kind: 'ok'; results: { phone: string; normalized: string; valid: boolean; known: boolean }[] }
+  | { kind: 'ok'; results: { phone: string; normalized: string; valid: boolean; known: boolean }[]; recorded: boolean }
   | { kind: 'unavailable'; reason: string }
 
 export interface GmplBundle {
@@ -340,14 +340,27 @@ export class GmplClient {
 
   /**
    * MTN's own "first-time number" precheck (Up2U), their equivalent of
-   * DataHub's beneficiary list. TELECEL never blocks. Always called with
-   * `record: false`, a purely speculative check: nothing here ever submits a
-   * number into GMPL's own approval queue, that queue is untracked locally
-   * this pass (see the GMPL supplier plan).
+   * DataHub's beneficiary list. TELECEL never blocks.
+   *
+   * `record` (default `false`) is a purely speculative check when unset:
+   * nothing submits a number into GMPL's own approval queue. `record: true`
+   * (used by `ApprovalsService.submit`'s GMPL branch, GMPL's equivalent of
+   * DataHub's broken `/beneficiaries` submission) is meant to actually
+   * register it there — confirmed live against their real sandbox to be
+   * accepted (200, no error) and to echo back a top-level `recorded` flag
+   * matching the request, but the sandbox itself answers every check with
+   * `enforced: false` (it never actually gates or records anything), so
+   * this could not be end-to-end confirmed against a real "was this number
+   * genuinely added to their queue" outcome, only that the parameter and
+   * response shape are real.
    */
-  async precheckBeneficiary(network: 'MTN' | 'TELECEL', phoneNumbers: string[]): Promise<PrecheckOutcome> {
+  async precheckBeneficiary(
+    network: 'MTN' | 'TELECEL',
+    phoneNumbers: string[],
+    record = false,
+  ): Promise<PrecheckOutcome> {
     if (!this.configured) return { kind: 'unavailable', reason: 'No GMPL API key configured.' }
-    if (phoneNumbers.length === 0) return { kind: 'ok', results: [] }
+    if (phoneNumbers.length === 0) return { kind: 'ok', results: [], recorded: false }
 
     try {
       const response = await this.fetchRepeatable(
@@ -355,19 +368,19 @@ export class GmplClient {
         {
           method: 'POST',
           headers: this.headers({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ network, phoneNumbers, record: false }),
+          body: JSON.stringify({ network, phoneNumbers, record }),
           signal: AbortSignal.timeout(8_000),
         },
         'precheck',
         2,
       )
       const body = (await response.json().catch(() => ({}))) as GmplEnvelope & {
-        data?: { results?: { phone: string; normalized: string; valid: boolean; known: boolean }[] }
+        data?: { results?: { phone: string; normalized: string; valid: boolean; known: boolean }[]; recorded?: boolean }
       }
       if (!response.ok || body.success === false || !Array.isArray(body.data?.results)) {
         return { kind: 'unavailable', reason: gmplErrorReason(body, `HTTP ${response.status}`) }
       }
-      return { kind: 'ok', results: body.data.results }
+      return { kind: 'ok', results: body.data.results, recorded: body.data.recorded === true }
     } catch (error) {
       this.log.warn(`could not precheck ${phoneNumbers.length} number(s) on ${network}: ${String(error)}`)
       return { kind: 'unavailable', reason: String(error) }
@@ -382,6 +395,17 @@ export class GmplClient {
  * because guessing wrong in the failure direction refunds a buyer whose
  * bundle actually arrived.
  */
+/**
+ * This platform's own `Network` ('MTN'/'Telecel'/'AirtelTigo') mapped to
+ * GMPL's own vocabulary ('MTN'/'TELECEL'). Only ever called for a product
+ * routed to GMPL, and routing validation (`SettingsService.set`) already
+ * refuses `gmpl` for AirtelTigo, so this only ever sees the two GMPL
+ * actually sells.
+ */
+export function toGmplNetwork(network: string): 'MTN' | 'TELECEL' {
+  return network === 'Telecel' ? 'TELECEL' : 'MTN'
+}
+
 export function mapGmplOrderStatus(status: string): 'completed' | 'failed' | null {
   switch (status.toLowerCase()) {
     case 'delivered':

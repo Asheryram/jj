@@ -25,7 +25,8 @@ import { LedgerService } from '../finance/ledger.service'
 import { RefundsService } from '../orders/refunds.service'
 import { ApplicationsService } from './applications.service'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
-import { SettingsService, type NetworkProviderRouting } from '../settings/settings.service'
+import { SettingsService, KNOWN_PROVIDERS, type NetworkProviderRouting, type SupplierProviderCode } from '../settings/settings.service'
+import { ValidationError } from '../common/domain-errors'
 import { SolvencyService } from '../finance/solvency.service'
 import { AgentsService } from '../agents/agents.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
@@ -33,6 +34,14 @@ import { OrdersService } from '../orders/orders.service'
 import type { OrderStatus } from '@prisma/client'
 
 const TIERS = ['supplierCost', 'adminPrice', 'standardPrice'] as const
+
+/** Which supplier float a request is about. Required, not defaulted: a caller asking about "the float" with no provider named is the exact ambiguity two separate floats exist to rule out. */
+function requireProvider(provider: string | undefined): SupplierProviderCode {
+  if (!provider || !(KNOWN_PROVIDERS as readonly string[]).includes(provider)) {
+    throw new ValidationError(`provider must be one of ${KNOWN_PROVIDERS.join(', ')}.`)
+  }
+  return provider as SupplierProviderCode
+}
 
 export class SetTierDto {
   @IsIn(TIERS)
@@ -56,6 +65,10 @@ export class MarkCopiedDto {
 }
 
 export class LogCapitalDto {
+  /** Which supplier float this top-up/withdrawal concerns. */
+  @IsIn(['datahub-gh', 'gmpl'])
+  provider!: 'datahub-gh' | 'gmpl'
+
   @IsIn(['in', 'out'])
   direction!: 'in' | 'out'
 
@@ -70,8 +83,8 @@ export class LogCapitalDto {
 
   /**
    * Only meaningful for `direction: 'in'`. 'reimbursement' means this top-up
-   * is specifically settling money already collected from customers for
-   * DataHub's charge, not adding fresh capital, see
+   * is specifically settling money already collected from customers for this
+   * provider's charge, not adding fresh capital, see
    * `FloatMonitorService.logCapital`.
    */
   @IsOptional()
@@ -422,12 +435,13 @@ export class AdminController {
    * was read, or it implies a live number it cannot have.
    */
   @Get('supplier/float')
-  async float_() {
+  async float_(@Query('provider') providerQuery?: string) {
+    const provider = requireProvider(providerQuery)
     const [observation, settings, capital, reconciliation] = await Promise.all([
-      this.float.latest(),
+      this.float.latest(provider),
       this.platformSettings.all(),
-      this.float.capitalSummary(),
-      this.float.reconcile(),
+      this.float.capitalSummary(provider),
+      this.float.reconcile(provider),
     ])
     return {
       observation,
@@ -439,10 +453,11 @@ export class AdminController {
   }
 
   /**
-   * James saying he moved his own money into or out of the float. DataHub
-   * gives no notice when this happens, so it is only ever known because he
-   * logged it, this is what lets the platform tell his capital apart from
-   * the profit the business has actually earned.
+   * James saying he moved his own money into or out of one provider's
+   * float. Neither provider gives any notice when this happens, so it is
+   * only ever known because he logged it, this is what lets the platform
+   * tell his capital apart from the profit the business has actually
+   * earned.
    */
   @Post('supplier/float/capital')
   logCapital(@Body() dto: LogCapitalDto) {
@@ -450,16 +465,17 @@ export class AdminController {
   }
 
   /**
-   * Plain top-ups that might actually be Paystack money paying DataHub back,
-   * not yet corrected, see `FloatMonitorService.capitalInNeedingReview`.
-   * Superadmin-only, not just admin: correcting a logged capital movement
-   * changes what "Your profit"/"Free to withdraw now" show, one step more
-   * sensitive than logging a fresh one.
+   * Plain top-ups that might actually be Paystack money paying this
+   * provider back, not yet corrected, see
+   * `FloatMonitorService.capitalInNeedingReview`. Superadmin-only, not just
+   * admin: correcting a logged capital movement changes what "Your
+   * profit"/"Free to withdraw now" show, one step more sensitive than
+   * logging a fresh one.
    */
   @Get('supplier/float/capital/needs-review')
   @Roles('superadmin')
-  capitalNeedingReview() {
-    return this.float.capitalInNeedingReview()
+  capitalNeedingReview(@Query('provider') providerQuery?: string) {
+    return this.float.capitalInNeedingReview(requireProvider(providerQuery))
   }
 
   /**
@@ -691,15 +707,24 @@ export class AdminController {
 
   /**
    * The Reserve panel's whole picture, Paystack's side from `SolvencyService`,
-   * plus the DataHub float's current reading alongside it. Not folded into
-   * `SolvencyService` itself: the two pots are genuinely separate money, and
-   * the float is not a claim on what should be at Paystack, see
-   * `ReservePanel`'s "your other pot" framing on the frontend.
+   * plus each provider's float reading alongside it. Not folded into
+   * `SolvencyService` itself: the floats are genuinely separate money from
+   * Paystack, and from each other, see `ReservePanel`'s "your other pots"
+   * framing on the frontend.
    */
   @Get('finance/position')
   async position() {
-    const [position, float] = await Promise.all([this.solvency.position(), this.float.latest()])
-    return { ...position, floatBalance: float?.balance ?? null }
+    const [position, spentOnBundlesByProvider, floats] = await Promise.all([
+      this.solvency.position(),
+      this.solvency.spentOnBundlesByProvider(),
+      Promise.all(
+        KNOWN_PROVIDERS.map(async (provider) => ({
+          provider,
+          floatBalance: (await this.float.latest(provider))?.balance ?? null,
+        })),
+      ),
+    ])
+    return { ...position, spentOnBundlesByProvider, floats }
   }
 
   @Get('finance/entries')

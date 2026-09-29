@@ -116,7 +116,7 @@ const ADMIN_TOOLS: ChatCompletionTool[] = [
     function: {
       name: 'get_float_status',
       description:
-        "The DataHub float: what it should hold going by logged capital and spending, and what DataHub's last reply actually reported.",
+        "Both supplier floats (DataHub and GMPL): what each should hold going by logged capital and spending, and what each provider's last reply actually reported.",
     },
   },
   {
@@ -515,12 +515,22 @@ export class AssistantService {
   private async runAdminTool(name: string): Promise<unknown> {
     switch (name) {
       case 'get_float_status': {
-        const [expected, observed] = await Promise.all([this.float.expectedBalance(), this.float.latest()])
-        return {
-          shouldHoldGhs: expected ? this.toCedis(expected.balance) : null,
-          dataHubLastReportedGhs: observed ? this.toCedis(observed.balance) : null,
-          lastReportedAt: observed?.observedAt ?? null,
-        }
+        const providers = ['datahub-gh', 'gmpl'] as const
+        const perProvider = await Promise.all(
+          providers.map(async (provider) => {
+            const [expected, observed] = await Promise.all([
+              this.float.expectedBalance(provider),
+              this.float.latest(provider),
+            ])
+            return {
+              provider,
+              shouldHoldGhs: expected ? this.toCedis(expected.balance) : null,
+              lastReportedGhs: observed ? this.toCedis(observed.balance) : null,
+              lastReportedAt: observed?.observedAt ?? null,
+            }
+          }),
+        )
+        return { floats: perProvider }
       }
       case 'get_pending_refunds': {
         const rows = await this.refunds.list('pending')
@@ -665,8 +675,11 @@ export class AssistantService {
       case 'get_float_risk_products': {
         const risk = await this.admin.floatRisk()
         return {
-          floatReferenceGhs: risk.floatReference != null ? this.toCedis(risk.floatReference) : null,
-          trackedSince: risk.trackedSince,
+          floats: risk.floats.map((f) => ({
+            provider: f.provider,
+            floatReferenceGhs: f.floatReference != null ? this.toCedis(f.floatReference) : null,
+            trackedSince: f.trackedSince,
+          })),
           atRiskProducts: risk.atRisk.map((p) => ({ product: p.name, network: p.network, costGhs: this.toCedis(p.supplierCost) })),
           inactiveProducts: risk.inactive.map((p) => ({ product: p.name, network: p.network })),
         }

@@ -18,7 +18,8 @@ export type NetworkProviderRouting = Record<string, SupplierProviderCode>
 
 const KNOWN_NETWORKS = ['MTN', 'Telecel', 'AirtelTigo'] as const
 const KNOWN_CATEGORIES = ['data', 'airtime', 'voice', 'sms', 'afa', 'checker'] as const
-const KNOWN_PROVIDERS: readonly SupplierProviderCode[] = ['datahub-gh', 'gmpl']
+/** Every supplier this platform can fulfil an order against. Exported so anything that needs to treat "every known provider" generically (a catalogue-wide query, a purge script) never has to hardcode just one. */
+export const KNOWN_PROVIDERS: readonly SupplierProviderCode[] = ['datahub-gh', 'gmpl']
 
 /**
  * Runtime platform switches, one row per key so a new flag needs no migration.

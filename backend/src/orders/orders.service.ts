@@ -8,7 +8,8 @@ import { FulfilmentService } from './fulfilment.service'
 import { PaymentsService } from '../payments/payments.service'
 import { SupplierService, hasAutomatedFulfilment } from '../supplier/supplier.service'
 import { DatahubClient } from '../supplier/datahub.client'
-import { GmplClient } from '../supplier/gmpl.client'
+import { GmplClient, toGmplNetwork } from '../supplier/gmpl.client'
+import type { SupplierProviderCode } from '../settings/settings.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
 import { toOrder, toTrackedOrder } from '../common/mappers'
@@ -254,24 +255,37 @@ export class OrdersService {
   }
 
   /**
-   * Remember a number DataHub has not approved, so somebody can go and approve it.
+   * Remember a number the provider has not approved, so somebody can go and
+   * approve it.
    *
-   * Their `/beneficiaries` endpoint 502s, so this cannot be automated, the only
-   * route is James doing it by hand in their dashboard, and he can only do that
-   * if he knows which numbers to enter. `attempts` counts how many sales each
-   * one has cost, which is the order to work through them in.
+   * DataHub's `/beneficiaries` endpoint 502s, so approving one there cannot be
+   * automated, the only route is James doing it by hand in their dashboard,
+   * and he can only do that if he knows which numbers to enter. GMPL's own
+   * queue is submitted through their API instead, see
+   * `ApprovalsService.submit`. Either way, `attempts` counts how many sales
+   * each one has cost, which is the order to work through them in.
+   *
+   * `networkKey` is written in whichever vocabulary `provider` actually
+   * speaks: DataHub's own (`product.supplier.networkKey`, e.g. YELLO) for a
+   * DataHub row, GMPL's (`MTN`/`TELECEL`, derived from `product.network`) for
+   * a GMPL one — never `product.supplier.networkKey` there, that column
+   * holds GMPL's *bundle id* for a GMPL SKU, not a network name.
    */
   private async noteApprovalNeeded(productId: string, recipient: string): Promise<void> {
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
-      select: { name: true, standardPrice: true, supplier: { select: { networkKey: true } } },
+      select: { name: true, standardPrice: true, network: true, supplier: { select: { networkKey: true, provider: true } } },
     })
+    const provider: SupplierProviderCode = (product?.supplier?.provider as SupplierProviderCode | undefined) ?? 'datahub-gh'
+    const networkKey =
+      provider === 'gmpl' ? toGmplNetwork(product?.network ?? 'MTN') : (product?.supplier?.networkKey ?? 'YELLO')
 
     await this.prisma.beneficiaryRequest.upsert({
-      where: { phone: recipient },
+      where: { phone_provider: { phone: recipient, provider } },
       create: {
         phone: recipient,
-        networkKey: product?.supplier?.networkKey ?? 'YELLO',
+        provider,
+        networkKey,
         lastProduct: product?.name ?? null,
         lastValue: product?.standardPrice ?? null,
       },
@@ -284,7 +298,7 @@ export class OrdersService {
       },
     })
 
-    this.log.warn(`${recipient} needs DataHub approval, sale refused`)
+    this.log.warn(`${recipient} needs ${provider === 'gmpl' ? 'GMPL' : 'DataHub'} approval, sale refused`)
   }
 
   /**
@@ -931,10 +945,14 @@ export class OrdersService {
       const result = await this.gmpl.precheckBeneficiary('MTN', [recipient])
       const entry = result.kind === 'ok' ? result.results[0] : null
       if (entry && entry.valid && !entry.known) {
-        // Advisory only, deliberately NOT written to `BeneficiaryRequest`:
-        // that table and the NumberApprovals screen are DataHub's own queue,
-        // GMPL's own is out of scope this pass (see the GMPL supplier plan).
-        this.log.warn(`${recipient}: not yet on GMPL/MTN's approved list`)
+        // Same reasoning as the DataHub refusal below: this is the only
+        // point in the flow that sees a refused number, so it is recorded
+        // here, into the same `BeneficiaryRequest` table (now provider-aware,
+        // see `noteApprovalNeeded`), or GMPL's own queue is just as invisible
+        // to an admin as DataHub's would be if this call were skipped.
+        await this.noteApprovalNeeded(productId, recipient).catch((error: unknown) =>
+          this.log.error(`${recipient}: failed to record approval-needed, ${String(error)}`),
+        )
         return {
           checked: true,
           verified: false,

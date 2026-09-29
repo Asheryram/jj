@@ -552,13 +552,14 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
    */
   private async ingestBronzeBeneficiaryRequests(today: number): Promise<void> {
     const rows = await this.prisma.beneficiaryRequest.findMany({
-      select: { phone: true, networkKey: true, attempts: true, lastProduct: true, lastValue: true, firstSeenAt: true, approvedAt: true },
+      select: { phone: true, provider: true, networkKey: true, attempts: true, lastProduct: true, lastValue: true, firstSeenAt: true, approvedAt: true },
     })
     for (const r of rows) {
       await this.warehouse.bronzeBeneficiaryRequest.upsert({
-        where: { phone: r.phone },
+        where: { phone_provider: { phone: r.phone, provider: r.provider } },
         create: {
           phone: r.phone,
+          provider: r.provider,
           snapshotDateKey: today,
           networkKey: r.networkKey,
           attempts: r.attempts,
@@ -858,8 +859,8 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
         hoursToResolve: r.approvedAt ? hoursBetween(r.firstSeenAt, r.approvedAt) : null,
       }
       await this.warehouse.silverBeneficiaryFact.upsert({
-        where: { phone: r.phone },
-        create: { phone: r.phone, dateKey: toDateInt(r.firstSeenAt), ...data },
+        where: { phone_provider: { phone: r.phone, provider: r.provider } },
+        create: { phone: r.phone, provider: r.provider, dateKey: toDateInt(r.firstSeenAt), ...data },
         update: data,
       })
     }
@@ -955,12 +956,18 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   /**
-   * `FloatMonitorService.latest()`, the same read `FloatPanel.tsx` already
-   * calls live, snapshotted once a day so its trend becomes visible. Always
-   * for `today` only: DataHub publishes no balance endpoint at all, a
+   * `FloatMonitorService.latest('datahub-gh')`, the same read `FloatPanel.tsx`
+   * already calls live, snapshotted once a day so its trend becomes visible.
+   * Always for `today` only: DataHub publishes no balance endpoint at all, a
    * reading only ever exists for the moment an order happened to get one
    * back, so there is no historical source to reconstruct a past day from,
    * unlike `computeHistoricalSolvency` below.
+   *
+   * DataHub only, deliberately, not looped over every provider: GMPL's own
+   * purchase reply carries no remaining-balance figure at all (see
+   * `GmplClient.purchase`'s return shape), so `dispatchLiveGmpl` never calls
+   * `FloatMonitorService.record` and `latest('gmpl')` can only ever be null.
+   * There is nothing to snapshot for GMPL until their API exposes one.
    *
    * Also copies today's own reading onto today's `DailySolvencySnapshot` row
    * (a plain `update`, never `upsert`: that row already exists by the time
@@ -970,7 +977,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
    * no reading yet for the day being displayed.
    */
   private async computeFloatSnapshot(today: number): Promise<void> {
-    const float = await this.floatMonitor.latest()
+    const float = await this.floatMonitor.latest('datahub-gh')
     // No live reading yet (a fresh install before the first purchase) leaves
     // nothing meaningful to snapshot.
     if (!float) return
@@ -1112,21 +1119,27 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
         .filter((r) => r.kind === 'capital_out' && r.idempotencyKey.startsWith('correction:'))
         .map((r) => r.idempotencyKey.split(':')[1]),
     )
-    const reimbursedToDataHub = reimbursements
+    // Unfiltered by provider, deliberately: this is the combined figure
+    // `SolvencyService.position()` also shows, every supplier's reimbursement
+    // added together, the same as `solvency.service.ts`'s own
+    // `reimbursedAcrossProviders`. A per-provider breakdown lives only on the
+    // live Reserve panel (`SolvencyService.spentOnBundlesByProvider`), not
+    // duplicated into this warehouse snapshot.
+    const reimbursedAcrossProviders = reimbursements
       .filter((r) => r.kind === 'capital_in_reimbursement' && !reversedReimbursementIds.has(r.id))
       .reduce((sum, r) => sum + r.amount, 0)
     const bundlesBought = await this.prisma.ledgerEntry.aggregate({
       where: { kind: 'supplier_cost', occurredAt: { lt: end } },
       _sum: { amount: true },
     })
-    const spentOnBundles = Math.max(0, -(bundlesBought._sum.amount ?? 0) - reimbursedToDataHub)
+    const spentOnBundles = Math.max(0, -(bundlesBought._sum.amount ?? 0) - reimbursedAcrossProviders)
 
     const expectedAtPaystack =
       (collected._sum.amount ?? 0) -
       (collected._sum.fee ?? 0) -
       (transferredPayouts._sum.amount ?? 0) -
       (transferredRefunds._sum.amount ?? 0) -
-      reimbursedToDataHub
+      reimbursedAcrossProviders
 
     const owedToAgents = earningsAsOf._sum.amount ?? 0
     const owedToCustomers = (walletAsOf._sum.amount ?? 0) + (unclaimedCredits._sum.amount ?? 0) + owedForRefunds

@@ -25,18 +25,24 @@ import { AlertIcon, SearchIcon } from '../../components/icons'
  * profit" and "Free to withdraw now" show elsewhere, one step more
  * sensitive than logging a fresh one.
  */
+type Row = CapitalNeedingReview & { provider: 'datahub-gh' | 'gmpl' }
+
+const providerLabel = (provider: 'datahub-gh' | 'gmpl') => (provider === 'gmpl' ? 'GMPL' : 'DataHub GH')
+
 export default function FloatCorrections() {
   const { pushToast } = useStore()
-  const [rows, setRows] = useState<CapitalNeedingReview[] | null>(null)
+  const [rows, setRows] = useState<Row[] | null>(null)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
-    api
-      .floatCapitalNeedingReview()
-      .then((result) => live && setRows(result))
+    Promise.all([
+      api.floatCapitalNeedingReview('datahub-gh').then((r) => r.map((row) => ({ ...row, provider: 'datahub-gh' as const }))),
+      api.floatCapitalNeedingReview('gmpl').then((r) => r.map((row) => ({ ...row, provider: 'gmpl' as const }))),
+    ])
+      .then(([datahub, gmpl]) => live && setRows([...datahub, ...gmpl]))
       .catch(
         (caught) =>
           live &&
@@ -63,7 +69,7 @@ export default function FloatCorrections() {
           return ghs.includes(trimmed) || ghs.replace('.', '').includes(trimmed)
         })
 
-  const reclassify = async (row: CapitalNeedingReview) => {
+  const reclassify = async (row: Row) => {
     setBusyId(row.id)
     try {
       await api.reclassifyFloatCapital(row.id)
@@ -90,7 +96,7 @@ export default function FloatCorrections() {
    * "reverse capital" passes the child's id instead when one exists. The
    * child's own button always passes its own id.
    */
-  const reverse = async (row: CapitalNeedingReview, targetId: string, amount: number) => {
+  const reverse = async (row: Row, targetId: string, amount: number) => {
     setBusyId(targetId)
     try {
       await api.reverseFloatCapital(targetId)
@@ -110,7 +116,7 @@ export default function FloatCorrections() {
     <div>
       <PageHead
         title="Float corrections"
-        subtitle="Fix a top-up that was logged as personal capital but was actually Paystack money paying DataHub back, or reverse one that was never a real movement at all."
+        subtitle="Fix a top-up that was logged as personal capital but was actually Paystack money paying a supplier back, or reverse one that was never a real movement at all."
       />
 
       <Card className="mt-3">
@@ -149,7 +155,12 @@ export default function FloatCorrections() {
                 <div key={row.id} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <p className="font-semibold text-slate-900 dark:text-slate-50">{cedis(row.amount)}</p>
+                      <p className="font-semibold text-slate-900 dark:text-slate-50">
+                        {cedis(row.amount)}{' '}
+                        <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
+                          ({providerLabel(row.provider)})
+                        </span>
+                      </p>
                       <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                         {row.description} · {dateTime(row.occurredAt)}
                       </p>

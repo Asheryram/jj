@@ -444,12 +444,12 @@ export interface SupplierFloat {
     totalIn: number
     /** Pesewas actually put in from outside the business, new capital. */
     ownCapital: number
-    /** Pesewas that were already the business's own money, moved from Paystack to settle DataHub, not new capital. */
+    /** Pesewas that were already the business's own money, moved from Paystack to settle this provider's charge, not new capital. */
     reimbursed: number
     totalOut: number
     net: number
-    /** Pesewas DataHub has charged for bundles that no reimbursement has covered yet. */
-    owedToDataHub: number
+    /** Pesewas this provider has charged for bundles that no reimbursement has covered yet. */
+    owedToProvider: number
     /** Pesewas reimbursed beyond what bundles have actually cost, extra float capital, not withdrawable profit. */
     overReimbursed: number
     since: string | null
@@ -822,11 +822,12 @@ export interface ReservePosition {
    */
   expectedAtPaystack: number
   /**
-   * Every bundle ever bought, all-time. That money came out of the DataHub
-   * float, not Paystack directly, but the float doesn't refill itself:
-   * keeping it funded means moving Paystack money across sooner or later, so
-   * this is subtracted from `freeToSpend` even though it never physically
-   * left Paystack.
+   * Every bundle ever bought, all-time, across every supplier combined. That
+   * money came out of a supplier float, not Paystack directly, but a float
+   * doesn't refill itself: keeping it funded means moving Paystack money
+   * across sooner or later, so this is subtracted from `freeToSpend` even
+   * though it never physically left Paystack. See `spentOnBundlesByProvider`
+   * for the per-supplier breakdown this sums.
    */
   spentOnBundles: number
   /** `expectedAtPaystack` less every claim already on it and everything spent on bundles, what's actually free to spend. */
@@ -843,14 +844,16 @@ export interface ReservePosition {
     manualPayoutAdvances: number
     total: number
   }
+  /** Same total as `spentOnBundles`, split by which supplier actually charged it. */
+  spentOnBundlesByProvider: Record<'datahub-gh' | 'gmpl', number>
   /**
-   * The DataHub float's current reading, alongside Paystack's side, not a
-   * claim on `expectedAtPaystack`, just the business's other pot of money,
-   * shown here so both are visible in one place. Null before any purchase
-   * has ever reported a balance, see `FloatPanel` for the full picture
-   * (thresholds, capital tracking, reconciliation).
+   * Each provider's float, current reading, alongside Paystack's side, not a
+   * claim on `expectedAtPaystack`, just the business's other pots of money,
+   * shown here so all of it is visible in one place. Null before any
+   * purchase has ever reported a balance for that provider, see `FloatPanel`
+   * for the full picture (thresholds, capital tracking, reconciliation).
    */
-  floatBalance: number | null
+  floats: { provider: 'datahub-gh' | 'gmpl'; floatBalance: number | null }[]
   pendingPayouts: { count: number; amount: number }
   unclaimedRefunds: { count: number; amount: number }
   /** Owed back and waiting on approval. Already counted in the liabilities. */
@@ -877,6 +880,8 @@ export interface FinanceStatement {
 
 export interface PendingApproval {
   phone: string
+  provider: 'datahub-gh' | 'gmpl'
+  /** In whichever vocabulary `provider` speaks: DataHub's own (YELLO/mtn_xpress) or GMPL's (MTN/TELECEL). */
   networkKey: string
   /**
    * Paid orders parked against this number, waiting to be delivered.
@@ -896,10 +901,13 @@ export interface PendingApproval {
   lastValue: number | null
   waitingSince: string
   /**
-   * Last time this number was copied to hand to DataHub, by hand. Null means
-   * never, the one worth noticing, since a batch copied minutes ago and a
-   * number that just showed up otherwise look identical in the list. Not a
-   * claim DataHub received it, only that it was handed over.
+   * Last time this number was copied to hand to DataHub, by hand. Always
+   * null for a `provider: 'gmpl'` row — GMPL's own submission is a real API
+   * call (see `submitApprovals`), never a copy-paste step. For a DataHub
+   * row, null means never copied, the one worth noticing, since a batch
+   * copied minutes ago and a number that just showed up otherwise look
+   * identical in the list. Not a claim DataHub received it, only that it
+   * was handed over.
    */
   copiedAt: string | null
 }
@@ -1824,14 +1832,18 @@ export const api = {
    */
   floatRisk: () =>
     request<{
-      /** Pesewas, what tracked capital says the float should hold right
-       *  now, deliberately not the live reading (which only refreshes on an
-       *  order and can sit stale for days). Null until a capital move has
-       *  ever been logged. */
-      floatReference: number | null
-      /** When capital tracking itself began, not how fresh this figure is:
-       *  `floatReference` is recomputed from every logged move up to now. */
-      trackedSince: string | null
+      /** One entry per known supplier, each judged against its own float independently. */
+      floats: {
+        provider: 'datahub-gh' | 'gmpl'
+        /** Pesewas, what tracked capital says this provider's float should
+         *  hold right now, deliberately not the live reading (which only
+         *  refreshes on an order and can sit stale for days). Null until a
+         *  capital move has ever been logged for it. */
+        floatReference: number | null
+        /** When capital tracking itself began, not how fresh this figure is:
+         *  `floatReference` is recomputed from every logged move up to now. */
+        trackedSince: string | null
+      }[]
       atRisk: Product[]
       inactive: Product[]
     }>('/admin/catalogue/float-risk'),
@@ -1890,16 +1902,18 @@ export const api = {
       body: { role },
     }),
 
-  supplierFloat: () => request<SupplierFloat>('/admin/supplier/float'),
+  supplierFloat: (provider: 'datahub-gh' | 'gmpl') =>
+    request<SupplierFloat>(`/admin/supplier/float?provider=${provider}`),
 
   /**
-   * James saying he moved his own money into or out of the DataHub float.
+   * James saying he moved his own money into or out of one provider's float.
    * `source` only matters for a top-up: 'reimbursement' means this is money
-   * already collected from customers for DataHub's charge, moved across from
-   * Paystack to settle it, not fresh capital. Only that kind reduces
-   * "already spent on bundles" on the Reserve panel.
+   * already collected from customers for that provider's charge, moved
+   * across from Paystack to settle it, not fresh capital. Only that kind
+   * reduces "already spent on bundles" on the Reserve panel.
    */
   logFloatCapital: (
+    provider: 'datahub-gh' | 'gmpl',
     direction: 'in' | 'out',
     amount: number,
     note?: string,
@@ -1907,12 +1921,12 @@ export const api = {
   ) =>
     request<void>('/admin/supplier/float/capital', {
       method: 'POST',
-      body: { direction, amount, note, source, idempotencyKey: newIdempotencyKey() },
+      body: { provider, direction, amount, note, source, idempotencyKey: newIdempotencyKey() },
     }),
 
-  /** Plain top-ups that might actually be Paystack money paying DataHub back, not yet corrected. */
-  floatCapitalNeedingReview: () =>
-    request<CapitalNeedingReview[]>('/admin/supplier/float/capital/needs-review'),
+  /** Plain top-ups that might actually be Paystack money paying this provider back, not yet corrected. */
+  floatCapitalNeedingReview: (provider: 'datahub-gh' | 'gmpl') =>
+    request<CapitalNeedingReview[]>(`/admin/supplier/float/capital/needs-review?provider=${provider}`),
 
   /** One click: reclassifies a mislabeled top-up as a Paystack reimbursement instead of personal capital. */
   reclassifyFloatCapital: (id: string) =>
@@ -1976,11 +1990,15 @@ export const api = {
       lastCheckedAt?: string
     }>('/admin/beneficiaries/recheck', { method: 'POST' }),
 
-  /** Try their submission API. Returns the reason when it refuses. */
+  /**
+   * Try each provider's submission API. DataHub's is expected to fail (their
+   * upstream 502s on every valid request); GMPL's is a real, working call.
+   */
   submitApprovals: () =>
-    request<{ submitted: number; error: string | null }>('/admin/beneficiaries/submit', {
-      method: 'POST',
-    }),
+    request<{
+      datahub: { submitted: number; error: string | null }
+      gmpl: { submitted: number; error: string | null }
+    }>('/admin/beneficiaries/submit', { method: 'POST' }),
 
   /** Checkpoint: these numbers were just copied to hand to DataHub by hand. */
   markApprovalsCopied: (phones: string[]) =>

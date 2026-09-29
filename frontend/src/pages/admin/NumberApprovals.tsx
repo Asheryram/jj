@@ -19,12 +19,15 @@ import {
 import { AlertIcon, CheckIcon, CopyIcon, RefreshIcon } from '../../components/icons'
 
 /**
- * Numbers DataHub has not approved, and the sales they are costing.
+ * Numbers neither provider has approved yet, and the sales they are costing.
  *
  * DataHub will not deliver an MTN bundle to a number that is not on their
  * beneficiary list, and their `/beneficiaries` submission endpoint answers 502 on
- * every valid request, so approving a number is a manual job in their dashboard.
- * This is the queue for that job.
+ * every valid request, so approving a DataHub number is a manual job in their
+ * dashboard. GMPL runs an equivalent "Up2U" first-time-number gate for MTN of
+ * their own, but their own submission is a real, working API call, not a
+ * copy-paste step. This is the queue for both, shown as two separate sections
+ * since the follow-up action differs.
  *
  * A sale to an unapproved number is now **refused before anything is charged**, so
  * most rows hold no money: the customer was turned away, and the row exists so
@@ -36,10 +39,10 @@ import { AlertIcon, CheckIcon, CopyIcon, RefreshIcon } from '../../components/ic
  * orders whose dispatch came back needing approval after payment. Those are the
  * urgent ones, and they sort to the top.
  *
- * The list re-checks with DataHub when it loads, so what you see is what is still
- * outstanding. Approval is theirs to grant, so their answer is the only thing that
- * may release an order, there is deliberately no button here to mark one approved
- * by hand.
+ * The list re-checks with both providers when it loads, so what you see is what
+ * is still outstanding. Approval is the provider's to grant, so their answer is
+ * the only thing that may release an order, there is deliberately no button here
+ * to mark one approved by hand.
  */
 export default function NumberApprovals() {
   const { pushToast } = useStore()
@@ -80,13 +83,17 @@ export default function NumberApprovals() {
     }
   }, [load])
 
+  const dhRows = (rows ?? []).filter((row) => row.provider === 'datahub-gh')
+  const gmplRows = (rows ?? []).filter((row) => row.provider === 'gmpl')
   const heldValue = (rows ?? []).reduce((sum, row) => sum + row.valueHeld, 0)
   const heldOrders = (rows ?? []).reduce((sum, row) => sum + row.ordersHeld, 0)
 
   /**
    * The checkpoint itself: mark every one of these as copied just now, both
    * on the server (so it survives a reload) and locally (so the badge
-   * updates immediately without waiting on a re-fetch).
+   * updates immediately without waiting on a re-fetch). DataHub rows only,
+   * see `PendingApproval.copiedAt`'s own comment for why a GMPL row never
+   * has one.
    */
   const [copyingPhone, setCopyingPhone] = useState<string | null>(null)
   const checkpoint = async (phones: string[]) => {
@@ -104,7 +111,7 @@ export default function NumberApprovals() {
   }
 
   const copyAll = async () => {
-    const phones = (rows ?? []).map((row) => row.phone)
+    const phones = dhRows.map((row) => row.phone)
     try {
       await navigator.clipboard.writeText(phones.join('\n'))
       setCopied(true)
@@ -144,7 +151,7 @@ export default function NumberApprovals() {
         pushToast({
           tone: 'info',
           title: 'Already checked a moment ago',
-          detail: 'DataHub allows a limited number of checks, so this waits a minute between them.',
+          detail: 'Providers allow a limited number of checks, so this waits a minute between them.',
         })
         return
       }
@@ -158,12 +165,12 @@ export default function NumberApprovals() {
         detail:
           approved.length > 0
             ? `${released} held order${released === 1 ? '' : 's'} sent for delivery now.`
-            : `Checked ${checked}. DataHub has not approved any of them yet.`,
+            : `Checked ${checked} across both providers, neither has approved any of them yet.`,
       })
     } catch (caught) {
       pushToast({
         tone: 'error',
-        title: caught instanceof ApiError ? caught.message : 'We could not check with DataHub.',
+        title: caught instanceof ApiError ? caught.message : 'We could not check with either provider.',
       })
     } finally {
       setBusy(null)
@@ -173,26 +180,32 @@ export default function NumberApprovals() {
   const submit = async () => {
     setBusy('submit')
     try {
-      const { submitted, error: refusal } = await api.submitApprovals()
-      if (refusal) {
-        // Said plainly rather than as a success. Claiming numbers were sent when
-        // they were not is the one outcome this screen must never produce.
+      const { datahub, gmpl } = await api.submitApprovals()
+      if (gmpl.submitted > 0) {
         pushToast({
-          tone: 'error',
-          title: 'DataHub would not accept them',
-          detail: refusal,
+          tone: 'success',
+          title: `${gmpl.submitted} number${gmpl.submitted === 1 ? '' : 's'} sent to GMPL for approval`,
+          detail: 'Press Re-check in a while to see which came through.',
         })
-        return
+      } else if (gmpl.error) {
+        pushToast({ tone: 'error', title: 'GMPL would not accept them', detail: gmpl.error })
       }
-      pushToast({
-        tone: 'success',
-        title: `${submitted} number${submitted === 1 ? '' : 's'} sent for approval`,
-        detail: 'DataHub reviews them. Press Re-check in a while to see which came through.',
-      })
+      if (datahub.submitted > 0) {
+        pushToast({
+          tone: 'success',
+          title: `${datahub.submitted} number${datahub.submitted === 1 ? '' : 's'} sent to DataHub for approval`,
+          detail: 'Press Re-check in a while to see which came through.',
+        })
+      } else if (datahub.error) {
+        // Said plainly rather than as a success. Claiming numbers were sent
+        // when they were not is the one outcome this screen must never
+        // produce. Expected to fail while DataHub's own upstream is down.
+        pushToast({ tone: 'error', title: 'DataHub would not accept them', detail: datahub.error })
+      }
     } catch (caught) {
       pushToast({
         tone: 'error',
-        title: caught instanceof ApiError ? caught.message : 'We could not reach DataHub.',
+        title: caught instanceof ApiError ? caught.message : 'We could not reach either provider.',
       })
     } finally {
       setBusy(null)
@@ -203,12 +216,12 @@ export default function NumberApprovals() {
     <div>
       <PageHead
         title="Approvals"
-        subtitle="MTN numbers DataHub must approve. Until they are, a sale to them is refused rather than charged."
+        subtitle="MTN numbers your suppliers must approve. Until they are, a sale to them is refused rather than charged."
       />
 
       <Card className="mt-3">
         <CardHead
-          title="Waiting on DataHub"
+          title="Waiting on approval"
           action={
             <div className="flex flex-wrap items-center gap-2">
               {/* When the figures below were last true. The list is only as current
@@ -257,11 +270,6 @@ export default function NumberApprovals() {
                 icon={<AlertIcon className="size-4" />}
               >
                 <p>
-                  DataHub only delivers MTN bundles to numbers on their approved list, and their
-                  automatic submission is failing on their side, so add these in your DataHub
-                  dashboard, then press <strong className="font-semibold">Re-check</strong>.
-                </p>
-                <p className="mt-1.5">
                   Each of these turned a customer away without charging them, so approving a number
                   wins those sales back. Work down by{' '}
                   <strong className="font-semibold">Sales refused</strong>.
@@ -270,16 +278,18 @@ export default function NumberApprovals() {
                   <p className="mt-1.5">
                     {heldOrders} order{heldOrders === 1 ? ' was' : 's were'} paid for before this
                     check existed and {heldOrders === 1 ? 'is' : 'are'} still waiting. Re-check
-                    releases {heldOrders === 1 ? 'it' : 'them'} the moment DataHub confirms the
+                    releases {heldOrders === 1 ? 'it' : 'them'} the moment a provider confirms the
                     number; anything still unapproved when the hold expires is refunded
                     automatically.
                   </p>
                 )}
                 <div className="mt-2.5 flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => void copyAll()}>
-                    {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
-                    {copied ? 'Copied' : `Copy all ${rows.length}`}
-                  </Button>
+                  {dhRows.length > 0 && (
+                    <Button size="sm" onClick={() => void copyAll()}>
+                      {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}
+                      {copied ? 'Copied' : `Copy all ${dhRows.length} DataHub number${dhRows.length === 1 ? '' : 's'}`}
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
@@ -291,92 +301,139 @@ export default function NumberApprovals() {
                 </div>
               </Callout>
 
-              <TableWrap caption="Numbers awaiting DataHub approval">
-                <thead>
-                  <tr>
-                    <Th>Number</Th>
-                    <Th>Waiting for</Th>
-                    <Th align="right">Sales refused</Th>
-                    <Th align="right">Orders held</Th>
-                    <Th align="right">Value held</Th>
-                    <Th align="right">Since</Th>
-                    <Th align="right">Copied</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr key={row.phone} className="hover:bg-slate-50 dark:hover:bg-slate-800">
-                      <Td>
-                        <div className="flex items-center gap-1.5">
-                          <div>
-                            <p className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                              {prettyPhone(row.phone)}
-                            </p>
-                            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{row.networkKey}</p>
-                          </div>
-                          {/* Copying just this one number, and checkpointing only
-                              it, for a single fresh arrival, without re-sending
-                              (and re-dating) the whole batch. */}
-                          <button
-                            type="button"
-                            onClick={() => void copyOne(row.phone)}
-                            aria-label={`Copy ${row.phone}`}
-                            className="flex size-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-                          >
-                            {copyingPhone === row.phone ? (
-                              <CheckIcon className="size-3.5" />
-                            ) : (
-                              <CopyIcon className="size-3.5" />
-                            )}
-                          </button>
-                        </div>
-                      </Td>
-                      <Td>
-                        <p className="text-slate-800 dark:text-slate-100">{row.lastProduct ?? '-'}</p>
-                      </Td>
-                      <Td align="right">
-                        {/* What this number has actually cost. Since the sale is
-                            now refused before anything is charged, this is the
-                            figure worth acting on, not the held ones below. */}
-                        <Badge tone={row.attempts > 1 ? 'warning' : 'neutral'}>
-                          {row.attempts}
-                        </Badge>
-                      </Td>
-                      <Td align="right">
-                        <Badge tone={row.ordersHeld > 0 ? 'warning' : 'neutral'}>
-                          {row.ordersHeld}
-                        </Badge>
-                      </Td>
-                      <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                        {row.valueHeld > 0 ? cedis(row.valueHeld) : '-'}
-                      </Td>
-                      <Td align="right" className="text-xs text-slate-500 dark:text-slate-400">
-                        {dateTime(row.waitingSince)}
-                      </Td>
-                      <Td align="right">
-                        {/* The checkpoint itself. Not-yet-copied is the row worth
-                            noticing (a fresh arrival since the last batch) so
-                            it's the one that stands out, not the routine case. */}
-                        {row.copiedAt ? (
-                          <span
-                            className="text-xs text-slate-500 dark:text-slate-400"
-                            title={dateTime(row.copiedAt)}
-                          >
-                            {timeAgo(row.copiedAt)}
-                          </span>
-                        ) : (
-                          <Badge tone="danger">Not yet</Badge>
-                        )}
-                      </Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </TableWrap>
+              {gmplRows.length > 0 && (
+                <ApprovalsTable
+                  caption="Numbers awaiting GMPL approval"
+                  rows={gmplRows}
+                  showCopy={false}
+                  copyingPhone={copyingPhone}
+                  onCopyOne={copyOne}
+                />
+              )}
+
+              {dhRows.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    DataHub's own automatic submission is failing on their side, so add these in
+                    your DataHub dashboard, then press <strong className="font-semibold">Re-check</strong>.
+                  </p>
+                  <ApprovalsTable
+                    caption="Numbers awaiting DataHub approval"
+                    rows={dhRows}
+                    showCopy
+                    copyingPhone={copyingPhone}
+                    onCopyOne={copyOne}
+                  />
+                </div>
+              )}
             </>
           )}
         </div>
       </Card>
     </div>
+  )
+}
+
+/** One provider's queue. `showCopy` is DataHub-only, see `PendingApproval.copiedAt`'s own comment. */
+function ApprovalsTable({
+  caption,
+  rows,
+  showCopy,
+  copyingPhone,
+  onCopyOne,
+}: {
+  caption: string
+  rows: PendingApproval[]
+  showCopy: boolean
+  copyingPhone: string | null
+  onCopyOne: (phone: string) => void
+}) {
+  return (
+    <TableWrap caption={caption}>
+      <thead>
+        <tr>
+          <Th>Number</Th>
+          <Th>Waiting for</Th>
+          <Th align="right">Sales refused</Th>
+          <Th align="right">Orders held</Th>
+          <Th align="right">Value held</Th>
+          <Th align="right">Since</Th>
+          {showCopy && <Th align="right">Copied</Th>}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.phone} className="hover:bg-slate-50 dark:hover:bg-slate-800">
+            <Td>
+              <div className="flex items-center gap-1.5">
+                <div>
+                  <p className="tabular font-semibold text-slate-900 dark:text-slate-50">
+                    {prettyPhone(row.phone)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{row.networkKey}</p>
+                </div>
+                {/* Copying just this one number, and checkpointing only
+                    it, for a single fresh arrival, without re-sending
+                    (and re-dating) the whole batch. */}
+                {showCopy && (
+                  <button
+                    type="button"
+                    onClick={() => void onCopyOne(row.phone)}
+                    aria-label={`Copy ${row.phone}`}
+                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                  >
+                    {copyingPhone === row.phone ? (
+                      <CheckIcon className="size-3.5" />
+                    ) : (
+                      <CopyIcon className="size-3.5" />
+                    )}
+                  </button>
+                )}
+              </div>
+            </Td>
+            <Td>
+              <p className="text-slate-800 dark:text-slate-100">{row.lastProduct ?? '-'}</p>
+            </Td>
+            <Td align="right">
+              {/* What this number has actually cost. Since the sale is
+                  now refused before anything is charged, this is the
+                  figure worth acting on, not the held ones below. */}
+              <Badge tone={row.attempts > 1 ? 'warning' : 'neutral'}>
+                {row.attempts}
+              </Badge>
+            </Td>
+            <Td align="right">
+              <Badge tone={row.ordersHeld > 0 ? 'warning' : 'neutral'}>
+                {row.ordersHeld}
+              </Badge>
+            </Td>
+            <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
+              {row.valueHeld > 0 ? cedis(row.valueHeld) : '-'}
+            </Td>
+            <Td align="right" className="text-xs text-slate-500 dark:text-slate-400">
+              {dateTime(row.waitingSince)}
+            </Td>
+            {showCopy && (
+              <Td align="right">
+                {/* The checkpoint itself. Not-yet-copied is the row worth
+                    noticing (a fresh arrival since the last batch) so
+                    it's the one that stands out, not the routine case. */}
+                {row.copiedAt ? (
+                  <span
+                    className="text-xs text-slate-500 dark:text-slate-400"
+                    title={dateTime(row.copiedAt)}
+                  >
+                    {timeAgo(row.copiedAt)}
+                  </span>
+                ) : (
+                  <Badge tone="danger">Not yet</Badge>
+                )}
+              </Td>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </TableWrap>
   )
 }
 

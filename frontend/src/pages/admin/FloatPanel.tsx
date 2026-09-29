@@ -23,21 +23,29 @@ function levelColor(level: FloatLevel): string {
       : 'text-slate-900 dark:text-slate-50'
 }
 
+const PROVIDERS: { value: 'datahub-gh' | 'gmpl'; label: string }[] = [
+  { value: 'datahub-gh', label: 'DataHub GH' },
+  { value: 'gmpl', label: 'GMPL' },
+]
+
 /**
- * What is left in the DataHub float.
+ * What is left in a supplier's float.
  *
  * The float is prepaid and it is the one balance that stops the product working:
  * empty, every order fails *after* the customer has paid, and each one comes
- * back through the refund queue by hand.
+ * back through the refund queue by hand. DataHub and GMPL each have their own,
+ * entirely separate real balance, so this panel shows exactly one at a time,
+ * switched with the tabs below, never a blended figure.
  *
- * The awkward part is that DataHub publishes no balance endpoint, so this figure
- * exists only in the reply to a purchase. It was being parsed and thrown away,
- * which is why the float was invisible until an order failed for want of it. So
- * the age of the reading is shown as prominently as the reading: a number from
- * last Tuesday tells you almost nothing, and pretending otherwise would be worse
- * than showing nothing at all.
+ * The awkward part is that neither provider publishes a balance endpoint, so
+ * this figure exists only in the reply to a purchase. It was being parsed and
+ * thrown away, which is why the float was invisible until an order failed for
+ * want of it. So the age of the reading is shown as prominently as the reading:
+ * a number from last Tuesday tells you almost nothing, and pretending
+ * otherwise would be worse than showing nothing at all.
  */
 export default function FloatPanel() {
+  const [provider, setProvider] = useState<'datahub-gh' | 'gmpl'>('datahub-gh')
   const [float, setFloat] = useState<SupplierFloat | null>(null)
   const [error, setError] = useState('')
   const [logging, setLogging] = useState<'in' | 'out' | null>(null)
@@ -54,13 +62,13 @@ export default function FloatPanel() {
   useEffect(() => {
     let live = true
     api
-      .floatCapitalNeedingReview()
+      .floatCapitalNeedingReview(provider)
       .then((rows) => live && setNeedsReviewCount(rows.length))
       .catch(() => live && setNeedsReviewCount(null))
     return () => {
       live = false
     }
-  }, [])
+  }, [provider])
 
   /**
    * What's actually free to move out of Paystack right now, fetched
@@ -69,7 +77,8 @@ export default function FloatPanel() {
    * still owed to agents or customers, not the business's own money to
    * move at all. Refreshed together with `float` below, not just once, a
    * stale reading here would wave through exactly the reimbursement this
-   * exists to catch.
+   * exists to catch. Not provider-scoped itself, Paystack's balance is one
+   * pot regardless of which float a reimbursement out of it lands in.
    */
   const [freeToSpend, setFreeToSpend] = useState<number | null>(null)
   const refreshFreeToSpend = () =>
@@ -85,7 +94,7 @@ export default function FloatPanel() {
   const refresh = () =>
     Promise.all([
       api
-        .supplierFloat()
+        .supplierFloat(provider)
         .then((result) => setFloat(result))
         .catch(
           (caught) =>
@@ -112,8 +121,10 @@ export default function FloatPanel() {
 
   useEffect(() => {
     let live = true
+    setFloat(null)
+    setError('')
     api
-      .supplierFloat()
+      .supplierFloat(provider)
       .then((result) => live && setFloat(result))
       .catch(
         (caught) =>
@@ -125,13 +136,19 @@ export default function FloatPanel() {
     return () => {
       live = false
     }
-  }, [])
+  }, [provider])
+
+  const providerLabel = provider === 'gmpl' ? 'GMPL' : 'DataHub GH'
+  const providerSwitcher = (
+    <Segmented<'datahub-gh' | 'gmpl'> options={PROVIDERS} value={provider} onChange={setProvider} />
+  )
 
   if (error) {
     return (
       <Card>
         <CardHead title="Provider float" />
-        <div className="px-4 pb-4">
+        <div className="space-y-3 px-4 pb-4">
+          {providerSwitcher}
           <Callout tone="warning" title="Could not read the float" icon={<AlertIcon className="size-4" />}>
             {error}
           </Callout>
@@ -144,8 +161,11 @@ export default function FloatPanel() {
     return (
       <Card>
         <CardHead title="Provider float" />
-        <div className="flex justify-center px-4 py-8">
-          <Spinner />
+        <div className="space-y-3 px-4 pb-4">
+          {providerSwitcher}
+          <div className="flex justify-center py-8">
+            <Spinner />
+          </div>
         </div>
       </Card>
     )
@@ -157,7 +177,7 @@ export default function FloatPanel() {
     <Card>
       <CardHead
         title="Provider float"
-        subtitle="What DataHub GH has left to buy bundles with"
+        subtitle={`What ${providerLabel} has left to buy bundles with`}
         action={
           <Button size="sm" variant="ghost" loading={refreshing} onClick={() => void manualRefresh()}>
             <RefreshIcon className="size-4" /> Refresh
@@ -165,10 +185,11 @@ export default function FloatPanel() {
         }
       />
       <div className="space-y-3 px-4 pb-4">
+        {providerSwitcher}
         {observation === null ? (
           /* Honest empty state. Not "GHS 0.00", which would read as an emergency. */
           <Callout tone="info" title="Not known yet">
-            DataHub does not publish a balance, so this only appears once an order has been sent,
+            {providerLabel} does not publish a balance, so this only appears once an order has been sent,
             their reply is the only place the number exists.
           </Callout>
         ) : (
@@ -190,7 +211,7 @@ export default function FloatPanel() {
                   <p className="text-sm text-slate-400 dark:text-slate-500">Not tracked yet</p>
                 )}
                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  Every top-up and withdrawal you've logged, minus every order DataHub has ever
+                  Every top-up and withdrawal you've logged, minus every order {providerLabel} has ever
                   charged you for
                 </p>
               </div>
@@ -265,7 +286,7 @@ export default function FloatPanel() {
               </p>
               {capital.overReimbursed > 0 && (
                 <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-400">
-                  {cedis(capital.overReimbursed)} has been paid in to DataHub beyond what it was
+                  {cedis(capital.overReimbursed)} has been paid in to {providerLabel} beyond what it was
                   actually owed for bundles bought so far. That extra is now float capital, not
                   profit free to withdraw at Paystack.
                 </p>
@@ -302,8 +323,10 @@ export default function FloatPanel() {
       </div>
 
       <CapitalModal
+        provider={provider}
+        providerLabel={providerLabel}
         direction={logging}
-        owedToDataHub={capital.owedToDataHub}
+        owedToProvider={capital.owedToProvider}
         freeToSpend={freeToSpend}
         onClose={() => setLogging(null)}
         onLogged={() => {
@@ -315,17 +338,21 @@ export default function FloatPanel() {
   )
 }
 
-/** James saying he moved his own money into or out of the float, either direction. */
+/** James saying he moved his own money into or out of one provider's float, either direction. */
 function CapitalModal({
+  provider,
+  providerLabel,
   direction,
-  owedToDataHub,
+  owedToProvider,
   freeToSpend,
   onClose,
   onLogged,
 }: {
+  provider: 'datahub-gh' | 'gmpl'
+  providerLabel: string
   direction: 'in' | 'out' | null
-  /** Pesewas DataHub is currently owed for bundles that no reimbursement has covered yet. */
-  owedToDataHub: number
+  /** Pesewas this provider is currently owed for bundles that no reimbursement has covered yet. */
+  owedToProvider: number
   /** Pesewas actually free to move out of Paystack right now, null while still loading. */
   freeToSpend: number | null
   onClose: () => void
@@ -338,7 +365,7 @@ function CapitalModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   /**
-   * Deliberately overpaying DataHub with his own profit is allowed, unlike
+   * Deliberately overpaying this provider with his own profit is allowed, unlike
    * reaching into money owed to someone else, but it should never happen
    * as a side effect of not reading the warning. Tied to `value` itself
    * (reset on every edit, see below), not just shown once, so it always
@@ -365,24 +392,24 @@ function CapitalModal({
   /**
    * Reimbursing moves money straight out of Paystack, the same balance
    * agent earnings, customer wallets and pending refunds are sitting in
-   * too. Up to what's owed to DataHub is always fine (a real, necessary
-   * cost), and beyond that, up to whatever's actually free, is still his to
-   * choose (it just becomes capital early, see `overpayBy`). Only past
-   * *both* combined is it somebody else's money, matching the backend's own
-   * hard limit in `FloatMonitorService.logCapital`, not a separate,
-   * stricter line drawn here. Checked ahead of `overpayBy` below and shown
-   * instead of it when both would fire, drawing on money owed to someone
-   * else is the more serious of the two problems.
+   * too. Up to what's owed to this provider is always fine (a real,
+   * necessary cost), and beyond that, up to whatever's actually free, is
+   * still his to choose (it just becomes capital early, see `overpayBy`).
+   * Only past *both* combined is it somebody else's money, matching the
+   * backend's own hard limit in `FloatMonitorService.logCapital`, not a
+   * separate, stricter line drawn here. Checked ahead of `overpayBy` below
+   * and shown instead of it when both would fire, drawing on money owed to
+   * someone else is the more serious of the two problems.
    */
-  const availableToReimburse = owedToDataHub + Math.max(freeToSpend ?? 0, 0)
+  const availableToReimburse = owedToProvider + Math.max(freeToSpend ?? 0, 0)
   const touchesOwedMoney =
     isReimbursement && freeToSpend !== null && enteredAmount! > availableToReimburse
       ? enteredAmount! - availableToReimburse
       : 0
 
   const overpayBy =
-    !touchesOwedMoney && isReimbursement && enteredAmount! > owedToDataHub
-      ? enteredAmount! - owedToDataHub
+    !touchesOwedMoney && isReimbursement && enteredAmount! > owedToProvider
+      ? enteredAmount! - owedToProvider
       : 0
 
   const submit = async () => {
@@ -393,7 +420,7 @@ function CapitalModal({
     }
     setBusy(true)
     try {
-      await api.logFloatCapital(direction, amount, note.trim() || undefined, source)
+      await api.logFloatCapital(provider, direction, amount, note.trim() || undefined, source)
       pushToast({
         tone: 'info',
         title: direction === 'in' ? `Logged ${cedis(amount)} in` : `Logged ${cedis(amount)} out`,
@@ -424,14 +451,14 @@ function CapitalModal({
               className="w-full"
               options={[
                 { value: 'external', label: 'Outside the business' },
-                { value: 'reimbursement', label: 'Paystack, paying DataHub back' },
+                { value: 'reimbursement', label: `Paystack, paying ${providerLabel} back` },
               ]}
               value={source}
               onChange={setSource}
             />
             <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
               {source === 'reimbursement'
-                ? "Money already collected from customers for what DataHub charges, you're moving it from Paystack to where it was always meant to end up, not adding new capital. This is the only kind of top-up that clears \"Already spent on bundles\" on the Reserve panel."
+                ? `Money already collected from customers for what ${providerLabel} charges, you're moving it from Paystack to where it was always meant to end up, not adding new capital. This is the only kind of top-up that clears "Already spent on bundles" on the Reserve panel.`
                 : 'Fresh money, from somewhere other than what this business itself has collected.'}
             </p>
           </Field>
@@ -439,7 +466,7 @@ function CapitalModal({
 
         {touchesOwedMoney > 0 && (
           <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
-            Only {cedis(availableToReimburse)} can be reimbursed right now, what's owed to DataHub
+            Only {cedis(availableToReimburse)} can be reimbursed right now, what's owed to {providerLabel}
             plus what's actually free to spend. This amount reaches {cedis(touchesOwedMoney)} into
             money still owed to agents, customers, or a pending order, not the business's spare
             money, so this can't be logged as it stands.
@@ -449,9 +476,9 @@ function CapitalModal({
         {overpayBy > 0 && (
           <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
             <p>
-              DataHub is currently owed {cedis(owedToDataHub)} for bundles bought so far, this is{' '}
+              {providerLabel} is currently owed {cedis(owedToProvider)} for bundles bought so far, this is{' '}
               {cedis(overpayBy)} more than that. That extra is your profit entering the float as
-              capital, not DataHub cost, it stops being free to spend at Paystack the moment this
+              capital, not {providerLabel} cost, it stops being free to spend at Paystack the moment this
               logs.
             </p>
             <label className="mt-2.5 flex cursor-pointer items-start gap-2 text-sm font-medium">
@@ -461,7 +488,7 @@ function CapitalModal({
                 checked={acknowledgedOverpay}
                 onChange={(event) => setAcknowledgedOverpay(event.target.checked)}
               />
-              I understand {cedis(overpayBy)} of my profit is moving into DataHub as capital, and
+              I understand {cedis(overpayBy)} of my profit is moving into {providerLabel} as capital, and
               want to log it anyway
             </label>
           </Callout>

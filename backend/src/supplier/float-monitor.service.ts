@@ -1,12 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
-import { SettingsService } from '../settings/settings.service'
+import { SettingsService, type SupplierProviderCode } from '../settings/settings.service'
 import { MailerService } from '../mail/mailer.service'
 import { LedgerService } from '../finance/ledger.service'
 import { SolvencyService } from '../finance/solvency.service'
 import { NotFoundError, ValidationError } from '../common/domain-errors'
 import { claimTransition } from '../common/alert-flag'
 import { escape, wrap } from '../mail/templates'
+import { bundleCostByProvider, capitalProviderFilter } from './provider-resolution'
+
+/** "DataHub GH" / "GMPL", for email text and log lines. */
+export function providerLabel(provider: SupplierProviderCode): string {
+  return provider === 'gmpl' ? 'GMPL' : 'DataHub GH'
+}
 
 /**
  * One `capital_in` or `capital_in_reimbursement` entry that might need
@@ -40,7 +46,7 @@ export interface CapitalNeedingReview {
   reimbursedAs: { id: string; amount: number; description: string; occurredAt: string } | null
 }
 
-/** One deliberate movement of James's own money into or out of the float. */
+/** One deliberate movement of James's own money into or out of one provider's float. */
 export interface CapitalSummary {
   /**
    * Pesewas landed in the float, all time: `ownCapital + reimbursed`. What
@@ -59,9 +65,9 @@ export interface CapitalSummary {
   ownCapital: number
   /**
    * Of `totalIn`, money that was already the business's own (collected from
-   * customers, sitting in Paystack) and moved across to settle what DataHub
-   * had already charged, logged as `capital_in_reimbursement`. Not new
-   * capital, a relocation of revenue already earned, kept separate so
+   * customers, sitting in Paystack) and moved across to settle what this
+   * provider had already charged, logged as `capital_in_reimbursement`. Not
+   * new capital, a relocation of revenue already earned, kept separate so
    * "Your own capital" never overstates what James actually put in himself.
    */
   reimbursed: number
@@ -70,25 +76,27 @@ export interface CapitalSummary {
   /** totalIn - totalOut. */
   net: number
   /**
-   * Of everything DataHub has ever actually charged for bundles, how much is
-   * not yet covered by a reimbursement, all time. Zero once reimbursements
-   * catch up. This is the same figure `SolvencyService.spentOnBundles`
-   * reads as "already spent on bundles" on the Reserve panel, computed here
-   * from the same two sums so the two can never drift apart.
+   * Of everything this provider has ever actually charged for bundles, how
+   * much is not yet covered by a reimbursement, all time. Zero once
+   * reimbursements catch up. This is the same figure
+   * `SolvencyService.spentOnBundlesByProvider` reads as "already spent on
+   * bundles" for this provider, computed here from the same two sums so the
+   * two can never drift apart.
    */
-  owedToDataHub: number
+  owedToProvider: number
   /**
-   * The mirror image of `owedToDataHub`: reimbursed to DataHub beyond what
-   * bundles have actually cost, all time. That excess still leaves Paystack
-   * exactly like a correctly-sized reimbursement does, but nothing owed
-   * absorbs it, so it lands as extra float capital instead of staying
-   * spendable at Paystack, quietly eating into `SolvencyService.freeToSpend`
-   * (and therefore the "Your profit" figure on the Orders page) by the same
-   * amount. Surfaced so an over-reimbursement is visible, not just felt as
-   * an unexplained drop in what's free to spend.
+   * The mirror image of `owedToProvider`: reimbursed beyond what bundles
+   * from this provider have actually cost, all time. That excess still
+   * leaves Paystack exactly like a correctly-sized reimbursement does, but
+   * nothing owed absorbs it, so it lands as extra float capital instead of
+   * staying spendable at Paystack, quietly eating into
+   * `SolvencyService.position().freeToSpend` (and therefore the "Your
+   * profit" figure on the Orders page) by the same amount. Surfaced so an
+   * over-reimbursement is visible, not just felt as an unexplained drop in
+   * what's free to spend.
    */
   overReimbursed: number
-  /** When the first entry was logged, or null before anything has been. */
+  /** When the first entry for this provider was logged, or null before anything has been. */
   since: string | null
 }
 
@@ -100,7 +108,7 @@ export interface CapitalSummary {
 export interface FloatReconciliation {
   /** Pesewas the float should hold: the baseline, plus capital moved, minus cost, since tracking began. */
   expected: number
-  /** Pesewas DataHub actually reports right now. */
+  /** Pesewas the provider actually reports right now. */
   observed: number
   /** expected - observed. Positive means the float holds less than it should. */
   shortfall: number
@@ -142,15 +150,28 @@ export interface FloatObservation {
   reference: number
 }
 
-const OBSERVATION_KEY = 'supplierFloat'
-const ALERT_LEVEL_KEY = 'supplierFloatAlertLevel'
-const CAPITAL_BASELINE_KEY = 'supplierFloatCapitalBaseline'
-const DISCREPANCY_ALERTED_KEY = 'supplierFloatDiscrepancyAlerted'
+/**
+ * The four `Setting` keys this service reads and writes, scoped by provider.
+ *
+ * DataHub keeps the exact bare key names this service has always used
+ * (`'supplierFloat'`, not `'supplierFloat:datahub-gh'`) so every reading
+ * logged before GMPL existed is still found under the same key, no data
+ * migration needed. GMPL, which has never written anything, gets a plainly
+ * suffixed key instead. Only ever DataHub or GMPL, so this is the entire
+ * table, not an open-ended scheme.
+ */
+function keyFor(base: string, provider: SupplierProviderCode): string {
+  return provider === 'datahub-gh' ? base : `${base}:${provider}`
+}
+const OBSERVATION_BASE = 'supplierFloat'
+const ALERT_LEVEL_BASE = 'supplierFloatAlertLevel'
+const CAPITAL_BASELINE_BASE = 'supplierFloatCapitalBaseline'
+const DISCREPANCY_ALERTED_BASE = 'supplierFloatDiscrepancyAlerted'
 
 /**
- * Pesewas of slack before a shortfall is worth mentioning. DataHub's balance
- * only ever arrives rounded to whole cedis, so a gap under this is rounding
- * noise, not a missing top-up.
+ * Pesewas of slack before a shortfall is worth mentioning. A provider's
+ * balance only ever arrives rounded to whole cedis, so a gap under this is
+ * rounding noise, not a missing top-up.
  */
 const DISCREPANCY_TOLERANCE = 100
 
@@ -161,7 +182,10 @@ const SEVERITY: Record<FloatLevel, number> = { ok: 0, watch: 1, risk: 2 }
  *
  * At-or-below rather than strictly below, so a threshold set to exactly the
  * remaining balance still counts as reached, the point is to be told before it
- * matters, not after.
+ * matters, not after. `floatWatchAt`/`floatRiskAt` are one shared pair of
+ * cedi thresholds applied independently to each provider's own float, not a
+ * separate setting per provider — "tell me when *any* float gets low" is the
+ * policy, not two different alert lines for two different suppliers.
  */
 function levelFor(balance: number, watchAt: number, riskAt: number): FloatLevel {
   if (riskAt > 0 && balance <= riskAt) return 'risk'
@@ -170,17 +194,21 @@ function levelFor(balance: number, watchAt: number, riskAt: number): FloatLevel 
 }
 
 /**
- * Watches what is left in the DataHub float and says so before it runs out.
+ * Watches what is left in a supplier's float and says so before it runs out.
  *
- * The float is prepaid: DataHub deducts the cost of every bundle from a balance
- * James tops up himself, so an empty float does not slow the platform down, it
- * fails every order outright, after the customer has paid. The money then has to
- * come back through the refund queue by hand.
+ * Both DataHub and GMPL work the same way: prepaid, the provider deducts the
+ * cost of every bundle from a balance James tops up himself, so an empty
+ * float does not slow the platform down, it fails every order outright,
+ * after the customer has paid. The money then has to come back through the
+ * refund queue by hand. Every method here takes a `provider` and operates on
+ * that provider's own float only, the two are entirely separate real
+ * balances at two separate companies, never combined.
  *
- * Two things make this awkward. There is no balance endpoint, so the figure is
- * knowable exactly once per purchase, from the reply; and it was being parsed and
- * thrown away, so nobody could see it at all until an order failed. Hence: record
- * it whenever it arrives, and email when it crosses a line.
+ * Two things make this awkward, for either provider. There is no balance
+ * endpoint, so the figure is knowable exactly once per purchase, from the
+ * reply; and it was being parsed and thrown away, so nobody could see it at
+ * all until an order failed. Hence: record it whenever it arrives, and email
+ * when it crosses a line.
  */
 @Injectable()
 export class FloatMonitorService {
@@ -201,22 +229,22 @@ export class FloatMonitorService {
    * the dispatch path, and failing to record a balance must not turn a successful
    * purchase into a failed one.
    */
-  async record(balanceCedis: number | null, orderRef: string | null): Promise<void> {
+  async record(provider: SupplierProviderCode, balanceCedis: number | null, orderRef: string | null): Promise<void> {
     if (balanceCedis === null || !Number.isFinite(balanceCedis)) return
 
     try {
       const balance = Math.round(balanceCedis * 100)
 
-      await this.write(OBSERVATION_KEY, {
+      await this.write(keyFor(OBSERVATION_BASE, provider), {
         balance,
         observedAt: new Date().toISOString(),
         orderRef,
       })
 
-      await this.checkFloat(balance)
+      await this.checkFloat(provider, balance)
     } catch (error) {
       // Deliberately swallowed, see the doc comment above.
-      this.log.error(`could not record the provider float: ${String(error)}`)
+      this.log.error(`could not record the ${providerLabel(provider)} float: ${String(error)}`)
     }
   }
 
@@ -229,11 +257,11 @@ export class FloatMonitorService {
    * so a risk that tracked capital reveals never has to sit unnoticed until
    * the next sale happens to confirm it.
    */
-  private async checkFloat(balance: number): Promise<void> {
+  private async checkFloat(provider: SupplierProviderCode, balance: number): Promise<void> {
     const { floatWatchAt, floatRiskAt } = await this.settings.all()
-    const reference = await this.referenceBalance(balance)
+    const reference = await this.referenceBalance(provider, balance)
     const level = levelFor(reference, floatWatchAt, floatRiskAt)
-    const previous = await this.alertLevel()
+    const previous = await this.alertLevel(provider)
 
     /**
      * Only on a change, and only email downwards.
@@ -253,21 +281,22 @@ export class FloatMonitorService {
      * either double-send the same alert or silently downgrade a level a
      * moment after another order correctly raised it.
      */
-    if (level !== previous && (await claimTransition(this.prisma, ALERT_LEVEL_KEY, previous, level))) {
+    const alertKey = keyFor(ALERT_LEVEL_BASE, provider)
+    if (level !== previous && (await claimTransition(this.prisma, alertKey, previous, level))) {
       if (SEVERITY[level] > SEVERITY[previous]) {
-        await this.alert(level, balance, reference, floatWatchAt, floatRiskAt)
+        await this.alert(provider, level, balance, reference, floatWatchAt, floatRiskAt)
       } else {
-        this.log.log(`float recovered to ${level} (GHS ${(reference / 100).toFixed(2)})`)
+        this.log.log(`${providerLabel(provider)} float recovered to ${level} (GHS ${(reference / 100).toFixed(2)})`)
       }
     }
 
-    const reconciliation = await this.reconcile()
-    if (reconciliation) await this.checkDiscrepancy(reconciliation)
+    const reconciliation = await this.reconcile(provider)
+    if (reconciliation) await this.checkDiscrepancy(provider, reconciliation)
   }
 
-  /** The last reading, for the admin screens. Null before any purchase. */
-  async latest(): Promise<FloatObservation | null> {
-    const row = await this.prisma.setting.findUnique({ where: { key: OBSERVATION_KEY } })
+  /** The last reading for this provider, for the admin screens. Null before any purchase. */
+  async latest(provider: SupplierProviderCode): Promise<FloatObservation | null> {
+    const row = await this.prisma.setting.findUnique({ where: { key: keyFor(OBSERVATION_BASE, provider) } })
     if (!row) return null
 
     const stored = row.value as { balance?: unknown; observedAt?: unknown; orderRef?: unknown }
@@ -275,7 +304,7 @@ export class FloatMonitorService {
     if (!Number.isFinite(balance)) return null
 
     const { floatWatchAt, floatRiskAt } = await this.settings.all()
-    const reference = await this.referenceBalance(balance)
+    const reference = await this.referenceBalance(provider, balance)
     return {
       balance,
       observedAt:
@@ -287,56 +316,61 @@ export class FloatMonitorService {
   }
 
   /**
-   * Record James putting his own money into the float, or taking it back out.
+   * Record James putting his own money into one provider's float, or taking
+   * it back out.
    *
-   * DataHub sends no notice when a top-up happens, so this only exists because
-   * James says so. Written as `capital_in`/`capital_out` with `affectsProfit:
-   * false`, it is a balance-sheet movement, not income or cost, and must
-   * never shift the P&L in `money-audit.ts`.
+   * Neither provider sends any notice when a top-up happens, so this only
+   * exists because James says so. Written as `capital_in`/`capital_out` with
+   * `affectsProfit: false`, it is a balance-sheet movement, not income or
+   * cost, and must never shift the P&L in `money-audit.ts`. Every entry
+   * carries `provider`, the one place `LedgerEntry.provider` is ever written.
    *
    * `source` only matters for a top-up (`direction: 'in'`), and only changes
    * the `LedgerKind` it is written under:
    *
    *  - `'external'` (the default), fresh money from outside the business.
    *  - `'reimbursement'`, money already collected from customers to cover
-   *    what DataHub charges for their bundles, sitting in Paystack rather
-   *    than the float, now moved across to where it was always meant to end
-   *    up. Written as `capital_in_reimbursement` instead of `capital_in` so
-   *    `SolvencyService` can tell the two apart, only this kind reduces
-   *    "already spent on bundles" there, because only this kind is actually
-   *    settling that specific amount, not adding new capital on top of it.
+   *    what this provider charges for their bundles, sitting in Paystack
+   *    rather than the float, now moved across to where it was always meant
+   *    to end up. Written as `capital_in_reimbursement` instead of
+   *    `capital_in` so `SolvencyService` can tell the two apart, only this
+   *    kind reduces "already spent on bundles" there, because only this
+   *    kind is actually settling that specific amount, not adding new
+   *    capital on top of it.
    */
   async logCapital(input: {
+    provider: SupplierProviderCode
     direction: 'in' | 'out'
     amount: number
     note?: string
     idempotencyKey: string
     source?: 'external' | 'reimbursement'
   }): Promise<void> {
+    const { provider } = input
     if (!Number.isInteger(input.amount) || input.amount <= 0) {
       throw new ValidationError('Enter an amount greater than zero.')
     }
 
     /**
-     * A reimbursement may overpay what DataHub is owed (that's just his own
-     * profit becoming float capital early, his call to make, see the
-     * frontend's own warning for it), but it may never reach past what's
+     * A reimbursement may overpay what this provider is owed (that's just
+     * his own profit becoming float capital early, his call to make, see
+     * the frontend's own warning for it), but it may never reach past what's
      * actually free, real money owed to agents, customers, or a pending
      * order. That line is not a judgement call, it's simply not his to
      * move, so unlike the overpay case, this is a hard stop, not a warning
      * that can be clicked through.
      */
     if (input.direction === 'in' && input.source === 'reimbursement') {
-      const [{ owedToDataHub }, { freeToSpend }] = await Promise.all([
-        this.capitalSummary(),
+      const [{ owedToProvider }, { freeToSpend }] = await Promise.all([
+        this.capitalSummary(provider),
         this.solvency.position(),
       ])
-      const availableToMove = owedToDataHub + Math.max(freeToSpend, 0)
+      const availableToMove = owedToProvider + Math.max(freeToSpend, 0)
       if (input.amount > availableToMove) {
         const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
         throw new ValidationError(
-          `That's more than what's owed to DataHub (${ghs(owedToDataHub)}) plus what's actually ` +
-            `free to spend (${ghs(Math.max(freeToSpend, 0))}). The rest is owed to agents, ` +
+          `That's more than what's owed to ${providerLabel(provider)} (${ghs(owedToProvider)}) plus what's ` +
+            `actually free to spend (${ghs(Math.max(freeToSpend, 0))}). The rest is owed to agents, ` +
             `customers, or a pending order, not yours to move.`,
         )
       }
@@ -344,35 +378,39 @@ export class FloatMonitorService {
 
     /**
      * The anchor for `reconcile()`, captured once, the first time James logs
-     * anything, from whatever the float last read. Everything before this
-     * moment is out of scope: DataHub gave no notice of any earlier top-up or
-     * spend, so there is nothing honest to reconstruct that far back.
+     * anything for this provider, from whatever its float last read.
+     * Everything before this moment is out of scope: the provider gave no
+     * notice of any earlier top-up or spend, so there is nothing honest to
+     * reconstruct that far back.
      *
-     * Falls back to zero when there is no reading yet at all, a shop that has
-     * never dispatched an order has, by definition, never spent from the
-     * float, so zero is the only honest place for tracking to start. Leaving
-     * the baseline uncaptured here would only defer it to some later log,
-     * which then double-counts whatever was logged in between.
+     * Falls back to zero when there is no reading yet at all, a provider
+     * that has never dispatched an order has, by definition, never spent
+     * from its float, so zero is the only honest place for tracking to
+     * start. Leaving the baseline uncaptured here would only defer it to
+     * some later log, which then double-counts whatever was logged in
+     * between.
      */
     /**
      * Captured atomically, not just read-then-write.
      *
-     * Two first-ever `logCapital` calls landing close together would both see
-     * no baseline yet. `write()` is an `upsert`, which updates rather than
-     * skips on a conflict, so whichever call's write happened to land last
-     * would silently overwrite the other's baseline with a value observed at
-     * the wrong moment, permanently. `createMany` with `skipDuplicates` is a
-     * real `INSERT ... ON CONFLICT DO NOTHING` at the database level: only the
-     * genuinely first call's value can ever land, no matter how close behind
-     * it the second one runs.
+     * Two first-ever `logCapital` calls for the same provider landing close
+     * together would both see no baseline yet. `write()` is an `upsert`,
+     * which updates rather than skips on a conflict, so whichever call's
+     * write happened to land last would silently overwrite the other's
+     * baseline with a value observed at the wrong moment, permanently.
+     * `createMany` with `skipDuplicates` is a real `INSERT ... ON CONFLICT
+     * DO NOTHING` at the database level: only the genuinely first call's
+     * value can ever land, no matter how close behind it the second one
+     * runs.
      */
-    const hasBaseline = await this.prisma.setting.findUnique({ where: { key: CAPITAL_BASELINE_KEY } })
+    const baselineKey = keyFor(CAPITAL_BASELINE_BASE, provider)
+    const hasBaseline = await this.prisma.setting.findUnique({ where: { key: baselineKey } })
     if (!hasBaseline) {
-      const observation = await this.latest()
+      const observation = await this.latest(provider)
       await this.prisma.setting.createMany({
         data: [
           {
-            key: CAPITAL_BASELINE_KEY,
+            key: baselineKey,
             value: { balance: observation?.balance ?? 0, capturedAt: new Date().toISOString() },
           },
         ],
@@ -386,9 +424,9 @@ export class FloatMonitorService {
       ? input.note
       : input.direction === 'in'
         ? reimbursement
-          ? `Moved to DataHub from Paystack: GHS ${ghs}`
-          : `Capital added: GHS ${ghs}`
-        : `Capital withdrawn: GHS ${ghs}`
+          ? `Moved to ${providerLabel(provider)} from Paystack: GHS ${ghs}`
+          : `Capital added (${providerLabel(provider)}): GHS ${ghs}`
+        : `Capital withdrawn (${providerLabel(provider)}): GHS ${ghs}`
 
     await this.ledger.record([
       {
@@ -398,6 +436,7 @@ export class FloatMonitorService {
         occurredAt: new Date(),
         affectsProfit: false,
         idempotencyKey: input.idempotencyKey,
+        provider,
       },
     ])
 
@@ -406,21 +445,23 @@ export class FloatMonitorService {
      * without any order to trigger a re-check, waiting for the next sale to
      * notice would leave that risk silent for however long it takes to sell
      * again. Skipped only when there is truly no live reading yet to check
-     * against (a shop that has never dispatched an order).
+     * against (a provider that has never dispatched an order).
      */
-    const observation = await this.latest()
-    if (observation) await this.checkFloat(observation.balance)
+    const observation = await this.latest(provider)
+    if (observation) await this.checkFloat(provider, observation.balance)
   }
 
   /**
-   * Cumulative capital James has logged putting in and taking out, all time.
+   * Cumulative capital James has logged putting in and taking out of one
+   * provider's float, all time.
    *
    * `capital_in_reimbursement` counts as capital in here alongside plain
    * `capital_in`, from the float's own point of view both are money landing
    * in it, and the float does not care where a top-up's money came from.
-   * That distinction only matters one place: `SolvencyService.spentOnBundles`,
-   * which is the only reader that cares whether a top-up settled money
-   * already owed to DataHub rather than adding fresh capital on top of it.
+   * That distinction only matters one place: `SolvencyService`'s per-provider
+   * spend figure, which is the only reader that cares whether a top-up
+   * settled money already owed to this provider rather than adding fresh
+   * capital on top of it.
    *
    * `orderRef: null` (and, identically, `withdrawalId: null`) is deliberate,
    * not incidental. `capital_in`/`capital_out` are also written by
@@ -428,25 +469,27 @@ export class FloatMonitorService {
    * `orderRef`) and `WithdrawalsService.settleManually`/`reimburseManualAdvance`
    * (keyed by `withdrawalId`), a completely different thing that happens to
    * share this kind: money someone personally sent a *customer* or an *agent*
-   * back, unrelated to the DataHub float. Those always carry one of the two;
+   * back, unrelated to any supplier float. Those always carry one of the two;
    * a real top-up logged through `logCapital` never carries either. Without
    * this filter, an outstanding manual refund or payout advance was being
    * counted as float capital, inflating "should hold" by exactly that amount,
    * the float and a refund or payout advance are different money and must
    * never be added together.
    */
-  async capitalSummary(): Promise<CapitalSummary> {
+  async capitalSummary(provider: SupplierProviderCode): Promise<CapitalSummary> {
     const capitalInKinds = ['capital_in', 'capital_in_reimbursement'] as const
+    const providerFilter = capitalProviderFilter(provider)
     const [rows, bundleCost] = await Promise.all([
       this.prisma.ledgerEntry.findMany({
-        where: { kind: { in: [...capitalInKinds, 'capital_out'] }, orderRef: null, withdrawalId: null },
+        where: { kind: { in: [...capitalInKinds, 'capital_out'] }, orderRef: null, withdrawalId: null, ...providerFilter },
         select: { id: true, kind: true, amount: true, idempotencyKey: true, occurredAt: true },
       }),
       // supplier_cost entries are stored negative (money leaving the float),
-      // same source `SolvencyService.spentOnBundles` reads, kept in step
-      // with `owedToDataHub`/`overReimbursed` below rather than trusted to
-      // agree by coincidence.
-      this.prisma.ledgerEntry.aggregate({ where: { kind: 'supplier_cost' }, _sum: { amount: true } }),
+      // resolved per-order rather than by a denormalized provider column
+      // (see `bundleCostByProvider`), kept in step with
+      // `owedToProvider`/`overReimbursed` below rather than trusted to agree
+      // by coincidence.
+      bundleCostByProvider(this.prisma, provider),
     ])
 
     /**
@@ -486,16 +529,14 @@ export class FloatMonitorService {
       null,
     )
 
-    const bundlesBought = -(bundleCost._sum.amount ?? 0)
-
     return {
       totalIn,
       ownCapital,
       reimbursed,
       totalOut,
       net: totalIn - totalOut,
-      owedToDataHub: Math.max(0, bundlesBought - reimbursed),
-      overReimbursed: Math.max(0, reimbursed - bundlesBought),
+      owedToProvider: Math.max(0, bundleCost - reimbursed),
+      overReimbursed: Math.max(0, reimbursed - bundleCost),
       since: first?.toISOString() ?? null,
     }
   }
@@ -504,19 +545,20 @@ export class FloatMonitorService {
    * Plain top-ups (`orderRef`/`withdrawalId` both null, see `capitalSummary`'s
    * own comment for why that excludes manual refund/payout advances, a
    * different thing that happens to share this `kind`) not yet reclassified
-   * by `reclassifyAsReimbursement`. What a "top-ups needing review" screen
-   * lists, for whoever logged a Paystack reimbursement as plain capital by
-   * mistake, easy to do since the button that distinguishes them is easy to
-   * miss.
+   * by `reclassifyAsReimbursement`, for one provider. What a "top-ups
+   * needing review" screen lists, for whoever logged a Paystack
+   * reimbursement as plain capital by mistake, easy to do since the button
+   * that distinguishes them is easy to miss.
    */
-  async capitalInNeedingReview(): Promise<CapitalNeedingReview[]> {
+  async capitalInNeedingReview(provider: SupplierProviderCode): Promise<CapitalNeedingReview[]> {
+    const providerFilter = capitalProviderFilter(provider)
     const [allRows, corrections] = await Promise.all([
       this.prisma.ledgerEntry.findMany({
-        where: { kind: { in: ['capital_in', 'capital_in_reimbursement'] }, orderRef: null, withdrawalId: null },
+        where: { kind: { in: ['capital_in', 'capital_in_reimbursement'] }, orderRef: null, withdrawalId: null, ...providerFilter },
         orderBy: { occurredAt: 'asc' },
       }),
       this.prisma.ledgerEntry.findMany({
-        where: { kind: 'capital_out', idempotencyKey: { startsWith: 'correction:' } },
+        where: { kind: 'capital_out', idempotencyKey: { startsWith: 'correction:' }, ...providerFilter },
         select: { idempotencyKey: true },
       }),
     ])
@@ -570,14 +612,16 @@ export class FloatMonitorService {
 
   /**
    * One click: corrects a `capital_in` top-up that was actually Paystack
-   * money paying DataHub back, not fresh personal capital.
+   * money paying a provider back, not fresh personal capital.
    *
    * Never edits the original row, the ledger records what happened and
    * never rewrites it, every other settlement path here follows that rule
    * and this is not the exception. Instead it cancels the original out with
    * a matching `capital_out`, then reissues the same amount as
-   * `capital_in_reimbursement`, the only kind `SolvencyService.spentOnBundles`
-   * actually clears.
+   * `capital_in_reimbursement`, the only kind `SolvencyService` actually
+   * clears against "already spent on bundles." Carries the original entry's
+   * own `provider` forward onto both new entries, never asked for
+   * separately, an entry's provider cannot change.
    *
    * Idempotent the same way as everywhere else: both new entries are keyed
    * off the original entry's own id, so this is safe to click twice, or to
@@ -589,6 +633,7 @@ export class FloatMonitorService {
     if (original.kind !== 'capital_in' || original.orderRef || original.withdrawalId) {
       throw new ValidationError('Only a plain capital top-up can be reclassified this way.')
     }
+    const provider = (original.provider as SupplierProviderCode | null) ?? 'datahub-gh'
 
     const cancelKey = LedgerService.key('correction', entryId, 'capital_out')
     const alreadyDone = await this.prisma.ledgerEntry.findUnique({ where: { idempotencyKey: cancelKey } })
@@ -609,15 +654,17 @@ export class FloatMonitorService {
     const originalWhen = original.occurredAt.toISOString().replace('T', ' ').slice(0, 19)
     const ghs = (original.amount / 100).toFixed(2)
     await this.logCapital({
+      provider,
       direction: 'out',
       amount: original.amount,
       note: `Correcting a misclassified top-up from ${originalWhen} (GHS ${ghs}): it was actually Paystack money, not personal capital`,
       idempotencyKey: cancelKey,
     })
     await this.logCapital({
+      provider,
       direction: 'in',
       amount: original.amount,
-      note: `Reclassified: GHS ${ghs} originally logged ${originalWhen}, moved from Paystack to pay DataHub back`,
+      note: `Reclassified: GHS ${ghs} originally logged ${originalWhen}, moved from Paystack to pay ${providerLabel(provider)} back`,
       idempotencyKey: LedgerService.key('correction', entryId, 'capital_in_reimbursement'),
       source: 'reimbursement',
     })
@@ -631,12 +678,11 @@ export class FloatMonitorService {
    * that genuinely happened but was labelled wrong. This is for an entry
    * that never should have existed at all, a duplicate submission, a typo
    * caught immediately, a top-up logged for money that never actually left
-   * Paystack or DataHub. Written as a plain `capital_out` correction, the
+   * Paystack or the provider. Written as a plain `capital_out` correction, the
    * same exclusion `capitalSummary()` already applies to a
    * `reclassifyAsReimbursement` cancel covers this one too, since it uses
-   * the identical `correction:` idempotency prefix, and
-   * `SolvencyService.reimbursedToDataHub()` now excludes a reversed
-   * `capital_in_reimbursement` the same way.
+   * the identical `correction:` idempotency prefix, and this now excludes a
+   * reversed `capital_in_reimbursement` the same way.
    */
   async reverseCapitalEntry(entryId: string): Promise<void> {
     const original = await this.prisma.ledgerEntry.findUnique({ where: { id: entryId } })
@@ -648,6 +694,7 @@ export class FloatMonitorService {
     ) {
       throw new ValidationError('Only a plain top-up or reimbursement can be reversed this way.')
     }
+    const provider = (original.provider as SupplierProviderCode | null) ?? 'datahub-gh'
 
     const cancelKey = LedgerService.key('correction', entryId, 'capital_out')
     const alreadyDone = await this.prisma.ledgerEntry.findUnique({ where: { idempotencyKey: cancelKey } })
@@ -655,6 +702,7 @@ export class FloatMonitorService {
 
     const ghs = (original.amount / 100).toFixed(2)
     await this.logCapital({
+      provider,
       direction: 'out',
       amount: original.amount,
       note: `Reversing a mistaken entry (GHS ${ghs}): never a real movement, a duplicate or logging error`,
@@ -671,7 +719,8 @@ export class FloatMonitorService {
    * transfer outright. That money is owed back until a matching `capital_out`
    * on the same order says it was taken back out; this lists every one that
    * is not yet matched, so it is never just a bare "owed" total nobody can
-   * trace back to a specific refund.
+   * trace back to a specific refund. Not provider-scoped: a manual refund
+   * advance is about a customer, not a supplier float.
    */
   async outstandingManualRefunds(): Promise<ManualRefundAdvance[]> {
     const [advances, reimbursed] = await Promise.all([
@@ -728,18 +777,15 @@ export class FloatMonitorService {
   }
 
   /**
-   * What the float should hold right now, going only by tracked capital,
-   * independent of any live reading. The baseline captured at the first
-   * logged top-up (whatever DataHub held before any tracked money moved),
-   * plus every capital move ever logged, minus every bundle DataHub has ever
-   * actually charged for, a full replay from the start, not a running total
-   * that only picks up spending from whenever it happened to be captured.
-   * `capitalSummary` was already all-time; the cost side used to stop at the
-   * baseline's moment, which was only ever equivalent to a full replay
-   * because nothing has yet been charged before tracking began, this makes
-   * that true by construction instead of by accident of the data so far.
+   * What one provider's float should hold right now, going only by tracked
+   * capital, independent of any live reading. The baseline captured at the
+   * first logged top-up for this provider (whatever it held before any
+   * tracked money moved), plus every capital move ever logged for it, minus
+   * every bundle it has ever actually charged for, a full replay from the
+   * start, not a running total that only picks up spending from whenever it
+   * happened to be captured.
    *
-   * Null until James has logged at least one capital move.
+   * Null until James has logged at least one capital move for this provider.
    *
    * Public (not just used internally by `referenceBalance`/`reconcile`): also
    * what `AdminService.floatRisk` judges the catalogue against, deliberately
@@ -749,8 +795,8 @@ export class FloatMonitorService {
    * just logged should immediately stop flagging products as too expensive,
    * not wait for the next order to confirm it landed.
    */
-  async expectedBalance(): Promise<{ balance: number; capturedAt: Date } | null> {
-    const baselineRow = await this.prisma.setting.findUnique({ where: { key: CAPITAL_BASELINE_KEY } })
+  async expectedBalance(provider: SupplierProviderCode): Promise<{ balance: number; capturedAt: Date } | null> {
+    const baselineRow = await this.prisma.setting.findUnique({ where: { key: keyFor(CAPITAL_BASELINE_BASE, provider) } })
     if (!baselineRow) return null
 
     const stored = baselineRow.value as { balance?: unknown; capturedAt?: unknown }
@@ -758,16 +804,10 @@ export class FloatMonitorService {
     const capturedAt = typeof stored.capturedAt === 'string' ? new Date(stored.capturedAt) : null
     if (!Number.isFinite(baselineBalance) || !capturedAt) return null
 
-    const [capital, cost] = await Promise.all([
-      this.capitalSummary(),
-      this.prisma.ledgerEntry.aggregate({
-        where: { kind: 'supplier_cost' },
-        _sum: { amount: true },
-      }),
-    ])
+    const [capital, cost] = await Promise.all([this.capitalSummary(provider), bundleCostByProvider(this.prisma, provider)])
 
-    // supplier_cost entries are already negative (money leaving the float).
-    return { balance: baselineBalance + capital.net + (cost._sum.amount ?? 0), capturedAt }
+    // Bundle cost is spend, subtracted from the balance.
+    return { balance: baselineBalance + capital.net - cost, capturedAt }
   }
 
   /**
@@ -781,8 +821,8 @@ export class FloatMonitorService {
    * two means a bigger number on either side can never mask a real risk the
    * other one is already showing.
    */
-  private async referenceBalance(observedBalance: number): Promise<number> {
-    const expected = await this.expectedBalance()
+  private async referenceBalance(provider: SupplierProviderCode, observedBalance: number): Promise<number> {
+    const expected = await this.expectedBalance(provider)
     return expected ? Math.min(observedBalance, expected.balance) : observedBalance
   }
 
@@ -790,11 +830,11 @@ export class FloatMonitorService {
    * Does the float hold what it should? Null until there is a baseline and a
    * live reading to compare it to.
    */
-  async reconcile(): Promise<FloatReconciliation | null> {
-    const expected = await this.expectedBalance()
+  async reconcile(provider: SupplierProviderCode): Promise<FloatReconciliation | null> {
+    const expected = await this.expectedBalance(provider)
     if (!expected) return null
 
-    const observation = await this.latest()
+    const observation = await this.latest(provider)
     if (!observation) return null
 
     /**
@@ -808,7 +848,7 @@ export class FloatMonitorService {
      * short" email at the exact moment an admin did the right thing.
      */
     const lastMovement = await this.prisma.ledgerEntry.findFirst({
-      where: { kind: { in: ['capital_in', 'capital_in_reimbursement', 'capital_out'] } },
+      where: { kind: { in: ['capital_in', 'capital_in_reimbursement', 'capital_out'] }, ...capitalProviderFilter(provider) },
       orderBy: { occurredAt: 'desc' },
       select: { occurredAt: true },
     })
@@ -818,9 +858,9 @@ export class FloatMonitorService {
 
     /**
      * A reading older than the last logged move cannot possibly reflect it,
-     * DataHub only ever reports the balance in the reply to an order, so
-     * nothing short of a new order can confirm a top-up or withdrawal just
-     * logged. Flagging against a stale reading would call every log a
+     * the provider only ever reports the balance in the reply to an order,
+     * so nothing short of a new order can confirm a top-up or withdrawal
+     * just logged. Flagging against a stale reading would call every log a
      * shortfall the moment it's saved.
      */
     const pending = Boolean(
@@ -836,8 +876,8 @@ export class FloatMonitorService {
     }
   }
 
-  private async alertLevel(): Promise<FloatLevel> {
-    const row = await this.prisma.setting.findUnique({ where: { key: ALERT_LEVEL_KEY } })
+  private async alertLevel(provider: SupplierProviderCode): Promise<FloatLevel> {
+    const row = await this.prisma.setting.findUnique({ where: { key: keyFor(ALERT_LEVEL_BASE, provider) } })
     const value = row?.value
     return value === 'watch' || value === 'risk' ? value : 'ok'
   }
@@ -848,15 +888,16 @@ export class FloatMonitorService {
    * expected is never flagged: that just means a top-up hasn't been logged
    * yet, or there is simply headroom, neither of which is a problem.
    */
-  private async checkDiscrepancy(r: FloatReconciliation): Promise<void> {
+  private async checkDiscrepancy(provider: SupplierProviderCode, r: FloatReconciliation): Promise<void> {
+    const key = keyFor(DISCREPANCY_ALERTED_BASE, provider)
     if (r.flagged) {
-      if (await claimTransition(this.prisma, DISCREPANCY_ALERTED_KEY, false, true)) {
-        await this.alertDiscrepancy(r)
+      if (await claimTransition(this.prisma, key, false, true)) {
+        await this.alertDiscrepancy(provider, r)
       }
     } else {
-      if (await claimTransition(this.prisma, DISCREPANCY_ALERTED_KEY, true, false)) {
+      if (await claimTransition(this.prisma, key, true, false)) {
         this.log.log(
-          `float discrepancy cleared (expected GHS ${(r.expected / 100).toFixed(2)}, ` +
+          `${providerLabel(provider)} float discrepancy cleared (expected GHS ${(r.expected / 100).toFixed(2)}, ` +
             `observed GHS ${(r.observed / 100).toFixed(2)})`,
         )
       }
@@ -878,6 +919,7 @@ export class FloatMonitorService {
 
   /** Tell whoever funds the float, see the doc comment on the query below. */
   private async alert(
+    provider: SupplierProviderCode,
     level: FloatLevel,
     balance: number,
     reference: number,
@@ -903,9 +945,10 @@ export class FloatMonitorService {
           })
 
     const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
+    const label = providerLabel(provider)
 
     if (recipients.length === 0) {
-      this.log.warn(`float is ${level} at ${ghs(reference)}, nobody to tell`)
+      this.log.warn(`${label} float is ${level} at ${ghs(reference)}, nobody to tell`)
       return
     }
 
@@ -916,18 +959,18 @@ export class FloatMonitorService {
     /**
      * The live reading and tracked capital can disagree, see `referenceBalance`.
      * When tracked capital is the more pessimistic of the two, say so plainly:
-     * otherwise this email shows a number lower than what DataHub itself
+     * otherwise this email shows a number lower than what the provider itself
      * reports, which reads as a mistake rather than the point of the check.
      */
     const trackedIsLower = reference < balance
 
     const consequence = urgent
-      ? 'This is urgent: once it runs out, every paid order fails after the customer has already been charged, and each one then has to be refunded by hand. Top up your DataHub float now to avoid that.'
+      ? `This is urgent: once it runs out, every paid order fails after the customer has already been charged, and each one then has to be refunded by hand. Top up your ${label} float now to avoid that.`
       : 'There is still time to top up before anything fails, no order has been affected yet.'
 
     const subject = urgent
-      ? `Float critically low, ${ghs(reference)} left`
-      : `Float getting low, ${ghs(reference)} left`
+      ? `${label} float critically low, ${ghs(reference)} left`
+      : `${label} float getting low, ${ghs(reference)} left`
 
     const pillBg = urgent ? '#fee2e2' : '#fef3c7'
     const pillFg = urgent ? '#b3261e' : '#92400e'
@@ -944,13 +987,13 @@ export class FloatMonitorService {
     for (const recipient of recipients) {
       const html = wrap(
         shopName,
-        urgent ? 'Your float is critically low' : 'Your float is running low',
+        urgent ? `Your ${label} float is critically low` : `Your ${label} float is running low`,
         `<div style="text-align:center;margin:0 0 20px">
            <span style="display:inline-block;padding:4px 14px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.4px;background:${pillBg};color:${pillFg}">
              ${urgent ? 'ACTION NEEDED' : 'HEADS UP'}
            </span>
          </div>
-         <p style="margin:0 0 18px;font-size:15px;line-height:1.6">Hello ${escape(recipient.name)}, your DataHub GH
+         <p style="margin:0 0 18px;font-size:15px;line-height:1.6">Hello ${escape(recipient.name)}, your ${escape(label)}
            float ${urgent ? 'is critically low' : 'is getting low'}.</p>
          <div style="text-align:center;background:${statBg};border:1px solid ${statBorder};border-radius:12px;padding:20px;margin:0 0 20px">
            <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:0.4px;color:${pillFg};text-transform:uppercase">Float remaining</p>
@@ -960,13 +1003,13 @@ export class FloatMonitorService {
          <p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;font-weight:${urgent ? '700' : '400'};color:${urgent ? '#b3261e' : '#1e293b'}">${escape(consequence)}</p>
          ${
            trackedIsLower
-             ? `<p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">DataHub itself still reports ${escape(ghs(balance))},
+             ? `<p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">${escape(label)} itself still reports ${escape(ghs(balance))},
            this is based on the capital you've logged instead, which is lower and hasn't been confirmed by a fresh
            order yet.</p>`
              : ''
          }
          <p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">This figure comes from the reply to
-           your most recent order, DataHub has no balance endpoint to ask directly, so it is only ever as current
+           your most recent order, ${escape(label)} has no balance endpoint to ask directly, so it is only ever as current
            as your last sale.</p>
          <p style="margin:0;font-size:12.5px;line-height:1.6;color:#64748b">You will not get this again until the
            float recovers and falls past the same point, so it will not repeat on every order.</p>`,
@@ -977,7 +1020,7 @@ export class FloatMonitorService {
         `Hello ${recipient.name},`,
         '',
         urgent ? '*** ACTION NEEDED ***' : '*** HEADS UP ***',
-        `Your DataHub GH float ${urgent ? 'is critically low' : 'is getting low'}.`,
+        `Your ${label} float ${urgent ? 'is critically low' : 'is getting low'}.`,
         '',
         `FLOAT REMAINING: ${ghs(reference)} (below your ${ghs(threshold)} alert line)`,
         '',
@@ -985,11 +1028,11 @@ export class FloatMonitorService {
         '',
         ...(trackedIsLower
           ? [
-              `DataHub itself still reports ${ghs(balance)}, this is based on the capital you've logged instead, which is lower and hasn't been confirmed by a fresh order yet.`,
+              `${label} itself still reports ${ghs(balance)}, this is based on the capital you've logged instead, which is lower and hasn't been confirmed by a fresh order yet.`,
               '',
             ]
           : []),
-        'This figure comes from the reply to your most recent order, DataHub has no balance endpoint to ask directly, so it is only ever as current as your last sale.',
+        `This figure comes from the reply to your most recent order, ${label} has no balance endpoint to ask directly, so it is only ever as current as your last sale.`,
         '',
         'You will not get this again until the float recovers and falls past the same point, so it will not repeat on every order.',
       ].join('\n')
@@ -1002,13 +1045,13 @@ export class FloatMonitorService {
     }
 
     this.log.warn(
-      `float ${level}: ${ghs(reference)} (threshold ${ghs(threshold)}${trackedIsLower ? `, live is ${ghs(balance)}` : ''}), told ` +
+      `${label} float ${level}: ${ghs(reference)} (threshold ${ghs(threshold)}${trackedIsLower ? `, live is ${ghs(balance)}` : ''}), told ` +
         recipients.map((r) => r.email).join(', '),
     )
   }
 
   /** Tell whoever funds the float that it holds less than the logged capital says it should. */
-  private async alertDiscrepancy(r: FloatReconciliation): Promise<void> {
+  private async alertDiscrepancy(provider: SupplierProviderCode, r: FloatReconciliation): Promise<void> {
     const admins = await this.prisma.user.findMany({
       where: { role: 'admin', status: 'active' },
       select: { name: true, email: true },
@@ -1023,24 +1066,25 @@ export class FloatMonitorService {
 
     const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`
     const shopName = await this.platformName()
+    const label = providerLabel(provider)
 
     if (recipients.length === 0) {
-      this.log.warn(`float short by ${ghs(r.shortfall)}, nobody to tell`)
+      this.log.warn(`${label} float short by ${ghs(r.shortfall)}, nobody to tell`)
       return
     }
 
-    const subject = `Float is short by ${ghs(r.shortfall)}`
+    const subject = `${label} float is short by ${ghs(r.shortfall)}`
     const body =
-      `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">The DataHub GH float should hold ` +
+      `<p style="margin:0 0 18px;font-size:15px;line-height:1.6">The ${escape(label)} float should hold ` +
       `${escape(ghs(r.expected))}, going by the capital you've logged and what orders have spent since. ` +
       `It actually holds ${escape(ghs(r.observed))}, ${escape(ghs(r.shortfall))} short.</p>` +
       `<p style="margin:0 0 20px;font-size:14.5px;line-height:1.6;color:#1e293b">This usually means a top-up or ` +
       `withdrawal happened without being logged. Check the float panel and log it if so, this note will not ` +
       `repeat until the gap changes.</p>`
 
-    const html = wrap(shopName, 'Your float is short', body, `You are getting this because you are an active admin on ${escape(shopName)}.`)
+    const html = wrap(shopName, `Your ${label} float is short`, body, `You are getting this because you are an active admin on ${escape(shopName)}.`)
     const text =
-      `The DataHub GH float should hold ${ghs(r.expected)}, going by the capital you've logged and what orders ` +
+      `The ${label} float should hold ${ghs(r.expected)}, going by the capital you've logged and what orders ` +
       `have spent since. It actually holds ${ghs(r.observed)}, ${ghs(r.shortfall)} short.\n\n` +
       `This usually means a top-up or withdrawal happened without being logged. Check the float panel and log it ` +
       `if so, this note will not repeat until the gap changes.`
@@ -1052,7 +1096,7 @@ export class FloatMonitorService {
     }
 
     this.log.warn(
-      `float short by ${ghs(r.shortfall)} (expected ${ghs(r.expected)}, observed ${ghs(r.observed)}), told ` +
+      `${label} float short by ${ghs(r.shortfall)} (expected ${ghs(r.expected)}, observed ${ghs(r.observed)}), told ` +
         recipients.map((rec) => rec.email).join(', '),
     )
   }

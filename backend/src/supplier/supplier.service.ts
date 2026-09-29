@@ -2,7 +2,7 @@ import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { Order, SupplierProduct } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
-import { SettingsService } from '../settings/settings.service'
+import { SettingsService, type SupplierProviderCode } from '../settings/settings.service'
 import { DatahubClient } from './datahub.client'
 import { GmplClient, gmplIdempotencyKey } from './gmpl.client'
 import { FloatMonitorService } from './float-monitor.service'
@@ -79,6 +79,9 @@ export function hasAutomatedFulfilment(
   if (supplier.provider === 'gmpl') return true
   return supplier.capacityGb != null
 }
+
+/** Re-exported so existing call sites don't need to change import paths, see `provider-resolution.ts` for why the implementation itself lives there. */
+export { resolveSupplierProvider } from './provider-resolution'
 
 /**
  * The DataHub GH adapter.
@@ -333,7 +336,7 @@ export class SupplierService implements OnModuleInit {
        * but `record` swallows its own failures, so it cannot turn a successful
        * purchase into a failed one.
        */
-      await this.float.record(result.balanceAfter, order.reference)
+      await this.float.record('datahub-gh', result.balanceAfter, order.reference)
 
       // Their reply means "queued", never "delivered". The real outcome arrives
       // by webhook, or the reconciler goes and asks.

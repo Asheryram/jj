@@ -198,7 +198,12 @@ model BronzeLedgerEntry {
 /// immutable-once-set timestamps that let Silver still place "first blocked"
 /// and "resolved" on the correct historical day despite that.
 model BronzeBeneficiaryRequest {
-  phone           String    @id
+  phone String
+  /// Mirrors the main database's `BeneficiaryRequest.provider`: the same
+  /// phone can genuinely hold under both DataHub and GMPL at different
+  /// times, so it joins `phone` as this row's key instead of being an
+  /// incidental column.
+  provider        String    @default("datahub-gh")
   snapshotDateKey Int       @map("snapshot_date_key")
   networkKey      String    @map("network_key")
   attempts        Int
@@ -208,6 +213,7 @@ model BronzeBeneficiaryRequest {
   approvedAt      DateTime? @map("approved_at")
   ingestedAt      DateTime  @updatedAt @map("ingested_at")
 
+  @@id([phone, provider])
   @@index([snapshotDateKey])
   @@map("bronze_beneficiary_requests")
 }
@@ -373,7 +379,11 @@ model SilverLedgerFact {
 }
 
 model SilverBeneficiaryFact {
-  phone           String  @id
+  phone String
+  /// Mirrors `BronzeBeneficiaryRequest.provider`: the same phone can be
+  /// blocked under both DataHub and GMPL at different times, so it joins
+  /// `phone` as this row's key.
+  provider        String  @default("datahub-gh")
   dateKey         Int     @map("date_key") /// The day first seen, immutable.
   resolvedDateKey Int?    @map("resolved_date_key") /// The day `approvedAt` was set, immutable once it is.
   networkKey      String  @map("network_key")
@@ -382,6 +392,7 @@ model SilverBeneficiaryFact {
   resolved        Boolean /// `approvedAt != null` as of the latest snapshot.
   hoursToResolve  Float?  @map("hours_to_resolve")
 
+  @@id([phone, provider])
   @@index([dateKey])
   @@index([resolvedDateKey])
   @@map("silver_beneficiary_facts")
