@@ -24,6 +24,7 @@ import {
   cn,
 } from '../../components/ui'
 import { AlertIcon, ChevronDownIcon, TagIcon, TrendUpIcon } from '../../components/icons'
+import { NetworkProviderRouting } from '../../components/NetworkProviderRouting'
 import { api, ApiError } from '../../lib/api'
 import { formatMarkup, priceFromMarkup } from '../../lib/pricing'
 
@@ -86,6 +87,31 @@ export default function CostPrices() {
   const [category, setCategory] = useState<Category>('data')
   const [editing, setEditing] = useState<Product | null>(null)
   const [marking, setMarking] = useState(false)
+
+  /**
+   * Which provider's rows to look at, a plain view filter, never changes
+   * what's live, see `NetworkProviderRouting`'s own comment for why that's a
+   * deliberately separate control. Once GMPL's own bundles land in the
+   * catalogue alongside DataHub's, a network's group can hold rows from
+   * both at once (this page shows every product regardless of routing, an
+   * admin needs to price and manage a provider that isn't currently live
+   * too), and picking just one out of a mixed list is exactly what this is
+   * for.
+   */
+  const [providerFilter, setProviderFilter] = useState<'all' | 'datahub-gh' | 'gmpl'>('all')
+
+  /** For the routing panel's own "GMPL is simulated" callout, see Settings.tsx's identical fetch. */
+  const [gmplState, setGmplState] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    let live = true
+    api
+      .health()
+      .then((result) => live && setGmplState(result.providers.gmpl))
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [])
 
   /**
    * Fetched once here rather than only living on its own dedicated page,
@@ -155,9 +181,9 @@ export default function CostPrices() {
   // into "Outdated": a bundle that's never sold isn't wrong, it's untested.
   const notBoughtInCategory = categoryProducts.filter((p) => reviewStatusOf(p) === 'none').length
 
-  const visible = categoryProducts.filter(
-    (p) => reviewFilter === 'all' || reviewStatusOf(p) === reviewFilter,
-  )
+  const visible = categoryProducts
+    .filter((p) => reviewFilter === 'all' || reviewStatusOf(p) === reviewFilter)
+    .filter((p) => providerFilter === 'all' || (p.provider ?? 'datahub-gh') === providerFilter)
 
   /**
    * Grouped by network, because that is how the person pricing them thinks.
@@ -385,11 +411,34 @@ export default function CostPrices() {
             setCategory(next)
             // A filter that made sense in the old category can silently hide
             // everything in the new one with no visible control left to
-            // explain why, see the gate below.
+            // explain why, see the gates below: the provider filter's own
+            // row disappears entirely outside "Data", so leaving it on
+            // "GMPL" would hide every single airtime/voice/etc. product with
+            // nothing on screen to explain the empty table.
             setReviewFilter('all')
+            setProviderFilter('all')
           }}
         />
       </div>
+
+      {/* Only data has a second provider to route or filter by, see
+          `NetworkProviderRouting`'s own comment for why this is a separate
+          control from the read-only provider badge on each group below. */}
+      {category === 'data' && <NetworkProviderRouting gmplState={gmplState} />}
+
+      {category === 'data' && (
+        <div className="mt-3 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
+          <Segmented<'all' | 'datahub-gh' | 'gmpl'>
+            options={[
+              { value: 'all', label: 'All providers' },
+              { value: 'datahub-gh', label: 'DataHub GH' },
+              { value: 'gmpl', label: 'GMPL' },
+            ]}
+            value={providerFilter}
+            onChange={setProviderFilter}
+          />
+        </div>
+      )}
 
       {/* Only worth showing once there's something in this category at all. */}
       {categoryProducts.length > 0 && (
@@ -452,30 +501,37 @@ export default function CostPrices() {
               <Fragment key={group.key}>
                 <tr className="bg-slate-50/80 dark:bg-slate-800/80">
                   <td colSpan={8} className="p-0">
-                    <button
-                      type="button"
-                      onClick={() => toggle(group.key)}
-                      aria-expanded={!collapsed.has(group.key)}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
-                    >
-                      <ChevronDownIcon
-                        className={cn(
-                          'size-4 shrink-0 text-slate-400 dark:text-slate-500 transition-transform',
-                          collapsed.has(group.key) && '-rotate-90',
-                        )}
-                      />
-                      <span className={cn('size-2 shrink-0 rounded-full', group.dot)} />
-                      <span className="text-xs font-bold tracking-wide text-slate-600 dark:text-slate-300 uppercase">
-                        {group.label}
-                      </span>
-                      <span className="text-xs font-semibold text-slate-400 dark:text-slate-500">
-                        {group.items.length} bundle{group.items.length === 1 ? '' : 's'} ·{' '}
-                        {group.items.filter((p) => p.active).length} on sale
-                      </span>
-                      {/* Who supplies them. One name normally; more once the
-                          catalogue spans providers, which it will as soon as
-                          airtime arrives from somewhere other than DataHub. */}
-                      <span className="ml-auto flex flex-wrap gap-1">
+                    <div className="flex w-full items-center gap-2 px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => toggle(group.key)}
+                        aria-expanded={!collapsed.has(group.key)}
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <ChevronDownIcon
+                          className={cn(
+                            'size-4 shrink-0 text-slate-400 dark:text-slate-500 transition-transform',
+                            collapsed.has(group.key) && '-rotate-90',
+                          )}
+                        />
+                        <span className={cn('size-2 shrink-0 rounded-full', group.dot)} />
+                        <span className="text-xs font-bold tracking-wide text-slate-600 dark:text-slate-300 uppercase">
+                          {group.label}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-400 dark:text-slate-500">
+                          {group.items.length} bundle{group.items.length === 1 ? '' : 's'} ·{' '}
+                          {group.items.filter((p) => p.active).length} on sale
+                        </span>
+                      </button>
+
+                      {/* Who supplies them, read-only, see the provider
+                          filter above the table and `NetworkProviderRouting`
+                          for the actual switch, deliberately two different
+                          controls now, not one that both showed and changed
+                          routing. One name normally; more once GMPL's own
+                          rows sit alongside DataHub's here, which is exactly
+                          when the filter above earns its keep. */}
+                      <span className="flex shrink-0 flex-wrap gap-1">
                         {group.providers.map((provider) => (
                           <span
                             key={provider}
@@ -490,7 +546,7 @@ export default function CostPrices() {
                           </span>
                         ))}
                       </span>
-                    </button>
+                    </div>
                   </td>
                 </tr>
                 {!collapsed.has(group.key) &&

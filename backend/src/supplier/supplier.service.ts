@@ -1,9 +1,10 @@
 import { Injectable, Logger, type OnModuleInit } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import type { Order } from '@prisma/client'
+import type { Order, SupplierProduct } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
 import { DatahubClient } from './datahub.client'
+import { GmplClient, gmplIdempotencyKey } from './gmpl.client'
 import { FloatMonitorService } from './float-monitor.service'
 
 export interface DispatchResult {
@@ -25,8 +26,15 @@ export interface DispatchResult {
   reason?: string
   /** FR-4.7, result-checker orders come back with a voucher. */
   voucher?: { serial: string; pin: string }
-  /** DataHub's own reference, once they have accepted the order. */
+  /** The provider's own reference, once they have accepted the order. */
   providerReference?: string
+  /**
+   * GMPL's own internal order id, needed only because their
+   * `purchase.success`/`purchase.failed` webhook keys on it instead of the
+   * `publicId` every other GMPL event and endpoint uses. Null/unused for a
+   * DataHub dispatch.
+   */
+  secondaryProviderReference?: string
   /** Their status verbatim, for the dispatch log. */
   providerStatus?: string
   /** Pesewas the provider actually debited, when they told us. */
@@ -52,6 +60,27 @@ export function isApprovalProblem(reason: string): boolean {
 }
 
 /**
+ * Whether a mapped supplier SKU can actually be fulfilled without a human.
+ *
+ * Used to be inlined as `!supplier.networkKey || !supplier.capacityGb`
+ * wherever it was needed, DataHub-shaped: their purchase call takes a
+ * network key AND a whole-GB capacity. GMPL's purchase call takes only a
+ * bundle id (stored in `networkKey`, same as `GmplSource`'s own comment
+ * explains), never a capacity, so a `gmpl` SKU with no `capacityGb` is
+ * completely normal, not unfulfillable. Extracted once, here, so every call
+ * site agrees on what "automated fulfilment" means for whichever provider a
+ * SKU actually belongs to, instead of two providers' rules getting
+ * copy-pasted and drifting apart.
+ */
+export function hasAutomatedFulfilment(
+  supplier: Pick<SupplierProduct, 'provider' | 'networkKey' | 'capacityGb'>,
+): boolean {
+  if (!supplier.networkKey) return false
+  if (supplier.provider === 'gmpl') return true
+  return supplier.capacityGb != null
+}
+
+/**
  * The DataHub GH adapter.
  *
  * With no API key configured it does not call anything, it decides the outcome
@@ -73,22 +102,32 @@ export class SupplierService implements OnModuleInit {
     private readonly settings: SettingsService,
     private readonly config: ConfigService,
     private readonly datahub: DatahubClient,
+    private readonly gmpl: GmplClient,
     private readonly float: FloatMonitorService,
   ) {}
 
-  /** Credentials are present. Necessary for live fulfilment, not sufficient. */
-  get hasCredentials(): boolean {
-    return this.datahub.configured
+  private clientFor(provider: string): DatahubClient | GmplClient {
+    return provider === 'gmpl' ? this.gmpl : this.datahub
+  }
+
+  private liveEnvKeyFor(provider: string): string {
+    return provider === 'gmpl' ? 'GMPL_LIVE' : 'DATAHUB_LIVE'
+  }
+
+  /** Credentials are present for this provider. Necessary for live fulfilment, not sufficient. */
+  hasCredentialsFor(provider: string): boolean {
+    return this.clientFor(provider).configured
   }
 
   /**
-   * Whether real orders go to DataHub GH.
+   * Whether real orders go to this provider.
    *
    * Two independent conditions, and both are deliberate:
    *
-   *  · `DATAHUB_LIVE` must be explicitly "true". Anything else, absent, empty,
-   *    "1", "yes", is false. A money switch should have exactly one spelling
-   *    that turns it on, so a typo fails safe rather than starting to spend.
+   *  · The provider's own `*_LIVE` env var must be explicitly "true".
+   *    Anything else, absent, empty, "1", "yes", is false. A money switch
+   *    should have exactly one spelling that turns it on, so a typo fails
+   *    safe rather than starting to spend.
    *  · Credentials must exist, or there is nothing to call with.
    *
    * Read from the environment rather than the database on purpose. Going live is
@@ -96,33 +135,52 @@ export class SupplierService implements OnModuleInit {
    * deliberate file change and a restart, not a click, and not something a
    * stolen admin session can do.
    */
-  get isLive(): boolean {
-    return this.hasCredentials && this.config.get<string>('DATAHUB_LIVE')?.trim() === 'true'
+  isLiveFor(provider: string): boolean {
+    return this.hasCredentialsFor(provider) && this.config.get<string>(this.liveEnvKeyFor(provider))?.trim() === 'true'
   }
 
   /** What `/api/health` reports, so the state is never ambiguous to a tester. */
-  get providerState(): 'live' | 'simulated' | 'simulated-live-off' | 'live-requested-no-key' {
-    if (this.isLive) return 'live'
+  providerStateFor(provider: string): 'live' | 'simulated' | 'simulated-live-off' | 'live-requested-no-key' {
+    if (this.isLiveFor(provider)) return 'live'
     // Configured to go live but with nothing to call. Called out separately
     // because it is a misconfiguration, not a choice.
-    if (this.config.get<string>('DATAHUB_LIVE')?.trim() === 'true') return 'live-requested-no-key'
-    return this.hasCredentials ? 'simulated-live-off' : 'simulated'
+    if (this.config.get<string>(this.liveEnvKeyFor(provider))?.trim() === 'true') return 'live-requested-no-key'
+    return this.hasCredentialsFor(provider) ? 'simulated-live-off' : 'simulated'
+  }
+
+  /** Back-compat aliases: every caller written before GMPL existed meant "DataHub" by this. */
+  get hasCredentials(): boolean {
+    return this.hasCredentialsFor('datahub-gh')
+  }
+  get isLive(): boolean {
+    return this.isLiveFor('datahub-gh')
+  }
+  get providerState(): 'live' | 'simulated' | 'simulated-live-off' | 'live-requested-no-key' {
+    return this.providerStateFor('datahub-gh')
+  }
+  /** What `/api/health` reports for GMPL specifically. */
+  get gmplProviderState(): 'live' | 'simulated' | 'simulated-live-off' | 'live-requested-no-key' {
+    return this.providerStateFor('gmpl')
   }
 
   onModuleInit(): void {
-    if (this.isLive) {
-      this.log.warn('DATAHUB_LIVE=true, orders WILL spend real money at DataHub GH.')
-      return
-    }
-    if (this.providerState === 'live-requested-no-key') {
-      this.log.error('DATAHUB_LIVE=true but no DATAHUB_API_KEY, falling back to simulated.')
-      return
-    }
-    if (this.hasCredentials) {
-      this.log.warn(
-        'DataHub credentials present, DATAHUB_LIVE is not true, orders are simulated ' +
-          'and no bundles are being sent.',
-      )
+    for (const [provider, label] of [
+      ['datahub-gh', 'DataHub GH'],
+      ['gmpl', 'GMPL'],
+    ] as const) {
+      const state = this.providerStateFor(provider)
+      if (state === 'live') {
+        this.log.warn(`${this.liveEnvKeyFor(provider)}=true, orders WILL spend real money at ${label}.`)
+      } else if (state === 'live-requested-no-key') {
+        this.log.error(
+          `${this.liveEnvKeyFor(provider)}=true but no credentials configured for ${label}, falling back to simulated.`,
+        )
+      } else if (state === 'simulated-live-off') {
+        this.log.warn(
+          `${label} credentials present, ${this.liveEnvKeyFor(provider)} is not true, orders are simulated ` +
+            'and nothing is being sent.',
+        )
+      }
     }
   }
 
@@ -137,13 +195,21 @@ export class SupplierService implements OnModuleInit {
    * refund path either way.
    */
   async dispatch(order: Order, attempt = 1): Promise<DispatchResult> {
-    const live = this.isLive
-    const result = live ? await this.dispatchLive(order) : await this.decide(order)
-
     // Frozen at order time (see `Order.supplierCodeAtSale`'s own doc
     // comment), not re-resolved from the product live, a checker with no
-    // DataHub SKU mapped yet still has null here, same as before.
+    // supplier SKU mapped yet still has null here, same as before. Loaded
+    // once, here, so `dispatchLive`/`decide` don't each re-query it, and so
+    // liveness is decided for the provider this order actually belongs to,
+    // not a single, one-provider-only switch.
     const supplierCode = order.supplierCodeAtSale
+    const supplier = supplierCode
+      ? await this.prisma.supplierProduct.findUnique({ where: { code: supplierCode } })
+      : null
+    const provider = supplier?.provider ?? 'datahub-gh'
+    const live = this.isLiveFor(provider)
+    const result = live
+      ? await this.dispatchLive(order, supplier, provider, attempt)
+      : await this.decide(order, supplier)
 
     if (supplierCode) {
       await this.prisma.supplierDispatch.create({
@@ -187,58 +253,59 @@ export class SupplierService implements OnModuleInit {
   }
 
   /**
-   * Place the order with DataHub GH for real.
+   * Refuse what neither provider can actually deliver, then hand off to
+   * whichever one this order's frozen SKU belongs to. Shared here, once,
+   * rather than duplicated inside `dispatchLiveDatahub`/`dispatchLiveGmpl`,
+   * so both providers are refused by the exact same rules.
    *
-   * Data bundles only, their API sells nothing else, so anything without a
-   * mapped `networkKey` and `capacityGb` is refused here rather than being
-   * quietly marked delivered. That refusal is a real refund, which is the honest
-   * outcome: we took money for something we cannot fulfil automatically.
+   * `supplier` is looked up by the SKU frozen at order time, not by
+   * re-reading `Product.supplierCode` live, see `Order.supplierCodeAtSale`'s
+   * own doc comment. A product remapped to a different provider SKU between
+   * this order being placed and dispatch actually running (a real,
+   * documented catalogue-correction workflow, not just a crash window) used
+   * to fulfil against whatever the mapping currently says, not what the
+   * customer's frozen sale price/split was actually priced against.
    */
-  private async dispatchLive(order: Order): Promise<DispatchResult> {
+  private async dispatchLive(
+    order: Order,
+    supplier: SupplierProduct | null,
+    provider: string,
+    attempt: number,
+  ): Promise<DispatchResult> {
     // The admin test switch still wins, so the refund path stays reproducible
-    // without spending money at the provider.
+    // without spending money at either provider.
     if (await this.settings.get('simulateFailure')) {
       return { outcome: 'rejected', reason: 'Forced failure, admin test switch is on.' }
     }
-
-    /**
-     * Looked up by the SKU frozen at order time, not by re-reading
-     * `Product.supplierCode` live, see `Order.supplierCodeAtSale`'s own
-     * doc comment. A product remapped to a different provider SKU between
-     * this order being placed and dispatch actually running (a real,
-     * documented catalogue-correction workflow, not just a crash window)
-     * used to fulfil against whatever the mapping currently says, not what
-     * the customer's frozen sale price/split was actually priced against.
-     */
-    const supplier = order.supplierCodeAtSale
-      ? await this.prisma.supplierProduct.findUnique({ where: { code: order.supplierCodeAtSale } })
-      : null
-
     if (!supplier) {
       return { outcome: 'rejected', reason: 'No provider SKU is mapped to this product.' }
     }
     if (!supplier.available) {
-      return {
-        outcome: 'rejected',
-        reason: `${supplier.name} is out of stock at ${supplier.provider}.`,
-      }
+      return { outcome: 'rejected', reason: `${supplier.name} is out of stock at ${supplier.provider}.` }
     }
-    if (!supplier.networkKey || !supplier.capacityGb) {
+    if (!hasAutomatedFulfilment(supplier)) {
       return {
         outcome: 'rejected',
-        reason: `${supplier.name} has no automated fulfilment, DataHub GH sells data bundles only.`,
+        reason: `${supplier.name} has no automated fulfilment at ${supplier.provider}.`,
       }
     }
 
+    return provider === 'gmpl'
+      ? this.dispatchLiveGmpl(order, supplier, attempt)
+      : this.dispatchLiveDatahub(order, supplier)
+  }
+
+  /** Place the order with DataHub GH for real. */
+  private async dispatchLiveDatahub(order: Order, supplier: SupplierProduct): Promise<DispatchResult> {
     // Ask before buying, for the networks they can answer about. Cheaper than a
     // 422 and it keeps a doomed purchase off their rate limit, but it is only
     // an optimisation: the purchase reply is checked for the same thing below,
     // because /verify covers MTN alone.
-    if (VERIFIABLE_KEYS.includes(supplier.networkKey)) {
+    if (VERIFIABLE_KEYS.includes(supplier.networkKey as string)) {
       // `verify()` already logs its own failures internally and resolves
       // rather than rejecting; this catch is only a defensive backstop.
       const check = await this.datahub
-        .verify(supplier.networkKey, order.recipient)
+        .verify(supplier.networkKey as string, order.recipient)
         .catch((error: unknown) => {
           this.log.warn(`${order.reference}: pre-purchase verify threw unexpectedly, ${String(error)}`)
           return null
@@ -251,9 +318,9 @@ export class SupplierService implements OnModuleInit {
     }
 
     const result = await this.datahub.purchase({
-      networkKey: supplier.networkKey,
+      networkKey: supplier.networkKey as string,
       recipient: order.recipient,
-      capacity: supplier.capacityGb,
+      capacity: supplier.capacityGb as string,
     })
 
     if (result.kind === 'accepted') {
@@ -310,7 +377,66 @@ export class SupplierService implements OnModuleInit {
     return { outcome: 'rejected', reason: result.reason, providerResponse: result.raw }
   }
 
-  private async decide(order: Order): Promise<DispatchResult> {
+  /**
+   * Place the order with GMPL for real.
+   *
+   * MTN has its own "first-time number" gate (Up2U), GMPL's equivalent of
+   * DataHub's beneficiary list, checked the same advisory way: only a
+   * definite `known: false` holds the order, the purchase call is still the
+   * authority and is checked for the same thing via its own machine-readable
+   * `BENEFICIARY_NOT_VALIDATED` code. Wallet monitoring is out of scope this
+   * pass, so unlike the DataHub path there is no float/balance recording
+   * here at all, only the log line below if a purchase ever reports the
+   * wallet empty.
+   */
+  private async dispatchLiveGmpl(order: Order, supplier: SupplierProduct, attempt: number): Promise<DispatchResult> {
+    if (supplier.network === 'MTN') {
+      const check = await this.gmpl.precheckBeneficiary('MTN', [order.recipient]).catch((error: unknown) => {
+        this.log.warn(`${order.reference}: GMPL precheck threw unexpectedly, ${String(error)}`)
+        return null
+      })
+      const entry = check?.kind === 'ok' ? check.results[0] : null
+      if (entry && entry.valid && !entry.known) {
+        return { outcome: 'needs_approval', reason: "Not yet on GMPL/MTN's approved beneficiary list." }
+      }
+    }
+
+    const result = await this.gmpl.purchase({
+      bundleId: supplier.networkKey as string,
+      recipient: order.recipient,
+      idempotencyKey: gmplIdempotencyKey(order.reference, attempt),
+    })
+
+    if (result.kind === 'accepted') {
+      // Their reply means "queued", never "delivered". The real outcome
+      // arrives by webhook, or the reconciler goes and asks.
+      return {
+        outcome: 'pending',
+        providerReference: result.providerReference,
+        secondaryProviderReference: result.secondaryReference,
+        providerStatus: result.providerStatus,
+        providerCharged: result.charged ?? undefined,
+        providerResponse: result.raw,
+      }
+    }
+
+    if (result.kind === 'unknown') {
+      this.log.error(`UNRESOLVED GMPL dispatch for ${order.reference} → ${order.recipient}: ${result.reason}`)
+      return { outcome: 'unknown', reason: result.reason, providerResponse: result.raw }
+    }
+
+    if (result.insufficientBalance) {
+      this.log.error('GMPL wallet is empty, every order routed to them will fail until it is topped up.')
+    }
+
+    if (result.code === 'BENEFICIARY_NOT_VALIDATED') {
+      return { outcome: 'needs_approval', reason: result.reason, providerResponse: result.raw }
+    }
+
+    return { outcome: 'rejected', reason: result.reason, providerResponse: result.raw }
+  }
+
+  private async decide(order: Order, supplier: SupplierProduct | null): Promise<DispatchResult> {
     // The admin test switch wins over everything, so a tester can always
     // reproduce the refund path on demand (FR-2.7).
     if (await this.settings.get('simulateFailure')) {
@@ -319,12 +445,6 @@ export class SupplierService implements OnModuleInit {
         reason: 'Forced failure, admin test switch is on.',
       }
     }
-
-    // Same frozen-SKU lookup as `dispatchLive`, see its own comment and
-    // `Order.supplierCodeAtSale`'s doc comment in schema.prisma.
-    const supplier = order.supplierCodeAtSale
-      ? await this.prisma.supplierProduct.findUnique({ where: { code: order.supplierCodeAtSale } })
-      : null
 
     // No mapped SKU means we cannot claim delivery. Better a clean refund than a
     // completed order nobody actually fulfilled.

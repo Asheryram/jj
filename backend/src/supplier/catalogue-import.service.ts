@@ -198,7 +198,23 @@ export class CatalogueImportService {
     }
   }
 
-  /** Returns true when the product is new and still needs a price. */
+  /**
+   * Returns true when the product is new and still needs a price.
+   *
+   * Runs the same way for every source, regardless of which provider is
+   * currently routed for this SKU's network+category: `SettingsService`'s
+   * `networkProviderRouting` is deliberately NOT consulted here any more.
+   * An earlier version of this method deactivated a non-selected provider's
+   * `Product` row on sync, which collided with `AdminService.setTier`/
+   * `applyMarkup`, both of which reactivate a product the moment its price
+   * clears cost with no idea *why* it was off, silently undoing a routing
+   * decision that had nothing to do with pricing. Routing is enforced at
+   * read time instead (`CatalogueService.snapshot`, `OrdersService.priceInside`),
+   * independent of `active`, which stays purely the admin's own on/off-sale
+   * signal and is never written here for any reason but the ones this
+   * method already had before GMPL existed: a brand-new SKU starts inactive,
+   * an existing one keeps whatever `active` value it already had.
+   */
   private async upsertProduct(sku: SourceSku): Promise<boolean> {
     const product = await this.prisma.product.findUnique({ where: { id: sku.productId } })
 

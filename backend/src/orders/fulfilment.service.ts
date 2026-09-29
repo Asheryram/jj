@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common'
 import type { Order, Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
-import { SupplierService } from '../supplier/supplier.service'
+import { SupplierService, hasAutomatedFulfilment } from '../supplier/supplier.service'
 import { LedgerService, type LedgerDraft } from '../finance/ledger.service'
 import { lastRealCost } from '../common/real-cost'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
@@ -309,7 +309,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
     if (!supplier.available) {
       throw new ValidationError(`${supplier.name} is currently out of stock at ${supplier.provider}.`)
     }
-    if (!supplier.networkKey || !supplier.capacityGb) {
+    if (!hasAutomatedFulfilment(supplier)) {
       throw new ValidationError(`${supplier.name} has no automated fulfilment, choose a data bundle.`)
     }
 
@@ -455,9 +455,12 @@ export class FulfilmentService implements OnApplicationBootstrap {
 
       await this.prisma.order.update({
         where: { id: orderId },
-        data: { providerReference: result.providerReference ?? null },
+        data: {
+          providerReference: result.providerReference ?? null,
+          gmplInternalOrderId: result.secondaryProviderReference ?? null,
+        },
       })
-      this.log.log(`${order.reference}: accepted by DataHub, awaiting webhook`)
+      this.log.log(`${order.reference}: accepted by the provider, awaiting webhook`)
       return
     }
 
@@ -505,9 +508,24 @@ export class FulfilmentService implements OnApplicationBootstrap {
     const supplier = await this.prisma.order
       .findUnique({
         where: { id: order.id },
-        select: { product: { select: { supplier: { select: { networkKey: true } } } } },
+        select: { product: { select: { supplier: { select: { networkKey: true, provider: true } } } } },
       })
       .then((row) => row?.product?.supplier ?? null)
+
+    if (supplier?.provider === 'gmpl') {
+      // GMPL's own MTN approval queue is out of scope this pass (see the
+      // GMPL supplier plan). The hold above still applies, money genuinely
+      // stays put and `ReconcilerService.expireStaleApprovals` still refunds
+      // it past the hold window, provider-agnostic, no changes needed there,
+      // this just doesn't feed DataHub's own `BeneficiaryRequest` queue,
+      // which their Lost Revenue tab/NumberApprovals screen tell an admin to
+      // action in DataHub's dashboard specifically, not GMPL's.
+      this.log.warn(
+        `${order.reference} held: ${order.recipient} needs GMPL's own approval (${reason}). ` +
+          "Not tracked locally, check GMPL's dashboard directly.",
+      )
+      return
+    }
 
     // The registry the admin screen reads. Upserted rather than inserted because
     // one number can hold up several orders.

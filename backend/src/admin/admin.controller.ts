@@ -9,6 +9,7 @@ import {
   IsIn,
   IsInt,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Max,
@@ -24,7 +25,7 @@ import { LedgerService } from '../finance/ledger.service'
 import { RefundsService } from '../orders/refunds.service'
 import { ApplicationsService } from './applications.service'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
-import { SettingsService } from '../settings/settings.service'
+import { SettingsService, type NetworkProviderRouting } from '../settings/settings.service'
 import { SolvencyService } from '../finance/solvency.service'
 import { AgentsService } from '../agents/agents.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
@@ -221,6 +222,19 @@ export class SetSettingDto {
   )
   @IsBoolean()
   value!: boolean | number | string
+}
+
+/**
+ * `SetSettingDto` above is scalar-only by design (a whole number, free text,
+ * or a switch), which can't cleanly validate an object body, so this routing
+ * table gets its own small, dedicated endpoint rather than being forced
+ * through it. All the real validation, legal network:category keys, legal
+ * supplier codes, GMPL's own AirtelTigo/data-only restrictions, still lives
+ * in `SettingsService.set()`, same division of labour as every other setting.
+ */
+export class SetNetworkProviderRoutingDto {
+  @IsObject()
+  routing!: Record<string, string>
 }
 
 export class ReportQueryDto {
@@ -742,6 +756,19 @@ export class AdminController {
   @Patch('settings')
   setSetting(@Body() dto: SetSettingDto) {
     return this.admin.setSetting(dto.key, dto.value)
+  }
+
+  /** Which supplier fulfils each network+category. See `SetNetworkProviderRoutingDto`'s own comment. */
+  @Patch('settings/network-provider-routing')
+  setNetworkProviderRouting(@Body() dto: SetNetworkProviderRoutingDto) {
+    // Cast, not trust: `SettingsService.set()` re-validates every key and
+    // value in this object itself before it's ever stored, see its own
+    // OBJECT_KEYS branch. This just satisfies the compiler at the one
+    // boundary where unchecked request input meets the validated type.
+    // Routed through `AdminService`, not `SettingsService` directly, since
+    // saving the setting alone doesn't take it off the storefront, see that
+    // method's own comment.
+    return this.admin.setNetworkProviderRouting(dto.routing as NetworkProviderRouting)
   }
 
   @Get('reports/revenue')

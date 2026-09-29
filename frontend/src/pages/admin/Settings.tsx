@@ -14,6 +14,7 @@ import {
   Toggle,
 } from '../../components/ui'
 import { AlertIcon, ShieldIcon, WhatsAppIcon } from '../../components/icons'
+import { NetworkProviderRouting } from '../../components/NetworkProviderRouting'
 
 /** FR-5.5, FR-6.4, NFR-2.4, NFR-5.1, NFR-5.2 */
 export default function Settings() {
@@ -39,6 +40,7 @@ export default function Settings() {
 
   /** The server's own word on fulfilment. Read-only here by design. */
   const datahubState = health?.providers.datahub ?? 'simulated'
+  const gmplState = health?.providers.gmpl ?? 'simulated'
 
   return (
     <div>
@@ -67,6 +69,12 @@ export default function Settings() {
               field: 'DATAHUB_API_KEY',
               state: health?.providers.datahub,
               note: 'Bundles, airtime, voice and SMS delivery.',
+            },
+            {
+              name: 'GMPL',
+              field: 'GMPL_SECRET',
+              state: health?.providers.gmpl,
+              note: 'MTN and Telecel data bundles, wherever routing sends them here.',
             },
             {
               name: 'Paystack',
@@ -187,6 +195,8 @@ export default function Settings() {
       <PaystackPayoutSetting />
 
       <PayoutTransferFeeSetting />
+
+      <NetworkProviderRouting gmplState={gmplState} />
 
       <FloatThresholds />
 

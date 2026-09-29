@@ -517,6 +517,12 @@ export interface PlatformSettings {
   whatsappChannelUrl: string | null
   /** A warning banner shown site-wide, agents and guests alike. Null = not set. */
   siteNotice: string | null
+  /**
+   * Which supplier fulfils each network, keyed `"<Network>:<Category>"`
+   * (e.g. `"MTN:data"`). A missing key means DataHub GH, the only-ever
+   * supplier before GMPL existed, so an empty object changes nothing.
+   */
+  networkProviderRouting: Record<string, 'datahub-gh' | 'gmpl'>
 }
 
 /** One SKU in the provider's catalogue. */
@@ -1197,7 +1203,7 @@ export const api = {
     request<{
       status: string
       database: string
-      providers: { datahub: string; paystack: string }
+      providers: { datahub: string; gmpl: string; paystack: string }
     }>('/health', { auth: false }),
 
   // Auth
@@ -1940,6 +1946,13 @@ export const api = {
     ),
 
   adminSettings: () => request<PlatformSettings>('/admin/settings'),
+
+  /** Replaces the whole routing table, not one entry, callers must send the full merged object. */
+  setNetworkProviderRouting: (routing: Record<string, 'datahub-gh' | 'gmpl'>) =>
+    request<PlatformSettings>('/admin/settings/network-provider-routing', {
+      method: 'PATCH',
+      body: { routing },
+    }),
 
   supplierCatalogue: () => request<SupplierSku[]>('/admin/supplier'),
 

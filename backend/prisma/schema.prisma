@@ -564,6 +564,15 @@ model Order {
   /// ambiguity here means crediting the wrong agent.
   providerReference String? @unique @map("provider_reference")
 
+  /// GMPL's own internal order id, distinct from `providerReference` (which
+  /// holds their `publicId`, used for `GET /agent/orders/:id` and every
+  /// `order.*` webhook event). Their `purchase.success`/`purchase.failed`
+  /// events key on THIS id instead, the one inconsistency in their event
+  /// schema, so both ids have to be kept to match every event back to an
+  /// order. Null for a DataHub order, and for any order placed before GMPL
+  /// existed.
+  gmplInternalOrderId String? @unique @map("gmpl_internal_order_id")
+
   createdAt   DateTime  @default(now()) @map("created_at")
   completedAt DateTime? @map("completed_at")
 

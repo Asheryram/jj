@@ -5,6 +5,21 @@ import { ValidationError } from '../common/domain-errors'
 
 type Db = PrismaService | Prisma.TransactionClient
 
+/** The two suppliers this platform can fulfil an order against. */
+export type SupplierProviderCode = 'datahub-gh' | 'gmpl'
+
+/**
+ * Which provider fulfils a given network+category, keyed `"<Network>:<Category>"`.
+ * A missing key means DataHub, today's only-ever supplier, so this setting
+ * defaulting to `{}` changes nothing for anyone until an admin actively
+ * routes a network somewhere else.
+ */
+export type NetworkProviderRouting = Record<string, SupplierProviderCode>
+
+const KNOWN_NETWORKS = ['MTN', 'Telecel', 'AirtelTigo'] as const
+const KNOWN_CATEGORIES = ['data', 'airtime', 'voice', 'sms', 'afa', 'checker'] as const
+const KNOWN_PROVIDERS: readonly SupplierProviderCode[] = ['datahub-gh', 'gmpl']
+
 /**
  * Runtime platform switches, one row per key so a new flag needs no migration.
  *
@@ -137,6 +152,14 @@ export interface PlatformSettings {
    * wallets is one flag flip, not a code change.
    */
   walletEnabled: boolean
+  /**
+   * Which supplier fulfils each network+category, admin-controlled. Only a
+   * `data` entry is ever meaningfully routable to `gmpl` today, see
+   * `set()`'s own validation: GMPL sells data bundles only, and never for
+   * AirtelTigo. Everything else, an unset network:category pair, any other
+   * category, stays on DataHub, unchanged from before this setting existed.
+   */
+  networkProviderRouting: NetworkProviderRouting
 }
 
 const DEFAULTS: PlatformSettings = {
@@ -152,6 +175,7 @@ const DEFAULTS: PlatformSettings = {
   whatsappChannelUrl: null,
   siteNotice: null,
   walletEnabled: false,
+  networkProviderRouting: {},
 }
 
 /**
@@ -173,6 +197,9 @@ const STRING_KEYS = ['whatsappChannelUrl', 'siteNotice'] as const
 
 /** Of the string keys, which ones must actually look like a link. */
 const URL_KEYS = ['whatsappChannelUrl'] as const
+
+/** Keys holding an object rather than a scalar. */
+const OBJECT_KEYS = ['networkProviderRouting'] as const
 
 @Injectable()
 export class SettingsService {
@@ -196,7 +223,18 @@ export class SettingsService {
       whatsappChannelUrl: str(stored.whatsappChannelUrl, DEFAULTS.whatsappChannelUrl),
       siteNotice: str(stored.siteNotice, DEFAULTS.siteNotice),
       walletEnabled: bool(stored.walletEnabled, DEFAULTS.walletEnabled),
+      networkProviderRouting: routing(stored.networkProviderRouting, DEFAULTS.networkProviderRouting),
     }
+  }
+
+  /**
+   * Which provider is selected for one network+category, `'datahub-gh'` for
+   * anything not explicitly routed. `network: null` (a result checker, an
+   * AFA registration) is never routable at all, those aren't network-specific.
+   */
+  providerFor(routingTable: NetworkProviderRouting, network: string | null, category: string): SupplierProviderCode {
+    if (!network) return 'datahub-gh'
+    return routingTable[`${network}:${category}`] ?? 'datahub-gh'
   }
 
   /**
@@ -229,14 +267,50 @@ export class SettingsService {
     if ((STRING_KEYS as readonly string[]).includes(key)) {
       return str(row.value, DEFAULTS[key] as string | null) as PlatformSettings[K]
     }
+    if ((OBJECT_KEYS as readonly string[]).includes(key)) {
+      return routing(row.value, DEFAULTS[key] as NetworkProviderRouting) as PlatformSettings[K]
+    }
     return bool(row.value, DEFAULTS[key] as boolean) as PlatformSettings[K]
   }
 
   async set(
     key: keyof PlatformSettings,
-    value: boolean | number | string,
+    value: boolean | number | string | NetworkProviderRouting,
   ): Promise<PlatformSettings> {
     const previous = await this.get(key)
+
+    if ((OBJECT_KEYS as readonly string[]).includes(key)) {
+      const proposed = (value ?? {}) as Record<string, string>
+      const clean: NetworkProviderRouting = {}
+
+      for (const [pair, provider] of Object.entries(proposed)) {
+        const [network, category] = pair.split(':')
+        if (
+          !(KNOWN_NETWORKS as readonly string[]).includes(network) ||
+          !(KNOWN_CATEGORIES as readonly string[]).includes(category)
+        ) {
+          throw new ValidationError(`"${pair}" is not a network:category pair we recognise.`)
+        }
+        if (!KNOWN_PROVIDERS.includes(provider as SupplierProviderCode)) {
+          throw new ValidationError(`"${provider}" is not a supplier we know about.`)
+        }
+        if (provider === 'gmpl' && network === 'AirtelTigo') {
+          throw new ValidationError("GMPL doesn't sell AirtelTigo, route it to DataHub GH instead.")
+        }
+        if (provider === 'gmpl' && category !== 'data') {
+          throw new ValidationError('GMPL only sells data bundles, route other categories to DataHub GH.')
+        }
+        clean[pair] = provider as SupplierProviderCode
+      }
+
+      await this.prisma.setting.upsert({
+        where: { key },
+        create: { key, value: clean },
+        update: { value: clean },
+      })
+      this.log.warn(`setting ${key}: ${JSON.stringify(previous)} -> ${JSON.stringify(clean)}`)
+      return this.all()
+    }
 
     if ((STRING_KEYS as readonly string[]).includes(key)) {
       const text = String(value ?? '').trim()
@@ -381,4 +455,29 @@ function str(value: unknown, fallback: string | null): string | null {
   if (typeof value !== 'string') return fallback
   const trimmed = value.trim()
   return trimmed === '' ? null : trimmed
+}
+
+/**
+ * A stored network-routing table, or the default.
+ *
+ * Lenient on read, unlike `set()`'s own strict validation: a row corrupted by
+ * hand, or written by a future version with rules this one doesn't know
+ * about, silently drops whichever entries don't parse rather than failing
+ * every read of every setting on the platform. A dropped entry falls back to
+ * `providerFor`'s own default, DataHub, the safe side to fail on.
+ */
+function routing(value: unknown, fallback: NetworkProviderRouting): NetworkProviderRouting {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return fallback
+  const clean: NetworkProviderRouting = {}
+  for (const [pair, provider] of Object.entries(value as Record<string, unknown>)) {
+    const [network, category] = pair.split(':')
+    if (
+      !(KNOWN_NETWORKS as readonly string[]).includes(network) ||
+      !(KNOWN_CATEGORIES as readonly string[]).includes(category)
+    ) {
+      continue
+    }
+    if (provider === 'datahub-gh' || provider === 'gmpl') clean[pair] = provider
+  }
+  return clean
 }
