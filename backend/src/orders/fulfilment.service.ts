@@ -435,7 +435,13 @@ export class FulfilmentService implements OnApplicationBootstrap {
        * settles, and `LedgerService.record` skips a duplicate rather than
        * writing it again, so whichever of the two runs first is the one
        * that sticks, and the amount is identical either way since both read
-       * the same `SupplierDispatch.providerCharged`.
+       * the same `SupplierDispatch.providerCharged`. This one always runs
+       * first for an order that ever passes through here, so its own
+       * description is the one a reader ends up seeing, permanently, not
+       * just until settlement, deliberately worded to already be true
+       * either way: the provider told us what it charged the moment it
+       * accepted the order, not at delivery, so there is no later number
+       * this could still turn out to disagree with.
        */
       if (result.providerCharged != null) {
         const believedCost = (order.split as unknown as OrderSplit).supplierCost
@@ -447,7 +453,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
             kind: 'supplier_cost',
             amount: -result.providerCharged,
             description:
-              `Bundle cost · ${order.productName} (charged by ${providerLabel}; not yet settled)` +
+              `Bundle cost · ${order.productName} (charged by ${providerLabel})` +
               (result.providerCharged !== believedCost
                 ? ` (expected ${(believedCost / 100).toFixed(2)}, charged ${(result.providerCharged / 100).toFixed(2)})`
                 : ''),
