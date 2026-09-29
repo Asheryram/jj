@@ -59,6 +59,19 @@ function accuracyKey(name: string, network: string | null): string {
   return `${name}|${network ?? ''}`
 }
 
+/**
+ * A network alone no longer says which supplier a row belongs to, GMPL and
+ * DataHub can both list bundles on the same network at once (a routing
+ * switch didn't retroactively deactivate the old provider's rows, see
+ * `CatalogueService.snapshot`'s own comment on why). Distinct, unclaimed
+ * tones from what this page already uses for review-status (`success`/
+ * `warning`) so the two never read as the same kind of signal.
+ */
+function ProviderBadge({ provider }: { provider?: string | null }) {
+  const isGmpl = provider === 'gmpl'
+  return <Badge tone={isGmpl ? 'brand' : 'info'}>{isGmpl ? 'GMPL' : 'DataHub'}</Badge>
+}
+
 const TIER_LABELS: Record<Tier, { label: string; help: string }> = {
   supplierCost: {
     label: 'What you pay the provider',
@@ -600,6 +613,7 @@ export default function CostPrices() {
                     <p className="font-medium text-slate-900 dark:text-slate-50">{product.name}</p>
                     <div className="mt-1 flex items-center gap-2">
                       <NetworkChip network={product.network} />
+                      <ProviderBadge provider={product.provider} />
                       <span className="text-xs text-slate-500 dark:text-slate-400">{product.validity}</span>
                     </div>
                   </Td>
@@ -893,6 +907,7 @@ function EditPricesModal({
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <NetworkChip network={product.network} />
+          <ProviderBadge provider={product.provider} />
           <span className="text-sm text-slate-500 dark:text-slate-400">{product.validity}</span>
         </div>
 
