@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError, type SupplierFloat } from '../../lib/api'
 import { useStore } from '../../state/store'
@@ -143,8 +143,18 @@ export default function FloatPanel() {
     <Segmented<'datahub-gh' | 'gmpl'> options={PROVIDERS} value={provider} onChange={setProvider} />
   )
 
+  /**
+   * `CapitalModal` is always rendered below, as a sibling to whichever
+   * branch of this shows, not nested only inside the "loaded" one. Changing
+   * the provider from inside the modal (see its own doc comment) resets
+   * `float` to null while it refetches, and this component would otherwise
+   * fall into the loading branch below and unmount the modal along with
+   * whatever the admin had already typed into it.
+   */
+  let body: ReactNode
+
   if (error) {
-    return (
+    body = (
       <Card>
         <CardHead title="Provider float" />
         <div className="space-y-3 px-4 pb-4">
@@ -155,10 +165,8 @@ export default function FloatPanel() {
         </div>
       </Card>
     )
-  }
-
-  if (!float) {
-    return (
+  } else if (!float) {
+    body = (
       <Card>
         <CardHead title="Provider float" />
         <div className="space-y-3 px-4 pb-4">
@@ -169,11 +177,9 @@ export default function FloatPanel() {
         </div>
       </Card>
     )
-  }
-
-  const { observation, watchAt, riskAt, capital, reconciliation } = float
-
-  return (
+  } else {
+    const { observation, watchAt, riskAt, capital, reconciliation } = float
+    body = (
     <Card>
       <CardHead
         title="Provider float"
@@ -321,12 +327,19 @@ export default function FloatPanel() {
           </p>
         )}
       </div>
+    </Card>
+    )
+  }
 
+  return (
+    <>
+      {body}
       <CapitalModal
         provider={provider}
+        onProviderChange={setProvider}
         providerLabel={providerLabel}
         direction={logging}
-        owedToProvider={capital.owedToProvider}
+        owedToProvider={float?.capital.owedToProvider ?? 0}
         freeToSpend={freeToSpend}
         onClose={() => setLogging(null)}
         onLogged={() => {
@@ -334,13 +347,25 @@ export default function FloatPanel() {
           void refresh()
         }}
       />
-    </Card>
+    </>
   )
 }
 
-/** James saying he moved his own money into or out of one provider's float, either direction. */
+/**
+ * James saying he moved his own money into or out of one provider's float,
+ * either direction.
+ *
+ * The provider tab lives on the page behind this modal, easy to have never
+ * touched if it was already open on the wrong one, or to forget mid-flow.
+ * Repeating the choice here, as the first thing in the modal rather than
+ * assumed from whatever tab happened to be active, is what actually prevents
+ * a DataHub top-up being logged for GMPL by accident: changing it here
+ * updates the same page-level tab (`onProviderChange`), so the two can never
+ * disagree.
+ */
 function CapitalModal({
   provider,
+  onProviderChange,
   providerLabel,
   direction,
   owedToProvider,
@@ -349,6 +374,7 @@ function CapitalModal({
   onLogged,
 }: {
   provider: 'datahub-gh' | 'gmpl'
+  onProviderChange: (provider: 'datahub-gh' | 'gmpl') => void
   providerLabel: string
   direction: 'in' | 'out' | null
   /** Pesewas this provider is currently owed for bundles that no reimbursement has covered yet. */
@@ -437,9 +463,25 @@ function CapitalModal({
     <Modal
       open
       onClose={onClose}
-      title={direction === 'in' ? 'Log a top-up' : 'Log money taken out'}
+      title={`${direction === 'in' ? 'Log a top-up' : 'Log money taken out'} — ${providerLabel}`}
     >
       <div className="space-y-4">
+        {/* Repeated here, not just implied by whatever tab was open behind
+            this modal: the one choice that determines everything else on
+            this form, so it comes first, and changing it updates the same
+            tab, never a second, disagreeing idea of which float this is. */}
+        <div className="rounded-xl border-2 border-brand-200 bg-brand-50 p-3 dark:border-brand-800 dark:bg-brand-950/40">
+          <p className="mb-1.5 text-xs font-semibold tracking-wide text-brand-800 uppercase dark:text-brand-200">
+            Which float is this for?
+          </p>
+          <Segmented<'datahub-gh' | 'gmpl'>
+            className="w-full"
+            options={PROVIDERS}
+            value={provider}
+            onChange={onProviderChange}
+          />
+        </div>
+
         <Callout tone="info" icon={<AlertIcon className="size-4" />}>
           This tracks your own capital, it never counts as revenue or cost, and does not change
           the profit figures anywhere else.

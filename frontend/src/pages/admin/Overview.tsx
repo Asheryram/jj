@@ -651,9 +651,14 @@ function GettingStartedCard() {
 
   useEffect(() => {
     let live = true
-    api
-      .supplierFloat('datahub-gh')
-      .then((float) => live && setFloatLogged(float.capital.since !== null))
+    // Done the moment EITHER provider's float has capital tracked — a shop
+    // routing everything through GMPL and never touching DataHub has just as
+    // real a need for this step, and just as real a way to satisfy it, as
+    // one that only ever uses DataHub. Checking one provider alone (this
+    // used to check only DataHub) left the checklist permanently "not done"
+    // for a GMPL-only setup even after the float was properly funded.
+    Promise.all([api.supplierFloat('datahub-gh'), api.supplierFloat('gmpl')])
+      .then(([datahub, gmpl]) => live && setFloatLogged(datahub.capital.since !== null || gmpl.capital.since !== null))
       .catch(() => undefined)
     return () => {
       live = false
@@ -666,9 +671,9 @@ function GettingStartedCard() {
   const steps = [
     {
       done: floatLogged,
-      label: 'Add money to your DataHub float, then log it here',
+      label: 'Add money to a supplier float, then log it here',
       detail:
-        'Every order spends from this prepaid balance, without it, a paid order can still fail to deliver.',
+        'Every order spends from a prepaid balance, without it, a paid order can still fail to deliver.',
       to: '/admin/finance#float-panel',
       cta: 'Log it on Finance',
     },
