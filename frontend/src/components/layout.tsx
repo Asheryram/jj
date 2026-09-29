@@ -10,6 +10,7 @@ import type { Role } from '../data/types'
 import { Badge, Button, Modal, cn } from './ui'
 import { UnreadAnnouncementsModal } from './UnreadAnnouncementsModal'
 import { api, apiAsset } from '../lib/api'
+import { renderSimpleMarkdown } from '../lib/simpleMarkdown'
 import {
   AlertIcon,
   CashIcon,
@@ -406,9 +407,78 @@ function SiteNotice() {
     <div className="border-b border-amber-200 bg-amber-50 px-4 py-2.5 dark:border-amber-900 dark:bg-amber-950/60">
       <div className="mx-auto flex max-w-7xl items-start gap-2 text-sm font-medium text-amber-900 dark:text-amber-200">
         <AlertIcon className="mt-0.5 size-4.5 shrink-0" />
-        <p>{siteNotice}</p>
+        <div className="space-y-1">{renderSimpleMarkdown(siteNotice)}</div>
       </div>
     </div>
+  )
+}
+
+/** sessionStorage key holding the exact notice text last dismissed, not just a flag: a genuinely new notice (even mid-session) must still show, and clearing storage or opening a new tab starts fresh. */
+const SITE_NOTICE_DISMISSED_KEY = 'siteNoticeDismissedText'
+
+/**
+ * The same site-wide notice as `SiteNotice` above, for guests on the public
+ * storefront specifically, as a modal instead of a banner: James found the
+ * banner easy to miss entirely (real complaints of customers never seeing
+ * it), so this interrupts once instead of sitting passively in the corner.
+ *
+ * Shown once per browser session per distinct notice: dismissing it (by the
+ * "Noted" button, the backdrop, or Escape, all treated the same, seeing it
+ * once is what matters) is remembered in `sessionStorage` against the exact
+ * text shown, so a refresh or another page in the same tab never re-shows
+ * it, but a new tab, a new session, or James changing the notice to
+ * something new all do. Renders nothing when there's nothing set, same as
+ * `SiteNotice`. Public storefront only, `AppShell` keeps the plain banner:
+ * an agent or admin is signed in and working, not someone to interrupt with
+ * a popup every time a shift starts.
+ */
+function SiteNoticeModal() {
+  const { siteNotice } = useStore()
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (!siteNotice) {
+      setOpen(false)
+      return
+    }
+    let dismissed: string | null = null
+    try {
+      dismissed = sessionStorage.getItem(SITE_NOTICE_DISMISSED_KEY)
+    } catch {
+      // Private browsing or storage disabled, fail open: better to show the
+      // notice every time than to silently never show it at all.
+    }
+    setOpen(dismissed !== siteNotice)
+  }, [siteNotice])
+
+  const dismiss = () => {
+    setOpen(false)
+    try {
+      sessionStorage.setItem(SITE_NOTICE_DISMISSED_KEY, siteNotice ?? '')
+    } catch {
+      // Nothing to persist against, worst case this shows again next time,
+      // never worse than that.
+    }
+  }
+
+  if (!siteNotice) return null
+
+  return (
+    <Modal
+      open={open}
+      onClose={dismiss}
+      title="A note before you continue"
+      footer={
+        <Button block onClick={dismiss}>
+          <CheckIcon className="size-4" /> Noted
+        </Button>
+      }
+    >
+      <div className="flex items-start gap-2.5 text-sm text-slate-700 dark:text-slate-200">
+        <AlertIcon className="mt-0.5 size-4.5 shrink-0 text-amber-600 dark:text-amber-400" />
+        <div className="space-y-2">{renderSimpleMarkdown(siteNotice)}</div>
+      </div>
+    </Modal>
   )
 }
 
@@ -875,7 +945,7 @@ export function PublicShell() {
           </nav>
         </div>
       </header>
-      <SiteNotice />
+      <SiteNoticeModal />
       <main id="main">
         <Outlet />
       </main>

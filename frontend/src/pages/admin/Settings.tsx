@@ -10,11 +10,13 @@ import {
   CardHead,
   Field,
   PageHead,
+  Textarea,
   TextInput,
   Toggle,
 } from '../../components/ui'
 import { AlertIcon, ShieldIcon, WhatsAppIcon } from '../../components/icons'
 import { NetworkProviderRouting } from '../../components/NetworkProviderRouting'
+import { renderSimpleMarkdown } from '../../lib/simpleMarkdown'
 
 /** FR-5.5, FR-6.4, NFR-2.4, NFR-5.1, NFR-5.2 */
 export default function Settings() {
@@ -949,14 +951,18 @@ function WhatsAppChannelSetting() {
 }
 
 /**
- * A site-wide warning banner, agents, customers and guests all see the same
- * one, on every page including an agent's own storefront. Not a popup on
- * purpose: it's meant to sit in view for as long as the situation lasts, so a
- * visitor who returns partway through still sees it, rather than only the
- * first person to load the page after it was set.
+ * A site-wide notice, agents, customers and guests all see the same one.
+ * For an agent (and an admin), it's the plain banner it always was: not a
+ * popup, sitting in view for as long as the situation lasts, so a visitor
+ * who returns partway through still sees it. For a guest on the public
+ * storefront, it shows once as a popup instead (`SiteNoticeModal` in
+ * `layout.tsx`) — real complaints that the banner went unnoticed there, so
+ * an interruption once per visit replaces it, rather than something
+ * passively sitting in the corner. Same underlying text either way.
  *
  * Stays up until cleared here, nothing expires it automatically, since only
- * James knows when the actual problem is over.
+ * James knows when the actual problem is over. Supports a small Markdown
+ * subset (see `renderSimpleMarkdown`): **bold**, *italic*, and lists.
  */
 function SiteNoticeSetting() {
   const { pushToast } = useStore()
@@ -1002,26 +1008,27 @@ function SiteNoticeSetting() {
     <Card className="mt-3">
       <CardHead
         title="Site-wide notice"
-        subtitle="A warning banner shown to everyone, everywhere on the site"
+        subtitle="Shown to everyone, everywhere on the site — a banner for agents/admins, a popup for guests"
         action={<AlertIcon className="size-5 text-amber-600 dark:text-amber-400" />}
       />
       <div className="space-y-3 px-4 pb-4">
         <p className="text-sm text-slate-600 dark:text-slate-300">
-          For something like a network running slow. It's not a popup, it sits at the top of every
-          page for as long as it's set, agents and public visitors alike, including anyone on an
-          agent's own shop. Clear it the moment things are back to normal; nothing here expires on its
-          own.
+          For something like a network running slow. Agents and admins see it as a plain banner that
+          sits at the top of every page for as long as it's set, including anyone on an agent's own
+          shop. Guests on the public storefront see it once, as a popup, when they visit. Clear it
+          the moment things are back to normal; nothing here expires on its own.
         </p>
 
         <Field
-          label="Banner message"
+          label="Notice message"
           htmlFor="site-notice"
-          hint="Leave blank to remove the banner entirely."
+          hint="Leave blank to remove it entirely. Supports **bold**, *italic*, and - lists."
         >
-          <TextInput
+          <Textarea
             id="site-notice"
             placeholder="MTN is running slow right now, orders are still going through, just taking longer than usual."
-            maxLength={300}
+            rows={4}
+            maxLength={500}
             disabled={!loaded}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -1034,7 +1041,7 @@ function SiteNoticeSetting() {
             <p className="mb-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">Preview</p>
             <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-sm font-medium text-amber-900 dark:border-amber-900 dark:bg-amber-950/60 dark:text-amber-200">
               <AlertIcon className="mt-0.5 size-4.5 shrink-0" />
-              <p>{draft.trim()}</p>
+              <div className="space-y-1">{renderSimpleMarkdown(draft.trim())}</div>
             </div>
           </div>
         )}
