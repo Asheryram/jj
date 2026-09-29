@@ -1615,6 +1615,11 @@ model ServiceSubscription {
   /// service: a domain worth transferring elsewhere needs more lead time
   /// than a monthly plan that just needs a card on file.
   alertDaysBefore Int      @default(14) @map("alert_days_before")
+  /// 'monthly' | 'yearly', or null for a one-off with no fixed cycle. Only
+  /// ever advances `expiresAt` when the "Renewed" action is clicked by hand,
+  /// never on its own, an unattended timer cannot know a real invoice was
+  /// actually paid, only a human renewing it can.
+  recurrence String?
 
   /// Set once the "expiring soon" email has gone out for the *current*
   /// `expiresAt`. Cleared back to null whenever `expiresAt` itself changes,

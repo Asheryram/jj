@@ -1,8 +1,10 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
-import { IsDateString, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator'
+import { IsDateString, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
-import { SubscriptionsService } from './subscriptions.service'
+import { SubscriptionsService, type SubscriptionRecurrence } from './subscriptions.service'
+
+const RECURRENCES = ['monthly', 'yearly'] as const
 
 export class CreateSubscriptionDto {
   @IsString()
@@ -33,6 +35,10 @@ export class CreateSubscriptionDto {
   @Min(1)
   @Max(365)
   alertDaysBefore?: number
+
+  @IsOptional()
+  @IsIn(RECURRENCES)
+  recurrence?: SubscriptionRecurrence
 }
 
 export class UpdateSubscriptionDto {
@@ -66,6 +72,11 @@ export class UpdateSubscriptionDto {
   @Min(1)
   @Max(365)
   alertDaysBefore?: number
+
+  /** '' clears a previously-set recurrence back to a one-off, same convention as `provider`/`renewalUrl`/`notes` clearing via an empty string. */
+  @IsOptional()
+  @IsIn([...RECURRENCES, ''])
+  recurrence?: SubscriptionRecurrence | ''
 }
 
 /**
@@ -99,6 +110,7 @@ export class SubscriptionsController {
       notes: dto.notes,
       expiresAt: new Date(dto.expiresAt),
       alertDaysBefore: dto.alertDaysBefore,
+      recurrence: dto.recurrence,
     })
   }
 
@@ -112,6 +124,7 @@ export class SubscriptionsController {
       ...(dto.notes !== undefined ? { notes: dto.notes } : {}),
       ...(dto.expiresAt !== undefined ? { expiresAt: new Date(dto.expiresAt) } : {}),
       ...(dto.alertDaysBefore !== undefined ? { alertDaysBefore: dto.alertDaysBefore } : {}),
+      ...(dto.recurrence !== undefined ? { recurrence: dto.recurrence || null } : {}),
     })
   }
 
@@ -119,5 +132,16 @@ export class SubscriptionsController {
   @Roles('superadmin')
   remove(@Param('id') id: string) {
     return this.subscriptions.remove(id)
+  }
+
+  /**
+   * One click after actually paying a recurring service's real invoice:
+   * advances it one cycle, see `SubscriptionsService.renew`. Superadmin-only,
+   * same as every other write here.
+   */
+  @Post(':id/renew')
+  @Roles('superadmin')
+  renew(@Param('id') id: string) {
+    return this.subscriptions.renew(id)
   }
 }

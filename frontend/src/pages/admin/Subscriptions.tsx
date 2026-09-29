@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, ApiError, type ServiceSubscription } from '../../lib/api'
+import { api, ApiError, type ServiceSubscription, type SubscriptionRecurrence } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { dateTime } from '../../lib/format'
 import {
@@ -11,10 +11,13 @@ import {
   Field,
   Modal,
   PageHead,
+  Segmented,
   Spinner,
   TextInput,
 } from '../../components/ui'
 import { AlertIcon, ClockIcon } from '../../components/icons'
+
+const RECURRENCE_LABEL: Record<SubscriptionRecurrence, string> = { monthly: 'Monthly', yearly: 'Yearly' }
 
 /**
  * Third-party services this platform depends on to keep running, watched
@@ -33,6 +36,7 @@ export default function Subscriptions() {
   const [editing, setEditing] = useState<ServiceSubscription | 'new' | null>(null)
   const [removing, setRemoving] = useState<ServiceSubscription | null>(null)
   const [busy, setBusy] = useState(false)
+  const [renewingId, setRenewingId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -58,6 +62,19 @@ export default function Subscriptions() {
       pushToast({ tone: 'error', title: caught instanceof ApiError ? caught.message : 'We could not remove that.' })
     } finally {
       setBusy(false)
+    }
+  }
+
+  const renew = async (row: ServiceSubscription) => {
+    setRenewingId(row.id)
+    try {
+      await api.renewSubscription(row.id)
+      await load()
+      pushToast({ tone: 'success', title: `${row.name} renewed` })
+    } catch (caught) {
+      pushToast({ tone: 'error', title: caught instanceof ApiError ? caught.message : 'We could not renew that.' })
+    } finally {
+      setRenewingId(null)
     }
   }
 
@@ -104,6 +121,7 @@ export default function Subscriptions() {
                     </div>
                     <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                       Expires {dateTime(row.expiresAt)}
+                      {row.recurrence && ` · ${RECURRENCE_LABEL[row.recurrence]}`}
                     </p>
                     {row.notes && <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{row.notes}</p>}
                     {row.renewalUrl && (
@@ -122,6 +140,16 @@ export default function Subscriptions() {
                     <ExpiryBadge row={row} />
                     {canManage && (
                       <>
+                        {row.recurrence && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            loading={renewingId === row.id}
+                            onClick={() => void renew(row)}
+                          >
+                            Renewed
+                          </Button>
+                        )}
                         <Button size="sm" variant="outline" onClick={() => setEditing(row)}>
                           Edit
                         </Button>
@@ -209,6 +237,7 @@ function EditModal({
   const [provider, setProvider] = useState(subscription?.provider ?? '')
   const [expiresAt, setExpiresAt] = useState(toDateInputValue(subscription?.expiresAt))
   const [alertDaysBefore, setAlertDaysBefore] = useState(String(subscription?.alertDaysBefore ?? 14))
+  const [recurrence, setRecurrence] = useState<SubscriptionRecurrence | 'none'>(subscription?.recurrence ?? 'none')
   const [renewalUrl, setRenewalUrl] = useState(subscription?.renewalUrl ?? '')
   const [notes, setNotes] = useState(subscription?.notes ?? '')
   const [error, setError] = useState('')
@@ -235,9 +264,9 @@ function EditModal({
         alertDaysBefore: Number(alertDaysBefore) || 14,
       }
       if (subscription) {
-        await api.updateSubscription(subscription.id, body)
+        await api.updateSubscription(subscription.id, { ...body, recurrence: recurrence === 'none' ? '' : recurrence })
       } else {
-        await api.createSubscription(body)
+        await api.createSubscription(recurrence === 'none' ? body : { ...body, recurrence })
       }
       pushToast({ tone: 'success', title: subscription ? 'Updated' : 'Added' })
       await onSaved()
@@ -293,6 +322,21 @@ function EditModal({
             max={365}
             value={alertDaysBefore}
             onChange={(event) => setAlertDaysBefore(event.target.value)}
+          />
+        </Field>
+        <Field
+          label="Repeats"
+          htmlFor="sub-recurrence"
+          hint="Set this and a Renewed button appears once you've actually paid, it pushes the expiry forward one cycle instead of you typing a new date each time."
+        >
+          <Segmented<SubscriptionRecurrence | 'none'>
+            options={[
+              { value: 'none', label: "Doesn't repeat" },
+              { value: 'monthly', label: 'Monthly' },
+              { value: 'yearly', label: 'Yearly' },
+            ]}
+            value={recurrence}
+            onChange={setRecurrence}
           />
         </Field>
         <Field label="Where to renew it (optional)" htmlFor="sub-renewal-url">

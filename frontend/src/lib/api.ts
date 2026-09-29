@@ -708,6 +708,7 @@ export interface AnnouncementHistoryRow {
 }
 
 export type SubscriptionStatus = 'ok' | 'expiring_soon' | 'expired'
+export type SubscriptionRecurrence = 'monthly' | 'yearly'
 
 export interface ServiceSubscription {
   id: string
@@ -717,6 +718,7 @@ export interface ServiceSubscription {
   notes: string | null
   expiresAt: string
   alertDaysBefore: number
+  recurrence: SubscriptionRecurrence | null
   daysUntilExpiry: number
   status: SubscriptionStatus
   createdAt: string
@@ -1346,6 +1348,7 @@ export const api = {
     notes?: string
     expiresAt: string
     alertDaysBefore?: number
+    recurrence?: SubscriptionRecurrence
   }) => request<ServiceSubscription>('/admin/subscriptions', { method: 'POST', body }),
 
   updateSubscription: (
@@ -1357,11 +1360,17 @@ export const api = {
       notes: string
       expiresAt: string
       alertDaysBefore: number
+      /** '' clears a previously-set recurrence back to a one-off. */
+      recurrence: SubscriptionRecurrence | ''
     }>,
   ) => request<ServiceSubscription>(`/admin/subscriptions/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
 
   deleteSubscription: (id: string) =>
     request<void>(`/admin/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  /** One click after actually paying a recurring service's invoice, advances it one cycle. */
+  renewSubscription: (id: string) =>
+    request<ServiceSubscription>(`/admin/subscriptions/${encodeURIComponent(id)}/renew`, { method: 'POST' }),
 
   // Orders
   /**

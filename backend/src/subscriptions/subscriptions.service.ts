@@ -10,6 +10,7 @@ import { NotFoundError, ValidationError } from '../common/domain-errors'
 const CHECK_INTERVAL_MS = 12 * 60 * 60_000
 
 export type SubscriptionStatus = 'ok' | 'expiring_soon' | 'expired'
+export type SubscriptionRecurrence = 'monthly' | 'yearly'
 
 export interface ServiceSubscriptionView {
   id: string
@@ -19,6 +20,7 @@ export interface ServiceSubscriptionView {
   notes: string | null
   expiresAt: string
   alertDaysBefore: number
+  recurrence: SubscriptionRecurrence | null
   daysUntilExpiry: number
   status: SubscriptionStatus
   createdAt: string
@@ -32,6 +34,7 @@ export interface SubscriptionInput {
   notes?: string | null
   expiresAt: Date
   alertDaysBefore?: number
+  recurrence?: SubscriptionRecurrence | null
 }
 
 /**
@@ -79,6 +82,7 @@ export class SubscriptionsService implements OnApplicationBootstrap, OnModuleDes
         notes: input.notes?.trim() || null,
         expiresAt: input.expiresAt,
         alertDaysBefore: input.alertDaysBefore ?? 14,
+        recurrence: input.recurrence ?? null,
         createdBy: adminId,
       },
     })
@@ -109,6 +113,7 @@ export class SubscriptionsService implements OnApplicationBootstrap, OnModuleDes
         ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
         ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
         ...(input.alertDaysBefore !== undefined ? { alertDaysBefore: input.alertDaysBefore } : {}),
+        ...(input.recurrence !== undefined ? { recurrence: input.recurrence } : {}),
         ...(expiryChanged ? { alertedAt: null } : {}),
       },
     })
@@ -119,6 +124,33 @@ export class SubscriptionsService implements OnApplicationBootstrap, OnModuleDes
     const existing = await this.prisma.serviceSubscription.findUnique({ where: { id } })
     if (!existing) throw new NotFoundError('We could not find that subscription.')
     await this.prisma.serviceSubscription.delete({ where: { id } })
+  }
+
+  /**
+   * One click for a subscription that repeats on a fixed schedule: advances
+   * `expiresAt` by exactly one cycle from its CURRENT date, not from today,
+   * so clicking a few days late never drifts the schedule off whatever day
+   * it is meant to fall on. Re-arms the alert the same way any other expiry
+   * change does.
+   *
+   * Only for a row that actually has a `recurrence` set: a one-off service
+   * has no "next cycle" to advance to, and this is never inferred, only a
+   * human clicking this after actually paying the real invoice means
+   * anything really renewed, an unattended check cannot know that on its
+   * own (see the schema's own doc comment on `recurrence`).
+   */
+  async renew(id: string): Promise<ServiceSubscriptionView> {
+    const existing = await this.prisma.serviceSubscription.findUnique({ where: { id } })
+    if (!existing) throw new NotFoundError('We could not find that subscription.')
+    if (existing.recurrence !== 'monthly' && existing.recurrence !== 'yearly') {
+      throw new ValidationError('This subscription has no recurrence set. Edit it to add one first.')
+    }
+
+    const row = await this.prisma.serviceSubscription.update({
+      where: { id },
+      data: { expiresAt: addInterval(existing.expiresAt, existing.recurrence), alertedAt: null },
+    })
+    return toView(row)
   }
 
   private validate(input: { name: string; expiresAt: Date }): void {
@@ -233,6 +265,23 @@ function daysUntil(date: Date): number {
   return Math.ceil((date.getTime() - Date.now()) / msPerDay)
 }
 
+/**
+ * One cycle forward from `date`, clamped to whatever day the target
+ * month/year actually has, Jan 31 plus a month lands on Feb 28 (or 29),
+ * never rolls into March, the same clamping any real billing schedule
+ * needs.
+ */
+function addInterval(date: Date, recurrence: SubscriptionRecurrence): Date {
+  if (recurrence === 'yearly') {
+    const result = new Date(date)
+    result.setFullYear(result.getFullYear() + 1)
+    return result
+  }
+  const targetMonth = date.getMonth() + 1
+  const daysInTargetMonth = new Date(date.getFullYear(), targetMonth + 1, 0).getDate()
+  return new Date(date.getFullYear(), targetMonth, Math.min(date.getDate(), daysInTargetMonth))
+}
+
 function toView(row: {
   id: string
   name: string
@@ -241,6 +290,7 @@ function toView(row: {
   notes: string | null
   expiresAt: Date
   alertDaysBefore: number
+  recurrence: string | null
   createdAt: Date
   updatedAt: Date
 }): ServiceSubscriptionView {
@@ -255,6 +305,7 @@ function toView(row: {
     notes: row.notes,
     expiresAt: row.expiresAt.toISOString(),
     alertDaysBefore: row.alertDaysBefore,
+    recurrence: row.recurrence === 'monthly' || row.recurrence === 'yearly' ? row.recurrence : null,
     daysUntilExpiry,
     status,
     createdAt: row.createdAt.toISOString(),
