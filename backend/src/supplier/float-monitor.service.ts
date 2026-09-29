@@ -408,17 +408,16 @@ export class FloatMonitorService {
 
     /**
      * The anchor for `reconcile()`, captured once, the first time James logs
-     * anything for this provider, from whatever its float last read.
-     * Everything before this moment is out of scope: the provider gave no
-     * notice of any earlier top-up or spend, so there is nothing honest to
-     * reconstruct that far back.
-     *
-     * Falls back to zero when there is no reading yet at all, a provider
-     * that has never dispatched an order has, by definition, never spent
-     * from its float, so zero is the only honest place for tracking to
-     * start. Leaving the baseline uncaptured here would only defer it to
-     * some later log, which then double-counts whatever was logged in
-     * between.
+     * anything for this provider. Always zero, never a live/observed
+     * reading, even though one might already exist by this point (an order,
+     * or a "Check live" click). Nothing has actually been logged as capital
+     * before this moment, so nothing before it belongs in "Should hold",
+     * whatever the provider's own float happens to already contain is real
+     * money, but it is not money this admin panel was ever told about, and
+     * silently importing it here reads as capital nobody actually logged.
+     * If real pre-existing money genuinely needs accounting for, that is a
+     * top-up logged by hand, an honest, explicit entry, not an inference
+     * from a balance that happened to be read moments earlier.
      */
     /**
      * Captured atomically, not just read-then-write.
@@ -427,21 +426,19 @@ export class FloatMonitorService {
      * together would both see no baseline yet. `write()` is an `upsert`,
      * which updates rather than skips on a conflict, so whichever call's
      * write happened to land last would silently overwrite the other's
-     * baseline with a value observed at the wrong moment, permanently.
-     * `createMany` with `skipDuplicates` is a real `INSERT ... ON CONFLICT
-     * DO NOTHING` at the database level: only the genuinely first call's
-     * value can ever land, no matter how close behind it the second one
-     * runs.
+     * baseline, permanently. `createMany` with `skipDuplicates` is a real
+     * `INSERT ... ON CONFLICT DO NOTHING` at the database level: only the
+     * genuinely first call can ever land, no matter how close behind it a
+     * second one runs.
      */
     const baselineKey = keyFor(CAPITAL_BASELINE_BASE, provider)
     const hasBaseline = await this.prisma.setting.findUnique({ where: { key: baselineKey } })
     if (!hasBaseline) {
-      const observation = await this.latest(provider)
       await this.prisma.setting.createMany({
         data: [
           {
             key: baselineKey,
-            value: { balance: observation?.balance ?? 0, capturedAt: new Date().toISOString() },
+            value: { balance: 0, capturedAt: new Date().toISOString() },
           },
         ],
         skipDuplicates: true,
