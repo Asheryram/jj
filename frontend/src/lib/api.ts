@@ -1905,6 +1905,10 @@ export const api = {
   supplierFloat: (provider: 'datahub-gh' | 'gmpl') =>
     request<SupplierFloat>(`/admin/supplier/float?provider=${provider}`),
 
+  /** Ask the provider directly what the float holds right now. A no-op for DataHub, which has no such endpoint; GMPL alone answers with a genuinely live figure. */
+  refreshSupplierFloatLive: (provider: 'datahub-gh' | 'gmpl') =>
+    request<SupplierFloat>(`/admin/supplier/float/refresh?provider=${provider}`, { method: 'POST' }),
+
   /**
    * James saying he moved his own money into or out of one provider's float.
    * `source` only matters for a top-up: 'reimbursement' means this is money

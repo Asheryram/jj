@@ -8,6 +8,7 @@ import { NotFoundError, ValidationError } from '../common/domain-errors'
 import { claimTransition } from '../common/alert-flag'
 import { escape, wrap } from '../mail/templates'
 import { bundleCostByProvider, capitalProviderFilter } from './provider-resolution'
+import { GmplClient } from './gmpl.client'
 
 /** "DataHub GH" / "GMPL", for email text and log lines. */
 export function providerLabel(provider: SupplierProviderCode): string {
@@ -138,7 +139,7 @@ export interface FloatObservation {
   balance: number
   /** When the provider reported it, always the moment of a purchase. */
   observedAt: string
-  /** The order whose reply revealed it, for tracing. */
+  /** The order whose reply revealed it, for tracing. Null when a live check (`refreshLive`) revealed it instead. */
   orderRef: string | null
   level: FloatLevel
   /**
@@ -204,11 +205,14 @@ function levelFor(balance: number, watchAt: number, riskAt: number): FloatLevel 
  * that provider's own float only, the two are entirely separate real
  * balances at two separate companies, never combined.
  *
- * Two things make this awkward, for either provider. There is no balance
- * endpoint, so the figure is knowable exactly once per purchase, from the
- * reply; and it was being parsed and thrown away, so nobody could see it at
- * all until an order failed. Hence: record it whenever it arrives, and email
- * when it crosses a line.
+ * Two things make this awkward, for DataHub still today and for GMPL until
+ * recently. DataHub has no balance endpoint at all, so its figure is knowable
+ * exactly once per purchase, from the reply; and it was being parsed and
+ * thrown away, so nobody could see it at all until an order failed. GMPL, by
+ * contrast, does publish one (`GmplClient.getWalletBalance`), so its float can
+ * be asked for directly, via `refreshLive`, not only inferred from the last
+ * sale. Either way: record it whenever it arrives, and email when it crosses
+ * a line.
  */
 @Injectable()
 export class FloatMonitorService {
@@ -220,6 +224,7 @@ export class FloatMonitorService {
     private readonly mailer: MailerService,
     private readonly ledger: LedgerService,
     private readonly solvency: SolvencyService,
+    private readonly gmpl: GmplClient,
   ) {}
 
   /**
@@ -313,6 +318,31 @@ export class FloatMonitorService {
       level: levelFor(reference, floatWatchAt, floatRiskAt),
       reference,
     }
+  }
+
+  /**
+   * Ask the provider directly what the float holds right now, instead of
+   * waiting for the next order to reveal it.
+   *
+   * DataHub still has no such endpoint (see this class's own doc comment),
+   * so for any provider but GMPL this is a deliberate no-op that just returns
+   * the last known reading, rather than an error, so a "check now" action
+   * can be wired up once without branching on which provider is selected.
+   * `orderRef: null` on the resulting observation is what tells the panel
+   * this reading came from a live check, not a purchase, see
+   * `FloatObservation.orderRef`.
+   */
+  async refreshLive(provider: SupplierProviderCode): Promise<FloatObservation | null> {
+    if (provider !== 'gmpl') return this.latest(provider)
+
+    const result = await this.gmpl.getWalletBalance()
+    if (result.kind !== 'ok') {
+      this.log.warn(`could not check the ${providerLabel(provider)} float live: ${result.reason}`)
+      return this.latest(provider)
+    }
+
+    await this.record(provider, result.balanceCedis, null)
+    return this.latest(provider)
   }
 
   /**
@@ -1008,9 +1038,11 @@ export class FloatMonitorService {
            order yet.</p>`
              : ''
          }
-         <p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">This figure comes from the reply to
-           your most recent order, ${escape(label)} has no balance endpoint to ask directly, so it is only ever as current
-           as your last sale.</p>
+         <p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">${
+           provider === 'gmpl'
+             ? escape(`${label} can be checked live any time from the float panel, this figure is whichever is more recent, a live check or your last order.`)
+             : escape(`This figure comes from the reply to your most recent order, ${label} has no balance endpoint to ask directly, so it is only ever as current as your last sale.`)
+         }</p>
          <p style="margin:0;font-size:12.5px;line-height:1.6;color:#64748b">You will not get this again until the
            float recovers and falls past the same point, so it will not repeat on every order.</p>`,
         footer,
@@ -1032,7 +1064,9 @@ export class FloatMonitorService {
               '',
             ]
           : []),
-        `This figure comes from the reply to your most recent order, ${label} has no balance endpoint to ask directly, so it is only ever as current as your last sale.`,
+        provider === 'gmpl'
+          ? `${label} can be checked live any time from the float panel, this figure is whichever is more recent, a live check or your last order.`
+          : `This figure comes from the reply to your most recent order, ${label} has no balance endpoint to ask directly, so it is only ever as current as your last sale.`,
         '',
         'You will not get this again until the float recovers and falls past the same point, so it will not repeat on every order.',
       ].join('\n')

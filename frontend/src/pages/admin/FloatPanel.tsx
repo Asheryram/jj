@@ -37,12 +37,14 @@ const PROVIDERS: { value: 'datahub-gh' | 'gmpl'; label: string }[] = [
  * entirely separate real balance, so this panel shows exactly one at a time,
  * switched with the tabs below, never a blended figure.
  *
- * The awkward part is that neither provider publishes a balance endpoint, so
- * this figure exists only in the reply to a purchase. It was being parsed and
+ * The awkward part is that DataHub does not publish a balance endpoint, so
+ * its figure exists only in the reply to a purchase; it was being parsed and
  * thrown away, which is why the float was invisible until an order failed for
- * want of it. So the age of the reading is shown as prominently as the reading:
- * a number from last Tuesday tells you almost nothing, and pretending
- * otherwise would be worse than showing nothing at all.
+ * want of it. GMPL does publish one, so its "Check live" button asks directly
+ * instead of waiting on the next sale. Either way the age of the reading is
+ * shown as prominently as the reading itself: a number from last Tuesday
+ * tells you almost nothing, and pretending otherwise would be worse than
+ * showing nothing at all.
  */
 export default function FloatPanel() {
   const [provider, setProvider] = useState<'datahub-gh' | 'gmpl'>('datahub-gh')
@@ -50,6 +52,7 @@ export default function FloatPanel() {
   const [error, setError] = useState('')
   const [logging, setLogging] = useState<'in' | 'out' | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [checkingLive, setCheckingLive] = useState(false)
   /**
    * Just a count here, never the entries themselves or a button to act on
    * them, that lives on its own page (`FloatCorrections`), off the main nav
@@ -119,6 +122,26 @@ export default function FloatPanel() {
     setRefreshing(false)
   }
 
+  /**
+   * Unlike `manualRefresh` above (which only re-reads what we already have
+   * stored), this asks the provider itself. Only GMPL answers, see
+   * `api.refreshSupplierFloatLive`; the button that calls this is only shown
+   * for GMPL.
+   */
+  const checkLiveBalance = async () => {
+    setCheckingLive(true)
+    setError('')
+    try {
+      const result = await api.refreshSupplierFloatLive(provider)
+      setFloat(result)
+      await refreshFreeToSpend()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'We could not check the live balance.')
+    } finally {
+      setCheckingLive(false)
+    }
+  }
+
   useEffect(() => {
     let live = true
     setFloat(null)
@@ -185,9 +208,16 @@ export default function FloatPanel() {
         title="Provider float"
         subtitle={`What ${providerLabel} has left to buy bundles with`}
         action={
-          <Button size="sm" variant="ghost" loading={refreshing} onClick={() => void manualRefresh()}>
-            <RefreshIcon className="size-4" /> Refresh
-          </Button>
+          <div className="flex gap-2">
+            {provider === 'gmpl' && (
+              <Button size="sm" variant="ghost" loading={checkingLive} onClick={() => void checkLiveBalance()}>
+                <RefreshIcon className="size-4" /> Check live
+              </Button>
+            )}
+            <Button size="sm" variant="ghost" loading={refreshing} onClick={() => void manualRefresh()}>
+              <RefreshIcon className="size-4" /> Refresh
+            </Button>
+          </div>
         }
       />
       <div className="space-y-3 px-4 pb-4">
@@ -195,8 +225,9 @@ export default function FloatPanel() {
         {observation === null ? (
           /* Honest empty state. Not "GHS 0.00", which would read as an emergency. */
           <Callout tone="info" title="Not known yet">
-            {providerLabel} does not publish a balance, so this only appears once an order has been sent,
-            their reply is the only place the number exists.
+            {provider === 'gmpl'
+              ? 'Nothing read yet. Check the live balance above, or place an order and it will show up automatically.'
+              : `${providerLabel} does not publish a balance, so this only appears once an order has been sent, their reply is the only place the number exists.`}
           </Callout>
         ) : (
           <>
@@ -230,7 +261,7 @@ export default function FloatPanel() {
                 </p>
                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                   read {dateTime(observation.observedAt)}
-                  {observation.orderRef ? ` · from ${observation.orderRef}` : ''}
+                  {observation.orderRef ? ` · from ${observation.orderRef}` : provider === 'gmpl' ? ' · checked live' : ''}
                 </p>
               </div>
             </div>
@@ -299,8 +330,8 @@ export default function FloatPanel() {
               )}
               {reconciliation?.pending && (
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  Logged, "Should hold" above will confirm against the live float once the next
-                  order updates it.
+                  Logged, "Should hold" above will confirm against the live float
+                  {provider === 'gmpl' ? ' once you check live again or the next order updates it.' : ' once the next order updates it.'}
                 </p>
               )}
             </>

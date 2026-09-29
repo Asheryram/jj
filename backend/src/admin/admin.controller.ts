@@ -453,6 +453,19 @@ export class AdminController {
   }
 
   /**
+   * Ask the provider directly what the float holds right now, see
+   * `FloatMonitorService.refreshLive`. A no-op for DataHub, which still has
+   * no such endpoint, so the button that calls this can be shown
+   * unconditionally without checking which provider is selected first.
+   */
+  @Post('supplier/float/refresh')
+  async refreshFloat(@Query('provider') providerQuery?: string) {
+    const provider = requireProvider(providerQuery)
+    await this.float.refreshLive(provider)
+    return this.float_(providerQuery)
+  }
+
+  /**
    * James saying he moved his own money into or out of one provider's
    * float. Neither provider gives any notice when this happens, so it is
    * only ever known because he logged it, this is what lets the platform

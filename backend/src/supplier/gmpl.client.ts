@@ -50,6 +50,8 @@ export type PrecheckOutcome =
   | { kind: 'ok'; results: { phone: string; normalized: string; valid: boolean; known: boolean }[]; recorded: boolean }
   | { kind: 'unavailable'; reason: string }
 
+export type WalletBalanceOutcome = { kind: 'ok'; balanceCedis: number } | { kind: 'unavailable'; reason: string }
+
 export interface GmplBundle {
   id: string
   name: string
@@ -334,6 +336,36 @@ export class GmplClient {
       return { kind: 'found', providerStatus: status, raw: body }
     } catch (error) {
       this.log.warn(`could not check order status for ${publicId}: ${String(error)}`)
+      return { kind: 'unavailable', reason: String(error) }
+    }
+  }
+
+  /**
+   * Their one genuinely live read: unlike DataHub, which only ever reveals a
+   * balance as a side effect of an order reply (see `DatahubClient`'s own
+   * header), this asks directly, no purchase required. Requires the
+   * `wallet:read` scope on the key; confirmed live against this platform's
+   * own real account (200, real figures back).
+   */
+  async getWalletBalance(): Promise<WalletBalanceOutcome> {
+    if (!this.configured) return { kind: 'unavailable', reason: 'No GMPL API key configured.' }
+
+    try {
+      const response = await this.fetchRepeatable(
+        this.url('/agent/wallet/balance'),
+        { headers: this.headers(), signal: AbortSignal.timeout(15_000) },
+        'wallet-balance',
+        2,
+      )
+      const body = (await response.json().catch(() => ({}))) as GmplEnvelope & {
+        data?: { balance?: number }
+      }
+      if (!response.ok || body.success === false || typeof body.data?.balance !== 'number') {
+        return { kind: 'unavailable', reason: gmplErrorReason(body, `HTTP ${response.status}`) }
+      }
+      return { kind: 'ok', balanceCedis: body.data.balance }
+    } catch (error) {
+      this.log.warn(`could not check the wallet balance: ${String(error)}`)
       return { kind: 'unavailable', reason: String(error) }
     }
   }
