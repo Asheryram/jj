@@ -68,25 +68,20 @@ export default function NumberApprovals() {
   }, [])
 
   /**
-   * Check with both providers first, then show what is left.
-   *
-   * The point of this screen is the numbers that are *still* not approved, so
-   * opening it asks before rendering rather than showing a list that may
-   * already be stale. Quiet on purpose, no toast, because nobody asked a
-   * question, and the server refuses to run it more than once a minute, so
-   * refreshing repeatedly cannot hammer either provider's rate limit.
+   * Two plain reads, nothing here calls out to either provider. That used
+   * to happen on every visit (a full recheck, DataHub rate-limited to 20 at
+   * a time with a pause between batches), which made a busy list slow to
+   * load for no reason anyone asked for. A background sweep now keeps this
+   * current on its own clock (every 10 minutes, see `ApprovalsService`),
+   * and "Re-check" below still does it on demand; this just shows when that
+   * last genuinely happened, whichever one did it.
    */
   useEffect(() => {
-    let live = true
-    void (async () => {
-      const result = await api.recheckApprovals().catch(() => null)
-      if (!live) return
-      if (result?.lastCheckedAt) setLastChecked(result.lastCheckedAt)
-      await load()
-    })()
-    return () => {
-      live = false
-    }
+    void load()
+    api
+      .lastApprovalsCheck()
+      .then((value) => value && setLastChecked(value))
+      .catch(() => {})
   }, [load])
 
   // Still worth copying to DataHub's own dashboard: its own half of this

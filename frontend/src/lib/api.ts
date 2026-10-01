@@ -2012,6 +2012,9 @@ export const api = {
    */
   pendingApprovals: () => request<PendingApproval[]>('/admin/beneficiaries'),
 
+  /** When this was last actually checked with either provider, without triggering a check itself. */
+  lastApprovalsCheck: () => request<string | null>('/admin/beneficiaries/last-checked'),
+
   /** Ask DataHub which of them have since been approved. */
   /** Ask DataHub which pending numbers they have approved. Rate-limited server-side. */
   recheckApprovals: () =>

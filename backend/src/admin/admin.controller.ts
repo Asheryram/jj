@@ -557,6 +557,12 @@ export class AdminController {
     return this.approvals.pending()
   }
 
+  /** When this was last actually checked with either provider, without triggering a check itself. */
+  @Get('beneficiaries/last-checked')
+  beneficiariesLastChecked() {
+    return this.approvals.lastCheckedAt()
+  }
+
   /** Ask DataHub which of them have been approved since we last looked. */
   @Post('beneficiaries/recheck')
   recheckBeneficiaries() {

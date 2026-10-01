@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common'
 import type { Network } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { DatahubClient } from '../supplier/datahub.client'
@@ -52,6 +52,19 @@ import type { SupplierProviderCode } from '../settings/settings.service'
 /** Where the last recheck time is kept, so the automatic call can be rate-limited. */
 const RECHECK_MARKER = 'beneficiaryRecheckAt'
 const RECHECK_COOLDOWN_MS = 60_000
+
+/**
+ * How often the background sweep runs on its own, independent of anyone
+ * opening this screen. Before this existed, `pending()` itself triggered
+ * `ensureCounterparts`, and the frontend auto-ran a full `recheck()` on
+ * every page load, which meant visiting Approvals was the only thing that
+ * ever sent a number to GMPL or asked either provider for an update, and a
+ * busy list made that one visit slow (DataHub's own verify is rate-limited
+ * to 20 at a time with a pause between batches). Now the page is a plain
+ * read and this sweep is the only thing that calls out to either provider
+ * unprompted.
+ */
+const SWEEP_INTERVAL_MS = 10 * 60_000
 
 /**
  * DataHub's own networkKey vocabulary, mapped back to the generic network it
@@ -133,8 +146,9 @@ export interface PendingApprovalRow {
 }
 
 @Injectable()
-export class ApprovalsService {
+export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = new Logger(ApprovalsService.name)
+  private timer: NodeJS.Timeout | null = null
 
   constructor(
     private readonly prisma: PrismaService,
@@ -142,6 +156,31 @@ export class ApprovalsService {
     private readonly gmpl: GmplClient,
     private readonly fulfilment: FulfilmentService,
   ) {}
+
+  onApplicationBootstrap(): void {
+    this.timer = setInterval(() => {
+      void this.sweep().catch((error) => this.log.error(`approvals sweep failed: ${String(error)}`))
+    }, SWEEP_INTERVAL_MS)
+    this.timer.unref?.()
+  }
+
+  onModuleDestroy(): void {
+    if (this.timer) clearInterval(this.timer)
+  }
+
+  /**
+   * The one thing that calls out to either provider without anyone asking:
+   * fills in any missing counterpart (and genuinely registers it with
+   * GMPL), tries sending everything still outstanding to both providers,
+   * then asks both who they have approved since and releases the orders
+   * waiting on them. The exact same three operations the manual buttons on
+   * the Approvals screen call, just on a clock instead of a click.
+   */
+  private async sweep(): Promise<void> {
+    await this.ensureCounterparts()
+    await Promise.all([this.submitDatahub(), this.submitGmpl()])
+    await this.recheck()
+  }
 
   /**
    * Make sure every phone currently needing approval anywhere has a row for
@@ -276,10 +315,13 @@ export class ApprovalsService {
    * Ordered by value held rather than by age: the number blocking GHS 200 of
    * paid orders is the one worth approving first, and it is also the one whose
    * customers are most likely to ask for their money back.
+   *
+   * A plain read, nothing here calls out to either provider: `sweep` keeps
+   * this list current on its own clock, and the manual buttons do it on
+   * demand, so opening this screen is never what makes a busy list slow to
+   * load.
    */
   async pending(): Promise<PendingApprovalRow[]> {
-    await this.ensureCounterparts()
-
     const held = await this.prisma.order.findMany({
       where: { status: 'awaiting_approval' },
       select: {
@@ -404,6 +446,17 @@ export class ApprovalsService {
   }
 
   /**
+   * When the list was last actually checked with either provider, the
+   * background sweep or a manual click alike, they share the one marker.
+   * A plain read, same as `pending`, so the Approvals screen can show this
+   * without itself triggering a check just to find out.
+   */
+  async lastCheckedAt(): Promise<string | null> {
+    const marker = await this.prisma.setting.findUnique({ where: { key: RECHECK_MARKER } })
+    return typeof marker?.value === 'string' ? marker.value : null
+  }
+
+  /**
    * Record that these DataHub numbers were just copied to paste into their
    * dashboard by hand.
    *
@@ -486,11 +539,12 @@ export class ApprovalsService {
      * providers rather than tracked per-provider: simpler, and safe either
      * way since GMPL's own limit is unconfirmed.
      *
-     * The approvals screen runs this on load so the list is current without
-     * anybody pressing anything, which means a few refreshes would otherwise
-     * fire a verify call per pending number each time, against a provider that
-     * allows thirty a minute. The cooldown makes the automatic call safe and
-     * leaves the manual button honest: it either checks, or says when it last did.
+     * The background sweep runs this every 10 minutes on its own so the list
+     * stays current without anybody pressing anything, which means it would
+     * otherwise fire a verify call per pending number each time it does,
+     * against a provider that allows thirty a minute. The cooldown makes
+     * that automatic run safe, and leaves the manual button honest too: it
+     * either checks, or says when it last did.
      */
     const marker = await this.prisma.setting.findUnique({ where: { key: RECHECK_MARKER } })
     const previousValue = typeof marker?.value === 'string' ? marker.value : ''
