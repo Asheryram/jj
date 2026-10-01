@@ -638,6 +638,21 @@ export class ApprovalsService {
     return { datahub, gmpl }
   }
 
+  /**
+   * GMPL only, on demand: this already happens on its own the moment a
+   * number needs approving, and again on every page load (`ensureCounterparts`,
+   * called from `pending`/`recheck`/`submit` alike), but that is a sweep
+   * triggered by someone opening this screen, not a push the instant a
+   * number appears. A number can sit genuinely un-sent for a while if
+   * nobody has loaded Approvals (or clicked anything) since it showed up.
+   * This is the explicit, on-demand version of exactly that sweep, scoped
+   * to GMPL alone, for someone who wants to force it rather than wait.
+   */
+  async submitGmplOnly(): Promise<{ submitted: number; error: string | null }> {
+    await this.ensureCounterparts()
+    return this.submitGmpl()
+  }
+
   private async submitDatahub(): Promise<{ submitted: number; error: string | null }> {
     const waiting = await this.prisma.beneficiaryRequest.findMany({
       where: { approvedAt: null, provider: 'datahub-gh' },

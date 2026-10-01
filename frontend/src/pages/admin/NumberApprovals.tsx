@@ -53,7 +53,7 @@ import { AlertIcon, CheckIcon, CopyIcon, RefreshIcon } from '../../components/ic
 export default function NumberApprovals() {
   const { pushToast } = useStore()
   const [rows, setRows] = useState<PendingApproval[] | null>(null)
-  const [busy, setBusy] = useState<'recheck' | 'submit' | null>(null)
+  const [busy, setBusy] = useState<'recheck' | 'submit' | 'submit-gmpl' | null>(null)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
   const [lastChecked, setLastChecked] = useState<string | null>(null)
@@ -93,6 +93,10 @@ export default function NumberApprovals() {
   // number has not approved yet. A row left pending only on GMPL's side
   // (DataHub already said yes) has nothing left to hand DataHub again.
   const copyableRows = (rows ?? []).filter((row) => row.datahub.status === 'pending')
+  // Genuinely never sent to GMPL yet, not "sent, awaiting answer". This
+  // sweep already runs on every page load, this count (and the button
+  // next to it) is for whatever showed up since the last one.
+  const gmplNeverSentCount = (rows ?? []).filter((row) => row.gmpl.status === 'pending').length
   const heldValue = (rows ?? []).reduce((sum, row) => sum + row.valueHeld, 0)
   const heldOrders = (rows ?? []).reduce((sum, row) => sum + row.ordersHeld, 0)
 
@@ -221,6 +225,38 @@ export default function NumberApprovals() {
     }
   }
 
+  /**
+   * GMPL only, scoped and explicit: for a number that showed up since the
+   * last time anyone happened to load this screen, the automatic sweep
+   * already covers it the moment someone does, this is for forcing that
+   * now instead of waiting.
+   */
+  const submitGmplOnly = async () => {
+    setBusy('submit-gmpl')
+    try {
+      const { submitted, error: submitError } = await api.submitGmplApprovals()
+      await load()
+      if (submitted > 0) {
+        pushToast({
+          tone: 'success',
+          title: `${submitted} number${submitted === 1 ? '' : 's'} sent to GMPL for approval`,
+          detail: 'Press Re-check in a while to see which came through.',
+        })
+      } else if (submitError) {
+        pushToast({ tone: 'error', title: 'GMPL would not accept them', detail: submitError })
+      } else {
+        pushToast({ tone: 'info', title: 'Nothing was waiting to be sent' })
+      }
+    } catch (caught) {
+      pushToast({
+        tone: 'error',
+        title: caught instanceof ApiError ? caught.message : 'We could not reach GMPL.',
+      })
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <div>
       <PageHead
@@ -311,6 +347,16 @@ export default function NumberApprovals() {
                   >
                     Try sending automatically
                   </Button>
+                  {gmplNeverSentCount > 0 && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      loading={busy === 'submit-gmpl'}
+                      onClick={() => void submitGmplOnly()}
+                    >
+                      Resend {gmplNeverSentCount} to GMPL
+                    </Button>
+                  )}
                 </div>
               </Callout>
 

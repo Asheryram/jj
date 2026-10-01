@@ -2034,6 +2034,10 @@ export const api = {
       gmpl: { submitted: number; error: string | null }
     }>('/admin/beneficiaries/submit', { method: 'POST' }),
 
+  /** GMPL only, on demand, for a number that showed up since the last automatic sweep. */
+  submitGmplApprovals: () =>
+    request<{ submitted: number; error: string | null }>('/admin/beneficiaries/submit-gmpl', { method: 'POST' }),
+
   /** Checkpoint: these numbers were just copied to hand to DataHub by hand. */
   markApprovalsCopied: (phones: string[]) =>
     request<void>('/admin/beneficiaries/mark-copied', { method: 'POST', body: { phones } }),

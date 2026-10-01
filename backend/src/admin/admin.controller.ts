@@ -570,6 +570,16 @@ export class AdminController {
   }
 
   /**
+   * GMPL only, on demand, see `ApprovalsService.submitGmplOnly`. For a
+   * number that has shown up since the last time anyone loaded this screen,
+   * rather than waiting for the next automatic sweep.
+   */
+  @Post('beneficiaries/submit-gmpl')
+  submitGmplOnly() {
+    return this.approvals.submitGmplOnly()
+  }
+
+  /**
    * Checkpoint: these numbers were just copied to hand to DataHub by hand,
    * see `ApprovalsService.markCopied`. Not a claim they were received.
    */
