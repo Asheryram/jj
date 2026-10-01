@@ -880,11 +880,40 @@ export interface FinanceStatement {
   marginRate: number | null
 }
 
+export interface ProviderApprovalStatus {
+  /**
+   * `'pending'` means specifically "has not been sent to this provider
+   * yet". `'awaiting_provider'` means it has been sent and received, just
+   * not yet decided, genuinely different: nothing left to do but wait.
+   * `'not_applicable'` for GMPL on an AirtelTigo number, GMPL never sells it.
+   */
+  status: 'approved' | 'awaiting_provider' | 'pending' | 'not_applicable'
+  /** In whichever vocabulary this provider speaks: DataHub's own (YELLO/mtn_xpress) or GMPL's (MTN/TELECEL). Null when `not_applicable`. */
+  networkKey: string | null
+  /**
+   * Last time this number was copied to hand to DataHub, by hand. Always
+   * null for GMPL — GMPL's own submission is a real API call (see
+   * `submitApprovals`), never a copy-paste step. Null for DataHub too means
+   * never copied, the one worth noticing, since a batch copied minutes ago
+   * and a number that just showed up otherwise look identical in the list.
+   * Not a claim DataHub received it, only that it was handed over.
+   */
+  copiedAt: string | null
+  /**
+   * GMPL only, the real-API counterpart to `copiedAt`: the last time this
+   * number was actually registered on GMPL's own Pending MTN Approval
+   * queue, not just tracked here locally. Null means it is sitting in this
+   * list pending, but has never actually reached GMPL yet, the one thing
+   * "Pending" alone could not tell apart from "already asked, just not yet
+   * answered". Always null for DataHub, `copiedAt` is their equivalent.
+   */
+  recordedAt: string | null
+}
+
+/** One phone number, consolidated across both providers: it is only truly clear once every provider that could serve its network has approved it, not just whichever one refused the sale first. */
 export interface PendingApproval {
   phone: string
-  provider: 'datahub-gh' | 'gmpl'
-  /** In whichever vocabulary `provider` speaks: DataHub's own (YELLO/mtn_xpress) or GMPL's (MTN/TELECEL). */
-  networkKey: string
+  network: 'MTN' | 'Telecel' | 'AirtelTigo'
   /**
    * Paid orders parked against this number, waiting to be delivered.
    *
@@ -896,22 +925,14 @@ export interface PendingApproval {
   ordersHeld: number
   /** Pesewas of customer money held up by it. */
   valueHeld: number
-  /** How many sales this number has been refused. The demand signal. */
+  /** How many sales this number has been refused, summed across whichever provider(s) actually turned it away. The demand signal. */
   attempts: number
   lastProduct: string | null
   /** Pesewas the last attempt was worth. */
   lastValue: number | null
   waitingSince: string
-  /**
-   * Last time this number was copied to hand to DataHub, by hand. Always
-   * null for a `provider: 'gmpl'` row — GMPL's own submission is a real API
-   * call (see `submitApprovals`), never a copy-paste step. For a DataHub
-   * row, null means never copied, the one worth noticing, since a batch
-   * copied minutes ago and a number that just showed up otherwise look
-   * identical in the list. Not a claim DataHub received it, only that it
-   * was handed over.
-   */
-  copiedAt: string | null
+  datahub: ProviderApprovalStatus
+  gmpl: ProviderApprovalStatus
 }
 
 export interface SupplierSku {

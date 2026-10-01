@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import type { Network } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { DatahubClient } from '../supplier/datahub.client'
 import { GmplClient } from '../supplier/gmpl.client'
@@ -24,7 +25,19 @@ import type { SupplierProviderCode } from '../settings/settings.service'
  * a real, working API call (`precheckBeneficiary(..., record: true)`, see
  * `GmplClient`'s own doc comment on how that was confirmed).
  *
- * Three operations, each split by provider:
+ * **Consolidated, not two independent queues.** A number is only truly clear
+ * once every provider that could actually serve its network has approved it,
+ * not just whichever one happened to refuse the sale first. Routing can move
+ * a network from one provider to the other at any time, and an MTN number
+ * DataHub approved means nothing to GMPL, which has never heard of it. So the
+ * moment a number needs approving anywhere, a row is ensured for every
+ * applicable provider (`ensureCounterparts`), `pending()` reports a number as
+ * still outstanding if ANY applicable provider has not approved it, and
+ * `submit`/`recheck` act on every applicable provider at once — but each
+ * provider's own already-approved row is skipped, never resubmitted or
+ * re-asked once it has already said yes.
+ *
+ * Three operations, each covering both applicable providers at once:
  *
  *  · **pending**, who is waiting, how many orders each is holding up, and how
  *    much of the customers' money is parked against them.
@@ -40,6 +53,85 @@ import type { SupplierProviderCode } from '../settings/settings.service'
 const RECHECK_MARKER = 'beneficiaryRecheckAt'
 const RECHECK_COOLDOWN_MS = 60_000
 
+/**
+ * DataHub's own networkKey vocabulary, mapped back to the generic network it
+ * represents. `mtn_xpress` is an alternate MTN product line, still MTN.
+ * Needed only to figure out whether a DataHub row's network could also apply
+ * to GMPL, never to pick which exact DataHub SKU a counterpart row belongs
+ * to (DataHub rows are only ever read here, never invented from a GMPL one,
+ * see `datahubNetworkKeyFor`).
+ */
+const DATAHUB_KEY_TO_NETWORK: Record<string, Network> = {
+  YELLO: 'MTN',
+  mtn_xpress: 'MTN',
+  TELECEL: 'Telecel',
+  AT_PREMIUM: 'AirtelTigo',
+  AT_BIGTIME: 'AirtelTigo',
+}
+
+/** The generic network a `BeneficiaryRequest` row represents, from its own provider-specific `networkKey`. Null for a DataHub key this platform does not recognise, rather than guessing. */
+function networkFor(provider: SupplierProviderCode, networkKey: string): Network | null {
+  if (provider === 'gmpl') return networkKey === 'TELECEL' ? 'Telecel' : 'MTN'
+  return DATAHUB_KEY_TO_NETWORK[networkKey] ?? null
+}
+
+/**
+ * The DataHub networkKey to use when creating a counterpart DataHub row from
+ * a GMPL one. Only ever reached for MTN/Telecel, GMPL never sells
+ * AirtelTigo, see `applicableProviders`. Defaults to `YELLO` for MTN, the
+ * same fallback `noteApprovalNeeded` already uses when a product's own
+ * networkKey is missing, there is no way to know from a GMPL row alone
+ * whether a number was ever meant for DataHub's `mtn_xpress` line instead of
+ * their ordinary one, and `YELLO` is the common case.
+ */
+export function datahubNetworkKeyFor(network: Network): string {
+  return network === 'Telecel' ? 'TELECEL' : 'YELLO'
+}
+
+/** Which providers could ever serve this network at all. GMPL sells MTN and Telecel only. */
+function applicableProviders(network: Network): SupplierProviderCode[] {
+  return network === 'AirtelTigo' ? ['datahub-gh'] : ['datahub-gh', 'gmpl']
+}
+
+export interface ProviderApprovalStatus {
+  /**
+   * `'pending'` means specifically "has not been sent to this provider yet",
+   * our own action still outstanding. Once it has been sent (GMPL:
+   * `recordedAt` set, DataHub: `copiedAt` set) and the provider has not yet
+   * answered, that is `'awaiting_provider'` instead, a genuinely different
+   * thing: nothing left for anyone here to do but wait. Conflating the two
+   * under one "pending" label read as "still needs sending" even for a
+   * number GMPL had already received and was simply still deciding on.
+   */
+  status: 'approved' | 'awaiting_provider' | 'pending' | 'not_applicable'
+  networkKey: string | null
+  /** DataHub only, see `copiedAt`'s own comment on `PendingApprovalRow`. */
+  copiedAt: string | null
+  /**
+   * GMPL only, the real-API counterpart to `copiedAt`: the last time this
+   * number was actually registered on GMPL's own Pending MTN Approval
+   * queue (their reply confirmed `recorded: true`), not just tracked here
+   * locally. Null means it is sitting in this list but has never actually
+   * reached GMPL yet, the one thing "pending" alone could not tell apart
+   * from "already asked, just not yet answered".
+   */
+  recordedAt: string | null
+}
+
+export interface PendingApprovalRow {
+  phone: string
+  network: Network
+  ordersHeld: number
+  valueHeld: number
+  /** Sales refused, summed across whichever provider(s) actually turned this number away. */
+  attempts: number
+  lastProduct: string | null
+  lastValue: number | null
+  waitingSince: string
+  datahub: ProviderApprovalStatus
+  gmpl: ProviderApprovalStatus
+}
+
 @Injectable()
 export class ApprovalsService {
   private readonly log = new Logger(ApprovalsService.name)
@@ -52,14 +144,142 @@ export class ApprovalsService {
   ) {}
 
   /**
+   * Make sure every phone currently needing approval anywhere has a row for
+   * every provider that could serve its network, not only the one that
+   * actually refused the sale.
+   *
+   * Looked up from whichever row (or held order) already exists for a phone,
+   * never invented from nothing: a phone with no row and no held order has
+   * never needed approving at all, and is correctly left alone. A missing
+   * counterpart is created with `attempts: 0`, it has not actually refused
+   * any sale of its own, only the provider that holds the real row has, and
+   * claiming otherwise would overstate demand on a screen sorted by exactly
+   * that figure.
+   *
+   * Safe to call on every read, not just before acting: it only ever fills
+   * in a genuinely missing row, `createMany` with `skipDuplicates` makes a
+   * second call for the same phone a no-op, and an existing row, approved or
+   * not, is never touched.
+   *
+   * Deliberately NOT filtered to `approvedAt: null`: a number already
+   * approved at DataHub says nothing about GMPL, routing can move it there
+   * at any time, and most of these rows predate GMPL existing as a provider
+   * at all. Filtering to only-still-pending rows here would make every one
+   * of those permanently invisible to this whole consolidation, exactly
+   * the numbers it most needs to catch up on.
+   */
+  private async ensureCounterparts(): Promise<void> {
+    const rows = await this.prisma.beneficiaryRequest.findMany({
+      select: { phone: true, provider: true, networkKey: true },
+    })
+
+    const byPhone = new Map<string, { provider: SupplierProviderCode; networkKey: string }[]>()
+    for (const row of rows) {
+      const list = byPhone.get(row.phone) ?? []
+      list.push({ provider: row.provider as SupplierProviderCode, networkKey: row.networkKey })
+      byPhone.set(row.phone, list)
+    }
+
+    const toCreate: { phone: string; provider: SupplierProviderCode; networkKey: string }[] = []
+    for (const [phone, entries] of byPhone) {
+      const present = new Set(entries.map((e) => e.provider))
+      // Resolved from whichever entry is recognisable; two conflicting
+      // networks for the same phone across providers cannot happen, a
+      // number is one person's one line.
+      const network = entries.map((e) => networkFor(e.provider, e.networkKey)).find((n) => n !== null)
+      if (!network) continue
+
+      for (const provider of applicableProviders(network)) {
+        if (present.has(provider)) continue
+        toCreate.push({
+          phone,
+          provider,
+          networkKey: provider === 'gmpl' ? toGmplNetworkKey(network) : datahubNetworkKeyFor(network),
+        })
+      }
+    }
+
+    if (toCreate.length === 0) return
+
+    const datahubRows = toCreate.filter((r) => r.provider === 'datahub-gh')
+    const gmplRows = toCreate.filter((r) => r.provider === 'gmpl')
+
+    // DataHub: no live call possible, their own submission endpoint is
+    // broken (see the class doc comment), only the tracking row so it
+    // shows up to copy into their dashboard by hand.
+    if (datahubRows.length > 0) {
+      await this.prisma.beneficiaryRequest.createMany({
+        data: datahubRows.map((row) => ({ ...row, attempts: 0 })),
+        skipDuplicates: true,
+      })
+    }
+
+    /**
+     * GMPL: a real, working API call, registered the moment the gap is
+     * first discovered, not left as a locally-tracked row nobody told them
+     * about. This is what makes a number that has been sitting here since
+     * before this consolidation existed (DataHub-only, from before GMPL
+     * was even a provider) actually reach GMPL's own Pending MTN Approval
+     * queue the next time this screen loads, rather than waiting on an
+     * admin to separately click "Try sending automatically". Only ever
+     * fires once per gap: the row this creates means `present.has('gmpl')`
+     * is true on every call after, so there is no repeat traffic once a
+     * number has been caught up.
+     */
+    if (gmplRows.length > 0) {
+      const byNetwork = new Map<string, string[]>()
+      for (const row of gmplRows) {
+        const list = byNetwork.get(row.networkKey) ?? []
+        list.push(row.phone)
+        byNetwork.set(row.networkKey, list)
+      }
+
+      const created: {
+        phone: string
+        provider: SupplierProviderCode
+        networkKey: string
+        attempts: number
+        approvedAt: Date | null
+        recordedAt: Date | null
+      }[] = []
+      for (const [network, phones] of byNetwork) {
+        const result = await this.gmpl
+          .precheckBeneficiary(network as 'MTN' | 'TELECEL', phones, true)
+          .catch(() => null)
+        for (const phone of phones) {
+          const entry = result?.kind === 'ok' ? result.results.find((r) => r.phone === phone) : null
+          // Same "do not trust a bypassed response" guard as everywhere
+          // else this platform reads a GMPL `known`, see
+          // `GmplClient.precheckBeneficiary`'s own doc comment.
+          const genuinelyKnown = Boolean(result?.kind === 'ok' && result.enforced && entry?.known)
+          created.push({
+            phone,
+            provider: 'gmpl',
+            networkKey: network,
+            attempts: 0,
+            approvedAt: genuinelyKnown ? new Date() : null,
+            recordedAt: result?.kind === 'ok' && result.recorded ? new Date() : null,
+          })
+        }
+        if (!result || result.kind !== 'ok') {
+          this.log.warn(`could not register ${phones.length} historical number(s) with GMPL on ${network}`)
+        }
+      }
+      await this.prisma.beneficiaryRequest.createMany({ data: created, skipDuplicates: true })
+    }
+  }
+
+  /**
    * Everyone waiting, with the money each is holding up, across both
-   * providers.
+   * providers, consolidated to one row per phone.
    *
    * Ordered by value held rather than by age: the number blocking GHS 200 of
    * paid orders is the one worth approving first, and it is also the one whose
    * customers are most likely to ask for their money back.
    */
-  async pending() {
+  async pending(): Promise<PendingApprovalRow[]> {
+    await this.ensureCounterparts()
+
     const held = await this.prisma.order.findMany({
       where: { status: 'awaiting_approval' },
       select: {
@@ -71,27 +291,17 @@ export class ApprovalsService {
       },
     })
 
-    const registry = await this.prisma.beneficiaryRequest.findMany({
-      where: { approvedAt: null },
-    })
+    const registry = await this.prisma.beneficiaryRequest.findMany()
 
-    /**
-     * A held order carries no `provider` of its own, only the SKU it was
-     * frozen against at sale time — resolved the same way every other
-     * provider-aware read in this codebase is, never denormalized.
-     */
     const providerByOrder = new Map<string, SupplierProviderCode>()
     for (const order of held) {
       providerByOrder.set(order.recipient, await resolveSupplierProvider(this.prisma, order.supplierCodeAtSale))
     }
 
-    const key = (phone: string, provider: string) => `${phone}:${provider}`
-
-    const byKey = new Map<
+    const byPhone = new Map<
       string,
       {
         phone: string
-        provider: SupplierProviderCode
         ordersHeld: number
         valueHeld: number
         lastProduct: string | null
@@ -101,18 +311,15 @@ export class ApprovalsService {
     >()
 
     for (const order of held) {
-      const provider = providerByOrder.get(order.recipient) ?? 'datahub-gh'
-      const k = key(order.recipient, provider)
-      const row = byKey.get(k)
+      const row = byPhone.get(order.recipient)
       if (row) {
         row.ordersHeld++
         row.valueHeld += order.salePrice
         if (order.createdAt < row.oldest) row.oldest = order.createdAt
         continue
       }
-      byKey.set(k, {
+      byPhone.set(order.recipient, {
         phone: order.recipient,
-        provider,
         ordersHeld: 1,
         valueHeld: order.salePrice,
         lastProduct: order.productName,
@@ -121,66 +328,79 @@ export class ApprovalsService {
       })
     }
 
-    /**
-     * Most rows now have no held order at all, and that is the point.
-     *
-     * A sale to an unapproved number is refused before it is created, so nothing
-     * is charged and nothing is held, which means `ordersHeld` and `valueHeld`
-     * are zero for every number refused that way. The demand shows up as
-     * `attempts` instead: how many times somebody tried and was turned away. That
-     * is the number worth sorting by, because it is the sales this is costing.
-     *
-     * Rows with a held order still exist: orders placed before the block, and
-     * orders whose dispatch came back `needs_approval` after payment.
-     */
+    const registryByPhone = new Map<string, typeof registry>()
     for (const entry of registry) {
-      const k = key(entry.phone, entry.provider)
-      if (byKey.has(k)) continue
-      byKey.set(k, {
-        phone: entry.phone,
-        provider: entry.provider as SupplierProviderCode,
+      const list = registryByPhone.get(entry.phone) ?? []
+      list.push(entry)
+      registryByPhone.set(entry.phone, list)
+    }
+
+    for (const [phone, entries] of registryByPhone) {
+      if (byPhone.has(phone)) continue
+      // Most recently attempted entry stands in for product/value context.
+      const latest = entries.reduce((a, b) => (a.lastSeenAt > b.lastSeenAt ? a : b))
+      byPhone.set(phone, {
+        phone,
         ordersHeld: 0,
         valueHeld: 0,
-        lastProduct: entry.lastProduct,
-        lastValue: entry.lastValue,
-        oldest: entry.lastSeenAt,
+        lastProduct: latest.lastProduct,
+        lastValue: latest.lastValue,
+        oldest: latest.lastSeenAt,
       })
     }
 
-    const networkKeys = new Map(registry.map((row) => [key(row.phone, row.provider), row.networkKey]))
-    const attemptsBy = new Map(registry.map((row) => [key(row.phone, row.provider), row.attempts]))
-    const copiedAtBy = new Map(registry.map((row) => [key(row.phone, row.provider), row.copiedAt]))
+    const results: PendingApprovalRow[] = []
+    for (const row of byPhone.values()) {
+      const entries = registryByPhone.get(row.phone) ?? []
+      const network = entries
+        .map((e) => networkFor(e.provider as SupplierProviderCode, e.networkKey))
+        .find((n) => n !== null)
+      // No recognisable network and no registry entry at all, just a held
+      // order older than this tracking, resolved via the order's own
+      // provider instead.
+      const resolvedNetwork: Network = network ?? 'MTN'
 
-    return [...byKey.values()]
-      .sort(
-        (a, b) =>
-          // Money actually held first, then the number of refused sales. Both
-          // matter, and with the block in place the second is usually all there is.
-          b.valueHeld - a.valueHeld ||
-          (attemptsBy.get(key(b.phone, b.provider)) ?? 0) - (attemptsBy.get(key(a.phone, a.provider)) ?? 0) ||
-          b.ordersHeld - a.ordersHeld,
-      )
-      .map((row) => ({
+      const statusFor = (provider: SupplierProviderCode): ProviderApprovalStatus => {
+        if (!applicableProviders(resolvedNetwork).includes(provider)) {
+          return { status: 'not_applicable', networkKey: null, copiedAt: null, recordedAt: null }
+        }
+        const entry = entries.find((e) => e.provider === provider)
+        const copiedAt = provider === 'datahub-gh' ? (entry?.copiedAt?.toISOString() ?? null) : null
+        const recordedAt = provider === 'gmpl' ? (entry?.recordedAt?.toISOString() ?? null) : null
+        const sent = Boolean(copiedAt ?? recordedAt)
+        return {
+          status: entry?.approvedAt ? 'approved' : sent ? 'awaiting_provider' : 'pending',
+          networkKey: entry?.networkKey ?? null,
+          copiedAt,
+          recordedAt,
+        }
+      }
+
+      const datahub = statusFor('datahub-gh')
+      const gmpl = statusFor('gmpl')
+      // Fully resolved: nothing applicable is still outstanding. Dropped
+      // from the list entirely, this is the point. "Awaiting the provider"
+      // still counts as outstanding, sent does not mean settled.
+      const settled = (s: ProviderApprovalStatus['status']) => s === 'approved' || s === 'not_applicable'
+      if (settled(datahub.status) && settled(gmpl.status)) continue
+
+      results.push({
         phone: row.phone,
-        provider: row.provider,
-        networkKey: networkKeys.get(key(row.phone, row.provider)) ?? 'YELLO',
+        network: resolvedNetwork,
         ordersHeld: row.ordersHeld,
         valueHeld: row.valueHeld,
-        /** How many sales this number has been refused. */
-        attempts: attemptsBy.get(key(row.phone, row.provider)) ?? 0,
+        attempts: entries.reduce((sum, e) => sum + e.attempts, 0),
         lastProduct: row.lastProduct,
         lastValue: row.lastValue,
         waitingSince: row.oldest.toISOString(),
-        /**
-         * Last time this specific number was copied to hand to DataHub's
-         * dashboard by hand — DataHub only, GMPL's own submission is an API
-         * call (see `submit`), never a copy-paste step. Null for a GMPL row
-         * always, and for a DataHub row that has never been copied, which is
-         * exactly the number that's easy to lose track of once a few more
-         * have come in since the last copy, see `pending`'s own callers.
-         */
-        copiedAt: copiedAtBy.get(key(row.phone, row.provider))?.toISOString() ?? null,
-      }))
+        datahub,
+        gmpl,
+      })
+    }
+
+    return results.sort(
+      (a, b) => b.valueHeld - a.valueHeld || b.attempts - a.attempts || b.ordersHeld - a.ordersHeld,
+    )
   }
 
   /**
@@ -191,15 +411,11 @@ export class ApprovalsService {
    * number that just showed up look identical in the list otherwise, and a
    * few numbers in either direction is enough to lose track of which is
    * which by memory alone. This is the checkpoint, not a claim about
-   * DataHub's side, just "this one was handed over, and when." DataHub only:
-   * see `pending`'s own comment on why `copiedAt` never applies to a GMPL row.
+   * DataHub's side, just "this one was handed over, and when."
    *
-   * A plain `updateMany`, not an upsert: every phone shown on the approvals
-   * screen already has a `BeneficiaryRequest` row from the moment a sale to
-   * it was first refused or held, so there is nothing to create here, bar
-   * a handful of pre-existing held orders older than that tracking itself,
-   * which this silently no-ops on rather than inventing a row with no real
-   * `networkKey` or attempt count behind it.
+   * A plain `updateMany`, not an upsert: `ensureCounterparts` already
+   * guarantees a DataHub row exists for every number that needs one by the
+   * time this screen can show a copy button for it.
    */
   async markCopied(phones: string[]): Promise<void> {
     if (phones.length === 0) return
@@ -306,6 +522,8 @@ export class ApprovalsService {
       return { checked: 0, approved: [], released: 0, skipped: true, lastCheckedAt: new Date().toISOString() }
     }
 
+    await this.ensureCounterparts()
+
     const waiting = await this.prisma.beneficiaryRequest.findMany({
       where: { approvedAt: null },
       select: { phone: true, networkKey: true, provider: true },
@@ -364,6 +582,17 @@ export class ApprovalsService {
         if (result) this.log.warn(`could not recheck ${phones.length} GMPL number(s) on ${network}: ${result.reason}`)
         continue
       }
+      // `enforced: false` (sandbox, or the kill switch) means every
+      // well-formed number reads `known: true` regardless of its real
+      // status, an honest "nothing is blocking you right now", never a
+      // real decision, see `GmplClient.precheckBeneficiary`'s own doc
+      // comment. Treated the same as "could not check" here: left pending,
+      // not falsely cleared, so this cannot be a way to approve numbers
+      // just by catching GMPL on a sandbox key or with the switch off.
+      if (!result.enforced) {
+        failedChecks.push(...phones)
+        continue
+      }
       for (const entry of result.results) {
         if (!entry.known) continue
         approved.push(entry.phone)
@@ -387,6 +616,13 @@ export class ApprovalsService {
   /**
    * Try to submit the pending numbers through each provider's own API.
    *
+   * Covers every applicable provider for every pending phone, not just
+   * whichever one already has a row, `ensureCounterparts` fills in the rest
+   * first. Each provider's own query already excludes anything it has
+   * already approved (`approvedAt: null`), so a provider that said yes
+   * earlier is never resubmitted, only the one(s) still outstanding for a
+   * given number are ever sent again.
+   *
    * DataHub's half is expected to fail while their upstream is down (see the
    * class doc comment); it returns the reason rather than swallowing it,
    * because "we submitted your number" is exactly the kind of claim that
@@ -397,6 +633,7 @@ export class ApprovalsService {
     datahub: { submitted: number; error: string | null }
     gmpl: { submitted: number; error: string | null }
   }> {
+    await this.ensureCounterparts()
     const [datahub, gmpl] = await Promise.all([this.submitDatahub(), this.submitGmpl()])
     return { datahub, gmpl }
   }
@@ -441,6 +678,12 @@ export class ApprovalsService {
       const result = await this.gmpl.precheckBeneficiary(network as 'MTN' | 'TELECEL', phones, true)
       if (result.kind === 'ok') {
         submitted += phones.length
+        if (result.recorded) {
+          await this.prisma.beneficiaryRequest.updateMany({
+            where: { phone: { in: phones }, provider: 'gmpl' },
+            data: { recordedAt: new Date() },
+          })
+        }
       } else {
         error = result.reason
         this.log.warn(`GMPL beneficiary submission failed for ${network}: ${result.reason}`)
@@ -452,3 +695,8 @@ export class ApprovalsService {
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+/** `Network` in GMPL's own vocabulary, see `toGmplNetwork` in `gmpl.client.ts`, duplicated here to avoid exporting a function from there purely for this reverse lookup's inverse. */
+function toGmplNetworkKey(network: Network): 'MTN' | 'TELECEL' {
+  return network === 'Telecel' ? 'TELECEL' : 'MTN'
+}

@@ -816,6 +816,14 @@ model BeneficiaryRequest {
   /// all, which is exactly the number that's easy to lose track of once a
   /// few more have come in since the last copy, see `ApprovalsService.pending`.
   copiedAt    DateTime? @map("copied_at")
+  /// GMPL only, the real-API counterpart to `copiedAt`: the last time
+  /// `GmplClient.precheckBeneficiary` was called for this number with
+  /// `record: true` and GMPL's own reply confirmed `recorded: true`, not
+  /// just attempted. Null means it is sitting here, tracked, but has never
+  /// actually reached GMPL's own Pending MTN Approval queue yet, the one
+  /// case "pending" alone could not tell apart from "already asked, just
+  /// not yet answered".
+  recordedAt  DateTime? @map("recorded_at")
 
   @@id([phone, provider])
   @@index([approvedAt])

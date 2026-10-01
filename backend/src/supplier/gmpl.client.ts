@@ -47,7 +47,25 @@ export type StatusOutcome =
   | { kind: 'unavailable'; reason: string }
 
 export type PrecheckOutcome =
-  | { kind: 'ok'; results: { phone: string; normalized: string; valid: boolean; known: boolean }[]; recorded: boolean }
+  | {
+      kind: 'ok'
+      results: { phone: string; normalized: string; valid: boolean; known: boolean }[]
+      recorded: boolean
+      /**
+       * False means Up2U is not actually being applied to this response at
+       * all, TELECEL, the kill switch off, or a sandbox key, see their own
+       * docs. Every well-formed number comes back `known: true` in that
+       * case, an honest "nothing is blocking you right now", never proof
+       * MTN approved them. Callers that write `approvedAt` from a `known`
+       * result should treat an `enforced: false` batch as unconfirmed, not
+       * as a real decision.
+       */
+      enforced: boolean
+      /** A sandbox (`ak_test_…`) key never enforces Up2U and never records anything, even with `record: true`. */
+      sandbox: boolean
+      /** False means GMPL is in maintenance; their own docs say not to place the order yet. */
+      acceptingOrders: boolean
+    }
   | { kind: 'unavailable'; reason: string }
 
 export type WalletBalanceOutcome = { kind: 'ok'; balanceCedis: number } | { kind: 'unavailable'; reason: string }
@@ -372,19 +390,26 @@ export class GmplClient {
 
   /**
    * MTN's own "first-time number" precheck (Up2U), their equivalent of
-   * DataHub's beneficiary list. TELECEL never blocks.
+   * DataHub's beneficiary list. TELECEL never blocks. Confirmed against
+   * their own published docs (`POST /agent/beneficiaries/precheck`), not
+   * reverse-engineered.
    *
    * `record` (default `false`) is a purely speculative check when unset:
    * nothing submits a number into GMPL's own approval queue. `record: true`
-   * (used by `ApprovalsService.submit`'s GMPL branch, GMPL's equivalent of
-   * DataHub's broken `/beneficiaries` submission) is meant to actually
-   * register it there — confirmed live against their real sandbox to be
-   * accepted (200, no error) and to echo back a top-level `recorded` flag
-   * matching the request, but the sandbox itself answers every check with
-   * `enforced: false` (it never actually gates or records anything), so
-   * this could not be end-to-end confirmed against a real "was this number
-   * genuinely added to their queue" outcome, only that the parameter and
-   * response shape are real.
+   * is meant to actually register an unknown number there, attributed to
+   * this key's own agent, exactly as a real blocked order would, used both
+   * by `ApprovalsService.submit`'s bulk GMPL branch and by
+   * `OrdersService.verifyRecipient` at the exact moment a sale is refused
+   * for an unknown number, their own docs call this out specifically: call
+   * it before charging, with the real recipient, so a first-time number is
+   * queued for MTN's own approval immediately, not only whenever an admin
+   * next happens to run a bulk resubmit.
+   *
+   * `enforced`/`sandbox` matter because every well-formed number comes back
+   * `known: true` when either is true (or `network` is TELECEL), which is
+   * "nothing is blocking you right now", never "MTN approved these". A
+   * sandbox key never enforces Up2U and never records anything, even with
+   * `record: true`, confirmed live.
    */
   async precheckBeneficiary(
     network: 'MTN' | 'TELECEL',
@@ -392,7 +417,7 @@ export class GmplClient {
     record = false,
   ): Promise<PrecheckOutcome> {
     if (!this.configured) return { kind: 'unavailable', reason: 'No GMPL API key configured.' }
-    if (phoneNumbers.length === 0) return { kind: 'ok', results: [], recorded: false }
+    if (phoneNumbers.length === 0) return { kind: 'ok', results: [], recorded: false, enforced: true, sandbox: this.isTestMode, acceptingOrders: true }
 
     try {
       const response = await this.fetchRepeatable(
@@ -407,12 +432,33 @@ export class GmplClient {
         2,
       )
       const body = (await response.json().catch(() => ({}))) as GmplEnvelope & {
-        data?: { results?: { phone: string; normalized: string; valid: boolean; known: boolean }[]; recorded?: boolean }
+        data?: {
+          results?: { phone: string; normalized: string; valid: boolean; known: boolean }[]
+          recorded?: boolean
+          enforced?: boolean
+          sandbox?: boolean
+          platform?: { acceptingOrders?: boolean }
+        }
       }
       if (!response.ok || body.success === false || !Array.isArray(body.data?.results)) {
         return { kind: 'unavailable', reason: gmplErrorReason(body, `HTTP ${response.status}`) }
       }
-      return { kind: 'ok', results: body.data.results, recorded: body.data.recorded === true }
+      const enforced = body.data.enforced !== false
+      const sandbox = body.data.sandbox === true
+      if (sandbox || !enforced) {
+        this.log.warn(
+          `GMPL precheck on ${network}: ${sandbox ? 'sandbox key' : 'Up2U not enforced'}, ` +
+            `every well-formed number reads known:true regardless of its real status`,
+        )
+      }
+      return {
+        kind: 'ok',
+        results: body.data.results,
+        recorded: body.data.recorded === true,
+        enforced,
+        sandbox,
+        acceptingOrders: body.data.platform?.acceptingOrders !== false,
+      }
     } catch (error) {
       this.log.warn(`could not precheck ${phoneNumbers.length} number(s) on ${network}: ${String(error)}`)
       return { kind: 'unavailable', reason: String(error) }

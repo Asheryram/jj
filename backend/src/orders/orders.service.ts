@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { randomInt } from 'node:crypto'
-import { Prisma, type Order, type OrderStatus } from '@prisma/client'
+import { Prisma, type Network, type Order, type OrderStatus } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { PricingService } from '../pricing/pricing.service'
 import { SettingsService } from '../settings/settings.service'
@@ -9,6 +9,7 @@ import { PaymentsService } from '../payments/payments.service'
 import { SupplierService, hasAutomatedFulfilment } from '../supplier/supplier.service'
 import { DatahubClient } from '../supplier/datahub.client'
 import { GmplClient, toGmplNetwork } from '../supplier/gmpl.client'
+import { datahubNetworkKeyFor } from './approvals.service'
 import type { SupplierProviderCode } from '../settings/settings.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
@@ -271,14 +272,26 @@ export class OrdersService {
    * a GMPL one — never `product.supplier.networkKey` there, that column
    * holds GMPL's *bundle id* for a GMPL SKU, not a network name.
    */
-  private async noteApprovalNeeded(productId: string, recipient: string): Promise<void> {
+  private async noteApprovalNeeded(
+    productId: string,
+    recipient: string,
+    /**
+     * The GMPL precheck result `verifyRecipient` already made, when this is
+     * the direct GMPL decline, so `recordedAt` can be set from the reply
+     * actually received, never a second, redundant call just to ask the
+     * same question again. Undefined for a DataHub decline, DataHub's own
+     * provider branch has no such reply to pass in.
+     */
+    gmplResult?: { recorded: boolean },
+  ): Promise<void> {
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
       select: { name: true, standardPrice: true, network: true, supplier: { select: { networkKey: true, provider: true } } },
     })
     const provider: SupplierProviderCode = (product?.supplier?.provider as SupplierProviderCode | undefined) ?? 'datahub-gh'
-    const networkKey =
-      provider === 'gmpl' ? toGmplNetwork(product?.network ?? 'MTN') : (product?.supplier?.networkKey ?? 'YELLO')
+    const network: Network = product?.network ?? 'MTN'
+    const networkKey = provider === 'gmpl' ? toGmplNetwork(network) : (product?.supplier?.networkKey ?? 'YELLO')
+    const recordedAt = provider === 'gmpl' && gmplResult?.recorded ? new Date() : undefined
 
     await this.prisma.beneficiaryRequest.upsert({
       where: { phone_provider: { phone: recipient, provider } },
@@ -288,6 +301,7 @@ export class OrdersService {
         networkKey,
         lastProduct: product?.name ?? null,
         lastValue: product?.standardPrice ?? null,
+        recordedAt,
       },
       update: {
         attempts: { increment: 1 },
@@ -295,10 +309,95 @@ export class OrdersService {
         lastValue: product?.standardPrice ?? null,
         // A number approved earlier and refused again is pending once more.
         approvedAt: null,
+        ...(recordedAt ? { recordedAt } : {}),
       },
     })
 
     this.log.warn(`${recipient} needs ${provider === 'gmpl' ? 'GMPL' : 'DataHub'} approval, sale refused`)
+
+    /**
+     * Reach the other provider immediately, not only whenever an admin next
+     * happens to open the Approvals screen (`ApprovalsService.pending`'s own
+     * `ensureCounterparts` is the lazy fallback for everything that is not a
+     * fresh decline, this is the eager path for one that just happened).
+     * Routing can move a network from one provider to the other at any
+     * time, and whichever provider did not see this particular sale
+     * deserves to learn about the number just as promptly as the one that
+     * did, GMPL especially, their own docs ask for the real recipient
+     * before a charge, not whenever we next happen to batch it.
+     *
+     * Deliberately not awaited by the caller: this customer is being told
+     * "declined" based on the provider that actually declined them, right
+     * now, a second live call to a provider they are not even buying from
+     * must not add its own latency to that response. Errors are logged,
+     * never surfaced, the lazy fallback in `ApprovalsService` still catches
+     * anything missed here the next time the Approvals screen loads.
+     */
+    void this.registerWithOtherProvider(provider, network, recipient).catch((error: unknown) =>
+      this.log.error(`${recipient}: failed to register with the other provider, ${String(error)}`),
+    )
+  }
+
+  /**
+   * The counterpart half of `noteApprovalNeeded`: tell whichever provider
+   * did NOT just decline this sale about the number too.
+   *
+   * Only for MTN/Telecel, GMPL never sells AirtelTigo, so DataHub is the
+   * only provider that could ever need to know about one of those, and it
+   * already does (the branch that called this). Skipped entirely if a row
+   * for the other provider already exists, an existing row (approved or
+   * not) already reflects whatever that provider has actually said, and
+   * must never be reset by a sale it was never asked about.
+   */
+  private async registerWithOtherProvider(
+    provider: SupplierProviderCode,
+    network: Network,
+    recipient: string,
+  ): Promise<void> {
+    if (network === 'AirtelTigo') return
+    const other: SupplierProviderCode = provider === 'gmpl' ? 'datahub-gh' : 'gmpl'
+
+    const existing = await this.prisma.beneficiaryRequest.findUnique({
+      where: { phone_provider: { phone: recipient, provider: other } },
+    })
+    if (existing) return
+
+    if (other === 'gmpl') {
+      // A real, working API call, `record: true` registers it on their own
+      // Pending MTN Approval queue immediately. If they already know this
+      // number (e.g. it was never actually new to them), the row is created
+      // pre-approved rather than falsely parked as pending.
+      const gmplNetwork = toGmplNetwork(network)
+      const result = await this.gmpl.precheckBeneficiary(gmplNetwork, [recipient], true)
+      // `enforced` false (sandbox, or the kill switch) means `known: true`
+      // is an honest "nothing is blocking you right now", never a real
+      // decision, see `GmplClient.precheckBeneficiary`'s own doc comment.
+      // Pre-approving off that would be wrong the moment a live key, or a
+      // re-enabled switch, starts actually enforcing Up2U again.
+      const genuinelyKnown = result.kind === 'ok' && result.enforced && (result.results[0]?.known ?? false)
+      await this.prisma.beneficiaryRequest.createMany({
+        data: [
+          {
+            phone: recipient,
+            provider: 'gmpl',
+            networkKey: gmplNetwork,
+            attempts: 0,
+            approvedAt: genuinelyKnown ? new Date() : null,
+            recordedAt: result.kind === 'ok' && result.recorded ? new Date() : null,
+          },
+        ],
+        skipDuplicates: true,
+      })
+    } else {
+      // DataHub's own submission endpoint is broken (502 on every valid
+      // request, see `ApprovalsService`'s own class comment), there is no
+      // live call to make here, only the tracking row so it shows up for
+      // an admin to copy into their dashboard by hand.
+      await this.prisma.beneficiaryRequest.createMany({
+        data: [{ phone: recipient, provider: 'datahub-gh', networkKey: datahubNetworkKeyFor(network), attempts: 0 }],
+        skipDuplicates: true,
+      })
+    }
   }
 
   /**
@@ -942,7 +1041,21 @@ export class OrdersService {
       // never blocks, so nothing here is worth asking about.
       if (supplier.network !== 'MTN') return { checked: false, verified: true, message: '' }
 
-      const result = await this.gmpl.precheckBeneficiary('MTN', [recipient])
+      /**
+       * `record: true`: their own docs are explicit that this is meant to
+       * be called with the real recipient right before charging, so an
+       * unknown number reaches MTN's own approval queue the moment it is
+       * discovered, not only whenever an admin next happens to run a bulk
+       * resubmit from the Approvals screen. Confirmed against their
+       * published docs, not reverse-engineered.
+       */
+      const result = await this.gmpl.precheckBeneficiary('MTN', [recipient], true)
+      // Maintenance: their own docs say not to place the order yet, same
+      // "provider outage is not the customer's fault" treatment as an
+      // unreachable check below, not a refusal.
+      if (result.kind === 'ok' && !result.acceptingOrders) {
+        return { checked: false, verified: true, message: '' }
+      }
       const entry = result.kind === 'ok' ? result.results[0] : null
       if (entry && entry.valid && !entry.known) {
         // Same reasoning as the DataHub refusal below: this is the only
@@ -950,8 +1063,8 @@ export class OrdersService {
         // here, into the same `BeneficiaryRequest` table (now provider-aware,
         // see `noteApprovalNeeded`), or GMPL's own queue is just as invisible
         // to an admin as DataHub's would be if this call were skipped.
-        await this.noteApprovalNeeded(productId, recipient).catch((error: unknown) =>
-          this.log.error(`${recipient}: failed to record approval-needed, ${String(error)}`),
+        await this.noteApprovalNeeded(productId, recipient, { recorded: result.kind === 'ok' && result.recorded }).catch(
+          (error: unknown) => this.log.error(`${recipient}: failed to record approval-needed, ${String(error)}`),
         )
         return {
           checked: true,
