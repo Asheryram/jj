@@ -375,6 +375,8 @@ export interface NeedsAttentionOrder {
    * "still stuck, needs a delivered/rejected decision" case.
    */
   conflict: boolean
+  /** Which actual supplier this order is stuck at or was flagged against. */
+  provider: 'datahub-gh' | 'gmpl'
 }
 
 /**
@@ -908,6 +910,12 @@ export interface ProviderApprovalStatus {
    * answered". Always null for DataHub, `copiedAt` is their equivalent.
    */
   recordedAt: string | null
+  /**
+   * GMPL only: why the last send attempt did not succeed, so a "Not sent"
+   * badge can say why instead of just that it happened. Null once a send
+   * actually succeeds. Always null for DataHub.
+   */
+  lastSendError: string | null
 }
 
 /** One phone number, consolidated across both providers: it is only truly clear once every provider that could serve its network has approved it, not just whichever one refused the sale first. */

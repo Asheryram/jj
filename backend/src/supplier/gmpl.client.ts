@@ -484,6 +484,28 @@ export function toGmplNetwork(network: string): 'MTN' | 'TELECEL' {
   return network === 'Telecel' ? 'TELECEL' : 'MTN'
 }
 
+/**
+ * What a `record: true` precheck attempt means for the row it was about:
+ * `recordedAt` only ever moves forward on a confirmed success, and
+ * `lastSendError` holds why the most recent attempt did not, so "why is this
+ * still Pending" has a real answer sitting in the data, not only a server
+ * log that may already be gone by the time anyone asks. Every write site
+ * that calls `precheckBeneficiary(..., true)` reads its outcome through
+ * this, so the reasons recorded are consistent no matter which caller hit
+ * the failure.
+ */
+export function gmplSendOutcome(result: PrecheckOutcome): { recordedAt: Date | null; lastSendError: string | null } {
+  if (result.kind !== 'ok') return { recordedAt: null, lastSendError: result.reason }
+  if (result.recorded) return { recordedAt: new Date(), lastSendError: null }
+  if (result.sandbox) {
+    return { recordedAt: null, lastSendError: 'Not recorded: this is a sandbox GMPL key, which never records a real registration.' }
+  }
+  if (!result.enforced) {
+    return { recordedAt: null, lastSendError: 'Not recorded: Up2U is not enforced right now (TELECEL, or the kill switch is off).' }
+  }
+  return { recordedAt: null, lastSendError: 'GMPL answered the check but did not confirm recording it.' }
+}
+
 export function mapGmplOrderStatus(status: string): 'completed' | 'failed' | null {
   switch (status.toLowerCase()) {
     case 'delivered':

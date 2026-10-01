@@ -15,6 +15,7 @@ import {
   Field,
   Modal,
   PageHead,
+  ProviderChip,
   Spinner,
   TextInput,
 } from '../../components/ui'
@@ -238,6 +239,7 @@ export default function NeedsAttention() {
                   <p className="flex items-center gap-2 font-semibold text-slate-900 dark:text-slate-50">
                     {row.reference} · {row.productName} · {cedis(row.salePrice)}
                     <Badge tone="danger">Conflict</Badge>
+                    <ProviderChip provider={row.provider} />
                   </p>
                   <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">{row.reason}</p>
                   <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
@@ -305,6 +307,7 @@ export default function NeedsAttention() {
                     <p className="flex flex-wrap items-center gap-2 font-semibold text-slate-900 dark:text-slate-50">
                       {row.reference} · {row.productName} · {cedis(row.salePrice)}
                       <Badge tone={style.badgeTone}>{style.badgeLabel}</Badge>
+                      <ProviderChip provider={row.provider} />
                       {manualTicket && (
                         <span className="inline-flex items-center gap-1">
                           <span className="font-mono font-bold text-amber-600 dark:text-amber-400">

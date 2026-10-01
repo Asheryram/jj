@@ -378,6 +378,16 @@ function StatusBadge({ status }: { status: ProviderApprovalStatus }) {
   // their decision, genuinely different from "Pending", which means it has
   // not even been sent yet.
   if (status.status === 'awaiting_provider') return <Badge tone="info">Awaiting answer</Badge>
+  // GMPL only (`lastSendError` is always null for DataHub): why the last
+  // attempt to send this one did not go through, so "why is this still
+  // Pending" has a real answer on hover instead of needing a server log.
+  if (status.lastSendError) {
+    return (
+      <span title={status.lastSendError}>
+        <Badge tone="danger">Pending</Badge>
+      </span>
+    )
+  }
   return <Badge tone="danger">Pending</Badge>
 }
 

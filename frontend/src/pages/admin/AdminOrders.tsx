@@ -13,6 +13,7 @@ import {
   EmptyState,
   NetworkChip,
   PageHead,
+  ProviderChip,
   Segmented,
   StatTile,
   Spinner,
@@ -316,6 +317,7 @@ export default function AdminOrders() {
       'Buyer',
       'Product',
       'Network',
+      'Provider',
       'Recipient',
       'Customer paid',
       'Paystack fee',
@@ -342,6 +344,7 @@ export default function AdminOrders() {
         o.buyer,
         o.productName,
         o.network ?? 'All',
+        o.provider === 'gmpl' ? 'GMPL' : 'DataHub',
         o.recipient,
         (o.salePrice / 100).toFixed(2),
         o.paystackFee == null ? '' : (o.paystackFee / 100).toFixed(2),
@@ -556,6 +559,7 @@ export default function AdminOrders() {
                         </p>
                         <div className="mt-1 flex items-center gap-2">
                           <NetworkChip network={order.network} />
+                          {order.provider && <ProviderChip provider={order.provider} />}
                           <span className="tabular text-xs text-slate-500 dark:text-slate-400">
                             {order.reference}
                           </span>
@@ -641,6 +645,7 @@ export default function AdminOrders() {
                       <p className="font-medium text-slate-900 dark:text-slate-50">{order.productName}</p>
                       <div className="mt-1 flex items-center gap-2">
                         <NetworkChip network={order.network} />
+                        {order.provider && <ProviderChip provider={order.provider} />}
                         <span className="tabular text-xs text-slate-500 dark:text-slate-400">{order.reference}</span>
                       </div>
                     </Td>
@@ -857,7 +862,11 @@ function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void 
       {order.fulfilmentReference === 'code' && (
         <span
           className="ml-1.5 inline-block"
-          title="DataHub's automated system handled this one, a plain reference, not routed to a person."
+          // A real reference that isn't `manual_`-prefixed: DataHub's own
+          // automated path, or simply any GMPL order at all, GMPL has no
+          // manual queue of its own, so every one of its references lands
+          // here (see `fulfilmentReference`'s own comment).
+          title={`${order.provider === 'gmpl' ? 'GMPL' : "DataHub's automated system"} handled this one, a plain reference, not routed to a person.`}
         >
           <Badge tone="neutral">Code</Badge>
         </span>

@@ -8,7 +8,7 @@ import { FulfilmentService } from './fulfilment.service'
 import { PaymentsService } from '../payments/payments.service'
 import { SupplierService, hasAutomatedFulfilment } from '../supplier/supplier.service'
 import { DatahubClient } from '../supplier/datahub.client'
-import { GmplClient, toGmplNetwork } from '../supplier/gmpl.client'
+import { GmplClient, gmplSendOutcome, toGmplNetwork } from '../supplier/gmpl.client'
 import { datahubNetworkKeyFor } from './approvals.service'
 import type { SupplierProviderCode } from '../settings/settings.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
@@ -277,12 +277,12 @@ export class OrdersService {
     recipient: string,
     /**
      * The GMPL precheck result `verifyRecipient` already made, when this is
-     * the direct GMPL decline, so `recordedAt` can be set from the reply
-     * actually received, never a second, redundant call just to ask the
-     * same question again. Undefined for a DataHub decline, DataHub's own
-     * provider branch has no such reply to pass in.
+     * the direct GMPL decline, so `recordedAt`/`lastSendError` can be set
+     * from the reply actually received, never a second, redundant call just
+     * to ask the same question again. Undefined for a DataHub decline,
+     * DataHub's own provider branch has no such reply to pass in.
      */
-    gmplResult?: { recorded: boolean },
+    gmplOutcome?: { recordedAt: Date | null; lastSendError: string | null },
   ): Promise<void> {
     const product = await this.prisma.product.findUnique({
       where: { id: productId },
@@ -291,7 +291,7 @@ export class OrdersService {
     const provider: SupplierProviderCode = (product?.supplier?.provider as SupplierProviderCode | undefined) ?? 'datahub-gh'
     const network: Network = product?.network ?? 'MTN'
     const networkKey = provider === 'gmpl' ? toGmplNetwork(network) : (product?.supplier?.networkKey ?? 'YELLO')
-    const recordedAt = provider === 'gmpl' && gmplResult?.recorded ? new Date() : undefined
+    const outcome = provider === 'gmpl' ? gmplOutcome : undefined
 
     await this.prisma.beneficiaryRequest.upsert({
       where: { phone_provider: { phone: recipient, provider } },
@@ -301,7 +301,8 @@ export class OrdersService {
         networkKey,
         lastProduct: product?.name ?? null,
         lastValue: product?.standardPrice ?? null,
-        recordedAt,
+        recordedAt: outcome?.recordedAt ?? null,
+        lastSendError: outcome?.lastSendError ?? null,
       },
       update: {
         attempts: { increment: 1 },
@@ -309,7 +310,14 @@ export class OrdersService {
         lastValue: product?.standardPrice ?? null,
         // A number approved earlier and refused again is pending once more.
         approvedAt: null,
-        ...(recordedAt ? { recordedAt } : {}),
+        // A fresh success clears any earlier failure and advances
+        // `recordedAt`; a fresh failure only updates the reason, it must
+        // never blank out a `recordedAt` an earlier attempt already earned.
+        ...(outcome
+          ? outcome.recordedAt
+            ? { recordedAt: outcome.recordedAt, lastSendError: null }
+            : { lastSendError: outcome.lastSendError }
+          : {}),
       },
     })
 
@@ -375,6 +383,7 @@ export class OrdersService {
       // Pre-approving off that would be wrong the moment a live key, or a
       // re-enabled switch, starts actually enforcing Up2U again.
       const genuinelyKnown = result.kind === 'ok' && result.enforced && (result.results[0]?.known ?? false)
+      const { recordedAt, lastSendError } = gmplSendOutcome(result)
       await this.prisma.beneficiaryRequest.createMany({
         data: [
           {
@@ -383,7 +392,8 @@ export class OrdersService {
             networkKey: gmplNetwork,
             attempts: 0,
             approvedAt: genuinelyKnown ? new Date() : null,
-            recordedAt: result.kind === 'ok' && result.recorded ? new Date() : null,
+            recordedAt,
+            lastSendError,
           },
         ],
         skipDuplicates: true,
@@ -838,25 +848,48 @@ export class OrdersService {
       refundCreatedAtByOrderId.set(r.orderId, r.createdAt)
     }
 
+    /**
+     * Which actual supplier fulfilled this sale, DataHub or GMPL, batched
+     * across the whole page rather than one `resolveSupplierProvider` call
+     * per row (this can be up to 2000 rows, see `adminList`). Admin has had
+     * no way to tell the two apart on this screen since GMPL went live,
+     * every order silently read as if DataHub always fulfilled it.
+     */
+    const supplierCodes = [...new Set(rows.map((r) => r.supplierCodeAtSale).filter((c): c is string => Boolean(c)))]
+    const supplierRows =
+      supplierCodes.length > 0
+        ? await this.prisma.supplierProduct.findMany({
+            where: { code: { in: supplierCodes } },
+            select: { code: true, provider: true },
+          })
+        : []
+    const providerByCode = new Map(supplierRows.map((s) => [s.code, s.provider as SupplierProviderCode]))
+    const providerFor = (code: string | null): SupplierProviderCode =>
+      code ? (providerByCode.get(code) ?? 'datahub-gh') : 'datahub-gh'
+
     return rows.map((row) => ({
       ...toOrder(row),
       actualSupplierCost: actualCostByOrderId.get(row.id) ?? null,
       paystackFee: feeByOrderId.get(row.id) ?? null,
+      /** Which supplier actually fulfilled this order, see `providerFor` above. */
+      provider: providerFor(row.supplierCodeAtSale),
       /** See `refundCreatedAtByOrderId` above, null for anything that isn't `failed`. */
       failedAt: row.status === 'failed' ? (refundCreatedAtByOrderId.get(row.id)?.toISOString() ?? null) : null,
       /**
-       * How DataHub routed this specific purchase, not something either side
-       * chose on this platform. A `manual_`-prefixed reference is their own
-       * naming: it means one of their staff has to clear this one by hand,
-       * rather than it going through their automated path (a plain numeric
-       * reference, 'code' below). Nothing about the order or the recipient
-       * predicts which: the exact same bundle to the exact same number has
-       * gone either way on different days. It matters to admin because a
-       * manual-routed order can take many hours longer to settle, and is the
-       * shape most likely to get permanently stuck and need
-       * `resolveManually`. Null until DataHub has actually replied with a
-       * reference at all, distinct from 'code', which is a positive answer,
-       * not just the absence of 'manual'.
+       * How the order's own reference reads, not something either side chose
+       * on this platform. A `manual_`-prefixed reference only ever comes from
+       * DataHub, their own naming for routing one of their staff to clear it
+       * by hand rather than it going through their automated path; GMPL has
+       * no equivalent, so every GMPL reference lands in 'code' instead,
+       * alongside DataHub's own plain, automated ones (check `provider`
+       * above to tell those two apart). Nothing about the order or the
+       * recipient predicts a DataHub 'manual' from a DataHub 'code': the
+       * exact same bundle to the exact same number has gone either way on
+       * different days. It matters to admin because a manual-routed order
+       * can take many hours longer to settle, and is the shape most likely
+       * to get permanently stuck and need `resolveManually`. Null until the
+       * provider has actually replied with a reference at all, distinct from
+       * 'code', which is a positive answer, not just the absence of 'manual'.
        */
       fulfilmentReference: row.providerReference == null
         ? null
@@ -1063,8 +1096,8 @@ export class OrdersService {
         // here, into the same `BeneficiaryRequest` table (now provider-aware,
         // see `noteApprovalNeeded`), or GMPL's own queue is just as invisible
         // to an admin as DataHub's would be if this call were skipped.
-        await this.noteApprovalNeeded(productId, recipient, { recorded: result.kind === 'ok' && result.recorded }).catch(
-          (error: unknown) => this.log.error(`${recipient}: failed to record approval-needed, ${String(error)}`),
+        await this.noteApprovalNeeded(productId, recipient, gmplSendOutcome(result)).catch((error: unknown) =>
+          this.log.error(`${recipient}: failed to record approval-needed, ${String(error)}`),
         )
         return {
           checked: true,

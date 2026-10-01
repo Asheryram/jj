@@ -2,7 +2,7 @@ import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@ne
 import type { Network } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { DatahubClient } from '../supplier/datahub.client'
-import { GmplClient } from '../supplier/gmpl.client'
+import { GmplClient, gmplSendOutcome } from '../supplier/gmpl.client'
 import { FulfilmentService } from './fulfilment.service'
 import { claimTransition } from '../common/alert-flag'
 import { resolveSupplierProvider } from '../supplier/supplier.service'
@@ -129,6 +129,14 @@ export interface ProviderApprovalStatus {
    * from "already asked, just not yet answered".
    */
   recordedAt: string | null
+  /**
+   * GMPL only: why the last `record: true` attempt did not succeed, so
+   * "why is this still Pending" has a real answer instead of depending on
+   * a server log that is usually long gone by the time anyone asks. Null
+   * once a send actually succeeds, see `BeneficiaryRequest.lastSendError`'s
+   * own schema comment.
+   */
+  lastSendError: string | null
 }
 
 export interface PendingApprovalRow {
@@ -280,11 +288,15 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
         attempts: number
         approvedAt: Date | null
         recordedAt: Date | null
+        lastSendError: string | null
       }[] = []
       for (const [network, phones] of byNetwork) {
         const result = await this.gmpl
           .precheckBeneficiary(network as 'MTN' | 'TELECEL', phones, true)
           .catch(() => null)
+        const outcome = result
+          ? gmplSendOutcome(result)
+          : { recordedAt: null, lastSendError: 'Could not reach GMPL to register this number.' }
         for (const phone of phones) {
           const entry = result?.kind === 'ok' ? result.results.find((r) => r.phone === phone) : null
           // Same "do not trust a bypassed response" guard as everywhere
@@ -297,7 +309,8 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
             networkKey: network,
             attempts: 0,
             approvedAt: genuinelyKnown ? new Date() : null,
-            recordedAt: result?.kind === 'ok' && result.recorded ? new Date() : null,
+            recordedAt: outcome.recordedAt,
+            lastSendError: outcome.lastSendError,
           })
         }
         if (!result || result.kind !== 'ok') {
@@ -404,17 +417,19 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
 
       const statusFor = (provider: SupplierProviderCode): ProviderApprovalStatus => {
         if (!applicableProviders(resolvedNetwork).includes(provider)) {
-          return { status: 'not_applicable', networkKey: null, copiedAt: null, recordedAt: null }
+          return { status: 'not_applicable', networkKey: null, copiedAt: null, recordedAt: null, lastSendError: null }
         }
         const entry = entries.find((e) => e.provider === provider)
         const copiedAt = provider === 'datahub-gh' ? (entry?.copiedAt?.toISOString() ?? null) : null
         const recordedAt = provider === 'gmpl' ? (entry?.recordedAt?.toISOString() ?? null) : null
+        const lastSendError = provider === 'gmpl' ? (entry?.lastSendError ?? null) : null
         const sent = Boolean(copiedAt ?? recordedAt)
         return {
           status: entry?.approvedAt ? 'approved' : sent ? 'awaiting_provider' : 'pending',
           networkKey: entry?.networkKey ?? null,
           copiedAt,
           recordedAt,
+          lastSendError,
         }
       }
 
@@ -730,6 +745,18 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
     const waiting = await this.prisma.beneficiaryRequest.findMany({
       where: { approvedAt: null, provider: 'gmpl' },
       select: { phone: true, networkKey: true },
+      /**
+       * Never-sent rows (`recordedAt: null`) first. Without this, a backlog
+       * bigger than one batch starves forever: the same already-recorded
+       * rows (sitting in GMPL's own queue, just awaiting their decision)
+       * keep winning this batch's 30 slots on every call, a truly
+       * never-sent number past them never gets its first attempt, no matter
+       * how many times this is re-run, since resubmitting an already-sent
+       * one is redundant but costs a slot a never-sent one actually needs.
+       * Confirmed live: a real backlog of 43 left the same 5 unreached
+       * across two manual resends in a row before this fix.
+       */
+      orderBy: { recordedAt: { sort: 'asc', nulls: 'first' } },
       take: 30,
     })
     if (waiting.length === 0) return { submitted: 0, error: null }
@@ -745,18 +772,23 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
     let error: string | null = null
     for (const [network, phones] of byNetwork) {
       const result = await this.gmpl.precheckBeneficiary(network as 'MTN' | 'TELECEL', phones, true)
+      const outcome = gmplSendOutcome(result)
       if (result.kind === 'ok') {
         submitted += phones.length
-        if (result.recorded) {
-          await this.prisma.beneficiaryRequest.updateMany({
-            where: { phone: { in: phones }, provider: 'gmpl' },
-            data: { recordedAt: new Date() },
-          })
-        }
       } else {
         error = result.reason
         this.log.warn(`GMPL beneficiary submission failed for ${network}: ${result.reason}`)
       }
+      // Written either way, not just on success: a failed attempt's reason
+      // belongs on the row too, see `BeneficiaryRequest.lastSendError`'s own
+      // schema comment, this is the one write site that previously left a
+      // failure invisible once the request finished.
+      await this.prisma.beneficiaryRequest.updateMany({
+        where: { phone: { in: phones }, provider: 'gmpl' },
+        data: outcome.recordedAt
+          ? { recordedAt: outcome.recordedAt, lastSendError: null }
+          : { lastSendError: outcome.lastSendError },
+      })
     }
     if (submitted > 0) this.log.log(`submitted ${submitted} number(s) to GMPL for approval`)
     return { submitted, error }

@@ -824,6 +824,13 @@ model BeneficiaryRequest {
   /// case "pending" alone could not tell apart from "already asked, just
   /// not yet answered".
   recordedAt  DateTime? @map("recorded_at")
+  /// GMPL only: why the last attempt to send this to their real queue did
+  /// not succeed, so "why is this still Pending" has a real answer sitting
+  /// in the data, not only an ephemeral server log that may already be
+  /// gone by the time anyone asks. Cleared the moment a send actually
+  /// succeeds (`recordedAt` set), so this only ever reflects the most
+  /// recent attempt, never a stale failure from one that has since worked.
+  lastSendError String? @map("last_send_error")
 
   @@id([phone, provider])
   @@index([approvedAt])

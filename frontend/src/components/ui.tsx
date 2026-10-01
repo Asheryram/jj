@@ -392,6 +392,15 @@ export function NetworkChip({ network, className }: { network: Network | null; c
   )
 }
 
+/** Admin-only: which actual supplier a bundle went to, DataHub or GMPL, now that both are live. */
+export function ProviderChip({ provider, className }: { provider: 'datahub-gh' | 'gmpl'; className?: string }) {
+  return (
+    <Badge tone={provider === 'gmpl' ? 'info' : 'neutral'} className={className}>
+      {provider === 'gmpl' ? 'GMPL' : 'DataHub'}
+    </Badge>
+  )
+}
+
 // ─── Form controls ──────────────────────────────────────────────────────────
 
 /**

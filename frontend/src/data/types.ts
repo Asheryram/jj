@@ -227,13 +227,14 @@ export interface Order {
    */
   paystackFee?: number | null
   /**
-   * Admin only: how DataHub routed this order's fulfilment, 'manual' when
-   * their own reference is `manual_`-prefixed (a person on their side has to
-   * clear it by hand), 'code' when it went through their automated path
-   * instead, or null when DataHub hasn't replied with a reference yet. Not
-   * predictable from anything else about the order, and the reason a
-   * manual-routed one can take much longer to settle than an identical
-   * automated one.
+   * Admin only: how the order's own provider reference reads. 'manual' only
+   * ever means DataHub (a `manual_`-prefixed reference, a person on their
+   * side has to clear it by hand); GMPL has no equivalent, so every GMPL
+   * order reads 'code' here too, alongside DataHub's own automated ones, see
+   * `provider` to tell those two apart. Null when the provider hasn't
+   * replied with a reference yet. Not predictable from anything else about
+   * the order, and the reason a DataHub manual-routed one can take much
+   * longer to settle than an identical automated one.
    */
   fulfilmentReference?: 'manual' | 'code' | null
   /**
@@ -266,6 +267,8 @@ export interface Order {
    * nothing was ever owed back.
    */
   refundStatus?: 'pending' | 'rejected' | null
+  /** Admin only: which actual supplier fulfilled this order, DataHub or GMPL. */
+  provider?: 'datahub-gh' | 'gmpl'
 }
 
 /** Customer wallet ledger entry (FR-2.4). */

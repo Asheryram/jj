@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { FulfilmentService } from '../orders/fulfilment.service'
 import { PaymentsService } from '../payments/payments.service'
 import { SupplierService, resolveSupplierProvider } from './supplier.service'
+import type { SupplierProviderCode } from '../settings/settings.service'
 import { DatahubClient, mapProviderStatus } from './datahub.client'
 import { GmplClient, mapGmplOrderStatus } from './gmpl.client'
 import { MailerService } from '../mail/mailer.service'
@@ -572,35 +573,56 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
         paidWith: true,
         createdAt: true,
         conflictNote: true,
+        supplierCodeAtSale: true,
       },
     })
 
-    return rows.map((r) => ({
-      id: r.id,
-      reference: r.reference,
-      providerReference: r.providerReference,
-      productName: r.productName,
-      recipient: r.recipient,
-      salePrice: r.salePrice,
-      paidWith: r.paidWith,
-      createdAt: r.createdAt.toISOString(),
-      conflict: r.conflictNote !== null,
-      // Without a provider reference we never got a usable reply, so there is
-      // nothing to ask them about, this one needs a human looking at their
-      // dashboard. A `manual_`-prefixed one is routed to DataHub's own staff
-      // and was never going to show up in `/order-status` at all (see
-      // `sweep`'s own exclusion), worth saying plainly here, since "accepted
-      // but never reported back" reads as something might still be coming,
-      // when the honest answer is that only a person at DataHub, contacted
-      // directly, ever will.
-      reason:
-        r.conflictNote ??
-        (r.providerReference?.startsWith('manual_')
-          ? `Routed to DataHub's manual queue, only their own staff can clear it, quote them ${r.providerReference}`
-          : r.providerReference
-            ? 'Accepted by DataHub but never reported back'
-            : 'No reply from DataHub, may or may not have been placed'),
-    }))
+    /**
+     * Batched rather than one `resolveSupplierProvider` call per row: up to
+     * 100 rows here, and a `manual_`-prefixed reference is DataHub-only (see
+     * `sweep`'s own comment), but "no reply at all" and "accepted but never
+     * reported back" are both now just as possible at GMPL, and used to
+     * always read as DataHub regardless.
+     */
+    const codes = [...new Set(rows.map((r) => r.supplierCodeAtSale).filter((c): c is string => Boolean(c)))]
+    const suppliers =
+      codes.length > 0
+        ? await this.prisma.supplierProduct.findMany({ where: { code: { in: codes } }, select: { code: true, provider: true } })
+        : []
+    const providerByCode = new Map(suppliers.map((s) => [s.code, s.provider as SupplierProviderCode]))
+    const providerFor = (code: string | null): SupplierProviderCode => (code ? (providerByCode.get(code) ?? 'datahub-gh') : 'datahub-gh')
+
+    return rows.map((r) => {
+      const provider = providerFor(r.supplierCodeAtSale)
+      const providerLabel = provider === 'gmpl' ? 'GMPL' : 'DataHub'
+      return {
+        id: r.id,
+        reference: r.reference,
+        providerReference: r.providerReference,
+        productName: r.productName,
+        recipient: r.recipient,
+        salePrice: r.salePrice,
+        paidWith: r.paidWith,
+        createdAt: r.createdAt.toISOString(),
+        conflict: r.conflictNote !== null,
+        provider,
+        // Without a provider reference we never got a usable reply, so there is
+        // nothing to ask them about, this one needs a human looking at their
+        // dashboard. A `manual_`-prefixed one is always DataHub routing to their
+        // own staff, GMPL has no equivalent, and was never going to show up in
+        // `/order-status` at all (see `sweep`'s own exclusion), worth saying
+        // plainly here, since "accepted but never reported back" reads as
+        // something might still be coming, when the honest answer is that only
+        // a person at DataHub, contacted directly, ever will.
+        reason:
+          r.conflictNote ??
+          (r.providerReference?.startsWith('manual_')
+            ? `Routed to DataHub's manual queue, only their own staff can clear it, quote them ${r.providerReference}`
+            : r.providerReference
+              ? `Accepted by ${providerLabel} but never reported back`
+              : `No reply from ${providerLabel}, may or may not have been placed`),
+      }
+    })
   }
 
   /**
