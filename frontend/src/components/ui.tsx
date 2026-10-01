@@ -586,28 +586,30 @@ export function Segmented<T extends string>({
   className?: string
 }) {
   return (
-    <div
-      className={cn(
-        'inline-flex rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-1',
-        className,
-      )}
-    >
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          onClick={() => onChange(option.value)}
-          aria-pressed={value === option.value}
-          className={cn(
-            'rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
-            value === option.value
-              ? 'bg-white dark:bg-slate-600 text-brand-800 dark:text-white shadow-sm'
-              : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-50',
-          )}
-        >
-          {option.label}
-        </button>
-      ))}
+    // A segmented control with enough options (a status filter, say) can run
+    // wider than a phone screen has room for. `max-w-full` stops it pushing
+    // the page itself wider than the viewport, and `overflow-x-auto` lets
+    // the control scroll sideways within its own bounds instead, same
+    // pattern as a mobile tab bar.
+    <div className={cn('inline-block max-w-full overflow-x-auto align-top', className)}>
+      <div className="inline-flex rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-1">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => onChange(option.value)}
+            aria-pressed={value === option.value}
+            className={cn(
+              'shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors',
+              value === option.value
+                ? 'bg-white dark:bg-slate-600 text-brand-800 dark:text-white shadow-sm'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-50',
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
