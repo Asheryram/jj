@@ -561,27 +561,48 @@ export default function Buy() {
                "beneficiary list", has done nothing wrong, and cannot act on any
                of it. What they need is that their money is safe, that the bundle
                is coming, and that they are not required to sit and watch. */
-            <Card className="mt-3 p-8 text-center" role="status" aria-live="polite">
-              <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400">
-                <ClockIcon className="size-7" />
-              </span>
-              <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">
-                Setting up {prettyPhone(placed.recipient)}
-              </p>
-              <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
-                This is the first bundle sent to this number, so it needs a one-time setup with our
-                delivery partner. It usually finishes within a few hours, and your bundle is sent
-                the moment it does.
-              </p>
-              <p className="mt-3 text-sm font-medium text-slate-800 dark:text-slate-100">
-                Your {cedis(placed.salePrice)} is safe. If the setup does not complete, it comes
-                back to you automatically, you do not need to ask.
-              </p>
-              <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
-                You can close this page. We will text {prettyPhone(placed.buyerPhone)} when it is
-                delivered.
-              </p>
-              <p className="tabular mt-4 text-xs text-slate-500 dark:text-slate-400">Reference {placed.reference}</p>
+            <Card className="mt-3 overflow-hidden" role="status" aria-live="polite">
+              <div className="p-8 text-center">
+                <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400">
+                  <ClockIcon className="size-7" />
+                </span>
+                <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">
+                  Setting up {prettyPhone(placed.recipient)}
+                </p>
+                <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
+                  This is the first bundle sent to this number, so it needs a one-time setup with our
+                  delivery partner. It usually finishes within a few hours, and your bundle is sent
+                  the moment it does.
+                </p>
+                <p className="mt-3 text-sm font-medium text-slate-800 dark:text-slate-100">
+                  Your {cedis(placed.salePrice)} is safe. If the setup does not complete, it comes
+                  back to you automatically, you do not need to ask.
+                </p>
+                <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
+                  You can close this page. We will text {prettyPhone(placed.buyerPhone)} when it is
+                  delivered.
+                </p>
+              </div>
+
+              <dl className="space-y-2.5 border-t border-slate-100 dark:border-slate-800 p-5 text-sm">
+                {sellerName && <Line label="Store" value={sellerName} />}
+                {placed.network && <Line label="Network" value={placed.network} />}
+                <Line label="Item" value={placed.productName} />
+                <Line label="Phone" value={prettyPhone(placed.recipient)} />
+                <Line label="Amount" value={cedis(placed.salePrice)} strong />
+                <Line label="Status" value="Setting up number" />
+                <Line label="Reference" value={placed.reference} />
+              </dl>
+
+              <div className="px-5 pb-5">
+                <OrderFollowUp
+                  reference={placed.reference}
+                  signedIn={Boolean(session)}
+                  shopTo={shopPath('/shop')}
+                  trackTo={shopPath('/track')}
+                  primaryLabel="Back to shop"
+                />
+              </div>
             </Card>
           ) : placed.status === 'processing' || placed.status === 'pending' ? (
             /* The status flips from a provider callback, not from a click, so it
@@ -614,11 +635,13 @@ export default function Buy() {
               </dl>
 
               <div className="px-5 pb-5">
-                <Link to={shopPath('/shop')}>
-                  <Button block variant="outline">
-                    Back to shop
-                  </Button>
-                </Link>
+                <OrderFollowUp
+                  reference={placed.reference}
+                  signedIn={Boolean(session)}
+                  shopTo={shopPath('/shop')}
+                  trackTo={shopPath('/track')}
+                  primaryLabel="Back to shop"
+                />
               </div>
             </Card>
           ) : placed.status === 'completed' ? (
@@ -665,29 +688,13 @@ export default function Buy() {
                   )}
                 </dl>
 
-                {/* A guest has no order history, so the reference is their only
-                    handle on this purchase. Make it easy to keep. */}
-                {!session && (
-                  <Callout tone="info" title="Keep your reference">
-                    Save <strong className="font-mono font-bold">{placed.reference}</strong>. With
-                    it and your phone number you can look this order up any time at{' '}
-                    <Link to={shopPath('/track')} className="font-semibold underline">
-                      /track
-                    </Link>
-                    .
-                  </Callout>
-                )}
-
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Link to={shopPath('/shop')} className="flex-1">
-                    <Button block>Buy another</Button>
-                  </Link>
-                  <Link to={session ? '/app/orders' : shopPath('/track')} className="flex-1">
-                    <Button block variant="outline">
-                      <ReceiptIcon className="size-4" /> {session ? 'My orders' : 'Track order'}
-                    </Button>
-                  </Link>
-                </div>
+                <OrderFollowUp
+                  reference={placed.reference}
+                  signedIn={Boolean(session)}
+                  shopTo={shopPath('/shop')}
+                  trackTo={shopPath('/track')}
+                  primaryLabel="Buy another"
+                />
               </div>
             </Card>
           ) : placed.paymentCollected === false ? (
@@ -921,6 +928,53 @@ function SplitBreakdown({
           </span>
         </li>
       </ul>
+    </div>
+  )
+}
+
+/**
+ * How to find this order again, on every result card where the order went
+ * through: in flight, waiting on a number's setup, or delivered. It matters
+ * most *before* delivery, that is when someone closes the page and wants to
+ * check back, yet it used to only appear once the bundle had already landed.
+ * A guest has no order history, so the reference is their only handle on
+ * the purchase; a signed-in buyer goes to their own orders list instead.
+ */
+function OrderFollowUp({
+  reference,
+  signedIn,
+  shopTo,
+  trackTo,
+  primaryLabel,
+}: {
+  reference: string
+  signedIn: boolean
+  shopTo: string
+  trackTo: string
+  primaryLabel: string
+}) {
+  return (
+    <div className="space-y-4">
+      {!signedIn && (
+        <Callout tone="info" title="Keep your reference">
+          Save <strong className="font-mono font-bold">{reference}</strong>. With it and your phone
+          number you can look this order up any time at{' '}
+          <Link to={trackTo} className="font-semibold underline">
+            /track
+          </Link>
+          .
+        </Callout>
+      )}
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Link to={shopTo} className="flex-1">
+          <Button block>{primaryLabel}</Button>
+        </Link>
+        <Link to={signedIn ? '/app/orders' : trackTo} className="flex-1">
+          <Button block variant="outline">
+            <ReceiptIcon className="size-4" /> {signedIn ? 'My orders' : 'Track order'}
+          </Button>
+        </Link>
+      </div>
     </div>
   )
 }
