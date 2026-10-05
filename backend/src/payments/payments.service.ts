@@ -278,7 +278,11 @@ export class PaymentsService {
         providerId: result.providerId,
         raw: result.raw,
       })
-      return { status: 'paid' }
+      // Read back rather than assumed: `applyPaid` refuses a wrong amount or
+      // currency (left pending for a human), and saying "paid" for that
+      // would send the buyer away happy from an order that will never ship.
+      const after = await this.prisma.payment.findUnique({ where: { reference }, select: { status: true } })
+      return { status: after?.status === 'paid' ? 'paid' : 'pending' }
     }
 
     // Their terminal failures. Anything else (pending, ongoing) is still in
@@ -347,8 +351,16 @@ export class PaymentsService {
        * below, a double top-up, or a second live DataHub purchase for one
        * paid order.
        */
+      /**
+       * `failed` is claimable too, and that matters: the sweep closes a
+       * payment as unpaid once Paystack has reported it `abandoned` or
+       * `failed` for a few minutes, but a Mobile Money prompt can still be
+       * approved after that. A verified success arriving then used to match
+       * nothing here and vanish silently, money taken, no bundle, no alert,
+       * while the buyer's screen said "paid". It is revived below instead.
+       */
       const claim = await tx.payment.updateMany({
-        where: { reference, status: 'pending' },
+        where: { reference, status: { in: ['pending', 'failed'] } },
         data: {
           status: 'paid',
           paidAt: new Date(),
@@ -360,6 +372,10 @@ export class PaymentsService {
         },
       })
       if (claim.count === 0) return null
+      const revived = payment.status === 'failed'
+      if (revived) {
+        this.log.warn(`${reference}: paid AFTER it had been closed as unpaid, reopening it`)
+      }
 
       // Recorded inside the same transaction that applies the payment, so the
       // books cannot show money arriving that the wallet or order never saw.
@@ -452,11 +468,21 @@ export class PaymentsService {
       }
 
       if (payment.orderId) {
-        // `processing` is the state dispatch expects. Paid and moving.
-        const order = await tx.order.update({
+        const order = await tx.order.findUniqueOrThrow({
           where: { id: payment.orderId },
+          select: { id: true, reference: true, productName: true, buyer: true, buyerPhone: true, salePrice: true },
+        })
+
+        // `processing` is the state dispatch expects. Paid and moving. A
+        // revived payment's order was closed as `failed` by `applyFailed`,
+        // and is only reopened if nothing has happened to it since: never
+        // sent to a provider. Anything else and reopening could deliver on
+        // top of whatever was done instead.
+        const moved = await tx.order.updateMany({
+          where: revived
+            ? { id: order.id, status: { in: ['awaiting_payment', 'failed'] }, dispatches: { none: {} } }
+            : { id: order.id },
           data: { status: 'processing' },
-          select: { id: true, reference: true, productName: true },
         })
 
         await this.ledger.record(
@@ -474,6 +500,29 @@ export class PaymentsService {
           ],
           tx,
         )
+
+        if (moved.count === 0) {
+          // Paid for an order that can no longer be reopened. The money is
+          // real and owed back, so it is queued as a refund for a person to
+          // send, never just absorbed.
+          await tx.refundRequest.upsert({
+            where: { orderId: order.id },
+            create: {
+              orderId: order.id,
+              orderRef: order.reference,
+              productName: order.productName,
+              buyerName: order.buyer,
+              buyerPhone: order.buyerPhone,
+              amount: order.salePrice,
+              method: 'transfer',
+              reason: 'Paid after this order had already been closed as unpaid.',
+              momoNetwork: detail.network,
+            },
+            update: {},
+          })
+          this.log.error(`${reference}: paid late for ${order.reference}, which could not be reopened, refund queued`)
+          return null
+        }
 
         return payment.orderId
       }

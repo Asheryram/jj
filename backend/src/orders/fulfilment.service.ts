@@ -20,6 +20,14 @@ import type { OrderSplit, SplitShare } from '../domain/pricing'
 const STALE_CLAIM_MS = 5 * 60 * 1000
 
 /**
+ * The note `reorder()` leaves on a refund it parks while its new attempt is
+ * in flight, and how `settle()` recognises that parking later to undo it.
+ * Exact wording kept from before, so refunds already parked this way in
+ * production are recognised too.
+ */
+const REORDER_HOLD_NOTE = 'On hold, reordering by hand:'
+
+/**
  * What actually happened when something tried to settle an order.
  *
  * `applied: false` covers two very different situations, which is why
@@ -241,15 +249,58 @@ export class FulfilmentService implements OnApplicationBootstrap {
       )
     }
 
+    // Compare-and-set on the claim this read saw, not just "still open": two
+    // admins pressing Retry at the same moment both pass every check above,
+    // and DataHub has no idempotency key of its own, so letting both through
+    // would buy the bundle twice. Only the first to move the claim wins.
     const reclaim = await this.prisma.order.updateMany({
-      where: { id: orderId, status: { notIn: ['completed', 'failed'] } },
+      where: { id: orderId, status: { notIn: ['completed', 'failed'] }, dispatchClaimedAt: order.dispatchClaimedAt },
       data: { dispatchClaimedAt: new Date() },
     })
     if (reclaim.count === 0) {
-      throw new ConflictError('ALREADY_SETTLED', 'This order was settled just now, refresh and check.')
+      throw new ConflictError('ALREADY_HANDLED', 'Someone else just retried or settled this order, refresh and check.')
     }
 
     this.log.warn(`${order.reference}: admin ${adminId} retrying dispatch by hand, ${reason}`)
+    await this.dispatchAndHandle(order, lastDispatch.attempt + 1)
+  }
+
+  /**
+   * Send an order whose number was just approved (see
+   * `ApprovalsService.releaseOrdersFor`). `run()` cannot: its claim only
+   * admits an order that has never been dispatched, and a held order already
+   * has a claim and a `needs_approval` attempt on file, so handing it to
+   * `run()` left it sitting in `processing` forever, paid for and never sent.
+   *
+   * Sent as the next attempt number, so GMPL gets a fresh idempotency key
+   * instead of the key of the attempt it refused (the same key would just
+   * return that same refused order). Claimed compare-and-set, same as
+   * `retryDispatch`, so a release racing anything else dispatches once.
+   */
+  async dispatchReleased(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } })
+    if (!order || order.status !== 'processing') return
+
+    const lastDispatch = await this.prisma.supplierDispatch.findFirst({
+      where: { orderId },
+      orderBy: { createdAt: 'desc' },
+      select: { attempt: true, outcome: true },
+    })
+    // Never dispatched at all (held before reaching a provider): the ordinary path handles it.
+    if (!lastDispatch) {
+      this.scheduleFor(orderId)
+      return
+    }
+    // Anything else means it already moved on since the release, leave it be.
+    if (lastDispatch.outcome !== 'needs_approval') return
+
+    const claim = await this.prisma.order.updateMany({
+      where: { id: orderId, status: 'processing', dispatchClaimedAt: order.dispatchClaimedAt },
+      data: { dispatchClaimedAt: new Date() },
+    })
+    if (claim.count === 0) return
+
+    this.log.log(`${order.reference}: number approved, sending as attempt ${lastDispatch.attempt + 1}`)
     await this.dispatchAndHandle(order, lastDispatch.attempt + 1)
   }
 
@@ -329,7 +380,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
         status: 'rejected',
         decidedBy: adminId,
         decidedAt: new Date(),
-        note: `On hold, reordering by hand: ${reason}`,
+        note: `${REORDER_HOLD_NOTE} ${reason}`,
       },
     })
     if (claimRefund.count === 0) {
@@ -790,6 +841,12 @@ export class FulfilmentService implements OnApplicationBootstrap {
         }
 
         await this.recordDelivered(tx, order, split, agentShares)
+        // A reorder's parked refund is now permanently not owed: reword it so
+        // the Refunds screen reads as settled, not as still on hold.
+        await tx.refundRequest.updateMany({
+          where: { orderId: order.id, status: 'rejected', note: { startsWith: REORDER_HOLD_NOTE } },
+          data: { note: 'Reordered and delivered, nothing owed back.' },
+        })
         return { applied: true, conflict: false }
       }
 
@@ -901,6 +958,17 @@ export class FulfilmentService implements OnApplicationBootstrap {
           },
           // A second failure on the same order does not owe twice.
           update: {},
+        })
+        // ...but a refund `reorder()` parked while its new attempt was still
+        // open is owed again now that the attempt failed after all. Without
+        // this, a reorder whose attempt came back pending or unknown and then
+        // failed later (webhook, sweep, approval expiry, or an admin's manual
+        // "failed") left the refund parked as `rejected` forever, and the
+        // customer was never paid back. Only reorder's own parking is undone,
+        // matched on its note, never a refund an admin genuinely rejected.
+        await tx.refundRequest.updateMany({
+          where: { orderId: order.id, status: 'rejected', note: { startsWith: REORDER_HOLD_NOTE } },
+          data: { status: 'pending', decidedBy: null, decidedAt: null, note: null },
         })
         this.log.warn(
           `${order.reference}: GHS ${(order.salePrice / 100).toFixed(2)} owed back, awaiting approval`,

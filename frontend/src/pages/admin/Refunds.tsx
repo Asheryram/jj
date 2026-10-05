@@ -359,10 +359,27 @@ export default function Refunds() {
                             </button>
                           )}
                         </div>
+                      ) : row.status === 'rejected' ? (
+                        <Badge tone="danger">refused</Badge>
+                      ) : row.method === 'transfer' && row.transferStatus === 'manual' ? (
+                        /* Approved, but this Paystack account can't send it, so it
+                           has to go out by hand and then be confirmed here. Green
+                           "refunded" here used to read as done when nothing had
+                           been sent. */
+                        <div className="flex flex-col items-end gap-1.5">
+                          <Badge tone="warning">send by hand</Badge>
+                          <button
+                            type="button"
+                            onClick={() => setSettling(row)}
+                            className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
+                          >
+                            Paid another way?
+                          </button>
+                        </div>
+                      ) : row.method === 'transfer' && row.transferStatus !== 'success' ? (
+                        <Badge tone="info">sending</Badge>
                       ) : (
-                        <Badge tone={row.status === 'approved' ? 'success' : 'danger'}>
-                          {row.status === 'approved' ? 'refunded' : 'refused'}
-                        </Badge>
+                        <Badge tone="success">refunded</Badge>
                       )}
                     </Td>
                   </tr>

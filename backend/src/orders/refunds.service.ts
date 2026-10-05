@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { LedgerService } from '../finance/ledger.service'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import { PaystackClient } from '../payments/paystack.client'
+import { SettingsService } from '../settings/settings.service'
 import { momoCodeFor } from '../payments/momo'
 import { resalePriceFor, type OrderSplit, type PricingAgent } from '../domain/pricing'
 
@@ -34,6 +35,7 @@ export class RefundsService {
     private readonly prisma: PrismaService,
     private readonly ledger: LedgerService,
     private readonly paystack: PaystackClient,
+    private readonly settings: SettingsService,
   ) {}
 
   /** The queue. Pending first and oldest first, the longest wait is the worst. */
@@ -379,7 +381,17 @@ export class RefundsService {
        * by hand must not both credit it and both tell the customer it's sent.
        */
       const claim = await tx.refundRequest.updateMany({
-        where: { id, status: 'pending' },
+        where: {
+          id,
+          OR: [
+            { status: 'pending' },
+            // Approved but parked for sending by hand (a Starter account, or
+            // no Paystack key, see `sendRefund`). Only when no Paystack
+            // transfer exists for it, so this can never pay on top of a real
+            // one.
+            { status: 'approved', transferStatus: 'manual', transferCode: null },
+          ],
+        },
         data: {
           status: 'approved',
           decidedAt: new Date(),
@@ -474,6 +486,29 @@ export class RefundsService {
 
     if (row.transferCode) {
       this.log.warn(`refund ${refundId} already has a transfer, not sending again`)
+      return
+    }
+
+    /**
+     * Same check `WithdrawalsService.sendPayout` makes, for the same reason:
+     * a Starter Paystack account refuses every third-party transfer, so
+     * calling it anyway only produces a timeout, an OTP prompt, or a refusal,
+     * and each of those used to leave the refund `approved` with nothing sent
+     * and no way to record it as paid by hand. Known in advance, so parked as
+     * `manual` straight away, for "Paid another way" to settle once sent.
+     */
+    if (!(await this.settings.get('paystackBusinessAccount'))) {
+      await this.prisma.refundRequest.update({
+        where: { id: refundId },
+        data: {
+          transferStatus: 'manual',
+          transferNote:
+            "This Paystack account can't send transfers yet (not registered/upgraded as a " +
+            'business account), so send this refund by hand on Mobile Money, then confirm it ' +
+            'with "Paid another way".',
+        },
+      })
+      this.log.warn(`refund ${refundId} left for manual sending, Paystack transfers are not enabled`)
       return
     }
 

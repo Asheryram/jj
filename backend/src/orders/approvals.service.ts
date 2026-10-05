@@ -524,7 +524,11 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
       })
       if (claim.count === 0) continue
       released++
-      this.fulfilment.scheduleFor(order.id)
+      // Not `scheduleFor`: its claim refuses an order that was already
+      // dispatched once, which a held order always was, see `dispatchReleased`.
+      void this.fulfilment
+        .dispatchReleased(order.id)
+        .catch((error: unknown) => this.log.error(`${order.reference}: release dispatch failed, ${String(error)}`))
       this.log.log(`${order.reference} released, ${phone} approved`)
     }
 

@@ -6,7 +6,7 @@ import { api } from '../lib/api'
 import { checkoutTotal } from '../lib/pricing'
 import { cedis, dateTime } from '../lib/format'
 import { checkPhone, prettyPhone } from '../lib/networks'
-import type { OrderSplit } from '../data/types'
+import type { Order, OrderSplit } from '../data/types'
 import { CATEGORY_META } from '../components/categories'
 import { SeasonalCelebration } from '../components/SeasonalMoments'
 import {
@@ -119,6 +119,35 @@ export default function Buy() {
   }, [resumeId, orderId, watchOrder])
 
   if (!product) {
+    // The bundle can be missing from the shop while the order is perfectly
+    // real: the catalogue only lists the provider routed *now*, so an order
+    // bought before a provider switch has no listed bundle any more. The
+    // receipt still has to show, it is built from the order alone.
+    if (placed) {
+      return (
+        <div className="mx-auto max-w-lg px-4 py-6 sm:py-8">
+          <h1 className="sr-only">Your order {placed.reference}</h1>
+          <OrderReceipt
+            placed={placed}
+            sellerName={sellerName}
+            signedIn={Boolean(session)}
+            sessionUserId={session?.id ?? null}
+            customerBalance={customerBalance}
+            shopTo={shopPath('/shop')}
+            trackTo={shopPath('/track')}
+          />
+        </div>
+      )
+    }
+    // Returning to a receipt whose order is still being fetched: wait for
+    // it rather than flashing "not found" at someone who has just paid.
+    if (resumeId) {
+      return (
+        <div className="py-16 text-center">
+          <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
+        </div>
+      )
+    }
     return (
       <div className="mx-auto max-w-lg px-4 py-16">
         <Card>
@@ -554,283 +583,320 @@ export default function Buy() {
 
       {/* ── Step 4: result (FR-4.4, FR-4.5, FR-4.7, FR-2.7) ── */}
       {step === 3 && placed && (
-        <>
-          {placed.status === 'awaiting_approval' ? (
-            /* A first purchase to this number.
-               Said without the plumbing: the customer does not have a
-               "beneficiary list", has done nothing wrong, and cannot act on any
-               of it. What they need is that their money is safe, that the bundle
-               is coming, and that they are not required to sit and watch. */
-            <Card className="mt-3 overflow-hidden" role="status" aria-live="polite">
-              <div className="p-8 text-center">
-                <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400">
-                  <ClockIcon className="size-7" />
-                </span>
-                <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">
-                  Setting up {prettyPhone(placed.recipient)}
-                </p>
-                <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
-                  This is the first bundle sent to this number, so it needs a one-time setup with our
-                  delivery partner. It usually finishes within a few hours, and your bundle is sent
-                  the moment it does.
-                </p>
-                <p className="mt-3 text-sm font-medium text-slate-800 dark:text-slate-100">
-                  Your {cedis(placed.salePrice)} is safe. If the setup does not complete, it comes
-                  back to you automatically, you do not need to ask.
-                </p>
-                <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
-                  You can close this page. We will text {prettyPhone(placed.buyerPhone)} when it is
-                  delivered.
-                </p>
-              </div>
-
-              <dl className="space-y-2.5 border-t border-slate-100 dark:border-slate-800 p-5 text-sm">
-                {sellerName && <Line label="Store" value={sellerName} />}
-                {placed.network && <Line label="Network" value={placed.network} />}
-                <Line label="Item" value={placed.productName} />
-                <Line label="Phone" value={prettyPhone(placed.recipient)} />
-                <Line label="Amount" value={cedis(placed.salePrice)} strong />
-                <Line label="Status" value="Setting up number" />
-                <Line label="Reference" value={placed.reference} />
-              </dl>
-
-              <div className="px-5 pb-5">
-                <OrderFollowUp
-                  reference={placed.reference}
-                  signedIn={Boolean(session)}
-                  shopTo={shopPath('/shop')}
-                  trackTo={shopPath('/track')}
-                  primaryLabel="Back to shop"
-                />
-              </div>
-            </Card>
-          ) : placed.status === 'processing' || placed.status === 'pending' ? (
-            /* The status flips from a provider callback, not from a click, so it
-               needs announcing (WCAG 4.1.3).
-               Two separate facts, said as two separate things: the payment is
-               already done (that is why this screen exists at all), and the
-               bundle is still on its way. Leading with a spinner and no
-               confirmation read as "did my payment even go through?", this
-               leads with the answer to that question first. */
-            <Card className="mt-3 overflow-hidden" role="status" aria-live="polite">
-              <div className="p-8 text-center">
-                <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400">
-                  <CheckIcon className="size-7" strokeWidth={2.4} />
-                </span>
-                <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">Payment received</p>
-                <p className="mt-1.5 flex items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-                  <Spinner className="size-3.5 text-brand-600 dark:text-brand-300" />
-                  Sending your bundle now, this usually takes a few seconds.
-                </p>
-              </div>
-
-              <dl className="space-y-2.5 border-t border-slate-100 dark:border-slate-800 p-5 text-sm">
-                {sellerName && <Line label="Store" value={sellerName} />}
-                {placed.network && <Line label="Network" value={placed.network} />}
-                <Line label="Item" value={placed.productName} />
-                <Line label="Phone" value={prettyPhone(placed.recipient)} />
-                <Line label="Amount" value={cedis(placed.salePrice)} strong />
-                <Line label="Status" value="Processing" />
-                <Line label="Reference" value={placed.reference} />
-              </dl>
-
-              <div className="px-5 pb-5">
-                <OrderFollowUp
-                  reference={placed.reference}
-                  signedIn={Boolean(session)}
-                  shopTo={shopPath('/shop')}
-                  trackTo={shopPath('/track')}
-                  primaryLabel="Back to shop"
-                />
-              </div>
-            </Card>
-          ) : placed.status === 'completed' ? (
-            <Card className="mt-3 overflow-hidden">
-              <div className="bg-brand-700 px-5 py-6 text-center text-white">
-                <span className="relative mx-auto flex size-12 items-center justify-center rounded-full bg-white/15">
-                  <CheckIcon className="size-7" strokeWidth={2.4} />
-                  {/* Bursts out of the check in the current season's shape, if a holiday is on. */}
-                  <SeasonalCelebration />
-                </span>
-                <p className="mt-3 text-lg font-bold">{product.name} delivered</p>
-                <p className="mt-0.5 text-sm text-brand-100">
-                  Sent to {prettyPhone(placed.recipient)}
-                </p>
-              </div>
-
-              <div className="space-y-4 p-5">
-                {/* FR-4.7, voucher on screen and by SMS, immediately. */}
-                {isChecker && placed.voucher && (
-                  <div className="space-y-3">
-                    <Callout
-                      tone="success"
-                      title="Your voucher"
-                      icon={<CertificateIcon className="size-4" />}
-                    >
-                      Keep these safe, a checker voucher can only be used a limited number of
-                      times. We have also sent them by SMS.
-                    </Callout>
-                    <CopyField label="Serial number" value={placed.voucher.serial} mono />
-                    <CopyField label="PIN" value={placed.voucher.pin} mono />
-                  </div>
-                )}
-
-                <dl className="space-y-2.5 text-sm">
-                  <Line label="Reference" value={placed.reference} />
-                  <Line label="Amount paid" value={cedis(placed.salePrice)} strong />
-                  <Line label="Time" value={dateTime(placed.createdAt)} />
-                  {myShare && myShare.margin > 0 && (
-                    <Line
-                      label="You earned"
-                      value={cedis(myShare.margin, { sign: true })}
-                      tone="brand"
-                    />
-                  )}
-                </dl>
-
-                <OrderFollowUp
-                  reference={placed.reference}
-                  signedIn={Boolean(session)}
-                  shopTo={shopPath('/shop')}
-                  trackTo={shopPath('/track')}
-                  primaryLabel="Buy another"
-                />
-              </div>
-            </Card>
-          ) : placed.paymentCollected === false ? (
-            /*
-             * The Mobile Money charge itself never went through, declined PIN,
-             * insufficient funds, the prompt timed out. Nothing was ever taken,
-             * so refund language here would be a lie, and this is the single
-             * most common failure in MoMo checkout, not the rare "paid but
-             * delivery failed" case the other branch below is actually about.
-             */
-            <Card className="mt-3 overflow-hidden">
-              <div className="bg-red-600 px-5 py-6 text-center text-white">
-                <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-white/15">
-                  <XIcon className="size-7" strokeWidth={2.4} />
-                </span>
-                <p className="mt-3 text-lg font-bold">That payment did not go through</p>
-                <p className="mt-0.5 text-sm text-red-100">Nothing was taken from you.</p>
-              </div>
-              <div className="space-y-4 p-5">
-                <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-                  This can happen from a declined PIN, insufficient funds, or the Mobile Money
-                  prompt timing out. You can try again whenever you are ready.
-                </Callout>
-                <dl className="space-y-2.5 text-sm">
-                  <Line label="Reference" value={placed.reference} />
-                  <Line label="Recipient" value={prettyPhone(placed.recipient)} />
-                </dl>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Button
-                    block
-                    className="flex-1"
-                    onClick={() => {
-                      setOrderId(null)
-                      setStep(2)
-                    }}
-                  >
-                    <RefreshIcon className="size-4" /> Try again
-                  </Button>
-                  <Link to={shopPath('/shop')} className="flex-1">
-                    <Button block variant="outline">
-                      Choose another bundle
-                    </Button>
-                  </Link>
-                </div>
-              </div>
-            </Card>
-          ) : (
-            /* FR-2.7 + NFR-3.3, a visible failure, with the money already moving back. */
-            <Card className="mt-3 overflow-hidden">
-              <div className="bg-red-600 px-5 py-6 text-center text-white">
-                <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-white/15">
-                  <XIcon className="size-7" strokeWidth={2.4} />
-                </span>
-                <p className="mt-3 text-lg font-bold">Order could not be delivered</p>
-                {/* Deliberately does not name a cause. This used to read "the
-                    network rejected it after two attempts", which was invented
-                    copy: most failures never reach the network, and there is no
-                    retry. Claiming a specific reason we do not have sends the
-                    buyer chasing the wrong thing, and sent us chasing it too.
-                    The real reason is on the order's dispatch log, for admin. */}
-                <p className="mt-0.5 text-sm text-red-100">
-                  {placed.refunded
-                    ? 'Nothing was lost, your money has been returned.'
-                    : 'Nothing was lost, your money is owed back to you.'}
-                </p>
-              </div>
-              <div className="space-y-4 p-5">
-                {/* Two different truths, and saying the wrong one is the problem.
-                    A refund is authorised by a person now, so until that happens
-                    the money is *owed*, not returned, and telling a customer it
-                    is already back when it is not is the fastest way to lose
-                    their trust twice. */}
-                {!placed.refunded ? (
-                  <Callout
-                    tone="info"
-                    title="Your refund is being arranged"
-                    icon={<ClockIcon className="size-4" />}
-                  >
-                    {cedis(placed.salePrice)} is owed back to you and has been logged for approval.
-                    Refunds are checked by a person rather than sent automatically, so this usually
-                    takes a few hours. You do not need to ask, we will text{' '}
-                    <strong className="tabular font-bold">{placed.buyerPhone}</strong> when it is
-                    done.
-                  </Callout>
-                ) : placed.paidWith === 'wallet' ? (
-                  <Callout
-                    tone="success"
-                    title="Refunded to your wallet"
-                    icon={<CheckIcon className="size-4" />}
-                  >
-                    {cedis(placed.salePrice)} has gone back into your wallet. Your balance is now{' '}
-                    {cedis(customerBalance)}. Nothing was lost.
-                  </Callout>
-                ) : (
-                  <Callout
-                    tone="success"
-                    title="Your money has been sent back"
-                    icon={<CheckIcon className="size-4" />}
-                  >
-                    {cedis(placed.salePrice)} has been sent to{' '}
-                    <strong className="tabular font-bold">{placed.buyerPhone}</strong>, the same
-                    number you paid from. Mobile Money usually lands within a few minutes.
-                  </Callout>
-                )}
-                <dl className="space-y-2.5 text-sm">
-                  <Line label="Reference" value={placed.reference} />
-                  <Line label="Recipient" value={prettyPhone(placed.recipient)} />
-                  <Line
-                    label={placed.refunded ? 'Returned' : 'Owed back to you'}
-                    value={cedis(placed.salePrice)}
-                    strong
-                  />
-                </dl>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Button
-                    block
-                    className="flex-1"
-                    onClick={() => {
-                      setOrderId(null)
-                      setStep(2)
-                    }}
-                  >
-                    <RefreshIcon className="size-4" /> Try again
-                  </Button>
-                  <Link to={shopPath('/shop')} className="flex-1">
-                    <Button block variant="outline">
-                      Choose another bundle
-                    </Button>
-                  </Link>
-                </div>
-              </div>
-            </Card>
-          )}
-        </>
+        <OrderReceipt
+          placed={placed}
+          sellerName={sellerName}
+          signedIn={Boolean(session)}
+          sessionUserId={session?.id ?? null}
+          customerBalance={customerBalance}
+          shopTo={shopPath('/shop')}
+          trackTo={shopPath('/track')}
+          onRetry={() => {
+            setOrderId(null)
+            setStep(2)
+          }}
+        />
       )}
     </div>
+  )
+}
+
+/**
+ * The receipt for a placed order, driven entirely by the order itself, not
+ * by the shop's catalogue. The catalogue only lists bundles from whichever
+ * provider is routed *now*, so after a provider switch a customer returning
+ * from Paystack (or reopening their link) for an order bought from the
+ * previous provider would otherwise land on "We could not find that bundle"
+ * instead of their own order. Earnings shown come from the order's own split,
+ * frozen at sale time, not a fresh preview at today's prices. `onRetry` is
+ * only offered when the bundle can still be bought.
+ */
+function OrderReceipt({
+  placed,
+  sellerName,
+  signedIn,
+  sessionUserId,
+  customerBalance,
+  shopTo,
+  trackTo,
+  onRetry,
+}: {
+  placed: Order
+  sellerName: string | null
+  signedIn: boolean
+  sessionUserId: string | null
+  customerBalance: number
+  shopTo: string
+  trackTo: string
+  onRetry?: () => void
+}) {
+  const myShare = sessionUserId ? placed.split?.shares.find((s) => s.userId === sessionUserId) : undefined
+  return (
+    <>
+      {placed.status === 'awaiting_approval' ? (
+        /* A first purchase to this number.
+           Said without the plumbing: the customer does not have a
+           "beneficiary list", has done nothing wrong, and cannot act on any
+           of it. What they need is that their money is safe, that the bundle
+           is coming, and that they are not required to sit and watch. */
+        <Card className="mt-3 overflow-hidden" role="status" aria-live="polite">
+          <div className="p-8 text-center">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400">
+              <ClockIcon className="size-7" />
+            </span>
+            <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">
+              Setting up {prettyPhone(placed.recipient)}
+            </p>
+            <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
+              This is the first bundle sent to this number, so it needs a one-time setup with our
+              delivery partner. It usually finishes within a few hours, and your bundle is sent
+              the moment it does.
+            </p>
+            <p className="mt-3 text-sm font-medium text-slate-800 dark:text-slate-100">
+              Your {cedis(placed.salePrice)} is safe. If the setup does not complete, it comes
+              back to you automatically, you do not need to ask.
+            </p>
+            <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
+              You can close this page. We will text {prettyPhone(placed.buyerPhone)} when it is
+              delivered.
+            </p>
+          </div>
+
+          <dl className="space-y-2.5 border-t border-slate-100 dark:border-slate-800 p-5 text-sm">
+            {sellerName && <Line label="Store" value={sellerName} />}
+            {placed.network && <Line label="Network" value={placed.network} />}
+            <Line label="Item" value={placed.productName} />
+            <Line label="Phone" value={prettyPhone(placed.recipient)} />
+            <Line label="Amount" value={cedis(placed.salePrice)} strong />
+            <Line label="Status" value="Setting up number" />
+            <Line label="Reference" value={placed.reference} />
+          </dl>
+
+          <div className="px-5 pb-5">
+            <OrderFollowUp
+              reference={placed.reference}
+              signedIn={signedIn}
+              shopTo={shopTo}
+              trackTo={trackTo}
+              primaryLabel="Back to shop"
+            />
+          </div>
+        </Card>
+      ) : placed.status === 'processing' || placed.status === 'pending' ? (
+        /* The status flips from a provider callback, not from a click, so it
+           needs announcing (WCAG 4.1.3).
+           Two separate facts, said as two separate things: the payment is
+           already done (that is why this screen exists at all), and the
+           bundle is still on its way. Leading with a spinner and no
+           confirmation read as "did my payment even go through?", this
+           leads with the answer to that question first. */
+        <Card className="mt-3 overflow-hidden" role="status" aria-live="polite">
+          <div className="p-8 text-center">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400">
+              <CheckIcon className="size-7" strokeWidth={2.4} />
+            </span>
+            <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">Payment received</p>
+            <p className="mt-1.5 flex items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+              <Spinner className="size-3.5 text-brand-600 dark:text-brand-300" />
+              Sending your bundle now, this usually takes a few seconds.
+            </p>
+          </div>
+
+          <dl className="space-y-2.5 border-t border-slate-100 dark:border-slate-800 p-5 text-sm">
+            {sellerName && <Line label="Store" value={sellerName} />}
+            {placed.network && <Line label="Network" value={placed.network} />}
+            <Line label="Item" value={placed.productName} />
+            <Line label="Phone" value={prettyPhone(placed.recipient)} />
+            <Line label="Amount" value={cedis(placed.salePrice)} strong />
+            <Line label="Status" value="Processing" />
+            <Line label="Reference" value={placed.reference} />
+          </dl>
+
+          <div className="px-5 pb-5">
+            <OrderFollowUp
+              reference={placed.reference}
+              signedIn={signedIn}
+              shopTo={shopTo}
+              trackTo={trackTo}
+              primaryLabel="Back to shop"
+            />
+          </div>
+        </Card>
+      ) : placed.status === 'completed' ? (
+        <Card className="mt-3 overflow-hidden">
+          <div className="bg-brand-700 px-5 py-6 text-center text-white">
+            <span className="relative mx-auto flex size-12 items-center justify-center rounded-full bg-white/15">
+              <CheckIcon className="size-7" strokeWidth={2.4} />
+              {/* Bursts out of the check in the current season's shape, if a holiday is on. */}
+              <SeasonalCelebration />
+            </span>
+            <p className="mt-3 text-lg font-bold">{placed.productName} delivered</p>
+            <p className="mt-0.5 text-sm text-brand-100">
+              Sent to {prettyPhone(placed.recipient)}
+            </p>
+          </div>
+
+          <div className="space-y-4 p-5">
+            {/* FR-4.7, voucher on screen and by SMS, immediately. */}
+            {placed.category === 'checker' && placed.voucher && (
+              <div className="space-y-3">
+                <Callout
+                  tone="success"
+                  title="Your voucher"
+                  icon={<CertificateIcon className="size-4" />}
+                >
+                  Keep these safe, a checker voucher can only be used a limited number of
+                  times. We have also sent them by SMS.
+                </Callout>
+                <CopyField label="Serial number" value={placed.voucher.serial} mono />
+                <CopyField label="PIN" value={placed.voucher.pin} mono />
+              </div>
+            )}
+
+            <dl className="space-y-2.5 text-sm">
+              <Line label="Reference" value={placed.reference} />
+              <Line label="Amount paid" value={cedis(placed.salePrice)} strong />
+              <Line label="Time" value={dateTime(placed.createdAt)} />
+              {myShare && myShare.margin > 0 && (
+                <Line
+                  label="You earned"
+                  value={cedis(myShare.margin, { sign: true })}
+                  tone="brand"
+                />
+              )}
+            </dl>
+
+            <OrderFollowUp
+              reference={placed.reference}
+              signedIn={signedIn}
+              shopTo={shopTo}
+              trackTo={trackTo}
+              primaryLabel="Buy another"
+            />
+          </div>
+        </Card>
+      ) : placed.paymentCollected === false ? (
+        /*
+         * The Mobile Money charge itself never went through, declined PIN,
+         * insufficient funds, the prompt timed out. Nothing was ever taken,
+         * so refund language here would be a lie, and this is the single
+         * most common failure in MoMo checkout, not the rare "paid but
+         * delivery failed" case the other branch below is actually about.
+         */
+        <Card className="mt-3 overflow-hidden">
+          <div className="bg-red-600 px-5 py-6 text-center text-white">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-white/15">
+              <XIcon className="size-7" strokeWidth={2.4} />
+            </span>
+            <p className="mt-3 text-lg font-bold">That payment did not go through</p>
+            <p className="mt-0.5 text-sm text-red-100">Nothing was taken from you.</p>
+          </div>
+          <div className="space-y-4 p-5">
+            <Callout tone="info" icon={<AlertIcon className="size-4" />}>
+              This can happen from a declined PIN, insufficient funds, or the Mobile Money
+              prompt timing out. You can try again whenever you are ready.
+            </Callout>
+            <dl className="space-y-2.5 text-sm">
+              <Line label="Reference" value={placed.reference} />
+              <Line label="Recipient" value={prettyPhone(placed.recipient)} />
+            </dl>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {onRetry && (
+                <Button block className="flex-1" onClick={onRetry}>
+                  <RefreshIcon className="size-4" /> Try again
+                </Button>
+              )}
+              <Link to={shopTo} className="flex-1">
+                <Button block variant="outline">
+                  Choose another bundle
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </Card>
+      ) : (
+        /* FR-2.7 + NFR-3.3, a visible failure, with the money already moving back. */
+        <Card className="mt-3 overflow-hidden">
+          <div className="bg-red-600 px-5 py-6 text-center text-white">
+            <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-white/15">
+              <XIcon className="size-7" strokeWidth={2.4} />
+            </span>
+            <p className="mt-3 text-lg font-bold">Order could not be delivered</p>
+            {/* Deliberately does not name a cause. This used to read "the
+                network rejected it after two attempts", which was invented
+                copy: most failures never reach the network, and there is no
+                retry. Claiming a specific reason we do not have sends the
+                buyer chasing the wrong thing, and sent us chasing it too.
+                The real reason is on the order's dispatch log, for admin. */}
+            <p className="mt-0.5 text-sm text-red-100">
+              {placed.refunded
+                ? 'Nothing was lost, your money has been returned.'
+                : 'Nothing was lost, your money is owed back to you.'}
+            </p>
+          </div>
+          <div className="space-y-4 p-5">
+            {/* Two different truths, and saying the wrong one is the problem.
+                A refund is authorised by a person now, so until that happens
+                the money is *owed*, not returned, and telling a customer it
+                is already back when it is not is the fastest way to lose
+                their trust twice. */}
+            {!placed.refunded ? (
+              <Callout
+                tone="info"
+                title="Your refund is being arranged"
+                icon={<ClockIcon className="size-4" />}
+              >
+                {cedis(placed.salePrice)} is owed back to you and has been logged for approval.
+                Refunds are checked by a person rather than sent automatically, so this usually
+                takes a few hours. You do not need to ask, we will text{' '}
+                <strong className="tabular font-bold">{placed.buyerPhone}</strong> when it is
+                done.
+              </Callout>
+            ) : placed.paidWith === 'wallet' ? (
+              <Callout
+                tone="success"
+                title="Refunded to your wallet"
+                icon={<CheckIcon className="size-4" />}
+              >
+                {cedis(placed.salePrice)} has gone back into your wallet. Your balance is now{' '}
+                {cedis(customerBalance)}. Nothing was lost.
+              </Callout>
+            ) : (
+              <Callout
+                tone="success"
+                title="Your money has been sent back"
+                icon={<CheckIcon className="size-4" />}
+              >
+                {cedis(placed.salePrice)} has been sent to{' '}
+                <strong className="tabular font-bold">{placed.buyerPhone}</strong>, the same
+                number you paid from. Mobile Money usually lands within a few minutes.
+              </Callout>
+            )}
+            <dl className="space-y-2.5 text-sm">
+              <Line label="Reference" value={placed.reference} />
+              <Line label="Recipient" value={prettyPhone(placed.recipient)} />
+              <Line
+                label={placed.refunded ? 'Returned' : 'Owed back to you'}
+                value={cedis(placed.salePrice)}
+                strong
+              />
+            </dl>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {onRetry && (
+                <Button block className="flex-1" onClick={onRetry}>
+                  <RefreshIcon className="size-4" /> Try again
+                </Button>
+              )}
+              <Link to={shopTo} className="flex-1">
+                <Button block variant="outline">
+                  Choose another bundle
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </Card>
+      )}
+    </>
   )
 }
 
