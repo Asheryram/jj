@@ -125,3 +125,612 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+
+/**
+ * Seasonal ambience (`SeasonalAmbience` in layout.tsx). Per-particle size,
+ * position, color, duration and delay are random per instance and set
+ * inline; only the shared motion and lighting live here. The
+ * `prefers-reduced-motion` block above already neutralises every animation
+ * below for anyone who has asked for less motion.
+ */
+
+/* ── Particle motion ────────────────────────────────────────────────────── */
+
+/* Plain vertical fall with a gentle wobble. */
+@keyframes particle-fall {
+  0% {
+    transform: translate3d(0, -10vh, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(10px, 50vh, 0) rotate(160deg);
+  }
+  100% {
+    transform: translate3d(-8px, 110vh, 0) rotate(320deg);
+  }
+}
+
+/* Snow carried on a cold wind: a long diagonal, not straight down, with the
+   gusts uneven so it never looks like a conveyor belt. */
+@keyframes particle-blow {
+  0% {
+    transform: translate3d(0, -10vh, 0) rotate(0deg);
+  }
+  30% {
+    transform: translate3d(9vw, 24vh, 0) rotate(110deg);
+  }
+  55% {
+    transform: translate3d(13vw, 52vh, 0) rotate(200deg);
+  }
+  80% {
+    transform: translate3d(24vw, 80vh, 0) rotate(290deg);
+  }
+  100% {
+    transform: translate3d(30vw, 110vh, 0) rotate(360deg);
+  }
+}
+
+/* Confetti tumbling: the rotateY flip is what makes a flat rectangle catch
+   the light like real paper instead of sliding down as a coloured block. */
+@keyframes particle-flutter {
+  0% {
+    transform: translate3d(0, -10vh, 0) rotateZ(0deg) rotateY(0deg);
+  }
+  25% {
+    transform: translate3d(18px, 22vh, 0) rotateZ(90deg) rotateY(180deg);
+  }
+  50% {
+    transform: translate3d(-14px, 50vh, 0) rotateZ(180deg) rotateY(360deg);
+  }
+  75% {
+    transform: translate3d(16px, 78vh, 0) rotateZ(270deg) rotateY(540deg);
+  }
+  100% {
+    transform: translate3d(0, 110vh, 0) rotateZ(360deg) rotateY(720deg);
+  }
+}
+
+/* A petal or leaf rocking side to side like a pendulum as it falls. */
+@keyframes particle-drift {
+  0% {
+    transform: translate3d(0, -10vh, 0) rotate(-25deg);
+  }
+  20% {
+    transform: translate3d(45px, 15vh, 0) rotate(20deg);
+  }
+  40% {
+    transform: translate3d(-25px, 38vh, 0) rotate(-30deg);
+  }
+  60% {
+    transform: translate3d(40px, 62vh, 0) rotate(18deg);
+  }
+  80% {
+    transform: translate3d(-20px, 85vh, 0) rotate(-22deg);
+  }
+  100% {
+    transform: translate3d(10px, 110vh, 0) rotate(10deg);
+  }
+}
+
+@keyframes particle-twinkle {
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: scale(0.75) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12) rotate(18deg);
+  }
+}
+
+/* Lanterns and embers lifting, swaying a little on the way up. */
+@keyframes particle-rise {
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0;
+  }
+  12% {
+    opacity: var(--p-opacity, 0.9);
+  }
+  50% {
+    transform: translate3d(14px, -65vh, 0);
+  }
+  85% {
+    opacity: var(--p-opacity, 0.9);
+  }
+  100% {
+    transform: translate3d(-6px, -130vh, 0);
+    opacity: 0;
+  }
+}
+
+/* A thin streak of cold air crossing the screen. */
+@keyframes particle-streak {
+  0% {
+    transform: translate3d(-40vw, 0, 0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.6;
+  }
+  60% {
+    opacity: 0.35;
+  }
+  100% {
+    transform: translate3d(140vw, 5vh, 0);
+    opacity: 0;
+  }
+}
+
+.ambience-particle {
+  position: absolute;
+  top: 0;
+  display: flex;
+  will-change: transform, opacity;
+  animation-iteration-count: infinite;
+}
+
+.ambience-particle.motion-fall {
+  animation-name: particle-fall;
+  animation-timing-function: linear;
+}
+
+.ambience-particle.motion-blow {
+  animation-name: particle-blow;
+  animation-timing-function: linear;
+}
+
+.ambience-particle.motion-flutter {
+  animation-name: particle-flutter;
+  animation-timing-function: linear;
+}
+
+.ambience-particle.motion-drift {
+  animation-name: particle-drift;
+  animation-timing-function: ease-in-out;
+}
+
+.ambience-particle.motion-twinkle {
+  animation-name: particle-twinkle;
+  animation-timing-function: ease-in-out;
+}
+
+.ambience-particle.motion-rise {
+  animation-name: particle-rise;
+  animation-timing-function: ease-in;
+}
+
+.ambience-particle.motion-streak {
+  animation-name: particle-streak;
+  animation-timing-function: ease-in-out;
+}
+
+.ambience-particle.shape-dot {
+  border-radius: 9999px;
+}
+
+.ambience-particle.shape-confetti {
+  border-radius: 1.5px;
+}
+
+.ambience-particle.shape-gust {
+  border-radius: 9999px;
+}
+
+/* ── Fireworks ──────────────────────────────────────────────────────────── */
+
+/* Each spark is a short tapered line pointed outward by `--a`, flying out
+   `--r` from the burst's center and fading, then staying dark for the rest
+   of the cycle so bursts go off now and then rather than constantly. */
+@keyframes burst-spark {
+  0% {
+    transform: rotate(var(--a)) translateY(0) scaleY(0.3);
+    opacity: 0;
+  }
+  3% {
+    opacity: 1;
+  }
+  22% {
+    transform: rotate(var(--a)) translateY(calc(-1 * var(--r))) scaleY(1);
+    opacity: 0.95;
+  }
+  34% {
+    transform: rotate(var(--a)) translateY(calc(-1.18 * var(--r))) scaleY(0.4);
+    opacity: 0;
+  }
+  100% {
+    transform: rotate(var(--a)) translateY(calc(-1.18 * var(--r))) scaleY(0.4);
+    opacity: 0;
+  }
+}
+
+@keyframes burst-flash {
+  0% {
+    transform: scale(0.2);
+    opacity: 0;
+  }
+  3% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  14% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+.ambience-burst {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.ambience-burst .burst-spark {
+  position: absolute;
+  left: -1.5px;
+  top: -6px;
+  width: 3px;
+  height: 12px;
+  border-radius: 9999px;
+  transform-origin: 50% 50%;
+  opacity: 0;
+  animation-name: burst-spark;
+  animation-timing-function: cubic-bezier(0.15, 0.7, 0.3, 1);
+  animation-iteration-count: infinite;
+}
+
+.ambience-burst .burst-flash {
+  position: absolute;
+  left: -18px;
+  top: -18px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  opacity: 0;
+  animation-name: burst-flash;
+  animation-timing-function: ease-out;
+  animation-iteration-count: infinite;
+}
+
+/* ── Atmosphere: the light each occasion is seen in ────────────────────── */
+
+@property --ray-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes atmo-breathe {
+  0%,
+  100% {
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Uneven on purpose: a candle never pulses on a clean sine. */
+@keyframes atmo-flicker {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  20% {
+    opacity: 1;
+  }
+  35% {
+    opacity: 0.78;
+  }
+  55% {
+    opacity: 0.95;
+  }
+  70% {
+    opacity: 0.82;
+  }
+}
+
+@keyframes atmo-rays {
+  0% {
+    --ray-angle: 0deg;
+  }
+  100% {
+    --ray-angle: 14deg;
+  }
+}
+
+.ambience-atmo {
+  position: fixed;
+  inset: 0;
+  z-index: 15;
+  pointer-events: none;
+}
+
+/* Frost creeping in from every edge, like breath on a cold window. */
+.ambience-atmo.atmo-frost {
+  background:
+    linear-gradient(to bottom, rgb(224 242 254 / 0.55), transparent 20%),
+    linear-gradient(to top, rgb(224 242 254 / 0.4), transparent 16%),
+    linear-gradient(to right, rgb(224 242 254 / 0.35), transparent 10%),
+    linear-gradient(to left, rgb(224 242 254 / 0.35), transparent 10%);
+  box-shadow:
+    inset 0 0 80px 6px rgb(186 230 253 / 0.55),
+    inset 0 0 220px rgb(224 242 254 / 0.3);
+  animation: atmo-breathe 9s ease-in-out infinite;
+}
+
+/* A deep night sky settling over the top of the page, a warm moonglow in one corner. */
+.ambience-atmo.atmo-night {
+  background:
+    radial-gradient(circle at 86% 9%, rgb(253 230 138 / 0.35), transparent 20%),
+    radial-gradient(ellipse 90% 50% at 50% 0%, rgb(30 27 75 / 0.42), transparent 75%),
+    linear-gradient(to top, rgb(245 158 11 / 0.12), transparent 25%);
+  animation: atmo-breathe 10s ease-in-out infinite;
+}
+
+/* Golden-hour sun low in one corner, its rays slowly swinging. */
+.ambience-atmo.atmo-golden {
+  background:
+    radial-gradient(circle at 4% 0%, rgb(253 224 71 / 0.55), rgb(251 191 36 / 0.2) 22%, transparent 48%),
+    linear-gradient(to top, rgb(254 243 199 / 0.4), transparent 28%);
+}
+
+.ambience-atmo.atmo-golden::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-conic-gradient(
+    from var(--ray-angle) at 4% 0%,
+    rgb(253 230 138 / 0.22) 0deg 3deg,
+    transparent 3deg 10deg
+  );
+  mask-image: radial-gradient(circle at 4% 0%, #000 0%, transparent 62%);
+  animation: atmo-rays 16s ease-in-out infinite alternate;
+}
+
+/* Soft pastel spring light from opposite corners. */
+.ambience-atmo.atmo-spring {
+  background:
+    radial-gradient(ellipse 50% 45% at 0% 0%, rgb(249 168 212 / 0.32), transparent 70%),
+    radial-gradient(ellipse 45% 40% at 100% 5%, rgb(196 181 253 / 0.3), transparent 70%),
+    radial-gradient(ellipse 60% 35% at 50% 100%, rgb(187 247 208 / 0.35), transparent 70%);
+  animation: atmo-breathe 8s ease-in-out infinite;
+}
+
+/* Festive, warm gold from above with a hint of colour at the corners. */
+.ambience-atmo.atmo-celebration {
+  background:
+    radial-gradient(ellipse 70% 40% at 50% 0%, rgb(251 191 36 / 0.32), transparent 72%),
+    radial-gradient(ellipse 40% 40% at 0% 100%, rgb(236 72 153 / 0.18), transparent 70%),
+    radial-gradient(ellipse 40% 40% at 100% 100%, rgb(59 130 246 / 0.18), transparent 70%);
+  animation: atmo-breathe 6s ease-in-out infinite;
+}
+
+/* A flag's three colours glowing in from the left edge, the bottom, and the
+   right edge, in order, `--c1`/`--c2`/`--c3` set inline per occasion. */
+.ambience-atmo.atmo-tricolor {
+  background:
+    radial-gradient(ellipse 32% 75% at 0% 55%, color-mix(in srgb, var(--c1) 30%, transparent), transparent 72%),
+    radial-gradient(ellipse 60% 28% at 50% 100%, color-mix(in srgb, var(--c2) 34%, transparent), transparent 72%),
+    radial-gradient(ellipse 32% 75% at 100% 55%, color-mix(in srgb, var(--c3) 30%, transparent), transparent 72%);
+  animation: atmo-breathe 9s ease-in-out infinite;
+}
+
+/* A single low, warm light from below and a quiet dimming at the edges:
+   reflective, never festive. `--c1` set inline. */
+.ambience-atmo.atmo-candle {
+  background: radial-gradient(ellipse 55% 38% at 50% 100%, color-mix(in srgb, var(--c1) 30%, transparent), transparent 75%);
+  box-shadow: inset 0 0 160px rgb(15 23 42 / 0.18);
+  animation: atmo-flicker 7s ease-in-out infinite;
+}
+
+/* ── Seasonal set pieces (`SeasonalDecor.tsx`) ─────────────────────────── */
+
+/* Frost spreading across the corner of the glass once, on arrival. */
+@keyframes decor-frost-grow {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.decor-frost-corner {
+  animation: decor-frost-grow 3.5s ease-out both;
+}
+
+/* Fog banks sliding slowly back and forth along the bottom. */
+@keyframes decor-mist {
+  0% {
+    transform: translateX(-25vw);
+  }
+  100% {
+    transform: translateX(45vw);
+  }
+}
+
+.decor-mist {
+  animation-name: decor-mist;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+/* Each pennant swinging gently on the string. */
+@keyframes decor-pennant {
+  0%,
+  100% {
+    transform: rotate(-7deg);
+  }
+  50% {
+    transform: rotate(7deg);
+  }
+}
+
+.decor-pennant {
+  transform-box: view-box;
+  animation: decor-pennant 3s ease-in-out infinite;
+}
+
+/* A hanging lantern swaying from its string, its glow breathing like a flame. */
+@keyframes decor-lantern {
+  0%,
+  100% {
+    transform: rotate(-4deg);
+  }
+  50% {
+    transform: rotate(4deg);
+  }
+}
+
+@keyframes decor-lantern-halo {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  30% {
+    opacity: 1;
+  }
+  60% {
+    opacity: 0.75;
+  }
+}
+
+.decor-lantern {
+  transform-origin: top center;
+  translate: -50% 0;
+  animation-name: decor-lantern;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.decor-lantern-halo {
+  animation: decor-lantern-halo 3.2s ease-in-out infinite;
+}
+
+/* Wheat stalks leaning with the wind, in three waves out of step. */
+@keyframes decor-field-sway {
+  0%,
+  100% {
+    transform: skewX(-5deg);
+  }
+  50% {
+    transform: skewX(6deg);
+  }
+}
+
+.decor-field-sway {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: decor-field-sway 4.5s ease-in-out infinite;
+}
+
+/* Shafts of light falling from above, slowly shifting. `--c1` set inline. */
+.decor-rays {
+  background: repeating-conic-gradient(
+    from calc(150deg + var(--ray-angle)) at 50% -20%,
+    color-mix(in srgb, var(--c1) 45%, transparent) 0deg 2.5deg,
+    transparent 2.5deg 9deg
+  );
+  mask-image: radial-gradient(ellipse 65% 85% at 50% 0%, #000 0%, transparent 75%);
+  animation: atmo-rays 18s ease-in-out infinite alternate;
+}
+
+/* Out-of-focus party lights drifting and swelling. */
+@keyframes decor-bokeh {
+  0% {
+    transform: translate3d(0, 0, 0) scale(0.9);
+  }
+  100% {
+    transform: translate3d(30px, -40px, 0) scale(1.15);
+  }
+}
+
+.decor-bokeh {
+  animation-name: decor-bokeh;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+/* ── Seasonal moments (`SeasonalMoments.tsx`) ─────────────────────────── */
+
+/* Thrown out from a point to `--dx`/`--dy`, then carried by `--fall`
+   (gravity down, or a lift up for lanterns and stars) as it fades.
+   Every value is set inline per particle. */
+@keyframes moment-pop {
+  0% {
+    transform: translate(-50%, -50%) translate(0, 0) scale(0.3) rotate(0deg);
+    opacity: 0;
+  }
+  8% {
+    transform: translate(-50%, -50%) translate(calc(var(--dx) * 0.25), calc(var(--dy) * 0.25)) scale(1)
+      rotate(calc(var(--spin) * 0.2));
+    opacity: 1;
+  }
+  55% {
+    transform: translate(-50%, -50%) translate(var(--dx), var(--dy)) scale(1) rotate(calc(var(--spin) * 0.6));
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) translate(calc(var(--dx) * 1.15), calc(var(--dy) + var(--fall))) scale(0.8)
+      rotate(var(--spin));
+    opacity: 0;
+  }
+}
+
+.moment-particle {
+  position: absolute;
+  display: flex;
+  will-change: transform, opacity;
+  animation-name: moment-pop;
+  animation-timing-function: cubic-bezier(0.15, 0.75, 0.35, 1);
+  animation-fill-mode: both;
+}
+
+/* String lights: each bulb glows, dims, glows, neighbours one after
+   another. Only opacity animates, the glow itself is a static filter. */
+@keyframes decor-bulb {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.decor-bulb {
+  filter: drop-shadow(0 0 3px currentColor) drop-shadow(0 0 6px currentColor);
+  animation: decor-bulb 1.8s ease-in-out infinite;
+}
+
+/* A woven kente ribbon: blocks of gold, green, red and black along the
+   length, fine dark threads across it for the weave. */
+.decor-kente {
+  height: 8px;
+  background:
+    repeating-linear-gradient(0deg, rgb(0 0 0 / 0.16) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(
+      90deg,
+      #fcd116 0 22px,
+      #111827 22px 25px,
+      #006b3f 25px 37px,
+      #fcd116 37px 41px,
+      #ce1126 41px 53px,
+      #111827 53px 56px,
+      #006b3f 56px 60px,
+      #fcd116 60px 82px,
+      #ce1126 82px 86px,
+      #006b3f 86px 98px
+    );
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.18);
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useStore, type Toast } from '../state/store'
 import { useBranding } from '../state/branding'
@@ -11,6 +11,19 @@ import { Badge, Button, Modal, cn } from './ui'
 import { UnreadAnnouncementsModal } from './UnreadAnnouncementsModal'
 import { api, apiAsset } from '../lib/api'
 import { renderSimpleMarkdown } from '../lib/simpleMarkdown'
+import {
+  activeHoliday,
+  HOLIDAYS,
+  momentSpec,
+  type Atmosphere,
+  type HolidayTheme,
+  type ParticleLayer,
+  type ParticleMotion,
+  type ParticleShape,
+} from '../lib/holidays'
+import { SHAPE_ICONS } from './seasonalIcons'
+import { SeasonalDecor, SeasonalTint } from './SeasonalDecor'
+import { celebrate, HeaderTrim, SeasonalMomentHost } from './SeasonalMoments'
 import {
   AlertIcon,
   CashIcon,
@@ -951,7 +964,429 @@ export function PublicShell() {
       </main>
       <PublicFooter />
       <ToastHost />
+      <SeasonalEffects />
     </div>
+  )
+}
+
+/** sessionStorage key for which holiday's popup was last dismissed, by its `key`, same per-notice-text pattern as `SITE_NOTICE_DISMISSED_KEY`: a new season still shows even mid-session, but dismissing this one doesn't re-nag for the rest of it. */
+const HOLIDAY_DISMISSED_KEY = 'holidayBannerDismissed'
+/** Separate from the key above: hiding the Christmas ambience is a "too much motion for me" choice, not the same as having already read a Farmers' Day card, the two must never share one flag. */
+const AMBIENCE_HIDDEN_KEY = 'holidayAmbienceHidden'
+
+/**
+ * One place that decides which seasonal touch, if any, the public storefront
+ * shows right now, see `activeHoliday`. Public storefront only, same
+ * reasoning as `SiteNoticeModal`: an agent or admin mid-shift doesn't need a
+ * seasonal flourish, a guest browsing for a data bundle might enjoy one.
+ */
+function SeasonalEffects() {
+  const location = useLocation()
+  const previewKey = new URLSearchParams(location.search).get('preview')
+  const holiday = activeHoliday(new Date(), previewKey)
+  if (!holiday) return null
+  const previewing = Boolean(previewKey)
+  return (
+    <>
+      {/* `key` forces a fresh mount (and fresh random particles) when
+          switching between holidays via `?preview=`, not just on a real
+          date change. */}
+      {holiday.kind === 'ambient' ? (
+        <SeasonalAmbience key={holiday.key} holiday={holiday} previewing={previewing} />
+      ) : (
+        <HolidayPopup holiday={holiday} />
+      )}
+      {previewing && <HolidayPreviewSwitcher current={holiday.key} />}
+    </>
+  )
+}
+
+/**
+ * Preview only (`?preview=`): step through every occasion in calendar order
+ * without retyping the link, previous/next or the arrow keys, wrapping at
+ * either end. Takes the place of the ambience's own close button, which
+ * real visitors still get.
+ */
+function HolidayPreviewSwitcher({ current }: { current: string }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const index = Math.max(
+    0,
+    HOLIDAYS.findIndex((h) => h.key === current),
+  )
+
+  const go = (step: number) => {
+    const next = HOLIDAYS[(index + step + HOLIDAYS.length) % HOLIDAYS.length]
+    const params = new URLSearchParams(location.search)
+    params.set('preview', next.key)
+    navigate(`${location.pathname}?${params.toString()}`, { replace: true })
+  }
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
+      if (event.key === 'ArrowRight') go(1)
+      if (event.key === 'ArrowLeft') go(-1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  return (
+    <div className="fixed top-20 right-3 z-30 flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 p-1 shadow-sm backdrop-blur">
+      <button
+        type="button"
+        onClick={() => go(-1)}
+        aria-label="Previous holiday"
+        className="rounded-full p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100"
+      >
+        <ChevronLeftIcon className="size-4" />
+      </button>
+      <span className="max-w-[42vw] truncate px-1 text-xs font-semibold text-slate-700 dark:text-slate-200 sm:max-w-none" aria-live="polite">
+        {HOLIDAYS[index].label}
+        <span className="ml-1.5 font-normal text-slate-400 tabular">
+          {index + 1}/{HOLIDAYS.length}
+        </span>
+      </span>
+      <button
+        type="button"
+        onClick={() => go(1)}
+        aria-label="Next holiday"
+        className="rounded-full p-1.5 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-800 dark:hover:text-slate-100"
+      >
+        <ChevronLeftIcon className="size-4 rotate-180" />
+      </button>
+      {/* Plays the completed-purchase burst without buying anything. Does
+          nothing on the solemn days, they have no `momentSpec`. */}
+      {momentSpec(HOLIDAYS[index].ambience) && (
+        <button
+          type="button"
+          onClick={() => celebrate(window.innerWidth / 2, window.innerHeight * 0.45)}
+          className="rounded-full bg-brand-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-800"
+        >
+          Celebrate
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A small corner card, on brand for the occasion by itself, deliberately NOT
+ * a theme swap: the storefront's own colors never change underneath it.
+ */
+function HolidayPopup({ holiday }: { holiday: HolidayTheme }) {
+  const [dismissed, setDismissed] = useState<string | null>(null)
+
+  useEffect(() => {
+    try {
+      setDismissed(sessionStorage.getItem(HOLIDAY_DISMISSED_KEY))
+    } catch {
+      // Private browsing or storage disabled, fail open: shows every time,
+      // never worse than that.
+    }
+  }, [])
+
+  if (dismissed === holiday.key) return null
+
+  const dismiss = () => {
+    setDismissed(holiday.key)
+    try {
+      sessionStorage.setItem(HOLIDAY_DISMISSED_KEY, holiday.key)
+    } catch {
+      // Nothing to persist against, worst case this shows again next time.
+    }
+  }
+
+  return (
+    <div className="pointer-events-none fixed inset-x-3 bottom-3 z-40 flex justify-center sm:inset-x-auto sm:left-4 sm:bottom-4 sm:justify-start">
+      <div
+        className={cn(
+          'pointer-events-auto flex max-w-xs items-start gap-2.5 rounded-2xl border p-3.5 shadow-lg',
+          holiday.accent,
+        )}
+      >
+        <span className="text-2xl leading-none" aria-hidden="true">
+          {holiday.emoji}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold">{holiday.label}</p>
+          <p className="mt-0.5 text-sm opacity-90">{holiday.message}</p>
+        </div>
+        <button
+          type="button"
+          onClick={dismiss}
+          aria-label="Dismiss"
+          className="relative -mt-0.5 -mr-0.5 shrink-0 self-start rounded p-1 opacity-60 before:absolute before:-inset-2.5 before:content-[''] hover:opacity-100"
+        >
+          <XIcon className="size-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** One particle's own randomized look and timing, picked once per mount, never recomputed on re-render. */
+interface ParticleInstance {
+  id: string
+  shape: ParticleShape
+  motion: ParticleMotion
+  color: string
+  glow: boolean
+  leftPercent: number
+  topPercent: number
+  size: number
+  opacity: number
+  durationS: number
+  delayS: number
+  /** 0 far away, 1 right up close: drives size, opacity and speed together, which is what gives the scene real depth instead of one flat sheet of identical particles. */
+  depth: number
+}
+
+/** Seconds for one full pass at middle depth; near particles move faster, far ones slower. */
+const MOTION_DURATION: Record<ParticleMotion, [number, number]> = {
+  fall: [10, 18],
+  blow: [9, 16],
+  flutter: [8, 14],
+  drift: [11, 19],
+  twinkle: [2.4, 5],
+  rise: [12, 20],
+  streak: [5, 8.5],
+}
+
+function between(min: number, max: number): number {
+  return min + Math.random() * (max - min)
+}
+
+function pick<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)]
+}
+
+function buildParticles(layers: ParticleLayer[]): ParticleInstance[] {
+  const out: ParticleInstance[] = []
+  layers.forEach((layer, layerIndex) => {
+    for (let i = 0; i < layer.count; i++) {
+      const depth = Math.random()
+      const base = between(...MOTION_DURATION[layer.motion])
+      const durationS = layer.motion === 'twinkle' ? base : base / (0.7 + 0.6 * depth)
+      out.push({
+        id: `${layerIndex}-${i}`,
+        shape: layer.shape,
+        motion: layer.motion,
+        color: pick(layer.colors),
+        glow: layer.glow ?? false,
+        // The wind carries `blow` far to the right over one pass, so it
+        // starts further left to still cover the whole width.
+        leftPercent: layer.motion === 'blow' ? between(-35, 95) : between(0, 100),
+        topPercent: layer.motion === 'streak' ? between(8, 85) : between(4, 92),
+        size: layer.size[0] + depth * (layer.size[1] - layer.size[0]),
+        opacity: 0.35 + 0.6 * depth,
+        durationS,
+        // Negative, so the scene is already mid-motion on page load rather
+        // than every particle starting from the top edge at once.
+        delayS: -Math.random() * durationS,
+        depth,
+      })
+    }
+  })
+  // Far ones first, so the near ones paint over them.
+  return out.sort((a, b) => a.depth - b.depth)
+}
+
+function AmbienceParticle({ particle: p }: { particle: ParticleInstance }) {
+  const style: CSSProperties = {
+    left: `${p.leftPercent}%`,
+    width: p.size,
+    height: p.size,
+    animationDuration: `${p.durationS}s`,
+    animationDelay: `${p.delayS}s`,
+  }
+  if (p.motion === 'twinkle' || p.motion === 'streak') style.top = `${p.topPercent}%`
+  // Starts just below the bottom edge and lifts; its fade in and out is the
+  // keyframe's own, peaking at this particle's opacity.
+  if (p.motion === 'rise') {
+    style.top = '100%'
+    ;(style as Record<string, unknown>)['--p-opacity'] = p.opacity
+  } else {
+    style.opacity = p.opacity
+  }
+
+  const className = `ambience-particle motion-${p.motion} shape-${p.shape}`
+
+  if (p.shape === 'dot') {
+    return (
+      <span
+        className={className}
+        style={{
+          ...style,
+          background: p.color,
+          boxShadow: p.glow ? `0 0 ${p.size * 2.5}px ${p.size / 2}px ${p.color}` : undefined,
+        }}
+      />
+    )
+  }
+  if (p.shape === 'confetti') {
+    return (
+      <span
+        className={className}
+        style={{ ...style, width: p.size * 0.45, background: `linear-gradient(135deg, ${p.color} 55%, ${p.color}b3)` }}
+      />
+    )
+  }
+  if (p.shape === 'gust') {
+    return (
+      <span
+        className={className}
+        style={{ ...style, left: 0, height: 1.5, background: `linear-gradient(90deg, transparent, ${p.color}, transparent)` }}
+      />
+    )
+  }
+  const Glyph = SHAPE_ICONS[p.shape]
+  return (
+    <span
+      className={className}
+      style={{
+        ...style,
+        color: p.color,
+        filter: p.glow ? `drop-shadow(0 0 ${Math.max(3, p.size / 3)}px ${p.color})` : undefined,
+      }}
+    >
+      {Glyph && <Glyph width="100%" height="100%" />}
+    </span>
+  )
+}
+
+interface BurstInstance {
+  id: number
+  leftPercent: number
+  topPercent: number
+  color: string
+  radius: number
+  cycleS: number
+  delayS: number
+}
+
+function buildBursts(spec: { colors: string[]; count: number }): BurstInstance[] {
+  return Array.from({ length: spec.count }, (_, id) => {
+    const cycleS = between(5, 8.5)
+    return {
+      id,
+      leftPercent: between(10, 90),
+      topPercent: between(10, 45),
+      color: pick(spec.colors),
+      radius: between(45, 85),
+      cycleS,
+      delayS: -between(0, cycleS),
+    }
+  })
+}
+
+const SPARKS_PER_BURST = 14
+
+/** One firework: a flash at the center and a ring of sparks flying out, then dark until its next cycle. */
+function FireworkBurst({ burst: b }: { burst: BurstInstance }) {
+  const timing = { animationDuration: `${b.cycleS}s`, animationDelay: `${b.delayS}s` }
+  return (
+    <div className="ambience-burst" style={{ left: `${b.leftPercent}%`, top: `${b.topPercent}%` }}>
+      <span className="burst-flash" style={{ ...timing, background: `radial-gradient(circle, ${b.color}, transparent 70%)` }} />
+      {Array.from({ length: SPARKS_PER_BURST }, (_, i) => (
+        <span
+          key={i}
+          className="burst-spark"
+          style={
+            {
+              ...timing,
+              '--a': `${(360 / SPARKS_PER_BURST) * i}deg`,
+              '--r': `${b.radius}px`,
+              background: `linear-gradient(to top, transparent, ${b.color})`,
+              boxShadow: `0 0 6px ${b.color}`,
+            } as CSSProperties
+          }
+        />
+      ))}
+    </div>
+  )
+}
+
+/** The light the whole scene sits in, see the `atmo-*` classes in index.css. */
+function AtmosphereLayer({ atmosphere }: { atmosphere: Atmosphere }) {
+  const vars: Record<string, string> = {}
+  if (atmosphere.kind === 'tricolor') {
+    ;[vars['--c1'], vars['--c2'], vars['--c3']] = atmosphere.colors
+  }
+  if (atmosphere.kind === 'candle') vars['--c1'] = atmosphere.color
+  return <div aria-hidden="true" className={`ambience-atmo atmo-${atmosphere.kind}`} style={vars as CSSProperties} />
+}
+
+/**
+ * One holiday's full-page atmosphere instead of a popup, see `AmbienceScene`.
+ * Entirely decorative, `pointer-events-none` throughout and `aria-hidden`,
+ * so it can never sit between a buyer and the Buy button underneath it, and
+ * `prefers-reduced-motion` (see index.css) already turns every animation
+ * here into a single static frame for anyone who asked for less motion.
+ *
+ * The light sits at `z-15` and the particles at `z-20`, both below the
+ * sticky header (`z-30`) and any popup or toast (`z-40`/`z-50`), so the
+ * scene drifts behind the header's own blur rather than over it.
+ */
+function SeasonalAmbience({ holiday, previewing }: { holiday: HolidayTheme; previewing: boolean }) {
+  const scene = holiday.ambience
+  const [hidden, setHidden] = useState<string | null>(null)
+  const particles = useState(() => (scene ? buildParticles(scene.layers) : []))[0]
+  const bursts = useState(() => (scene?.bursts ? buildBursts(scene.bursts) : []))[0]
+  const moment = momentSpec(scene)
+
+  useEffect(() => {
+    try {
+      setHidden(sessionStorage.getItem(AMBIENCE_HIDDEN_KEY))
+    } catch {
+      // Private browsing or storage disabled, fail open: shows every time,
+      // never worse than that.
+    }
+  }, [])
+
+  // A preview always shows, even for a scene this browser hid earlier.
+  if (!scene || (!previewing && hidden === holiday.key)) return null
+
+  const hide = () => {
+    setHidden(holiday.key)
+    try {
+      sessionStorage.setItem(AMBIENCE_HIDDEN_KEY, holiday.key)
+    } catch {
+      // Nothing to persist against, worst case this shows again next time.
+    }
+  }
+
+  return (
+    <>
+      {scene.tint && <SeasonalTint tint={scene.tint} />}
+      {scene.atmosphere && <AtmosphereLayer atmosphere={scene.atmosphere} />}
+      {scene.decor?.map((decor) => <SeasonalDecor key={decor.kind} decor={decor} />)}
+      {scene.trim && <HeaderTrim trim={scene.trim} />}
+      {moment && <SeasonalMomentHost spec={moment} />}
+      {(particles.length > 0 || bursts.length > 0) && (
+        <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-20 overflow-hidden">
+          {bursts.map((burst) => (
+            <FireworkBurst key={burst.id} burst={burst} />
+          ))}
+          {particles.map((particle) => (
+            <AmbienceParticle key={particle.id} particle={particle} />
+          ))}
+        </div>
+      )}
+      {!previewing && (
+        <button
+          type="button"
+          onClick={hide}
+          className="fixed top-20 right-3 z-30 rounded-full border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 p-2 text-slate-500 dark:text-slate-400 shadow-sm backdrop-blur hover:text-slate-800 dark:hover:text-slate-100"
+          aria-label={`Turn off the ${holiday.label} effect`}
+          title={`Turn off the ${holiday.label} effect`}
+        >
+          <XIcon className="size-4" />
+        </button>
+      )}
+    </>
   )
 }
 

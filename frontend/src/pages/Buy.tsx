@@ -8,6 +8,7 @@ import { cedis, dateTime } from '../lib/format'
 import { checkPhone, prettyPhone } from '../lib/networks'
 import type { OrderSplit } from '../data/types'
 import { CATEGORY_META } from '../components/categories'
+import { SeasonalCelebration } from '../components/SeasonalMoments'
 import {
   Badge,
   Button,
@@ -623,8 +624,10 @@ export default function Buy() {
           ) : placed.status === 'completed' ? (
             <Card className="mt-3 overflow-hidden">
               <div className="bg-brand-700 px-5 py-6 text-center text-white">
-                <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-white/15">
+                <span className="relative mx-auto flex size-12 items-center justify-center rounded-full bg-white/15">
                   <CheckIcon className="size-7" strokeWidth={2.4} />
+                  {/* Bursts out of the check in the current season's shape, if a holiday is on. */}
+                  <SeasonalCelebration />
                 </span>
                 <p className="mt-3 text-lg font-bold">{product.name} delivered</p>
                 <p className="mt-0.5 text-sm text-brand-100">
