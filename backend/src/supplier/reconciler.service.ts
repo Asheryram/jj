@@ -225,10 +225,24 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    */
   private async expireStaleApprovals(): Promise<number> {
     const holdMs = this.approvalHoldMs
+    const cutoff = new Date(Date.now() - holdMs)
     const expired = await this.prisma.order.findMany({
       where: {
         status: 'awaiting_approval',
-        createdAt: { lt: new Date(Date.now() - holdMs) },
+        // Timed from when the hold began (its latest `needs_approval`
+        // attempt), not from when the order was placed. A reorder of an
+        // older order that ends up held used to expire on the very next
+        // sweep, before its number ever had a chance to be approved.
+        // Orders with no such attempt on file fall back to their age.
+        OR: [
+          {
+            dispatches: {
+              some: { outcome: 'needs_approval', createdAt: { lt: cutoff } },
+              none: { outcome: 'needs_approval', createdAt: { gte: cutoff } },
+            },
+          },
+          { dispatches: { none: { outcome: 'needs_approval' } }, createdAt: { lt: cutoff } },
+        ],
       },
       select: { id: true, reference: true, recipient: true },
       take: 25,

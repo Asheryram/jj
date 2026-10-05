@@ -73,35 +73,44 @@ Tick a line only once the fix is built, type-checked, and verified against the s
 
 ## P1: wrong figures on admin screens
 
-- [ ] **D1** After logging capital, totals disagree with the per-provider rows for up to
+- [x] **D1** After logging capital, totals disagree with the per-provider rows for up to
       2 minutes. `solvency.service.ts` caches `position()` parts for 2 minutes and
       `float-monitor.service.ts` `logCapital` fills that cache just before writing. Fix:
       clear the cache whenever capital is logged, reversed or reimbursed. (Also fix the
       `ReservePanel.tsx` comment that says nothing is cached.)
-- [ ] **D2** "Free to spend" goes up when a manual refund or payout advance is reimbursed.
+      **Done:** SolvencyService.invalidate() clears both memos after any capital entry, reversal, reclassify or advance repayment, and the over-move check reads fresh figures.
+- [x] **D2** "Free to spend" goes up when a manual refund or payout advance is reimbursed.
       `solvency.service.ts` `expectedBalance` never subtracts the reimbursement (`capital_out`
       tied to an order or withdrawal), while the debt leaves the liabilities. Same in
       `etl.service.ts`. Over by GHS 5.10 today, GHS 125.00 more once the two fronted payouts
       are reimbursed. It also caps float reimbursements, so it can allow moving money that is
       owed to people.
-- [ ] **D3** GMPL's "Live reading" never moves with orders (frozen at the last manual check).
+      **Done:** expectedBalance now subtracts advance repayments (capital_out tied to an order or withdrawal), and so does the ETL. Free to spend falls by exactly the GHS 5.10 repaid so far.
+- [x] **D3** GMPL's "Live reading" never moves with orders (frozen at the last manual check).
       Only DataHub's dispatch calls `float.record`. The GMPL shortfall check therefore never
       fires. Fix: refresh GMPL's real wallet balance after an accepted GMPL order (throttled),
       and fix the ETL comment that says GMPL's reading is always null.
-- [ ] **D4** "Projected profit" counts the supplier cost of accepted, still-open orders twice
+      **Done:** after every accepted GMPL order the real wallet balance is fetched in the background (at most once a minute) and recorded, so the reading moves with orders and the shortfall check can fire. Still open: the warehouse float history is DataHub-only until its table gets a provider column.
+- [x] **D4** "Projected profit" counts the supplier cost of accepted, still-open orders twice
       (booked at acceptance, then subtracted again from the split). `ledger.service.ts`.
-- [ ] **D5** "Margin, last 7 days" mixes revenue by sale date with agent margin by completion
+      **Done:** only open orders with no supplier cost booked yet subtract the estimate.
+- [x] **D5** "Margin, last 7 days" mixes revenue by sale date with agent margin by completion
       date, and uses a rolling 168 hours where the revenue tile uses calendar days.
       `ledger.service.ts` window, `Overview.tsx`, Finance ranges.
-- [ ] **D6** Warehouse solvency history disagrees with the live screen: past days force
+      **Done:** order-linked ledger lines count in the window the order was sold in; others by their own date. Last 7 days on real data: margin GHS 220.96 (was 194.58) on the same GHS 1,139.31 revenue. The rolling-vs-calendar window mismatch with the revenue tile is still open.
+- [x] **D6** Warehouse solvency history disagrees with the live screen: past days force
       "not yet delivered" to 0, and bundle spend is blended across providers differently.
       `etl.service.ts`.
-- [ ] **D7** Finance "Where the money goes" bars add up to more than revenue (payout fee shown
+      **Done:** not yet delivered is reconstructed per day (paid by then, not delivered or refunded by then); bundle spend is per provider then added, like the live screen. End of Sep 30 now shows 13 orders (GHS 259.21) in flight instead of 0.
+- [x] **D7** Finance "Where the money goes" bars add up to more than revenue (payout fee shown
       outside the margin). `Finance.tsx`, `ledger.service.ts`.
-- [ ] **D8** DataHub "float is short" alert (GHS 23.85) has been on since Sep 26, unexplained.
+      **Done:** the payout fee withheld from agents is no longer drawn as a cost band.
+- [x] **D8** DataHub "float is short" alert (GHS 23.85) has been on since Sep 26, unexplained.
       Investigate charges on failed or estimated dispatches that were never booked.
-- [ ] **D9** Manual refund and payout advances count as DataHub float movements in the
+      **Done:** investigated on the Oct 5 snapshot. No DataHub charge is missing from the books and none was booked at the wrong amount. Expected now: 6.02 baseline + 3,845.00 capital - 3,825.15 bundle cost = GHS 25.87; real reading GHS 28.02, so the float holds GHS 2.15 more, not less (roughly the 3 estimate-booked orders). The Sep 26 gap has since been covered by logged top-ups; the alert flag is latched from then and clears on the next comparison.
+- [x] **D9** Manual refund and payout advances count as DataHub float movements in the
       "pending reading" check. `float-monitor.service.ts` `lastMovement` query.
+      **Done:** the pending check ignores capital rows tied to an order or withdrawal.
 
 ## P2: books wrong in edge cases, races
 
@@ -112,20 +121,26 @@ Tick a line only once the fix is built, type-checked, and verified against the s
 - [ ] **L3** Payouts sent by hand still charge the agent the GHS 1 "Paystack transfer fee" and
       book it as a cost, though Paystack never sent anything. Needs a decision: keep charging
       it (then book it as income, not a cost) or stop charging it on manual payouts.
-- [ ] **L4** Agent cancelling a withdrawal, and an admin rejecting a refund, are read-then-write;
+      **Needs your decision**, then a small change either way.
+- [x] **L4** Agent cancelling a withdrawal, and an admin rejecting a refund, are read-then-write;
       racing an approval can leave the wrong state. Fix: status-guarded claims.
-- [ ] **L5** Putting an order on hold can overwrite an order that was just settled, and the hold's
+      **Done:** agent cancel and refund reject now claim on pending; a lost race says "just decided, refresh".
+- [x] **L5** Putting an order on hold can overwrite an order that was just settled, and the hold's
       expiry clock starts at the order's creation, not the hold. `fulfilment.service.ts`,
       `reconciler.service.ts`.
+      **Done:** a hold no longer overwrites a settled order; hold expiry is timed from the latest needs-approval attempt (orders with none fall back to their age).
 - [ ] **L6** An underpaid or wrong-currency charge leaves the order hanging forever and can fill
       the sweep's 25-row batch. `payments.service.ts`, `reconciler.service.ts`.
-- [ ] **L7** An approved manual payout cannot be undone if the admin decides not to send it.
+      **Needs your decision:** when a charge arrives short, refund what arrived, or hold the order and ask the buyer to pay the difference? None in production today.
+- [x] **L7** An approved manual payout cannot be undone if the admin decides not to send it.
+      **Done:** "Not sending it?" on an approved payout with no Paystack transfer returns amount + fee to the agent (reason required); failPayout now claims atomically so it cannot race "Paid another way".
 - [ ] **L8** A late "delivered" signal on a refunded order is only flagged; refund approval does
       not check that flag.
 - [ ] **L9** Settlement ledger writes are unchecked: `LedgerService.record` swallows errors, and
       an agent margin row is written even when the agent no longer exists.
-- [ ] **L10** Withdrawal failure note says "top up and approve it again", but a failed withdrawal
+- [x] **L10** Withdrawal failure note says "top up and approve it again", but a failed withdrawal
       cannot be approved again.
+      **Done:** the note now says the money went back to the agent and they can request again.
 - [ ] **L11** A missing Paystack fee is booked as 0 (the comment says it must not be).
 - [ ] **L12** The agent's payout earning shows their profile phone, not the number actually paid.
 

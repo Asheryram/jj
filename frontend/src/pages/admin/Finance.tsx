@@ -64,11 +64,14 @@ export default function Finance() {
   const paystackFee = statement?.costs.paymentFees ?? 0
   const agentShare = statement?.costs.agentMargins ?? 0
   const refunds = statement?.costs.refunds ?? 0
-  /** referralBonuses and payoutFees are both historical-only kinds, nothing live writes either; agentMarginWriteoffs is the rare uncollectable-clawback case. */
-  const otherCosts =
-    (statement?.costs.referralBonuses ?? 0) +
-    (statement?.costs.payoutFees ?? 0) +
-    (statement?.costs.agentMarginWriteoffs ?? 0)
+  /**
+   * referralBonuses is historical-only; agentMarginWriteoffs is the rare
+   * uncollectable-clawback case. `payoutFees` is deliberately left out: it is
+   * the transfer fee withheld from an agent's own payout, not a cost of any
+   * sale (`affectsProfit` false, so it is not in "Your margin" either), and
+   * including it made these bands add up to more than revenue.
+   */
+  const otherCosts = (statement?.costs.referralBonuses ?? 0) + (statement?.costs.agentMarginWriteoffs ?? 0)
   const myMargin = statement?.profit ?? 0
 
   return (

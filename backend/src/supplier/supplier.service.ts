@@ -411,6 +411,12 @@ export class SupplierService implements OnModuleInit {
     })
 
     if (result.kind === 'accepted') {
+      // Their order reply carries no balance (DataHub's does), so the float
+      // reading is fetched separately, in the background, never holding up
+      // the order itself. See `FloatMonitorService.noteOrderPlaced`.
+      void this.float
+        .noteOrderPlaced('gmpl', order.reference)
+        .catch((error: unknown) => this.log.warn(`GMPL float read after ${order.reference} failed: ${String(error)}`))
       // Their reply means "queued", never "delivered". The real outcome
       // arrives by webhook, or the reconciler goes and asks.
       return {

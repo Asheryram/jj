@@ -963,11 +963,11 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
    * back, so there is no historical source to reconstruct a past day from,
    * unlike `computeHistoricalSolvency` below.
    *
-   * DataHub only, deliberately, not looped over every provider: GMPL's own
-   * purchase reply carries no remaining-balance figure at all (see
-   * `GmplClient.purchase`'s return shape), so `dispatchLiveGmpl` never calls
-   * `FloatMonitorService.record` and `latest('gmpl')` can only ever be null.
-   * There is nothing to snapshot for GMPL until their API exposes one.
+   * DataHub only, for now: `DailyFloatSnapshot` has a single balance column.
+   * GMPL does have readings (its wallet balance is fetched after each
+   * accepted order, throttled, see `FloatMonitorService.noteOrderPlaced`,
+   * and on every "Check live"), so a per-provider history needs a provider
+   * column on that warehouse table first.
    *
    * Also copies today's own reading onto today's `DailySolvencySnapshot` row
    * (a plain `update`, never `upsert`: that row already exists by the time
@@ -1038,17 +1038,26 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
         where: { requestedAt: { lt: end } },
         select: { amount: true, status: true, decidedAt: true, paidAt: true },
       }),
-      // Same live-only "still literally in flight right now" reading the
-      // current query uses, no as-of-X equivalent: an order's exact
-      // resolution moment isn't recorded for every outcome (only `completedAt`
-      // is), and this state is transient (minutes to hours), never material
-      // for a day more than a day or two in the past either way.
-      dateInt === toDateInt(new Date())
-        ? this.prisma.order.aggregate({
-            where: { status: { in: ['awaiting_approval', 'processing'] } },
-            _sum: { salePrice: true },
-          })
-        : Promise.resolve({ _sum: { salePrice: 0 } }),
+      // Paid for by `end` and not yet resolved by `end`, reconstructed for
+      // every day rather than only today. A delivery's moment is
+      // `completedAt`; a failure's is its refund request's `createdAt`,
+      // written in the same transaction that fails a paid order (see
+      // `FulfilmentService.settle`). This used to be forced to 0 for every
+      // past day, so the history showed nothing in flight on days that had
+      // orders stuck open the whole time, and disagreed with the live screen.
+      this.prisma.order.aggregate({
+        where: {
+          OR: [
+            { paidWith: 'momo', payment: { is: { status: 'paid', paidAt: { lt: end } } } },
+            { paidWith: 'wallet', createdAt: { lt: end } },
+          ],
+          AND: [
+            { OR: [{ completedAt: null }, { completedAt: { gte: end } }] },
+            { OR: [{ refundRequest: { is: null } }, { refundRequest: { is: { createdAt: { gte: end } } } }] },
+          ],
+        },
+        _sum: { salePrice: true },
+      }),
       this.prisma.refundRequest.findMany({
         where: { createdAt: { lt: end } },
         select: { amount: true, method: true, status: true, decidedAt: true, paidAt: true },
@@ -1059,7 +1068,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       }),
       this.prisma.ledgerEntry.findMany({
         where: { kind: 'capital_out', occurredAt: { lt: end }, OR: [{ orderRef: { not: null } }, { withdrawalId: { not: null } }] },
-        select: { orderRef: true, withdrawalId: true },
+        select: { orderRef: true, withdrawalId: true, amount: true },
       }),
       this.prisma.payment.aggregate({ where: { status: 'paid', paidAt: { lt: end } }, _sum: { amount: true, fee: true } }),
       this.prisma.withdrawal.aggregate({
@@ -1072,7 +1081,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       }),
       this.prisma.ledgerEntry.findMany({
         where: { kind: { in: ['capital_in_reimbursement', 'capital_out'] }, occurredAt: { lt: end } },
-        select: { id: true, kind: true, amount: true, idempotencyKey: true },
+        select: { id: true, kind: true, amount: true, idempotencyKey: true, provider: true },
       }),
     ])
 
@@ -1119,27 +1128,59 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
         .filter((r) => r.kind === 'capital_out' && r.idempotencyKey.startsWith('correction:'))
         .map((r) => r.idempotencyKey.split(':')[1]),
     )
-    // Unfiltered by provider, deliberately: this is the combined figure
-    // `SolvencyService.position()` also shows, every supplier's reimbursement
-    // added together, the same as `solvency.service.ts`'s own
-    // `reimbursedAcrossProviders`. A per-provider breakdown lives only on the
-    // live Reserve panel (`SolvencyService.spentOnBundlesByProvider`), not
-    // duplicated into this warehouse snapshot.
-    const reimbursedAcrossProviders = reimbursements
-      .filter((r) => r.kind === 'capital_in_reimbursement' && !reversedReimbursementIds.has(r.id))
-      .reduce((sum, r) => sum + r.amount, 0)
-    const bundlesBought = await this.prisma.ledgerEntry.aggregate({
+    const liveReimbursements = reimbursements.filter(
+      (r) => r.kind === 'capital_in_reimbursement' && !reversedReimbursementIds.has(r.id),
+    )
+    const reimbursedAcrossProviders = liveReimbursements.reduce((sum, r) => sum + r.amount, 0)
+
+    /**
+     * Per provider, then added, exactly as the live Reserve panel does it
+     * (`SolvencyService.spentOnBundlesByProvider`): each provider's own
+     * bundle cost less what was reimbursed to *that* float, floored at 0.
+     * Blending both providers into one subtraction (what this used to do)
+     * lets one float's over-reimbursement silently cancel the other's real
+     * spend, and the history then disagrees with the live screen. Provider
+     * comes from the order's SKU, a capital row with no provider predates
+     * GMPL and is DataHub's, the same rules as `provider-resolution.ts`.
+     */
+    const costRows = await this.prisma.ledgerEntry.findMany({
       where: { kind: 'supplier_cost', occurredAt: { lt: end } },
-      _sum: { amount: true },
+      select: { amount: true, order: { select: { supplierCodeAtSale: true } } },
     })
-    const spentOnBundles = Math.max(0, -(bundlesBought._sum.amount ?? 0) - reimbursedAcrossProviders)
+    const skuCodes = [...new Set(costRows.map((r) => r.order?.supplierCodeAtSale).filter((c): c is string => Boolean(c)))]
+    const skuProviders = await this.prisma.supplierProduct.findMany({
+      where: { code: { in: skuCodes } },
+      select: { code: true, provider: true },
+    })
+    const providerByCode = new Map(skuProviders.map((s) => [s.code, s.provider]))
+    const costByProvider = new Map<string, number>()
+    for (const row of costRows) {
+      const code = row.order?.supplierCodeAtSale
+      const provider = code ? (providerByCode.get(code) ?? 'datahub-gh') : 'datahub-gh'
+      costByProvider.set(provider, (costByProvider.get(provider) ?? 0) - row.amount)
+    }
+    const reimbursedByProvider = new Map<string, number>()
+    for (const r of liveReimbursements) {
+      const provider = r.provider ?? 'datahub-gh'
+      reimbursedByProvider.set(provider, (reimbursedByProvider.get(provider) ?? 0) + r.amount)
+    }
+    const providers = new Set([...costByProvider.keys(), ...reimbursedByProvider.keys()])
+    const spentOnBundles = [...providers].reduce(
+      (sum, p) => sum + Math.max(0, (costByProvider.get(p) ?? 0) - (reimbursedByProvider.get(p) ?? 0)),
+      0,
+    )
+
+    // Repaying whoever fronted a manual refund or payout is money leaving
+    // Paystack, same as the live `SolvencyService.manualAdvancesRepaid`.
+    const advancesRepaid = -manualReimbursements.reduce((sum, r) => sum + r.amount, 0)
 
     const expectedAtPaystack =
       (collected._sum.amount ?? 0) -
       (collected._sum.fee ?? 0) -
       (transferredPayouts._sum.amount ?? 0) -
       (transferredRefunds._sum.amount ?? 0) -
-      reimbursedAcrossProviders
+      reimbursedAcrossProviders -
+      advancesRepaid
 
     const owedToAgents = earningsAsOf._sum.amount ?? 0
     const owedToCustomers = (walletAsOf._sum.amount ?? 0) + (unclaimedCredits._sum.amount ?? 0) + owedForRefunds

@@ -180,10 +180,18 @@ export class WithdrawalsService {
         throw new ConflictError('ALREADY_DECIDED', `That request was already ${row.status}.`)
       }
 
-      const updated = await tx.withdrawal.update({
-        where: { id },
+      // Claimed on `pending`, not just checked above: an admin approving at
+      // the same moment would otherwise have that approval overwritten to
+      // `rejected` and the held amount returned, while the payout (possibly
+      // already sent by hand) went ahead anyway.
+      const claim = await tx.withdrawal.updateMany({
+        where: { id, status: 'pending' },
         data: { status: 'rejected', decidedAt: new Date() },
       })
+      if (claim.count === 0) {
+        throw new ConflictError('ALREADY_DECIDED', 'That request was just decided, refresh and check.')
+      }
+      const updated = await tx.withdrawal.findUniqueOrThrow({ where: { id } })
 
       // The hold was `amount + transferFee` (see `request()`), so the reversal
       // returns both, not just `amount`, or the frozen fee would stay stuck
@@ -559,7 +567,10 @@ export class WithdrawalsService {
       await this.failPayout(
         row.id,
         result.insufficientBalance
-          ? 'Your Paystack balance could not cover this payout. Top up and approve it again.'
+          ? // `failPayout` closes the request and returns the money to the agent,
+            // so it can't be approved again; the agent requests it afresh.
+            'Your Paystack balance could not cover this payout. The amount has gone back to the ' +
+            "agent's balance; once Paystack is topped up they can request it again."
           : result.reason,
       )
       return
@@ -711,6 +722,7 @@ export class WithdrawalsService {
         affectsProfit: false,
       },
     ])
+    this.solvency.invalidate()
 
     this.log.log(`manual payout advance for ${withdrawalId} reimbursed by ${adminId}`)
   }
@@ -722,20 +734,47 @@ export class WithdrawalsService {
    * they are down the amount and nobody has it. Returning it is the whole point
    * of distinguishing a refusal from an unknown outcome.
    */
+  /**
+   * Back out of an approved payout nobody has sent, the agent's money back.
+   *
+   * Before this, approving was one-way: on a Starter account an approved
+   * payout waits to be sent by hand, and if the admin then decided not to
+   * (a wrong Mobile Money number, a request they should have refused) there
+   * was no way back, the agent's balance stayed held indefinitely.
+   * Only for a payout with no Paystack transfer on record: one Paystack is
+   * already processing must not be reversed here on top of being sent.
+   */
+  async cancelApproved(id: string, adminId: string, note: string): Promise<void> {
+    const reason = note.trim()
+    if (reason.length < 5) {
+      throw new ValidationError('Say why this payout is not being sent. It is kept on the record.')
+    }
+    const row = await this.prisma.withdrawal.findUnique({ where: { id } })
+    if (!row) throw new NotFoundError('We could not find that withdrawal request.')
+    if (row.status !== 'approved') {
+      throw new ConflictError('NOT_APPROVED', `Only an approved payout can be cancelled, this one is ${row.status}.`)
+    }
+    if (row.transferCode) {
+      throw new ConflictError('ALREADY_SENT', 'Paystack already has a transfer for this one, check their dashboard instead.')
+    }
+    await this.failPayout(id, `Not sent, cancelled by an admin: ${reason}`)
+    this.log.warn(`payout ${id} cancelled after approval by ${adminId}: ${reason}`)
+  }
+
   private async failPayout(withdrawalId: string, reason: string): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
-      const row = await tx.withdrawal.findUnique({ where: { id: withdrawalId } })
-      if (!row || row.status === 'failed' || row.status === 'paid') {
-        this.log.warn(
-          `payout ${withdrawalId}: not failing, already ${row?.status ?? 'missing'}`,
-        )
-        return
-      }
-
-      await tx.withdrawal.update({
-        where: { id: withdrawalId },
+      // Claimed, not read-then-written: a "Paid another way" or a late
+      // Paystack success racing this must not have its paid row flipped to
+      // failed with the money handed back on top.
+      const claim = await tx.withdrawal.updateMany({
+        where: { id: withdrawalId, status: { in: ['pending', 'approved'] } },
         data: { status: 'failed', transferStatus: 'failed', transferNote: reason },
       })
+      const row = await tx.withdrawal.findUnique({ where: { id: withdrawalId } })
+      if (claim.count === 0 || !row) {
+        this.log.warn(`payout ${withdrawalId}: not failing, already ${row?.status ?? 'missing'}`)
+        return
+      }
 
       // The hold was `amount + transferFee` (see `request()`), both come back:
       // the transfer never went out at all, so nothing was actually spent on

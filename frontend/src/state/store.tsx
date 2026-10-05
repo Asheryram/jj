@@ -182,6 +182,7 @@ interface Store {
   updatePhone: (phone: string) => Promise<void>
   decideWithdrawal: (id: string, status: WithdrawalStatus) => Promise<void>
   settleWithdrawalManually: (id: string, note: string) => Promise<void>
+  cancelApprovedWithdrawal: (id: string, note: string) => Promise<void>
 
   users: PlatformUser[]
   toggleUserStatus: (id: string) => Promise<void>
@@ -1108,6 +1109,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [pushToast, reportError],
   )
 
+  const cancelApprovedWithdrawal = useCallback(
+    async (id: string, note: string) => {
+      try {
+        await api.cancelApprovedWithdrawal(id, note)
+        setWithdrawals((current) =>
+          current.map((w) => (w.id === id ? { ...w, status: 'failed', transferStatus: 'failed' } : w)),
+        )
+        pushToast({ tone: 'success', title: "Payout cancelled, the amount is back on the agent's balance" })
+      } catch (error) {
+        reportError(error, 'We could not cancel that.')
+      }
+    },
+    [pushToast, reportError],
+  )
+
   const toggleUserStatus = useCallback(
     async (id: string) => {
       try {
@@ -1172,6 +1188,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       updatePhone,
       decideWithdrawal,
       settleWithdrawalManually,
+      cancelApprovedWithdrawal,
       users,
       toggleUserStatus,
       claimableCredits,
@@ -1197,6 +1214,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       customerBalance,
       decideWithdrawal,
       settleWithdrawalManually,
+      cancelApprovedWithdrawal,
       dismissToast,
       earnings,
       findOrder,

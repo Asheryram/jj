@@ -44,6 +44,7 @@ export default function AdminWithdrawals() {
   const { withdrawals, decideWithdrawal, users, pushToast } = useStore()
   const [filter, setFilter] = useState<Filter>('pending')
   const [settling, setSettling] = useState<WithdrawalRequest | null>(null)
+  const [cancelling, setCancelling] = useState<WithdrawalRequest | null>(null)
   const [decidingId, setDecidingId] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -365,6 +366,19 @@ export default function AdminWithdrawals() {
                         >
                           Paid another way?
                         </button>
+                        {/* Approving used to be one-way: decide not to send it
+                            after all (wrong number, should have refused) and
+                            the agent's money stayed held. Hidden once Paystack
+                            has a real transfer, that one is theirs to settle. */}
+                        {(request.transferStatus === 'manual' || !request.transferStatus) && (
+                          <button
+                            type="button"
+                            onClick={() => setCancelling(request)}
+                            className="text-xs font-semibold text-red-700 dark:text-red-400 underline underline-offset-2"
+                          >
+                            Not sending it?
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <span className="text-xs text-slate-500 dark:text-slate-400">Decided</span>
@@ -380,6 +394,7 @@ export default function AdminWithdrawals() {
       <ManualAdvancesCard />
 
       <SettleManuallyModal request={settling} onClose={() => setSettling(null)} />
+      <SettleManuallyModal request={cancelling} mode="cancel" onClose={() => setCancelling(null)} />
     </div>
   )
 }
@@ -471,11 +486,15 @@ function ManualAdvancesCard() {
 function SettleManuallyModal({
   request,
   onClose,
+  mode = 'settle',
 }: {
   request: WithdrawalRequest | null
   onClose: () => void
+  /** 'cancel': back out of the approved payout instead, the money returns to the agent. */
+  mode?: 'settle' | 'cancel'
 }) {
-  const { settleWithdrawalManually } = useStore()
+  const { settleWithdrawalManually, cancelApprovedWithdrawal } = useStore()
+  const cancelling = mode === 'cancel'
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -492,12 +511,17 @@ function SettleManuallyModal({
 
   const submit = async () => {
     if (note.trim().length < 5) {
-      setError('Say how and where this was sent. It is kept on the record.')
+      setError(
+        cancelling
+          ? 'Say why this payout is not being sent. It is kept on the record.'
+          : 'Say how and where this was sent. It is kept on the record.',
+      )
       return
     }
     setBusy(true)
     try {
-      await settleWithdrawalManually(request.id, note.trim())
+      if (cancelling) await cancelApprovedWithdrawal(request.id, note.trim())
+      else await settleWithdrawalManually(request.id, note.trim())
       onClose()
     } finally {
       setBusy(false)
@@ -505,7 +529,11 @@ function SettleManuallyModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Mark ${cedis(request.amount)} as sent`}>
+    <Modal
+      open
+      onClose={onClose}
+      title={cancelling ? `Don't send ${cedis(request.amount)}` : `Mark ${cedis(request.amount)} as sent`}
+    >
       <div className="space-y-4">
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
           <p className="font-semibold text-slate-900 dark:text-slate-50">{request.agentName}</p>
@@ -514,15 +542,27 @@ function SettleManuallyModal({
           </p>
         </div>
 
-        <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
-          Only use this once the money has actually left your hands. This closes the request and
-          tells the agent it has been sent, there is no automatic transfer behind it this time.
-        </Callout>
+        {cancelling ? (
+          <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
+            Only if you have not sent any of this money. The request closes and{' '}
+            {cedis(request.amount + request.transferFee)} goes back to the agent's balance; they can
+            request it again.
+          </Callout>
+        ) : (
+          <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
+            Only use this once the money has actually left your hands. This closes the request and
+            tells the agent it has been sent, there is no automatic transfer behind it this time.
+          </Callout>
+        )}
 
-        <Field label="How and where did you send it?" htmlFor="wd-settle-note" error={error}>
+        <Field
+          label={cancelling ? 'Why is it not being sent?' : 'How and where did you send it?'}
+          htmlFor="wd-settle-note"
+          error={error}
+        >
           <TextInput
             id="wd-settle-note"
-            placeholder="Sent from my personal MTN MoMo, ref 88578647868"
+            placeholder={cancelling ? 'Wrong MoMo number, asked the agent to request again' : 'Sent from my personal MTN MoMo, ref 88578647868'}
             value={note}
             invalid={Boolean(error)}
             onChange={(event) => {
@@ -533,8 +573,8 @@ function SettleManuallyModal({
         </Field>
 
         <div className="flex gap-2">
-          <Button block loading={busy} onClick={() => void submit()}>
-            Mark as sent
+          <Button block loading={busy} variant={cancelling ? 'danger' : undefined} onClick={() => void submit()}>
+            {cancelling ? "Don't send, return the money" : 'Mark as sent'}
           </Button>
           <Button block variant="outline" disabled={busy} onClick={onClose}>
             Cancel

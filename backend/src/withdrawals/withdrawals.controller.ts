@@ -90,6 +90,22 @@ export class WithdrawalsController {
    * Confirm a payout was sent by hand, see `WithdrawalsService.settleManually`.
    * For an account that cannot send Paystack transfers yet, or at all.
    */
+  /**
+   * Back out of an approved payout that was never sent (wrong number, changed
+   * mind): the held amount and fee go back to the agent. See
+   * `WithdrawalsService.cancelApproved`. Reuses the settle DTO, a reason is
+   * required and kept the same way.
+   */
+  @Post(':id/cancel-approved')
+  @Roles('admin')
+  cancelApproved(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: SettleWithdrawalManuallyDto,
+  ) {
+    return this.withdrawals.cancelApproved(id, user.id, dto.note)
+  }
+
   @Post(':id/settle-manually')
   @Roles('admin')
   settleManually(

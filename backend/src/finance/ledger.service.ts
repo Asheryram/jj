@@ -118,9 +118,23 @@ export class LedgerService {
    * actual flag on each row rather than a hardcoded list of kinds.
    */
   async statement(since: Date) {
+    /**
+     * Anything tied to an order counts in the window the order was *sold*
+     * in, not the day each line happened to book. Revenue books at payment
+     * but supplier cost and agent margin only at delivery, so filtering on
+     * `occurredAt` alone put a sale's revenue in one week and its costs in
+     * the next: ten orders completed by hand on Oct 1 dragged their margin
+     * into a week whose revenue they never belonged to, and "margin, last 7
+     * days" read GHS 2.38 where the true figure was about 25.67. Lines with
+     * no order (payouts, top-ups, capital) keep their own date.
+     */
+    const window =
+      since.getTime() <= 0
+        ? {}
+        : { OR: [{ orderRef: null, occurredAt: { gte: since } }, { order: { createdAt: { gte: since } } }] }
     const rows = await this.prisma.ledgerEntry.groupBy({
       by: ['kind', 'affectsProfit'],
-      where: { occurredAt: { gte: since } },
+      where: window,
       _sum: { amount: true },
       _count: { _all: true },
     })
@@ -188,16 +202,29 @@ export class LedgerService {
       this.statement(new Date(0)),
       this.prisma.order.findMany({
         where: { status: { in: ['awaiting_approval', 'processing'] } },
-        select: { split: true },
+        select: { reference: true, split: true },
       }),
     ])
+
+    // An accepted order's real supplier cost is booked the moment the
+    // provider accepts it (see `FulfilmentService`), so it is already in
+    // `profit` above. Subtracting the estimate again for those counted the
+    // cost twice. Only orders with no cost booked yet still need it.
+    const costBooked = new Set(
+      (
+        await this.prisma.ledgerEntry.findMany({
+          where: { kind: 'supplier_cost', orderRef: { in: openOrders.map((o) => o.reference) } },
+          select: { orderRef: true },
+        })
+      ).map((e) => e.orderRef),
+    )
 
     const pendingCost = openOrders.reduce((sum, order) => {
       const split = order.split as unknown as OrderSplit
       const agentMargin = split.shares
         .filter((share) => share.role === 'agent')
         .reduce((total, share) => total + share.margin, 0)
-      return sum + split.supplierCost + agentMargin
+      return sum + (costBooked.has(order.reference) ? 0 : split.supplierCost) + agentMargin
     }, 0)
 
     return profit - pendingCost

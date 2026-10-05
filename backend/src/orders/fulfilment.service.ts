@@ -561,10 +561,16 @@ export class FulfilmentService implements OnApplicationBootstrap {
     order: { id: string; reference: string; recipient: string; productName: string; salePrice: number },
     reason: string,
   ): Promise<void> {
-    await this.prisma.order.update({
-      where: { id: order.id },
+    // Guarded: an admin resolving the order while this provider call was in
+    // flight must not have their settled outcome overwritten back to a hold.
+    const held = await this.prisma.order.updateMany({
+      where: { id: order.id, status: { notIn: ['completed', 'failed'] } },
       data: { status: 'awaiting_approval' },
     })
+    if (held.count === 0) {
+      this.log.warn(`${order.reference}: settled while its dispatch was in flight, not putting it on hold`)
+      return
+    }
 
     const product = await this.prisma.order
       .findUnique({

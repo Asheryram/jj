@@ -345,6 +345,33 @@ export class FloatMonitorService {
     return this.latest(provider)
   }
 
+  /** When `noteOrderPlaced` last asked GMPL, see its throttle. */
+  private lastOrderBalanceCheckAt = 0
+
+  /**
+   * Keep GMPL's live reading moving with its orders. DataHub reports its
+   * balance in every order reply (`record` is called from the dispatch
+   * itself); GMPL's order reply doesn't, so without this its reading only
+   * ever changed when someone pressed "Check live", sat frozen at that
+   * figure, and `reconcile()` stayed "pending" indefinitely, which meant a
+   * real GMPL shortfall could never be flagged.
+   *
+   * At most once a minute: a burst of orders needs one fresh reading, not
+   * one call each. Never throws, a failed check just leaves the last
+   * reading in place, the same as a failed "Check live".
+   */
+  async noteOrderPlaced(provider: SupplierProviderCode, orderRef: string): Promise<void> {
+    if (provider !== 'gmpl') return
+    if (Date.now() - this.lastOrderBalanceCheckAt < 60_000) return
+    this.lastOrderBalanceCheckAt = Date.now()
+    const result = await this.gmpl.getWalletBalance()
+    if (result.kind !== 'ok') {
+      this.log.warn(`could not read the GMPL float after ${orderRef}: ${result.reason}`)
+      return
+    }
+    await this.record(provider, result.balanceCedis, orderRef)
+  }
+
   /**
    * Record James putting his own money into one provider's float, or taking
    * it back out.
@@ -391,6 +418,9 @@ export class FloatMonitorService {
      * that can be clicked through.
      */
     if (input.direction === 'in' && input.source === 'reimbursement') {
+      // A hard money limit must not be checked against a memo up to two
+      // minutes old (a reimbursement logged moments ago is not in it yet).
+      this.solvency.invalidate()
       const [{ owedToProvider }, { freeToSpend }] = await Promise.all([
         this.capitalSummary(provider),
         this.solvency.position(),
@@ -466,6 +496,9 @@ export class FloatMonitorService {
         provider,
       },
     ])
+    // Totals on the Reserve and Float screens must move with this entry
+    // straight away, not up to two minutes later, see `SolvencyService.invalidate`.
+    this.solvency.invalidate()
 
     /**
      * A logged withdrawal can push tracked capital into risk on its own,
@@ -799,6 +832,7 @@ export class FloatMonitorService {
         idempotencyKey: LedgerService.key('order', orderRef, 'capital_out'),
       },
     ])
+    this.solvency.invalidate()
 
     this.log.log(`manual refund advance for ${orderRef} reimbursed by ${adminId}`)
   }
@@ -874,8 +908,17 @@ export class FloatMonitorService {
      * reading was compared as if it were current, firing a false "Float is
      * short" email at the exact moment an admin did the right thing.
      */
+    // `orderRef`/`withdrawalId` null: a manual refund or payout advance (and
+    // its repayment) is capital too, but it never touches a supplier float,
+    // and having no provider it otherwise read as a DataHub movement, marking
+    // a perfectly current DataHub reading as "pending" for no reason.
     const lastMovement = await this.prisma.ledgerEntry.findFirst({
-      where: { kind: { in: ['capital_in', 'capital_in_reimbursement', 'capital_out'] }, ...capitalProviderFilter(provider) },
+      where: {
+        kind: { in: ['capital_in', 'capital_in_reimbursement', 'capital_out'] },
+        orderRef: null,
+        withdrawalId: null,
+        ...capitalProviderFilter(provider),
+      },
       orderBy: { occurredAt: 'desc' },
       select: { occurredAt: true },
     })

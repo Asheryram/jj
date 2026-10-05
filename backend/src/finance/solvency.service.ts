@@ -797,14 +797,48 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       return this.expectedBalanceCache.value
     }
 
-    const [collected, transferred, reimbursedAcrossProviders] = await Promise.all([
+    const [collected, transferred, reimbursedAcrossProviders, advancesRepaid] = await Promise.all([
       this.collectedSince(),
       this.transfersSince(),
       this.reimbursedAcrossProviders(),
+      this.manualAdvancesRepaid(),
     ])
-    const value = collected - transferred - reimbursedAcrossProviders
+    const value = collected - transferred - reimbursedAcrossProviders - advancesRepaid
     this.expectedBalanceCache = { value, computedAt: Date.now() }
     return value
+  }
+
+  /**
+   * All-time pesewas taken back out of Paystack to repay whoever fronted a
+   * manual refund or payout from their own pocket (`capital_out` tied to an
+   * order or a withdrawal, see `FloatMonitorService.reimburseManualRefund`
+   * and `WithdrawalsService.reimburseManualAdvance`).
+   *
+   * That repayment is real money leaving Paystack. Without this term the
+   * advance dropped out of `liabilities` the moment it was repaid while this
+   * figure never fell, so `freeToSpend` rose by the full amount repaid, and
+   * so did the ceiling on how much could be moved into a supplier float.
+   * Corrections (`correction:` keys, never tied to an order or withdrawal)
+   * are reversals of a mistaken entry, not money moving, and stay out.
+   */
+  private async manualAdvancesRepaid(): Promise<number> {
+    const repaid = await this.prisma.ledgerEntry.aggregate({
+      where: { kind: 'capital_out', OR: [{ orderRef: { not: null } }, { withdrawalId: { not: null } }] },
+      _sum: { amount: true },
+    })
+    return -(repaid._sum.amount ?? 0)
+  }
+
+  /**
+   * Drop the short-lived memos below, for whatever just changed what they
+   * total: a capital entry logged, reversed or reclassified, an advance
+   * repaid. Without this, the screen right after logging showed per-provider
+   * rows already updated beside totals still two minutes old, and the next
+   * reimbursement check ran against the old figure.
+   */
+  invalidate(): void {
+    this.expectedBalanceCache = null
+    this.spentOnBundlesCache = null
   }
 
   /**

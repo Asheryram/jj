@@ -689,10 +689,16 @@ export class RefundsService {
       throw new ConflictError('ALREADY_DECIDED', `That refund was already ${request.status}.`)
     }
 
-    await this.prisma.refundRequest.update({
-      where: { id },
+    // Claimed on `pending`, not just checked above: an approval landing in
+    // between (wallet already credited, or a transfer already sent) must not
+    // be overwritten to `rejected` with the money already gone.
+    const claim = await this.prisma.refundRequest.updateMany({
+      where: { id, status: 'pending' },
       data: { status: 'rejected', decidedAt: new Date(), decidedBy: adminId, note: reason },
     })
+    if (claim.count === 0) {
+      throw new ConflictError('ALREADY_DECIDED', 'That refund was just decided, refresh and check.')
+    }
 
     // No ledger entry and no `refunded` flag: nothing moved.
     this.log.warn(`refund ${request.orderRef} REFUSED by ${adminId}: ${reason}`)

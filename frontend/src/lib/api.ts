@@ -1634,6 +1634,13 @@ export const api = {
       body: { note },
     }),
 
+  /** Back out of an approved payout that was never sent; the agent's money goes back. See WithdrawalsService.cancelApproved. */
+  cancelApprovedWithdrawal: (id: string, note: string) =>
+    request<void>(`/withdrawals/${id}/cancel-approved`, {
+      method: 'POST',
+      body: { note },
+    }),
+
   manualPayoutAdvances: () => request<ManualPayoutAdvance[]>('/withdrawals/manual-advances'),
 
   /** Whoever fronted a manual payout has taken that exact amount back out. */
