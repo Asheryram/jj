@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { Network, Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
@@ -29,8 +29,33 @@ import { SettingsService } from '../settings/settings.service'
  * customer refreshing the return page is normal.
  */
 @Injectable()
-export class PaymentsService {
+export class PaymentsService implements OnModuleDestroy {
   private readonly log = new Logger(PaymentsService.name)
+
+  /**
+   * Checkouts opened in the last few minutes, by reference, with when each
+   * was opened and last asked about.
+   *
+   * Mobile Money means the buyer leaves the browser to approve a prompt on
+   * their phone and often never comes back, so when Paystack's webhook is
+   * also late or lost, nothing else asks about the payment until the
+   * reconciler's ten-minute sweep. On real data that was 1 paid order in 12
+   * waiting 5 to 20 minutes before it was even sent. This asks Paystack every
+   * few seconds instead, but only while a checkout is actually open: an empty
+   * list means no timer and no database query, so the database can still go
+   * idle overnight (see `ReconcilerService.intervalMs`). In memory on
+   * purpose: a restart only loses the fast path, the sweep still catches it.
+   */
+  private readonly openCheckouts = new Map<string, { openedAt: number; checkedAt: number }>()
+  private watchTimer: NodeJS.Timeout | null = null
+  private watching = false
+  private static readonly WATCH_TICK_MS = 5_000
+  /** Gives the webhook first refusal; Paystack's own reply usually lands within this. */
+  private static readonly WATCH_FIRST_CHECK_MS = 10_000
+  /** Between asks for the same checkout once it is being chased. */
+  private static readonly WATCH_GAP_MS = 10_000
+  /** Past this the buyer has walked away; the ten-minute sweep takes over. */
+  private static readonly WATCH_FOR_MS = 20 * 60_000
 
   constructor(
     private readonly prisma: PrismaService,
@@ -41,6 +66,50 @@ export class PaymentsService {
     private readonly domains: DomainsService,
     private readonly settings: SettingsService,
   ) {}
+
+  onModuleDestroy(): void {
+    if (this.watchTimer) clearInterval(this.watchTimer)
+  }
+
+  /** Start chasing one checkout, see `openCheckouts`. */
+  private watchCheckout(reference: string): void {
+    const now = Date.now()
+    this.openCheckouts.set(reference, { openedAt: now, checkedAt: now - PaymentsService.WATCH_GAP_MS + PaymentsService.WATCH_FIRST_CHECK_MS })
+    if (this.watchTimer) return
+    this.watchTimer = setInterval(() => void this.checkOpenCheckouts(), PaymentsService.WATCH_TICK_MS)
+    this.watchTimer.unref?.()
+  }
+
+  private async checkOpenCheckouts(): Promise<void> {
+    // One pass at a time: a slow Paystack reply must not stack up passes.
+    if (this.watching) return
+    this.watching = true
+    try {
+      const now = Date.now()
+      for (const [reference, entry] of this.openCheckouts) {
+        if (now - entry.openedAt > PaymentsService.WATCH_FOR_MS) {
+          this.openCheckouts.delete(reference)
+          continue
+        }
+        if (now - entry.checkedAt < PaymentsService.WATCH_GAP_MS) continue
+        entry.checkedAt = now
+        const result = await this.confirm(reference).catch((error: unknown) => {
+          this.log.warn(`${reference}: quick payment check failed, ${String(error)}`)
+          return null
+        })
+        if (result && result.status !== 'pending') {
+          this.log.log(`${reference}: checkout resolved as ${result.status} by the quick check`)
+          this.openCheckouts.delete(reference)
+        }
+      }
+    } finally {
+      this.watching = false
+      if (this.openCheckouts.size === 0 && this.watchTimer) {
+        clearInterval(this.watchTimer)
+        this.watchTimer = null
+      }
+    }
+  }
 
   get live(): boolean {
     return this.paystack.configured
@@ -189,6 +258,7 @@ export class PaymentsService {
       where: { reference: order.reference },
       data: { authorizationUrl: result.authorizationUrl },
     })
+    this.watchCheckout(order.reference)
 
     return { paymentUrl: result.authorizationUrl }
   }

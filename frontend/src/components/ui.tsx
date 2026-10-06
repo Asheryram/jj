@@ -362,6 +362,15 @@ export function StatusBadge({ status }: { status: OrderStatus }) {
       </Badge>
     )
   }
+  if (status === 'awaiting_payment') {
+    // Not "Pending": nothing has been paid, so there is nothing to send yet. An
+    // admin reading "Pending" here took an unfinished checkout for a stuck order.
+    return (
+      <Badge tone="neutral">
+        <ClockIcon className="size-3.5" /> Awaiting payment
+      </Badge>
+    )
+  }
   return (
     <Badge tone="warning">
       <ClockIcon className="size-3.5" /> Pending

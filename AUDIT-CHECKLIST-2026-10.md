@@ -62,15 +62,19 @@ Tick a line only once the fix is built, type-checked, and verified against the s
 
 ## Action needed from the owner (data, not code)
 
-- [ ] **A1** Three customers are owed refunds now: JDC-845365490 (GHS 5.77, waiting since Sep 22),
+- [x] **A1** Three customers are owed refunds now: JDC-845365490 (GHS 5.77, waiting since Sep 22),
       JDC-165355727 (GHS 10.73, since Sep 24), JDC-438822858 (GHS 97.82, since Oct 5).
       Send them by hand and record each with "Paid another way".
-- [ ] **A2** Check the 51 order payments closed as unpaid (GHS 812.93) against the Paystack
+- [x] **A2** Check the 51 order payments closed as unpaid (GHS 812.93) against the Paystack
       dashboard for any that were actually paid later. Each one found needs delivering or
       refunding by hand; from now on M1 handles it automatically.
-- [ ] **A3** Two delivered orders still show a refund note "On hold, reordering by hand"
+- [x] **A3** Two delivered orders still show a refund note "On hold, reordering by hand"
       (JDC-104614453, JDC-377814297). Cosmetic; can be reworded with one SQL update.
-- [ ] **A4** The two payouts you sent by hand (GHS 85.00 and GHS 40.00) were recorded as advances without the GHS 1 sending fee each. Once deployed, the new rule applies to new payouts; to make these two match, raise each advance by 100 pesewas (one SQL update on the two capital_in rows tied to those withdrawals) before reimbursing them.
+- [x] **A4** The two payouts you sent by hand (GHS 85.00 and GHS 40.00) were recorded as advances without the GHS 1 sending fee each. Once deployed, the new rule applies to new payouts; to make these two match, raise each advance by 100 pesewas (one SQL update on the two capital_in rows tied to those withdrawals) before reimbursing them.
+      **Done (owner, 2026-10-06):** both were paid from the MoMo linked to Paystack, so business
+      money, not personal. Advances raised by GHS 1 each, then marked Reimbursed on the
+      Withdrawals screen, so they leave the expected Paystack balance and nothing shows as owed.
+      Going forward, a payout sent from that MoMo is "Paid another way" then "Reimbursed" at once.
 
 ## P1: wrong figures on admin screens
 
