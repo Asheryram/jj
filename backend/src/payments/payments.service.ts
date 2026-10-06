@@ -8,6 +8,7 @@ import { PaystackClient } from './paystack.client'
 import { LedgerService } from '../finance/ledger.service'
 import { DomainsService } from '../domains/domains.service'
 import { SettingsService } from '../settings/settings.service'
+import { SmsService } from '../sms/sms.service'
 
 /**
  * Collecting money, and what happens once it arrives.
@@ -73,6 +74,7 @@ export class PaymentsService implements OnModuleDestroy {
     private readonly ledger: LedgerService,
     private readonly domains: DomainsService,
     private readonly settings: SettingsService,
+    private readonly sms: SmsService,
   ) {}
 
   onModuleDestroy(): void {
@@ -859,6 +861,7 @@ export class PaymentsService implements OnModuleDestroy {
         return { applied: false }
       }
       this.log.log(`refund ${row.orderRef} confirmed paid to ${row.buyerPhone}`)
+      this.sms.refundPaid(refundId)
       return { applied: true }
     }
 
@@ -984,11 +987,12 @@ export class PaymentsService implements OnModuleDestroy {
         return { applied: false }
       }
       this.log.log(`payout ${id} confirmed paid to ${row.agentPhone}`)
+      this.sms.payoutSent(id)
       return { applied: true }
     }
 
     // failed or reversed, the money is back with us, so it goes back to them.
-    await this.prisma.$transaction(async (tx) => {
+    const returned = await this.prisma.$transaction(async (tx) => {
       /**
        * Claimed atomically, not read-then-branched, the same fix `settle()`
        * needed for order settlement. The `alreadyApplied` check above reads
@@ -1017,7 +1021,7 @@ export class PaymentsService implements OnModuleDestroy {
               : 'The transfer did not go through. The amount is back in your balance.',
         },
       })
-      if (claim.count === 0) return
+      if (claim.count === 0) return false
 
       // Amount and fee, both held at request, both returned, the same as
       // `WithdrawalsService.failPayout`. Only the amount used to come back
@@ -1049,8 +1053,12 @@ export class PaymentsService implements OnModuleDestroy {
           },
         },
       })
+      return true
     })
 
+    // A duplicate failure webhook returns nothing, so it must not text twice.
+    if (!returned) return { applied: false }
+    this.sms.payoutReturned(id)
     this.log.warn(`payout ${id} ${event}, GHS ${((row.amount + row.transferFee) / 100).toFixed(2)} returned to the agent`)
     return { applied: true }
   }

@@ -8,6 +8,7 @@ import { SettingsService } from '../settings/settings.service'
 import { requirePaystackChecked } from '../common/paystack-check'
 import { momoCodeFor } from '../payments/momo'
 import { resalePriceFor, type OrderSplit, type PricingAgent } from '../domain/pricing'
+import { SmsService } from '../sms/sms.service'
 
 /**
  * Paying back money that is owed, once a person has authorised it.
@@ -37,6 +38,7 @@ export class RefundsService {
     private readonly ledger: LedgerService,
     private readonly paystack: PaystackClient,
     private readonly settings: SettingsService,
+    private readonly sms: SmsService,
   ) {}
 
   /** The queue. Pending first and oldest first, the longest wait is the worst. */
@@ -371,6 +373,10 @@ export class RefundsService {
         // `sendRefund` records what happened. This only catches the unexpected.
         this.log.error(`refund transfer for ${id} threw: ${String(error)}`)
       })
+    } else if (request.method === 'wallet') {
+      // A wallet refund is credited inside the transaction above, so it has
+      // reached the customer now. A transfer texts once it actually lands.
+      this.sms.refundPaid(id)
     }
 
     return settled
@@ -409,7 +415,7 @@ export class RefundsService {
     await this.refuseIfFlagged(existing.orderId)
     requirePaystackChecked(existing.transferStatus, confirmCheckedPaystack)
 
-    return this.prisma.$transaction(async (tx) => {
+    const settledManually = await this.prisma.$transaction(async (tx) => {
       /**
        * Claimed atomically, not read-then-written, same reasoning as
        * `approve()` above. Two admins racing to settle the same stuck refund
@@ -506,6 +512,8 @@ export class RefundsService {
       this.log.log(`refund ${request.orderRef} settled manually by ${adminId}: ${reason}`)
       return { id, status: 'approved' as const }
     })
+    this.sms.refundPaid(id)
+    return settledManually
   }
 
   /**
@@ -749,6 +757,8 @@ export class RefundsService {
 
     // No ledger entry and no `refunded` flag: nothing moved.
     this.log.warn(`refund ${request.orderRef} REFUSED by ${adminId}: ${reason}`)
+    // They were told a refund was coming when the order failed.
+    this.sms.refundDeclined(id)
     return { id, status: 'rejected' as const }
   }
 }

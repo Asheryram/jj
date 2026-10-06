@@ -2,6 +2,7 @@ import { Controller, Get } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { PrismaService } from '../prisma/prisma.service'
 import { SupplierService } from '../supplier/supplier.service'
+import { SmsService } from '../sms/sms.service'
 
 /**
  * How long a real database check stays good enough to reuse.
@@ -23,6 +24,7 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly supplier: SupplierService,
+    private readonly sms: SmsService,
   ) {}
 
   /**
@@ -62,6 +64,7 @@ export class HealthController {
         datahub: this.supplier.providerState,
         gmpl: this.supplier.gmplProviderState,
         paystack: process.env.PAYSTACK_SECRET_KEY ? 'live' : 'simulated',
+        sms: this.sms.state,
       },
       uptimeSeconds: Math.round(process.uptime()),
     }

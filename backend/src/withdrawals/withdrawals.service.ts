@@ -5,6 +5,7 @@ import { LedgerService } from '../finance/ledger.service'
 import { SolvencyService } from '../finance/solvency.service'
 import { PaystackClient } from '../payments/paystack.client'
 import { SettingsService } from '../settings/settings.service'
+import { SmsService } from '../sms/sms.service'
 import { momoCodeFor } from '../payments/momo'
 
 import { toWithdrawal } from '../common/mappers'
@@ -24,6 +25,7 @@ export class WithdrawalsService {
     private readonly solvency: SolvencyService,
     private readonly paystack: PaystackClient,
     private readonly settings: SettingsService,
+    private readonly sms: SmsService,
   ) {}
 
   /**
@@ -427,6 +429,7 @@ export class WithdrawalsService {
       if (current) return toWithdrawal(current)
     }
 
+    if (status === 'rejected') this.sms.payoutReturned(id)
     return decided
   }
 
@@ -637,7 +640,7 @@ export class WithdrawalsService {
     }
     if (approver) await this.refuseOwnPayout(id, approver)
 
-    return this.prisma.$transaction(async (tx) => {
+    const settled = await this.prisma.$transaction(async (tx) => {
       const row = await tx.withdrawal.findUnique({ where: { id } })
       if (!row) throw new NotFoundError('We could not find that withdrawal request.')
       requirePaystackChecked(row.transferStatus, confirmCheckedPaystack)
@@ -707,6 +710,9 @@ export class WithdrawalsService {
       this.log.log(`payout ${id} settled manually by ${adminId}: ${reason}`)
       return toWithdrawal(updated)
     })
+    // The agent was promised a text once their money is sent (see their Withdraw page).
+    this.sms.payoutSent(id)
+    return settled
   }
 
   /**
@@ -799,7 +805,7 @@ export class WithdrawalsService {
   }
 
   private async failPayout(withdrawalId: string, reason: string): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
+    const returned = await this.prisma.$transaction(async (tx) => {
       // Claimed, not read-then-written: a "Paid another way" or a late
       // Paystack success racing this must not have its paid row flipped to
       // failed with the money handed back on top.
@@ -810,7 +816,7 @@ export class WithdrawalsService {
       const row = await tx.withdrawal.findUnique({ where: { id: withdrawalId } })
       if (claim.count === 0 || !row) {
         this.log.warn(`payout ${withdrawalId}: not failing, already ${row?.status ?? 'missing'}`)
-        return
+        return false
       }
 
       // The hold was `amount + transferFee` (see `request()`), both come back:
@@ -847,8 +853,12 @@ export class WithdrawalsService {
           },
         },
       })
+      return true
     })
 
+    // Only when this call actually handed the money back, never a no-op replay.
+    if (!returned) return
     this.log.warn(`payout ${withdrawalId} failed and was returned: ${reason}`)
+    this.sms.payoutReturned(withdrawalId)
   }
 }

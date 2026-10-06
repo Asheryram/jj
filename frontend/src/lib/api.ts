@@ -1180,7 +1180,7 @@ export const api = {
     request<{
       status: string
       database: string
-      providers: { datahub: string; gmpl: string; paystack: string }
+      providers: { datahub: string; gmpl: string; paystack: string; sms?: string }
     }>('/health', { auth: false }),
 
   // Auth

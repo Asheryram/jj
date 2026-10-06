@@ -8,6 +8,7 @@ import { LedgerService, type LedgerDraft } from '../finance/ledger.service'
 import { lastRealCost } from '../common/real-cost'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import type { OrderSplit, SplitShare } from '../domain/pricing'
+import { SmsService } from '../sms/sms.service'
 
 /**
  * How long a dispatch claim (`Order.dispatchClaimedAt`) has to sit with no
@@ -91,6 +92,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
     private readonly prisma: PrismaService,
     private readonly supplier: SupplierService,
     private readonly ledger: LedgerService,
+    private readonly sms: SmsService,
   ) {}
 
   /**
@@ -808,6 +810,20 @@ export class FulfilmentService implements OnApplicationBootstrap {
    * credited, or it fails and everybody is made whole, never half of each.
    */
   private async settle(
+    orderId: string,
+    outcome: 'delivered' | 'rejected',
+    reason?: string,
+    voucher?: { serial: string; pin: string },
+    resolvedManually = false,
+  ): Promise<SettleResult> {
+    const result = await this.settleInTransaction(orderId, outcome, reason, voucher, resolvedManually)
+    // Only once the outcome is committed, and only for the call that applied
+    // it, never a replay. Fire-and-forget: a text can't delay or undo this.
+    if (result.applied) this.sms.orderSettled(orderId)
+    return result
+  }
+
+  private async settleInTransaction(
     orderId: string,
     outcome: 'delivered' | 'rejected',
     reason?: string,

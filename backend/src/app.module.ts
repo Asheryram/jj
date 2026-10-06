@@ -19,6 +19,7 @@ import { FinanceModule } from './finance/finance.module'
 import { BrandingModule } from './branding/branding.module'
 import { DomainsModule } from './domains/domains.module'
 import { MailModule } from './mail/mail.module'
+import { SmsModule } from './sms/sms.module'
 import { AssistantModule } from './assistant/assistant.module'
 import { FeedbackModule } from './feedback/feedback.module'
 import { AnnouncementsModule } from './announcements/announcements.module'
@@ -99,6 +100,7 @@ import { AuthGuard } from './common/auth'
     }),
     PrismaModule,
     MailModule,
+    SmsModule,
     FinanceModule,
     SettingsModule,
     SupplierModule,

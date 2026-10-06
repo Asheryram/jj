@@ -410,6 +410,13 @@ export default function Overview() {
               label: health ? (health.providers.paystack === 'live' ? 'Configured' : 'Not configured') : 'Checking…',
               tone: health ? (health.providers.paystack === 'live' ? 'success' : 'danger') : 'neutral',
             },
+            {
+              name: 'SMS (BMS Africa)',
+              detail: 'Texts for deliveries, refunds and payouts',
+              label: health ? (health.providers.sms === 'live' ? 'Sending' : 'Off') : 'Checking…',
+              // Off is a choice, not a fault: nothing depends on a text going out.
+              tone: health ? (health.providers.sms === 'live' ? 'success' : 'neutral') : 'neutral',
+            },
           ].map((service) => (
             <div
               key={service.name}
