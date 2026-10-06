@@ -395,6 +395,7 @@ export class AuthService {
       code: user.referralCode,
       phone: user.phone,
       name: user.name,
+      tv: user.tokenVersion,
     }
     return {
       accessToken: await this.jwt.signAsync(payload),

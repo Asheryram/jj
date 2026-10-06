@@ -43,7 +43,7 @@ export async function bundleCostByProvider(
 ): Promise<number> {
   const rows = await prisma.ledgerEntry.findMany({
     where: { kind: 'supplier_cost' },
-    select: { amount: true, order: { select: { supplierCodeAtSale: true } } },
+    select: { amount: true, provider: true, order: { select: { supplierCodeAtSale: true } } },
   })
   const codes = [...new Set(rows.map((r) => r.order?.supplierCodeAtSale).filter((c): c is string => Boolean(c)))]
   const suppliers = await prisma.supplierProduct.findMany({
@@ -51,11 +51,15 @@ export async function bundleCostByProvider(
     select: { code: true, provider: true },
   })
   const providerByCode = new Map(suppliers.map((s) => [s.code, s.provider]))
-  const matches = (code: string | null | undefined) =>
-    provider === 'datahub-gh'
-      ? !code || (providerByCode.get(code) ?? 'datahub-gh') === 'datahub-gh'
-      : providerByCode.get(code ?? '') === 'gmpl'
-  return -rows.filter((r) => matches(r.order?.supplierCodeAtSale)).reduce((sum, r) => sum + r.amount, 0)
+  // A cost row stamped with the provider that charged it wins (a reorder can
+  // move the order's own SKU to the other provider afterwards); older rows,
+  // booked before the stamp existed, still go by the order's SKU.
+  const providerOf = (row: (typeof rows)[number]) => {
+    if (row.provider) return row.provider
+    const code = row.order?.supplierCodeAtSale
+    return code ? (providerByCode.get(code) ?? 'datahub-gh') : 'datahub-gh'
+  }
+  return -rows.filter((r) => providerOf(r) === provider).reduce((sum, r) => sum + r.amount, 0)
 }
 
 /**

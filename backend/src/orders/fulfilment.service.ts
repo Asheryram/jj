@@ -28,6 +28,18 @@ const STALE_CLAIM_MS = 5 * 60 * 1000
 const REORDER_HOLD_NOTE = 'On hold, reordering by hand:'
 
 /**
+ * The ledger key for one dispatch attempt's supplier cost. Attempt 1 keeps
+ * the original per-order key, so nothing booked before this existed can be
+ * booked a second time; a retry or reorder that is charged again gets its
+ * own key instead of being silently skipped as a duplicate of the first.
+ */
+function supplierCostKey(reference: string, attempt: number | null | undefined): string {
+  return !attempt || attempt <= 1
+    ? LedgerService.key('order', reference, 'supplier_cost')
+    : LedgerService.key('order', reference, 'supplier_cost', `attempt-${attempt}`)
+}
+
+/**
  * What actually happened when something tried to settle an order.
  *
  * `applied: false` covers two very different situations, which is why
@@ -500,8 +512,12 @@ export class FulfilmentService implements OnApplicationBootstrap {
         const providerLabel = provider === 'gmpl' ? 'GMPL' : 'DataHub'
         await this.ledger.record([
           {
-            idempotencyKey: LedgerService.key('order', order.reference, 'supplier_cost'),
+            idempotencyKey: supplierCostKey(order.reference, attempt),
             kind: 'supplier_cost',
+            // Stamped with whoever actually charged it: a reorder can move the
+            // order to the other provider afterwards (`supplierCodeAtSale` is
+            // overwritten), and attribution must not move this cost with it.
+            provider,
             amount: -result.providerCharged,
             description:
               `Bundle cost · ${order.productName} (charged by ${providerLabel})` +
@@ -631,6 +647,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
       paidWith: string
       salePrice: number
       buyerUserId: string | null
+      supplierCodeAtSale: string | null
     },
     split: OrderSplit,
     agentShares: OrderSplit['shares'],
@@ -638,7 +655,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
     const dispatch = await tx.supplierDispatch.findFirst({
       where: { orderId: order.id },
       orderBy: { createdAt: 'desc' },
-      select: { providerCharged: true, costPrice: true, supplierCode: true },
+      select: { providerCharged: true, costPrice: true, supplierCode: true, attempt: true },
     })
 
     /**
@@ -656,10 +673,15 @@ export class FulfilmentService implements OnApplicationBootstrap {
       split.supplierCost
     const estimated = split.supplierCost
 
+    // Whoever ran the delivering attempt, see `supplierCostKey` and the
+    // acceptance-time booking for why the provider is stamped on the row.
+    const costProvider = await resolveSupplierProvider(tx, dispatch?.supplierCode ?? order.supplierCodeAtSale)
+
     const entries: (LedgerDraft & { idempotencyKey: string })[] = [
       {
-        idempotencyKey: LedgerService.key('order', order.reference, 'supplier_cost'),
+        idempotencyKey: supplierCostKey(order.reference, dispatch?.attempt),
         kind: 'supplier_cost',
+        provider: costProvider,
         amount: -actualCost,
         description:
           `Bundle cost · ${order.productName}` +
@@ -693,7 +715,18 @@ export class FulfilmentService implements OnApplicationBootstrap {
       })
     }
 
-    for (const share of agentShares) {
+    // Only agents that still exist: `creditAgent` skips paying a deleted one,
+    // so their margin stays with the business, and booking it as a cost
+    // anyway understated profit by exactly that margin.
+    const existingAgents = new Set(
+      (
+        await tx.user.findMany({
+          where: { id: { in: agentShares.map((s) => s.userId) } },
+          select: { id: true },
+        })
+      ).map((u) => u.id),
+    )
+    for (const share of agentShares.filter((s) => existingAgents.has(s.userId))) {
       entries.push({
         /**
          * Still keyed per user, though a sale now has only one agent in it.
@@ -910,14 +943,16 @@ export class FulfilmentService implements OnApplicationBootstrap {
       const dispatch = await tx.supplierDispatch.findFirst({
         where: { orderId: order.id },
         orderBy: { createdAt: 'desc' },
-        select: { providerCharged: true },
+        select: { providerCharged: true, attempt: true, supplierCode: true },
       })
       if (dispatch?.providerCharged) {
+        const costProvider = await resolveSupplierProvider(tx, dispatch.supplierCode ?? order.supplierCodeAtSale)
         await this.ledger.record(
           [
             {
-              idempotencyKey: LedgerService.key('order', order.reference, 'supplier_cost'),
+              idempotencyKey: supplierCostKey(order.reference, dispatch.attempt),
               kind: 'supplier_cost',
+              provider: costProvider,
               amount: -dispatch.providerCharged,
               description: `Bundle cost · ${order.productName} (charged before the order was rejected)`,
               orderRef: order.reference,
@@ -926,6 +961,33 @@ export class FulfilmentService implements OnApplicationBootstrap {
           ],
           tx,
         )
+
+        /**
+         * GMPL, unlike DataHub, puts a failed order's charge back in our
+         * wallet (their own status vocabulary has `refunded`, and a part-
+         * failed batch reads "some delivered, the rest refunded"). Left as
+         * booked, that cost overstated what GMPL had been paid and made its
+         * float look short by every failed order. Reversed here, same
+         * attempt, so a later retry's own charge is never cancelled by it.
+         * The live GMPL reading after each order (`noteOrderPlaced`) is the
+         * check on this: if they ever stop refunding, the float shows it.
+         */
+        if (costProvider === 'gmpl') {
+          await this.ledger.record(
+            [
+              {
+                idempotencyKey: `${supplierCostKey(order.reference, dispatch.attempt)}:refunded`,
+                kind: 'supplier_cost',
+                provider: costProvider,
+                amount: dispatch.providerCharged,
+                description: `Bundle cost refunded by GMPL · ${order.productName} (order failed)`,
+                orderRef: order.reference,
+                occurredAt: new Date(),
+              },
+            ],
+            tx,
+          )
+        }
       }
 
       /**

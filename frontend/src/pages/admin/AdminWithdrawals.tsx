@@ -370,7 +370,10 @@ export default function AdminWithdrawals() {
                             after all (wrong number, should have refused) and
                             the agent's money stayed held. Hidden once Paystack
                             has a real transfer, that one is theirs to settle. */}
-                        {(request.transferStatus === 'manual' || !request.transferStatus) && (
+                        {(request.transferStatus === 'manual' ||
+                          request.transferStatus === 'unknown' ||
+                          request.transferStatus === 'otp' ||
+                          !request.transferStatus) && (
                           <button
                             type="button"
                             onClick={() => setCancelling(request)}
@@ -498,6 +501,7 @@ function SettleManuallyModal({
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [checkedPaystack, setCheckedPaystack] = useState(false)
 
   const key = request?.id ?? 'none'
   const [lastKey, setLastKey] = useState(key)
@@ -505,9 +509,14 @@ function SettleManuallyModal({
     setLastKey(key)
     setNote('')
     setError('')
+    setCheckedPaystack(false)
   }
 
   if (!request) return null
+
+  // Paystack never answered, or is waiting for an OTP: the transfer may
+  // still go out, so acting by hand first needs a look at their dashboard.
+  const needsPaystackCheck = request.transferStatus === 'unknown' || request.transferStatus === 'otp'
 
   const submit = async () => {
     if (note.trim().length < 5) {
@@ -520,8 +529,8 @@ function SettleManuallyModal({
     }
     setBusy(true)
     try {
-      if (cancelling) await cancelApprovedWithdrawal(request.id, note.trim())
-      else await settleWithdrawalManually(request.id, note.trim())
+      if (cancelling) await cancelApprovedWithdrawal(request.id, note.trim(), checkedPaystack)
+      else await settleWithdrawalManually(request.id, note.trim(), checkedPaystack)
       onClose()
     } finally {
       setBusy(false)
@@ -572,8 +581,31 @@ function SettleManuallyModal({
           />
         </Field>
 
+        {needsPaystackCheck && (
+          <label className="flex items-start gap-2.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-900 dark:text-amber-200">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 shrink-0"
+              checked={checkedPaystack}
+              onChange={(event) => setCheckedPaystack(event.target.checked)}
+            />
+            <span>
+              {request.transferStatus === 'otp'
+                ? 'Paystack was waiting for an OTP on this transfer. '
+                : 'Paystack never answered about this transfer. '}
+              I have checked it on the Paystack dashboard and it did <strong>not</strong> go out.
+            </span>
+          </label>
+        )}
+
         <div className="flex gap-2">
-          <Button block loading={busy} variant={cancelling ? 'danger' : undefined} onClick={() => void submit()}>
+          <Button
+            block
+            loading={busy}
+            disabled={needsPaystackCheck && !checkedPaystack}
+            variant={cancelling ? 'danger' : undefined}
+            onClick={() => void submit()}
+          >
             {cancelling ? "Don't send, return the money" : 'Mark as sent'}
           </Button>
           <Button block variant="outline" disabled={busy} onClick={onClose}>

@@ -27,6 +27,8 @@ export interface TokenPayload {
   code: string
   phone: string
   name: string
+  /** The account's `tokenVersion` when this token was issued; see `AuthGuard`. Absent on tokens issued before it existed, read as 0. */
+  tv?: number
 }
 
 export const ROLES_KEY = 'jdc:roles'
@@ -126,6 +128,24 @@ export class AuthGuard implements CanActivate {
           referralCode: payload.code,
           phone: payload.phone,
           name: payload.name,
+        }
+        /**
+         * An admin token is only as good as the account behind it right now.
+         * The role inside a token is trusted for its whole 12 hours, so
+         * suspending an admin, or resetting their password after a
+         * compromise, used to change nothing until it expired: the token
+         * kept approving payouts and logging capital. Checked against the
+         * database for admin roles only, where a stolen session can move
+         * money; agent and buyer requests don't pay for the extra read.
+         */
+        if (isAdminRole(payload.role)) {
+          const current = await this.prisma.user.findUnique({
+            where: { id: payload.sub },
+            select: { status: true, tokenVersion: true },
+          })
+          if (!current || current.status !== 'active' || current.tokenVersion !== (payload.tv ?? 0)) {
+            req.user = undefined
+          }
         }
       } catch {
         // An expired or forged token is treated as absent. Routes that need a

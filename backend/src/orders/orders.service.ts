@@ -798,7 +798,8 @@ export class OrdersService {
     const actualCostByOrderId = new Map<string, number>()
     for (const entry of costEntries) {
       const orderId = entry.orderRef ? orderIdByRef.get(entry.orderRef) : undefined
-      if (orderId) actualCostByOrderId.set(orderId, -entry.amount)
+      // Summed: a retried or reordered order can be charged once per attempt.
+      if (orderId) actualCostByOrderId.set(orderId, (actualCostByOrderId.get(orderId) ?? 0) - entry.amount)
     }
 
     /**
@@ -938,35 +939,20 @@ export class OrdersService {
     if (isAdminRole(user.role)) return {}
 
     if (user.role === 'customer') {
-      // Their own purchases, including ones made as a guest before they signed
-      // up, matched on the phone number they registered with.
-      return { OR: [{ buyerUserId: user.id }, { buyerPhone: user.phone }] }
+      // Only purchases made signed in to this account. Matching guest orders
+      // on the registered phone used to be included too, but a phone number
+      // is never verified here, so anyone registering with somebody else's
+      // number could read all their guest orders (recipients, checker
+      // vouchers). A guest order stays reachable by reference plus phone
+      // on the Track page, exactly as before.
+      return { buyerUserId: user.id }
     }
 
-    // An agent sees what they sold, plus what their downline sold, because their
-    // earnings depend on it. Resolved to codes rather than joined, so a deep
-    // chain stays one indexed IN query.
-    const codes = await this.downlineCodes(user.referralCode)
-    return { OR: [{ soldByCode: { in: codes } }, { buyerUserId: user.id }] }
-  }
-
-  /** The seller's own code plus every code beneath it, breadth-first. */
-  private async downlineCodes(rootCode: string): Promise<string[]> {
-    const codes = new Set<string>([rootCode])
-    let frontier = [rootCode]
-
-    // Bounded to match MAX_CHAIN_DEPTH in the pricing domain, a cycle in the
-    // referral graph must not turn a list request into an infinite loop.
-    for (let depth = 0; depth < 10 && frontier.length > 0; depth++) {
-      const children: { referralCode: string }[] = await this.prisma.user.findMany({
-        where: { uplineCode: { in: frontier }, role: 'agent' },
-        select: { referralCode: true },
-      })
-      frontier = children.map((c) => c.referralCode).filter((c) => !codes.has(c))
-      frontier.forEach((c) => codes.add(c))
-    }
-
-    return [...codes]
+    // An agent sees what they sold, and what they bought themselves. Not
+    // their downline's sales any more: referral sharing is off, so an upline
+    // earns nothing on them, and seeing them exposed another agent's buyers
+    // and margins.
+    return { OR: [{ soldByCode: user.referralCode }, { buyerUserId: user.id }] }
   }
 
   async byId(id: string, user: AuthUser | undefined) {
@@ -991,10 +977,11 @@ export class OrdersService {
 
     if (isAdminRole(user.role)) return { ...toOrder(row), paymentCollected }
 
-    const mine =
-      row.buyerUserId === user.id ||
-      row.buyerPhone === user.phone ||
-      (row.soldByCode !== null && (await this.downlineCodes(user.referralCode)).includes(row.soldByCode))
+    // The buyer's own account, or the agent who sold it. Not a phone match
+    // (never verified, see `scopeFor`), and not an upline (referral sharing
+    // is off, an upline earns nothing on a downline sale and has no reason
+    // to see its buyer or its margin).
+    const mine = row.buyerUserId === user.id || (row.soldByCode !== null && row.soldByCode === user.referralCode)
 
     return mine ? { ...toOrder(row), paymentCollected } : { ...toTrackedOrder(row), paymentCollected }
   }

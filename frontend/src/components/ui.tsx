@@ -545,11 +545,13 @@ export function Toggle({
   onChange,
   label,
   id,
+  disabled,
 }: {
   checked: boolean
   onChange: (next: boolean) => void
   label: string
   id: string
+  disabled?: boolean
 }) {
   return (
     <button
@@ -558,9 +560,10 @@ export function Toggle({
       id={id}
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors',
+        'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50',
         checked ? 'bg-brand-600' : 'bg-slate-300 dark:bg-slate-600',
       )}
     >

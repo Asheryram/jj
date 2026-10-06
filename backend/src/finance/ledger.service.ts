@@ -90,12 +90,17 @@ export class LedgerService {
       })
       return result.count
     } catch (error) {
-      // Loud, and swallowed. The money already moved; losing the note about it
-      // must not undo it.
       this.log.error(
         `failed to record ${entries.length} ledger entr(ies) ` +
           `[${entries.map((e) => e.idempotencyKey).join(', ')}]: ${String(error)}`,
       )
+      // Inside a transaction, rethrown: Postgres has already aborted it, so
+      // swallowing only deferred the failure to a confusing later statement.
+      // Rethrowing rolls the money movement back with its note, so neither
+      // can exist without the other, and the caller's retry (webhook,
+      // sweep, the admin's click) redoes both. Outside one, the money has
+      // already moved and losing the note must not undo it: loud, swallowed.
+      if (tx) throw error
       return 0
     }
   }

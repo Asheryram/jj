@@ -185,6 +185,11 @@ model User {
   passwordHash String?    @map("password_hash")
   role         Role
   status       UserStatus @default(active)
+  /// Bumped to end every session this account already holds: on suspension
+  /// and on setting a new password. Carried in the token at sign-in and
+  /// checked on every admin request (see `AuthGuard`), so a stolen or
+  /// suspended admin's 12-hour token stops working at once, not at expiry.
+  tokenVersion Int        @default(0) @map("token_version")
 
   /// Why an application was turned down, in the words the applicant is shown.
   /// Also carries a suspension note.
@@ -1688,4 +1693,25 @@ model SetupToken {
 
   @@index([userId])
   @@map("setup_tokens")
+}
+
+/// Every write an admin or superadmin makes through the API: approvals,
+/// payouts marked sent, capital logged or reversed, settings, routing, orders
+/// resolved by hand. Written by `AdminAuditInterceptor` for every non-GET
+/// request from an admin role, so a new admin action is covered without
+/// remembering to add logging to it. Bodies have passwords, tokens and
+/// secrets redacted. Read on the Team screen by a superadmin.
+model AdminAction {
+  id         String   @id @default(uuid())
+  actorId    String   @map("actor_id")
+  actorRole  Role     @map("actor_role")
+  method     String
+  path       String
+  body       Json?
+  statusCode Int      @map("status_code")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([actorId])
+  @@map("admin_actions")
 }

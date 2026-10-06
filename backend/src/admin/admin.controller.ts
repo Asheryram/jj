@@ -26,7 +26,7 @@ import { RefundsService } from '../orders/refunds.service'
 import { ApplicationsService } from './applications.service'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
 import { SettingsService, KNOWN_PROVIDERS, type NetworkProviderRouting, type SupplierProviderCode } from '../settings/settings.service'
-import { ValidationError } from '../common/domain-errors'
+import { ForbiddenError, ValidationError } from '../common/domain-errors'
 import { SolvencyService } from '../finance/solvency.service'
 import { AgentsService } from '../agents/agents.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
@@ -166,6 +166,11 @@ export class SettleRefundManuallyDto {
   @IsOptional()
   @IsIn(['MTN', 'Telecel', 'AirtelTigo'])
   momoNetwork?: 'MTN' | 'Telecel' | 'AirtelTigo'
+
+  /** Required when Paystack's answer was unknown or it asked for an OTP: the admin has checked their dashboard and the transfer did not go out. */
+  @IsOptional()
+  @IsBoolean()
+  confirmCheckedPaystack?: boolean
 }
 
 /** Keys whose value is a number rather than a switch. */
@@ -179,6 +184,9 @@ const NUMERIC_SETTING_KEYS = [
 
 /** Keys whose value is free text rather than a number or a switch. */
 const STRING_SETTING_KEYS = ['whatsappChannelUrl', 'siteNotice'] as const
+
+/** Settings only a superadmin may change, see `setSetting`. */
+const PLATFORM_SETTING_KEYS = ['simulateFailure', 'paystackBusinessAccount', 'walletEnabled'] as const
 
 export class SetSettingDto {
   @IsIn([
@@ -708,7 +716,7 @@ export class AdminController {
     @CurrentUser() user: AuthUser,
     @Body() dto: SettleRefundManuallyDto,
   ) {
-    return this.refunds.settleManually(id, user.id, dto.note, dto.momoNetwork)
+    return this.refunds.settleManually(id, user.id, dto.note, dto.momoNetwork, dto.confirmCheckedPaystack)
   }
 
   /**
@@ -808,7 +816,14 @@ export class AdminController {
   }
 
   @Patch('settings')
-  setSetting(@Body() dto: SetSettingDto) {
+  setSetting(@Body() dto: SetSettingDto, @CurrentUser() user: AuthUser) {
+    // Switches that change how money moves platform-wide: failing every
+    // live order on purpose, routing every refund and payout to Paystack
+    // transfers, opening customer wallets. A superadmin's call, not any
+    // admin's, and never a stolen admin session's.
+    if (PLATFORM_SETTING_KEYS.includes(dto.key as (typeof PLATFORM_SETTING_KEYS)[number]) && user.role !== 'superadmin') {
+      throw new ForbiddenError('Only a superadmin can change that setting.')
+    }
     return this.admin.setSetting(dto.key, dto.value)
   }
 

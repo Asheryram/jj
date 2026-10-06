@@ -181,8 +181,8 @@ interface Store {
   cancelWithdrawal: (id: string) => Promise<void>
   updatePhone: (phone: string) => Promise<void>
   decideWithdrawal: (id: string, status: WithdrawalStatus) => Promise<void>
-  settleWithdrawalManually: (id: string, note: string) => Promise<void>
-  cancelApprovedWithdrawal: (id: string, note: string) => Promise<void>
+  settleWithdrawalManually: (id: string, note: string, confirmCheckedPaystack?: boolean) => Promise<void>
+  cancelApprovedWithdrawal: (id: string, note: string, confirmCheckedPaystack?: boolean) => Promise<void>
 
   users: PlatformUser[]
   toggleUserStatus: (id: string) => Promise<void>
@@ -1097,9 +1097,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const settleWithdrawalManually = useCallback(
-    async (id: string, note: string) => {
+    async (id: string, note: string, confirmCheckedPaystack?: boolean) => {
       try {
-        const updated = await api.settleWithdrawalManually(id, note)
+        const updated = await api.settleWithdrawalManually(id, note, confirmCheckedPaystack)
         setWithdrawals((current) => current.map((w) => (w.id === id ? updated : w)))
         pushToast({ tone: 'success', title: 'Payout marked as sent' })
       } catch (error) {
@@ -1110,9 +1110,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   )
 
   const cancelApprovedWithdrawal = useCallback(
-    async (id: string, note: string) => {
+    async (id: string, note: string, confirmCheckedPaystack?: boolean) => {
       try {
-        await api.cancelApprovedWithdrawal(id, note)
+        await api.cancelApprovedWithdrawal(id, note, confirmCheckedPaystack)
         setWithdrawals((current) =>
           current.map((w) => (w.id === id ? { ...w, status: 'failed', transferStatus: 'failed' } : w)),
         )

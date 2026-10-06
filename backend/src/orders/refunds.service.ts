@@ -5,6 +5,7 @@ import { LedgerService } from '../finance/ledger.service'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import { PaystackClient } from '../payments/paystack.client'
 import { SettingsService } from '../settings/settings.service'
+import { requirePaystackChecked } from '../common/paystack-check'
 import { momoCodeFor } from '../payments/momo'
 import { resalePriceFor, type OrderSplit, type PricingAgent } from '../domain/pricing'
 
@@ -206,6 +207,24 @@ export class RefundsService {
    * against their number as a claim, NFR-3.3 without depending on a reversal
    * that may never land.
    */
+  /**
+   * Stop before paying a refund for an order the provider has since reported
+   * delivered. That report doesn't undo anything on its own, it only flags
+   * the order (see `FulfilmentService`'s conflict detection), and paying the
+   * refund anyway would hand the customer both the bundle and their money.
+   * Cleared once someone has checked and acknowledged it on Needs Attention.
+   */
+  private async refuseIfFlagged(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, select: { conflictNote: true } })
+    if (order?.conflictNote) {
+      throw new ConflictError(
+        'ORDER_FLAGGED',
+        'The provider has since reported this order delivered. Check whether the bundle arrived, ' +
+          'then acknowledge the flag on Needs attention, before refunding.',
+      )
+    }
+  }
+
   async approve(id: string, adminId: string, momoNetwork?: Network) {
     const request = await this.prisma.refundRequest.findUnique({ where: { id } })
     if (!request) throw new NotFoundError('We could not find that refund request.')
@@ -227,6 +246,8 @@ export class RefundsService {
         'Choose which Mobile Money network to send this back on.',
       )
     }
+
+    await this.refuseIfFlagged(request.orderId)
 
     const settled = await this.prisma.$transaction(async (tx) => {
       /**
@@ -310,12 +331,24 @@ export class RefundsService {
 
       // And now it is a real cost. Booked here rather than when the order failed,
       // so profit is not reduced by a payment nobody had authorised.
+      //
+      // ...but only a cost against profit if the sale's revenue was ever
+      // booked. A Mobile Money sale books revenue at payment, so giving it
+      // back is a loss. A wallet sale only books revenue on delivery, so a
+      // failed one never did: returning that money to the wallet just
+      // reverses a transfer of the customer's own balance, and counting it
+      // against profit understated profit by the full sale price.
+      const revenueBooked = await tx.ledgerEntry.findFirst({
+        where: { kind: 'revenue', orderRef: request.orderRef },
+        select: { id: true },
+      })
       await this.ledger.record(
         [
           {
             idempotencyKey: LedgerService.key('order', request.orderRef, 'refund'),
             kind: 'refund',
             amount: -request.amount,
+            affectsProfit: Boolean(revenueBooked),
             description: `Refund · ${request.productName}`,
             orderRef: request.orderRef,
             userId: order.buyerUserId,
@@ -359,7 +392,7 @@ export class RefundsService {
    * else verifies the way Paystack's webhook verifies an automatic transfer,
    * the record is what answers a dispute later.
    */
-  async settleManually(id: string, adminId: string, note: string, momoNetwork?: Network) {
+  async settleManually(id: string, adminId: string, note: string, momoNetwork?: Network, confirmCheckedPaystack = false) {
     const reason = note.trim()
     if (reason.length < 5) {
       throw new ValidationError('Say how and where this was sent. It is kept on the record.')
@@ -373,6 +406,8 @@ export class RefundsService {
     if (existing.method === 'transfer' && !momoNetwork && !existing.momoNetwork) {
       throw new ValidationError('Choose which Mobile Money network this was sent on.')
     }
+    await this.refuseIfFlagged(existing.orderId)
+    requirePaystackChecked(existing.transferStatus, confirmCheckedPaystack)
 
     return this.prisma.$transaction(async (tx) => {
       /**
@@ -390,6 +425,11 @@ export class RefundsService {
             // transfer exists for it, so this can never pay on top of a real
             // one.
             { status: 'approved', transferStatus: 'manual', transferCode: null },
+            // Stuck on Paystack (no answer, or waiting for an OTP), only once
+            // the admin has confirmed on their dashboard it did not go out,
+            // see `requirePaystackChecked`. Before this there was no way out
+            // of either state at all.
+            ...(confirmCheckedPaystack ? [{ status: 'approved' as const, transferStatus: { in: ['unknown', 'otp'] } }] : []),
           ],
         },
         data: {
@@ -397,6 +437,8 @@ export class RefundsService {
           decidedAt: new Date(),
           decidedBy: adminId,
           momoNetwork: momoNetwork ?? existing.momoNetwork,
+          // Never counted as money that left through Paystack, see `transfersSince`.
+          transferCode: null,
           transferStatus: 'success',
           transferNote: `Sent manually, ${reason}`,
           paidAt: new Date(),
@@ -545,12 +587,17 @@ export class RefundsService {
       await this.prisma.refundRequest.update({ where: { id: refundId }, data: { recipientCode } })
     }
 
-    // Derived from the refund, never the clock: Paystack rejects a duplicate
-    // reference, so one refund can only ever produce one transfer.
+    // One reference per approval, not per refund: derived from this
+    // approval's own `decidedAt`, so any retry of the *same* approval reuses
+    // it (Paystack's duplicate check stops a double send), while a new
+    // approval after a failed transfer gets a fresh one instead of being
+    // refused as a duplicate forever. `PaymentsService.applyTransfer` strips
+    // the suffix to find the refund.
+    const attempt = (row.decidedAt ?? row.createdAt).getTime().toString(36)
     const result = await this.paystack.transfer({
       recipientCode,
       amount: row.amount,
-      reference: `RFD-${row.id}`,
+      reference: `RFD-${row.id}_${attempt}`,
       reason: `Refund, ${row.productName} (${row.orderRef})`,
     })
 

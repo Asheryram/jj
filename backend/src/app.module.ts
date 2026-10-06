@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common'
 import { ConfigModule } from '@nestjs/config'
-import { APP_GUARD } from '@nestjs/core'
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core'
+import { AdminAuditInterceptor } from './common/admin-audit.interceptor'
 import { PrismaModule } from './prisma/prisma.module'
 import { PricingModule } from './pricing/pricing.module'
 import { AuthModule } from './auth/auth.module'
@@ -76,6 +77,12 @@ import { AuthGuard } from './common/auth'
           if (!env.SUPERADMIN_EMAIL) {
             unsafe.push('SUPERADMIN_EMAIL must name the person who runs the platform')
           }
+          // Missing, not just a test key: with no key Mobile Money is
+          // "simulated", which in production means an order skips payment
+          // entirely and goes straight to a live provider, a free bundle.
+          if (!env.PAYSTACK_SECRET_KEY) {
+            unsafe.push('PAYSTACK_SECRET_KEY must be set, without it orders would be delivered without any payment')
+          }
           if (env.PAYSTACK_SECRET_KEY && String(env.PAYSTACK_SECRET_KEY).startsWith('sk_test')) {
             unsafe.push('PAYSTACK_SECRET_KEY is a test key, no real money would be collected')
           }
@@ -117,6 +124,8 @@ import { AuthGuard } from './common/auth'
     // Global so a new controller is authenticated by default. A route is public
     // only by omitting @Roles(), which is a visible choice in the code.
     { provide: APP_GUARD, useClass: AuthGuard },
+    // Who did what, for every admin write, see the interceptor's own comment.
+    { provide: APP_INTERCEPTOR, useClass: AdminAuditInterceptor },
   ],
 })
 export class AppModule {}

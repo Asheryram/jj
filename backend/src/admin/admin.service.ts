@@ -7,7 +7,8 @@ import { ConflictError, NotFoundError, ValidationError } from '../common/domain-
 import { floorAtCost, markupFromPrice, priceFromMarkup, type OrderSplit } from '../domain/pricing'
 import { CatalogueImportService } from '../supplier/catalogue-import.service'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
-import { hasAutomatedFulfilment } from '../supplier/supplier.service'
+import { hasAutomatedFulfilment, SupplierService } from '../supplier/supplier.service'
+import { ConfigService } from '@nestjs/config'
 import { lastRealCost } from '../common/real-cost'
 import { recordPriceChange } from '../common/pending-price-change'
 import { MailerService } from '../mail/mailer.service'
@@ -41,6 +42,8 @@ export class AdminService {
     private readonly catalogueImport: CatalogueImportService,
     private readonly float: FloatMonitorService,
     private readonly mailer: MailerService,
+    private readonly supplier: SupplierService,
+    private readonly config: ConfigService,
   ) {}
 
   /**
@@ -972,6 +975,18 @@ export class AdminService {
    * routed-away product the moment its price next got touched).
    */
   setNetworkProviderRouting(routing: NetworkProviderRouting) {
+    // In production, never route a network to a provider that isn't live on
+    // this server: its orders would sit unsent until someone noticed (see
+    // `SupplierService.dispatch`). Refused here, before a single sale.
+    if (this.config.get<string>('NODE_ENV') === 'production') {
+      const notLive = [...new Set(Object.values(routing))].filter((p) => !this.supplier.isLiveFor(p))
+      if (notLive.length > 0) {
+        throw new ValidationError(
+          `${notLive.join(', ')} is not live on this server, so it can't take orders yet. ` +
+            'Set it live (environment variable plus a restart) before routing to it.',
+        )
+      }
+    }
     return this.settings.set('networkProviderRouting', routing)
   }
 
@@ -1090,7 +1105,7 @@ export class AdminService {
     const startOfLastWeek = startOfDayUtc(new Date(), 13)
 
     if (user.role === 'agent') {
-      const codes = await this.downlineCodes(user.referralCode)
+      const codes = [user.referralCode]
 
       const [today, allTime, completed, total, activeDownline, thisWeek, lastWeek] = await Promise.all([
         this.prisma.earning.aggregate({
@@ -1151,7 +1166,7 @@ export class AdminService {
 
     // A customer's own purchases, including any made as a guest on the number
     // they later registered with.
-    const mine = { OR: [{ buyerUserId: user.id }, { buyerPhone: user.phone }] }
+    const mine = { buyerUserId: user.id }
 
     const [today, allTime, completed, total] = await Promise.all([
       this.prisma.order.aggregate({
@@ -1190,8 +1205,8 @@ export class AdminService {
     const range = { createdAt: { gte: since, lte: until } }
     const scope =
       user.role === 'agent'
-        ? { soldByCode: { in: await this.downlineCodes(user.referralCode) } }
-        : { OR: [{ buyerUserId: user.id }, { buyerPhone: user.phone }] }
+        ? { soldByCode: { in: [user.referralCode] } }
+        : { buyerUserId: user.id }
 
     const [revenueAgg, failedCount, byCategory, earnings] = await Promise.all([
       this.prisma.order.aggregate({
@@ -1238,7 +1253,7 @@ export class AdminService {
    */
   async myTopCustomers(user: { id: string; role: Role; referralCode: string }, since: Date, until: Date) {
     if (user.role !== 'agent') return []
-    const codes = await this.downlineCodes(user.referralCode)
+    const codes = [user.referralCode]
     const orders = await this.prisma.order.findMany({
       where: { soldByCode: { in: codes }, createdAt: { gte: since, lte: until }, status: 'completed' },
       select: { buyerPhone: true, buyer: true, salePrice: true, createdAt: true },
@@ -1273,8 +1288,8 @@ export class AdminService {
   async myDailyRevenue(user: { id: string; role: Role; referralCode: string; phone: string }, since: Date, until: Date) {
     const scope =
       user.role === 'agent'
-        ? { soldByCode: { in: await this.downlineCodes(user.referralCode) } }
-        : { OR: [{ buyerUserId: user.id }, { buyerPhone: user.phone }] }
+        ? { soldByCode: { in: [user.referralCode] } }
+        : { buyerUserId: user.id }
 
     const orders = await this.prisma.order.findMany({
       where: { ...scope, createdAt: { gte: since, lte: until }, status: 'completed' },
@@ -1293,23 +1308,6 @@ export class AdminService {
       days.push({ date: key, revenue: byDay.get(key) ?? 0 })
     }
     return days
-  }
-
-  /** The agent's own code plus every code beneath it. Mirrors OrdersService. */
-  private async downlineCodes(rootCode: string): Promise<string[]> {
-    const codes = new Set<string>([rootCode])
-    let frontier = [rootCode]
-
-    for (let depth = 0; depth < 10 && frontier.length > 0; depth++) {
-      const children = await this.prisma.user.findMany({
-        where: { uplineCode: { in: frontier }, role: 'agent' },
-        select: { referralCode: true },
-      })
-      frontier = children.map((c) => c.referralCode).filter((c) => !codes.has(c))
-      frontier.forEach((c) => codes.add(c))
-    }
-
-    return [...codes]
   }
 
   /** Headline numbers for the admin overview. */

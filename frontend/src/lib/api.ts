@@ -1628,17 +1628,17 @@ export const api = {
    * Confirm a payout was sent by hand, for an account that cannot send
    * Paystack transfers yet, or at all. See WithdrawalsService.settleManually.
    */
-  settleWithdrawalManually: (id: string, note: string) =>
+  settleWithdrawalManually: (id: string, note: string, confirmCheckedPaystack?: boolean) =>
     request<WithdrawalRequest>(`/withdrawals/${id}/settle-manually`, {
       method: 'POST',
-      body: { note },
+      body: { note, confirmCheckedPaystack },
     }),
 
   /** Back out of an approved payout that was never sent; the agent's money goes back. See WithdrawalsService.cancelApproved. */
-  cancelApprovedWithdrawal: (id: string, note: string) =>
+  cancelApprovedWithdrawal: (id: string, note: string, confirmCheckedPaystack?: boolean) =>
     request<void>(`/withdrawals/${id}/cancel-approved`, {
       method: 'POST',
-      body: { note },
+      body: { note, confirmCheckedPaystack },
     }),
 
   manualPayoutAdvances: () => request<ManualPayoutAdvance[]>('/withdrawals/manual-advances'),
@@ -1761,7 +1761,23 @@ export const api = {
   /** Superadmin only. */
   team: () => request<TeamMember[]>('/platform/team'),
 
-  createAdmin: (body: { name: string; email: string; phone: string }) =>
+  /** Superadmin: the newest admin and superadmin writes, who made each, and whether it worked. */
+  teamActions: () =>
+    request<
+      {
+        id: string
+        at: string
+        actorName: string
+        actorEmail: string | null
+        actorRole: string
+        method: string
+        path: string
+        body: unknown
+        statusCode: number
+      }[]
+    >('/platform/team/actions'),
+
+  createAdmin: (body: { name: string; email: string; phone: string; confirmExisting?: boolean }) =>
     request<{
       id: string
       email: string
@@ -1832,10 +1848,15 @@ export const api = {
    * that wall. `note` says how and where it was sent, and is required for the
    * same reason a refusal's reason is: nothing else confirms the claim.
    */
-  settleRefundManually: (id: string, note: string, momoNetwork?: 'MTN' | 'Telecel' | 'AirtelTigo') =>
+  settleRefundManually: (
+    id: string,
+    note: string,
+    momoNetwork?: 'MTN' | 'Telecel' | 'AirtelTigo',
+    confirmCheckedPaystack?: boolean,
+  ) =>
     request<{ id: string; status: 'approved' }>(`/admin/refunds/${id}/settle-manually`, {
       method: 'POST',
-      body: { note, momoNetwork },
+      body: { note, momoNetwork, confirmCheckedPaystack },
     }),
 
   /** Profit and loss from the ledger, over a window of days, or every entry ever recorded. */

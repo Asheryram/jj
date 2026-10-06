@@ -13,7 +13,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
  */
 import { SkipThrottle, Throttle } from '@nestjs/throttler'
 import { LoginThrottleGuard } from './login-throttle.guard'
-import { IsEmail, IsIn, IsString, MaxLength, Matches, MinLength } from 'class-validator'
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MaxLength, Matches, MinLength } from 'class-validator'
 import { Transform } from 'class-transformer'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { AuthService } from './auth.service'
@@ -68,6 +68,11 @@ export class CreateAdminDto {
 
   @Matches(/^0\d{9}$/, { message: 'A Ghana number needs 10 digits.' })
   phone!: string
+
+  /** Set only after being told the email already belongs to someone, see `TeamService.createAdmin`. */
+  @IsOptional()
+  @IsBoolean()
+  confirmExisting?: boolean
 }
 
 @ApiTags('auth')
@@ -236,6 +241,12 @@ export class TeamController {
   @Get()
   list() {
     return this.team.list()
+  }
+
+  /** The newest admin and superadmin writes, see `AdminAuditInterceptor`. */
+  @Get('actions')
+  actions() {
+    return this.team.recentActions()
   }
 
   /** Create an admin. Returns the one-time link for them to set a password. */

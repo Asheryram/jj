@@ -255,7 +255,15 @@ export class SetupTokensService {
         )
       }
 
-      await tx.user.update({ where: { id: row.user.id }, data: { passwordHash } })
+      const owner = await tx.user.update({ where: { id: row.user.id }, data: { passwordHash }, select: { email: true } })
+
+      // A new password ends every session this person already holds, on
+      // every profile (their admin profile is a separate row with the same
+      // email, reached by switching), and clears any sign-in lockout:
+      // a reset after a compromise must lock the old sessions out, and must
+      // not leave the real owner locked out by someone else's wrong guesses.
+      await tx.user.updateMany({ where: { email: owner.email }, data: { tokenVersion: { increment: 1 } } })
+      await tx.loginAttempt.deleteMany({ where: { email: owner.email } })
 
       // Every other outstanding link for this account dies with it, so an old
       // one cannot be used to take the account back.

@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma-analytics/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { mapProviderStatus } from '../supplier/datahub.client'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
+import { SettingsService } from '../settings/settings.service'
 import { AnalyticsPrismaService } from './analytics-prisma.service'
 import { addDays, dayBounds, toDateInt } from './date'
 
@@ -135,6 +136,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly warehouse: AnalyticsPrismaService,
     private readonly floatMonitor: FloatMonitorService,
+    private readonly settings: SettingsService,
   ) {}
 
   private msUntilNextDailyRun(): number {
@@ -1071,13 +1073,15 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
         select: { orderRef: true, withdrawalId: true, amount: true },
       }),
       this.prisma.payment.aggregate({ where: { status: 'paid', paidAt: { lt: end } }, _sum: { amount: true, fee: true } }),
+      // Fees included, the same as the live `SolvencyService.transfersSince`.
       this.prisma.withdrawal.aggregate({
         where: { paidAt: { lt: end }, transferCode: { not: null } },
-        _sum: { amount: true },
+        _sum: { amount: true, transferFee: true },
       }),
       this.prisma.refundRequest.aggregate({
         where: { method: 'transfer', paidAt: { lt: end }, transferCode: { not: null } },
         _sum: { amount: true },
+        _count: { _all: true },
       }),
       this.prisma.ledgerEntry.findMany({
         where: { kind: { in: ['capital_in_reimbursement', 'capital_out'] }, occurredAt: { lt: end } },
@@ -1145,7 +1149,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
      */
     const costRows = await this.prisma.ledgerEntry.findMany({
       where: { kind: 'supplier_cost', occurredAt: { lt: end } },
-      select: { amount: true, order: { select: { supplierCodeAtSale: true } } },
+      select: { amount: true, provider: true, order: { select: { supplierCodeAtSale: true } } },
     })
     const skuCodes = [...new Set(costRows.map((r) => r.order?.supplierCodeAtSale).filter((c): c is string => Boolean(c)))]
     const skuProviders = await this.prisma.supplierProduct.findMany({
@@ -1156,7 +1160,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     const costByProvider = new Map<string, number>()
     for (const row of costRows) {
       const code = row.order?.supplierCodeAtSale
-      const provider = code ? (providerByCode.get(code) ?? 'datahub-gh') : 'datahub-gh'
+      const provider = row.provider ?? (code ? (providerByCode.get(code) ?? 'datahub-gh') : 'datahub-gh')
       costByProvider.set(provider, (costByProvider.get(provider) ?? 0) - row.amount)
     }
     const reimbursedByProvider = new Map<string, number>()
@@ -1178,7 +1182,9 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       (collected._sum.amount ?? 0) -
       (collected._sum.fee ?? 0) -
       (transferredPayouts._sum.amount ?? 0) -
+      (transferredPayouts._sum.transferFee ?? 0) -
       (transferredRefunds._sum.amount ?? 0) -
+      transferredRefunds._count._all * (await this.settings.get('payoutTransferFee')) -
       reimbursedAcrossProviders -
       advancesRepaid
 
@@ -1731,7 +1737,9 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       where: { kind: 'supplier_cost', orderRef: { in: refs } },
       select: { orderRef: true, amount: true },
     })
-    const costByRef = new Map(costEntries.map((e) => [e.orderRef as string, -e.amount]))
+    // Summed per order: one order can be charged once per dispatch attempt.
+    const costByRef = new Map<string, number>()
+    for (const e of costEntries) costByRef.set(e.orderRef as string, (costByRef.get(e.orderRef as string) ?? 0) - e.amount)
 
     const avgSalePrice = Math.round(orders.reduce((sum, o) => sum + o.salePrice, 0) / orders.length)
     const avgSupplierCost = Math.round(orders.reduce((sum, o) => sum + (costByRef.get(o.reference) ?? 0), 0) / orders.length)

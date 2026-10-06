@@ -376,6 +376,20 @@ export default function Refunds() {
                             Paid another way?
                           </button>
                         </div>
+                      ) : row.method === 'transfer' && (row.transferStatus === 'unknown' || row.transferStatus === 'otp') ? (
+                        /* Stuck on Paystack: no answer, or waiting for an OTP.
+                           Settling by hand is offered, behind a check of their
+                           dashboard (see the modal), since it may still go out. */
+                        <div className="flex flex-col items-end gap-1.5">
+                          <Badge tone="warning">{row.transferStatus === 'otp' ? 'needs OTP' : 'no answer'}</Badge>
+                          <button
+                            type="button"
+                            onClick={() => setSettling(row)}
+                            className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
+                          >
+                            Paid another way?
+                          </button>
+                        </div>
                       ) : row.method === 'transfer' && row.transferStatus !== 'success' ? (
                         <Badge tone="info">sending</Badge>
                       ) : (
@@ -1196,6 +1210,7 @@ function SettleManuallyModal({
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [checkedPaystack, setCheckedPaystack] = useState(false)
 
   const key = request?.id ?? 'none'
   const [lastKey, setLastKey] = useState(key)
@@ -1204,9 +1219,14 @@ function SettleManuallyModal({
     setNetwork(request?.momoNetwork ?? 'MTN')
     setNote('')
     setError('')
+    setCheckedPaystack(false)
   }
 
   if (!request) return null
+
+  // Paystack never answered, or is waiting for an OTP: the transfer may still
+  // go out, so paying by hand first needs a look at their dashboard.
+  const needsPaystackCheck = request.transferStatus === 'unknown' || request.transferStatus === 'otp'
 
   const submit = async () => {
     if (note.trim().length < 5) {
@@ -1215,7 +1235,7 @@ function SettleManuallyModal({
     }
     setBusy(true)
     try {
-      await api.settleRefundManually(request.id, note.trim(), network)
+      await api.settleRefundManually(request.id, note.trim(), network, checkedPaystack)
       await onSettled()
       pushToast({
         tone: 'success',
@@ -1271,8 +1291,25 @@ function SettleManuallyModal({
           />
         </Field>
 
+        {needsPaystackCheck && (
+          <label className="flex items-start gap-2.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-900 dark:text-amber-200">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 shrink-0"
+              checked={checkedPaystack}
+              onChange={(event) => setCheckedPaystack(event.target.checked)}
+            />
+            <span>
+              {request.transferStatus === 'otp'
+                ? 'Paystack was waiting for an OTP on this refund. '
+                : 'Paystack never answered about this refund. '}
+              I have checked it on the Paystack dashboard and it did <strong>not</strong> go out.
+            </span>
+          </label>
+        )}
+
         <div className="flex gap-2">
-          <Button block loading={busy} onClick={() => void submit()}>
+          <Button block loading={busy} disabled={needsPaystackCheck && !checkedPaystack} onClick={() => void submit()}>
             Mark as sent
           </Button>
           <Button block variant="outline" disabled={busy} onClick={onClose}>

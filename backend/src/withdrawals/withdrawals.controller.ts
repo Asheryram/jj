@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
-import { IsIn, IsInt, IsString, Matches, Min, MinLength } from 'class-validator'
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, Min, MinLength } from 'class-validator'
 import { CurrentUser, RequireActive, Roles, type AuthUser } from '../common/auth'
 import { WithdrawalsService } from './withdrawals.service'
 
@@ -45,6 +45,11 @@ export class SettleWithdrawalManuallyDto {
   @IsString()
   @MinLength(5, { message: 'Say how and where this was sent.' })
   note!: string
+
+  /** Required when Paystack's answer was unknown or it asked for an OTP: the admin has checked their dashboard and the transfer did not go out. */
+  @IsOptional()
+  @IsBoolean()
+  confirmCheckedPaystack?: boolean
 }
 
 @ApiTags('withdrawals')
@@ -82,8 +87,8 @@ export class WithdrawalsController {
 
   @Patch(':id')
   @Roles('admin')
-  decide(@Param('id') id: string, @Body() dto: DecideWithdrawalDto) {
-    return this.withdrawals.decide(id, dto.status)
+  decide(@Param('id') id: string, @Body() dto: DecideWithdrawalDto, @CurrentUser() user: AuthUser) {
+    return this.withdrawals.decide(id, dto.status, user)
   }
 
   /**
@@ -103,7 +108,7 @@ export class WithdrawalsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: SettleWithdrawalManuallyDto,
   ) {
-    return this.withdrawals.cancelApproved(id, user.id, dto.note)
+    return this.withdrawals.cancelApproved(id, user.id, dto.note, dto.confirmCheckedPaystack)
   }
 
   @Post(':id/settle-manually')
@@ -113,7 +118,7 @@ export class WithdrawalsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: SettleWithdrawalManuallyDto,
   ) {
-    return this.withdrawals.settleManually(id, user.id, dto.note)
+    return this.withdrawals.settleManually(id, user.id, dto.note, user, dto.confirmCheckedPaystack)
   }
 
   /** Payouts sent from someone's own pocket, not yet taken back out. */

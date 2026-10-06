@@ -54,6 +54,17 @@ export class BootstrapService implements OnApplicationBootstrap {
       // Promote rather than complain: the address in the environment is the
       // operator by definition, and an operator locked out of their own platform
       // by a stale role is a worse outcome than a surprising promotion.
+      // ...but only an account already on the platform team. An agent or
+      // customer who self-registered with that address (a typo in the env, or
+      // an address set to someone else's) must never become the superadmin
+      // just because a deploy happened.
+      if (existing.role === 'agent' || existing.role === 'customer') {
+        this.log.error(
+          `SUPERADMIN_EMAIL ${email} belongs to a self-registered ${existing.role} account, NOT promoting it. ` +
+            'Check the address, or add that person as an admin first.',
+        )
+        return
+      }
       if (existing.role !== 'superadmin') {
         await this.prisma.user.update({ where: { id: existing.id }, data: { role: 'superadmin' } })
         this.log.warn(`${email} promoted to superadmin.`)

@@ -733,17 +733,28 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
    * `freeToSpend` by every manually-settled payout or refund on the books.
    */
   private async transfersSince(): Promise<number> {
-    const [payouts, refunds] = await Promise.all([
+    const [payouts, refunds, refundFee] = await Promise.all([
       this.prisma.withdrawal.aggregate({
         where: { paidAt: { not: null }, transferCode: { not: null } },
-        _sum: { amount: true },
+        _sum: { amount: true, transferFee: true },
       }),
       this.prisma.refundRequest.aggregate({
         where: { method: 'transfer', paidAt: { not: null }, transferCode: { not: null } },
         _sum: { amount: true },
+        _count: { _all: true },
       }),
+      this.settings.get('payoutTransferFee'),
     ])
-    return (payouts._sum.amount ?? 0) + (refunds._sum.amount ?? 0)
+    // Each real transfer also costs Paystack's own fee, out of the same
+    // balance. A payout records the fee it was charged; a refund records
+    // none, so the configured transfer fee stands in for it. Without these,
+    // "Should be at Paystack" drifted up by one fee per transfer.
+    return (
+      (payouts._sum.amount ?? 0) +
+      (payouts._sum.transferFee ?? 0) +
+      (refunds._sum.amount ?? 0) +
+      refunds._count._all * refundFee
+    )
   }
 
   /**

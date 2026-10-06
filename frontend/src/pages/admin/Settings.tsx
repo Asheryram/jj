@@ -728,7 +728,10 @@ function AgentApproval() {
  * See `SolvencyService.reconcile` and `WithdrawalsService.sendPayout`.
  */
 function PaystackPayoutSetting() {
-  const { pushToast } = useStore()
+  const { pushToast, session } = useStore()
+  // Changes how every payout and refund moves, so the server only accepts it
+  // from a superadmin; shown read-only to everyone else rather than failing.
+  const canChange = session?.role === 'superadmin'
   const [businessAccount, setBusinessAccount] = useState<boolean | null>(null)
 
   useEffect(() => {
@@ -779,11 +782,17 @@ function PaystackPayoutSetting() {
             never changes with this switch, only whether it's checked), emailing you only on a real
             shortfall.
           </p>
+          {!canChange && (
+            <p className="mt-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+              Only a superadmin can change this.
+            </p>
+          )}
         </div>
         <Toggle
           id="paystack-watch"
           label="This account can send transfers and is worth watching live"
           checked={businessAccount ?? false}
+          disabled={!canChange}
           onChange={(next) => void change(next)}
         />
       </div>

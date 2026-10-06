@@ -49,7 +49,9 @@ export class AnalyticsController {
    * routine use, so this validates just enough to reject an obvious mistake
    * (garbage input, a future date) and otherwise trusts the caller.
    */
+  // Superadmin only: rewrites warehouse history from a date onward.
   @Post('recompute-from')
+  @Roles('superadmin')
   recomputeFrom(@Query('date') date?: string) {
     const dateInt = Number(date)
     const today = toDateInt(new Date())
@@ -65,7 +67,9 @@ export class AnalyticsController {
    * is and is not safe to remove. Safe to call more than once, an already-
    * pruned range simply deletes nothing further.
    */
+  // Superadmin only: permanently deletes Bronze/Silver rows.
   @Post('prune-history')
+  @Roles('superadmin')
   pruneHistory() {
     return this.etl.pruneHistory()
   }

@@ -227,6 +227,8 @@ export default function Team() {
         them and nobody else.
       </Callout>
 
+      <AdminActionsCard />
+
       <AddAdminModal
         open={adding}
         onClose={() => setAdding(false)}
@@ -265,6 +267,102 @@ export default function Team() {
   )
 }
 
+type AdminAction = Awaited<ReturnType<typeof api.teamActions>>[number]
+
+/** Plain words for the admin actions that move money or change the platform; anything else shows its route. */
+const ACTION_LABELS: [RegExp, string, string?][] = [
+  [/\/withdrawals\/[^/]+$/, 'Decided a withdrawal', 'PATCH'],
+  [/\/withdrawals\/[^/]+\/settle-manually/, 'Marked a payout as sent by hand'],
+  [/\/withdrawals\/[^/]+\/cancel-approved/, 'Cancelled an approved payout'],
+  [/\/withdrawals\/manual-advances\/[^/]+\/reimburse/, 'Repaid a payout advance'],
+  [/\/refunds\/[^/]+\/approve/, 'Approved a refund'],
+  [/\/refunds\/[^/]+\/reject/, 'Refused a refund'],
+  [/\/refunds\/[^/]+\/settle-manually/, 'Marked a refund as sent by hand'],
+  [/\/float\/capital/, 'Logged capital'],
+  [/\/settings\/network-provider-routing/, 'Changed provider routing'],
+  [/\/admin\/settings/, 'Changed a setting'],
+  [/\/orders\/[^/]+\/resolve/, 'Resolved an order by hand'],
+  [/\/orders\/[^/]+\/retry-dispatch/, 'Retried an order'],
+  [/\/orders\/[^/]+\/reorder/, 'Reordered an order'],
+  [/\/platform\/team\/[^/]+\/suspend/, 'Suspended an account'],
+  [/\/platform\/team\/[^/]+\/restore/, 'Restored an account'],
+  [/\/platform\/team$/, 'Added an admin', 'POST'],
+]
+
+function describe(action: AdminAction): string {
+  const path = action.path.split('?')[0]
+  for (const [pattern, label, method] of ACTION_LABELS) {
+    if (pattern.test(path) && (!method || method === action.method)) return label
+  }
+  return `${action.method} ${path.replace(/^\/api/, '')}`
+}
+
+/**
+ * Who did what: every write made by an admin or superadmin, newest first
+ * (see `AdminAuditInterceptor`). The one place to check, after the fact,
+ * who approved a payout, logged a capital entry or changed a setting.
+ */
+function AdminActionsCard() {
+  const [rows, setRows] = useState<AdminAction[] | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api
+      .teamActions()
+      .then((result) => live && setRows(result))
+      .catch(() => live && setFailed(true))
+    return () => {
+      live = false
+    }
+  }, [])
+
+  return (
+    <Card className="mt-3">
+      <CardHead title="Recent admin actions" subtitle="Every change an admin or superadmin made, newest first" />
+      <div className="px-4 pb-4">
+        {failed ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">We could not load the action history.</p>
+        ) : rows === null ? (
+          <div className="py-6 text-center">
+            <Spinner className="mx-auto size-5 text-brand-600 dark:text-brand-300" />
+          </div>
+        ) : rows.length === 0 ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">Nothing recorded yet.</p>
+        ) : (
+          <TableWrap caption="Recent admin actions">
+            <thead>
+              <tr>
+                <Th>When</Th>
+                <Th>Who</Th>
+                <Th>What</Th>
+                <Th align="right">Result</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id}>
+                  <Td className="text-xs whitespace-nowrap text-slate-500 dark:text-slate-400">{dateTime(row.at)}</Td>
+                  <Td>
+                    <p className="text-sm font-medium text-slate-900 dark:text-slate-50">{row.actorName}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{row.actorRole}</p>
+                  </Td>
+                  <Td className="text-sm text-slate-700 dark:text-slate-200">{describe(row)}</Td>
+                  <Td align="right">
+                    <Badge tone={row.statusCode < 400 ? 'success' : 'danger'}>
+                      {row.statusCode < 400 ? 'done' : `failed ${row.statusCode}`}
+                    </Badge>
+                  </Td>
+                </tr>
+              ))}
+            </tbody>
+          </TableWrap>
+        )}
+      </div>
+    </Card>
+  )
+}
+
 function AddAdminModal({
   open,
   onClose,
@@ -285,20 +383,27 @@ function AddAdminModal({
   const [phone, setPhone] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  /** Set when the email already belongs to someone: the server's own description of whose it is, shown before confirming. */
+  const [existingOwner, setExistingOwner] = useState('')
 
   if (!open) return null
 
-  const submit = async () => {
+  const submit = async (confirmExisting = false) => {
     setBusy(true)
     try {
-      const result = await api.createAdmin({ name: name.trim(), email: email.trim(), phone })
+      const result = await api.createAdmin({ name: name.trim(), email: email.trim(), phone, confirmExisting })
       setName('')
       setEmail('')
       setPhone('')
+      setExistingOwner('')
       onClose()
       await onCreated(result)
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : 'We could not create that account.')
+      if (caught instanceof ApiError && caught.code === 'EXISTING_ACCOUNT') {
+        setExistingOwner(caught.message)
+      } else {
+        setError(caught instanceof ApiError ? caught.message : 'We could not create that account.')
+      }
     } finally {
       setBusy(false)
     }
@@ -331,6 +436,7 @@ function AddAdminModal({
             value={email}
             onChange={(event) => {
               setEmail(event.target.value)
+              setExistingOwner('')
               setError('')
             }}
           />
@@ -349,15 +455,27 @@ function AddAdminModal({
           />
         </Field>
 
+        {existingOwner && (
+          <Callout tone="warning" title="That email is already someone's account">
+            {existingOwner} Only continue if that is the person you mean.
+          </Callout>
+        )}
+
         <div className="flex gap-2">
-          <Button
-            block
-            loading={busy}
-            disabled={!name.trim() || !email.trim() || !phone.trim()}
-            onClick={() => void submit()}
-          >
-            Create and get link
-          </Button>
+          {existingOwner ? (
+            <Button block loading={busy} onClick={() => void submit(true)}>
+              Yes, give them admin
+            </Button>
+          ) : (
+            <Button
+              block
+              loading={busy}
+              disabled={!name.trim() || !email.trim() || !phone.trim()}
+              onClick={() => void submit()}
+            >
+              Create and get link
+            </Button>
+          )}
           <Button block variant="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>

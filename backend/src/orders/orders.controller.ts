@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common'
+import { Body, Controller, Get, Headers, Param, Post, Query, UseGuards } from '@nestjs/common'
+import { Throttle } from '@nestjs/throttler'
+import { LoginThrottleGuard } from '../auth/login-throttle.guard'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { OrdersService } from './orders.service'
@@ -28,7 +30,11 @@ export class OrdersController {
    * able to complete a purchase, or the sell link is worthless. A signed-in
    * caller is still recognised, because the token is decoded on every route.
    */
+  // Per IP, generous enough for a busy agent's walk-in sales, tight enough
+  // that a script cannot pump out unpaid orders.
   @Post()
+  @UseGuards(LoginThrottleGuard)
+  @Throttle({ burst: { limit: 20, ttl: 60_000 }, grind: { limit: 120, ttl: 900_000 } })
   place(
     @Body() dto: PlaceOrderDto,
     @CurrentUser() user: AuthUser | undefined,
@@ -45,13 +51,22 @@ export class OrdersController {
    * Ask the provider whether they will deliver to this number, before the buyer
    * pays. Public, because the checkout it protects is public (FR-4.8).
    */
+  // Rate-limited: every call asks a real provider, and on GMPL registers
+  // the number on MTN's approval queue under this business's account, so an
+  // unlimited loop could flood that queue and the approvals list.
   @Post('verify-recipient')
+  @UseGuards(LoginThrottleGuard)
+  @Throttle({ burst: { limit: 20, ttl: 60_000 }, grind: { limit: 120, ttl: 900_000 } })
   verifyRecipient(@Body() dto: VerifyRecipientDto) {
     return this.orders.verifyRecipient(dto.productId, dto.recipient)
   }
 
   /** FR-4.9, reference plus phone number, no account needed. */
+  // Rate-limited: reference plus phone answers differently for a real
+  // pair, which unthrottled would let a script guess its way through.
   @Post('track')
+  @UseGuards(LoginThrottleGuard)
+  @Throttle({ burst: { limit: 10, ttl: 60_000 }, grind: { limit: 40, ttl: 900_000 } })
   track(@Body() dto: TrackOrderDto) {
     return this.orders.track(dto)
   }
@@ -65,6 +80,8 @@ export class OrdersController {
 
   /** Money held for a failed Mobile Money order (NFR-3.3). */
   @Get('credits')
+  @UseGuards(LoginThrottleGuard)
+  @Throttle({ burst: { limit: 10, ttl: 60_000 }, grind: { limit: 40, ttl: 900_000 } })
   credits(@Query('phone') phone?: string) {
     return this.orders.claimableCredits(phone ?? '')
   }

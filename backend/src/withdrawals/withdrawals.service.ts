@@ -8,9 +8,10 @@ import { SettingsService } from '../settings/settings.service'
 import { momoCodeFor } from '../payments/momo'
 
 import { toWithdrawal } from '../common/mappers'
-import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../common/domain-errors'
 import type { AuthUser } from '../common/auth'
 import { momoLabel } from '../wallet/wallet.service'
+import { requirePaystackChecked } from '../common/paystack-check'
 import { isAdminRole } from '../common/auth'
 
 @Injectable()
@@ -134,7 +135,9 @@ export class WithdrawalsService {
           type: 'withdrawal',
           amount: -amount,
           balanceAfter: transferFee > 0 ? after.balance + transferFee : after.balance,
-          description: `Withdrawal requested · ${momoLabel(momoNetwork)} ${after.phone}`,
+          // The number actually being paid, same as `agentPhone` above, not the
+          // profile phone, which can differ.
+          description: `Withdrawal requested · ${momoLabel(momoNetwork)} ${momoNumber}`,
           reference: `WDR-${row.id.slice(0, 8).toUpperCase()}`,
           depth: 0,
         },
@@ -230,10 +233,28 @@ export class WithdrawalsService {
    * checked first so an agent is never marked paid against money that is not there.
    * Rejection is what has to move money, it puts the held amount back.
    */
-  async decide(id: string, status: WithdrawalStatus) {
+  /**
+   * An admin may not approve, or mark as sent, a payout to their own agent
+   * profile (same person, same email). Both admins today also sell as agents,
+   * so without this one person could approve their own money out with no
+   * second pair of eyes. A superadmin approves those instead.
+   */
+  private async refuseOwnPayout(id: string, approver: AuthUser): Promise<void> {
+    if (approver.role === 'superadmin') return
+    const [row, me] = await Promise.all([
+      this.prisma.withdrawal.findUnique({ where: { id }, select: { user: { select: { email: true } } } }),
+      this.prisma.user.findUnique({ where: { id: approver.id }, select: { email: true } }),
+    ])
+    if (row?.user.email && me?.email && row.user.email === me.email) {
+      throw new ForbiddenError('This payout is to your own agent profile. A superadmin has to approve it.')
+    }
+  }
+
+  async decide(id: string, status: WithdrawalStatus, approver?: AuthUser) {
     if (status !== 'approved' && status !== 'rejected') {
       throw new ValidationError('A withdrawal is either approved or rejected.')
     }
+    if (approver && status === 'approved') await this.refuseOwnPayout(id, approver)
 
     // Checked before the transaction, because it is an outbound HTTP call and a
     // transaction must never be held open across one.
@@ -609,16 +630,22 @@ export class WithdrawalsService {
    * apart from this one, so `expectedAtPaystack` is not quietly overstated as
    * if the money had left Paystack when nothing here can actually confirm it did.
    */
-  async settleManually(id: string, adminId: string, note: string) {
+  async settleManually(id: string, adminId: string, note: string, approver?: AuthUser, confirmCheckedPaystack = false) {
     const reason = note.trim()
     if (reason.length < 5) {
       throw new ValidationError('Say how and where this was sent. It is kept on the record.')
     }
+    if (approver) await this.refuseOwnPayout(id, approver)
 
     return this.prisma.$transaction(async (tx) => {
       const row = await tx.withdrawal.findUnique({ where: { id } })
       if (!row) throw new NotFoundError('We could not find that withdrawal request.')
-      if (row.transferCode) {
+      requirePaystackChecked(row.transferStatus, confirmCheckedPaystack)
+      // An OTP transfer carries a code but never left without the OTP; once
+      // the admin has confirmed on Paystack's dashboard it did not go out, it
+      // may be sent by hand like any other. Anything else with a code is a
+      // real transfer and is Paystack's to settle.
+      if (row.transferCode && row.transferStatus !== 'otp') {
         throw new ConflictError(
           'ALREADY_SENT',
           'Paystack already has a real transfer recorded for this one.',
@@ -638,6 +665,9 @@ export class WithdrawalsService {
           transferStatus: 'success',
           transferNote: `Sent manually, ${reason}`,
           paidAt: new Date(),
+          // Cleared (only ever an un-sent OTP transfer's here), so this hand
+          // payment is never counted as money that left through Paystack.
+          transferCode: null,
           // The one thing a later genuine Paystack transfer event for this
           // same reference can check to refuse acting, see the field's own
           // doc comment in schema.prisma and `PaymentsService.applyTransfer`.
@@ -658,8 +688,14 @@ export class WithdrawalsService {
           {
             idempotencyKey: LedgerService.key('withdrawal', id, 'capital_in'),
             kind: 'capital_in',
-            amount: row.amount,
-            description: `Covered ${row.agentName}'s payout personally, ${reason}`,
+            // The payout plus its sending fee: sent by hand, the Mobile Money
+            // transfer costs about the same GHS 1 Paystack would have charged,
+            // and whoever sent it paid that too. The agent's `transferFee`
+            // (held at request, booked as `payout_fee` at approval) is what
+            // covers it, so it is owed back to them along with the payout.
+            // Recording only `amount` repaid them a fee short every time.
+            amount: row.amount + row.transferFee,
+            description: `Covered ${row.agentName}'s payout personally (incl. sending fee), ${reason}`,
             withdrawalId: id,
             occurredAt: new Date(),
             affectsProfit: false,
@@ -744,7 +780,7 @@ export class WithdrawalsService {
    * Only for a payout with no Paystack transfer on record: one Paystack is
    * already processing must not be reversed here on top of being sent.
    */
-  async cancelApproved(id: string, adminId: string, note: string): Promise<void> {
+  async cancelApproved(id: string, adminId: string, note: string, confirmCheckedPaystack = false): Promise<void> {
     const reason = note.trim()
     if (reason.length < 5) {
       throw new ValidationError('Say why this payout is not being sent. It is kept on the record.')
@@ -754,7 +790,8 @@ export class WithdrawalsService {
     if (row.status !== 'approved') {
       throw new ConflictError('NOT_APPROVED', `Only an approved payout can be cancelled, this one is ${row.status}.`)
     }
-    if (row.transferCode) {
+    requirePaystackChecked(row.transferStatus, confirmCheckedPaystack)
+    if (row.transferCode && row.transferStatus !== 'otp') {
       throw new ConflictError('ALREADY_SENT', 'Paystack already has a transfer for this one, check their dashboard instead.')
     }
     await this.failPayout(id, `Not sent, cancelled by an admin: ${reason}`)

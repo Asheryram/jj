@@ -1,12 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import type { Network } from '@prisma/client'
+import type { Network, Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { FulfilmentService } from '../orders/fulfilment.service'
 import { ValidationError } from '../common/domain-errors'
 import { PaystackClient } from './paystack.client'
 import { LedgerService } from '../finance/ledger.service'
 import { DomainsService } from '../domains/domains.service'
+import { SettingsService } from '../settings/settings.service'
 
 /**
  * Collecting money, and what happens once it arrives.
@@ -38,6 +39,7 @@ export class PaymentsService {
     private readonly fulfilment: FulfilmentService,
     private readonly ledger: LedgerService,
     private readonly domains: DomainsService,
+    private readonly settings: SettingsService,
   ) {}
 
   get live(): boolean {
@@ -316,23 +318,18 @@ export class PaymentsService {
       raw: string
     },
   ): Promise<void> {
+    // Read before the transaction: only needed when Paystack omits its fee.
+    const feeEstimate =
+      detail.fee == null ? Math.ceil((detail.amount * (await this.settings.get('paystackFeeBp'))) / 10_000) : 0
     const orderIdToDispatch = await this.prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findUnique({ where: { reference } })
       // Already applied. Paystack retries webhooks and customers refresh pages;
       // both must be no-ops rather than a second bundle or a second credit.
       if (!payment || payment.status === 'paid') return null
 
-      if (detail.currency && detail.currency !== 'GHS') {
-        this.log.error(
-          `${reference}: paid in ${detail.currency}, expected GHS, NOT applied, needs a human`,
-        )
-        return null
-      }
-
-      if (detail.amount < payment.amount) {
-        this.log.error(
-          `${reference}: only ${detail.amount}p of ${payment.amount}p arrived, NOT applied, needs a human`,
-        )
+      const wrongCurrency = detail.currency !== 'GHS'
+      if (wrongCurrency || detail.amount < payment.amount) {
+        await this.closeUnacceptablePayment(tx, payment, reference, detail, wrongCurrency)
         return null
       }
 
@@ -388,8 +385,14 @@ export class PaymentsService {
             // Negative: this is money Paystack kept out of what the customer
             // paid. Null when they did not report it, which is not zero, a
             // missing figure must not read as a free transaction.
-            amount: detail.fee != null ? -detail.fee : 0,
-            description: `Paystack fee · ${detail.channel ?? 'unknown channel'}`,
+            // When they don't report it, the same rate the buyer was charged
+            // for it at checkout stands in, labelled as an estimate. Booking
+            // 0 made the sale look fee-free and its margin too high.
+            amount: -(detail.fee ?? feeEstimate),
+            description:
+              detail.fee != null
+                ? `Paystack fee · ${detail.channel ?? 'unknown channel'}`
+                : `Paystack fee (estimated, not reported) · ${detail.channel ?? 'unknown channel'}`,
             paymentRef: reference,
             userId: payment.userId,
             occurredAt: paidAt,
@@ -539,6 +542,80 @@ export class PaymentsService {
   }
 
   /**
+   * Money arrived, but not money this order can ship on: less than the price
+   * (some Mobile Money prompts let the amount be edited), or in the wrong
+   * currency (also catches a blank one). It used to be left `pending` for a
+   * human, which in practice meant forever: the sweep re-checked it every
+   * few minutes, oldest first in a batch of 25, so enough of these would
+   * have starved it, and the buyer was never told anything.
+   *
+   * Refunded instead, for exactly what arrived: the payment is closed, the
+   * order fails, and a refund request is queued for a person to send, the
+   * same as any other failed paid order. The amount is booked as income
+   * here so the refund's cost nets it to zero, profit never moves.
+   * `expectedBalance` only counts `paid` payments, so this sum reads as not
+   * at Paystack until the refund goes, understating what's free to spend
+   * for a while, the cautious side to be wrong on.
+   */
+  private async closeUnacceptablePayment(
+    tx: Prisma.TransactionClient,
+    payment: { amount: number; orderId: string | null; userId: string | null },
+    reference: string,
+    detail: { amount: number; currency: string; network: Network | null; raw: string },
+    wrongCurrency: boolean,
+  ): Promise<void> {
+    const why = wrongCurrency
+      ? `paid in ${detail.currency || 'an unknown currency'}, expected GHS`
+      : `only GHS ${(detail.amount / 100).toFixed(2)} of GHS ${(payment.amount / 100).toFixed(2)} arrived`
+    this.log.error(`${reference}: ${why}, closing it and queueing a refund of what arrived`)
+
+    const claim = await tx.payment.updateMany({
+      where: { reference, status: { in: ['pending', 'failed'] } },
+      data: { status: 'failed', providerResponse: detail.raw },
+    })
+    if (claim.count === 0) return
+
+    await this.ledger.record(
+      [
+        {
+          idempotencyKey: LedgerService.key('payment', reference, 'unacceptable'),
+          kind: 'overpayment',
+          amount: detail.amount,
+          description: `Payment not accepted (${why}), being refunded`,
+          paymentRef: reference,
+          userId: payment.userId,
+          occurredAt: new Date(),
+        },
+      ],
+      tx,
+    )
+
+    if (!payment.orderId) return
+    const order = await tx.order.findUnique({ where: { id: payment.orderId } })
+    if (!order) return
+    await tx.order.updateMany({
+      where: { id: order.id, status: { in: ['awaiting_payment', 'failed'] } },
+      data: { status: 'failed' },
+    })
+    await tx.refundRequest.upsert({
+      where: { orderId: order.id },
+      create: {
+        orderId: order.id,
+        orderRef: order.reference,
+        productName: order.productName,
+        buyerName: order.buyer,
+        buyerPhone: order.buyerPhone,
+        // What actually arrived, not the price: that is all there is to give back.
+        amount: wrongCurrency ? order.salePrice : detail.amount,
+        method: 'transfer',
+        reason: `Payment not accepted: ${why}.`,
+        momoNetwork: detail.network,
+      },
+      update: {},
+    })
+  }
+
+  /**
    * Paystack says it will not be paid. Close the order; nothing was charged.
    *
    * Claimed the same way `applyPaid` claims a success: a `failed`/`abandoned`
@@ -665,14 +742,30 @@ export class PaymentsService {
     if (alreadyApplied) return { applied: false }
 
     if (event === 'transfer.success') {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.refundRequest.update({
-          where: { id: refundId },
+      const applied = await this.prisma.$transaction(async (tx) => {
+        // Only an approved refund still in flight. A success redelivered after
+        // a failure (the refund already back in the queue, maybe approved and
+        // sent again since) must not mark it paid on top of that.
+        const claim = await tx.refundRequest.updateMany({
+          where: {
+            id: refundId,
+            status: 'approved',
+            resolvedManually: false,
+            OR: [{ transferStatus: null }, { transferStatus: { notIn: ['reversed', 'failed', 'success'] } }],
+          },
           data: { transferStatus: 'success', paidAt: new Date(), transferNote: null },
         })
+        if (claim.count === 0) return false
         // Now, and only now, the receipt may say the money has gone back.
         await tx.order.update({ where: { id: row.orderId }, data: { refunded: true } })
+        return true
       })
+      if (!applied) {
+        this.log.error(
+          `refund ${row.orderRef}: Paystack says SENT, but it is ${row.status}/${row.transferStatus ?? 'none'}. Check Paystack before doing anything.`,
+        )
+        return { applied: false }
+      }
       this.log.log(`refund ${row.orderRef} confirmed paid to ${row.buyerPhone}`)
       return { applied: true }
     }
@@ -702,6 +795,10 @@ export class PaymentsService {
         },
         data: {
           status: 'pending',
+          // Cleared, so approving it again actually sends: `sendRefund` skips
+          // any refund that still carries a transfer code, which left a
+          // retried refund "approved" with nothing ever sent.
+          transferCode: null,
           transferStatus: event === 'transfer.reversed' ? 'reversed' : 'failed',
           transferNote:
             event === 'transfer.reversed'
@@ -733,7 +830,9 @@ export class PaymentsService {
     // payout (WDR-) and a customer refund (RFD-). The prefix says which, so one
     // webhook settles both without guessing.
     if (reference.startsWith('RFD-')) {
-      return this.applyRefundTransfer(event, reference.slice(4))
+      // `RFD-<refund id>_<approval>`, see `RefundsService.sendRefund`; older
+      // transfers carry no suffix. A uuid has no underscore, so this is exact.
+      return this.applyRefundTransfer(event, reference.slice(4).split('_')[0])
     }
 
     const id = reference.startsWith('WDR-') ? reference.slice(4) : null
@@ -778,10 +877,20 @@ export class PaymentsService {
     }
 
     if (event === 'transfer.success') {
-      await this.prisma.withdrawal.update({
-        where: { id },
+      // Only from `approved`: Paystack redelivers webhooks, out of order
+      // too, and a success landing after a failure already handed the money
+      // back to the agent must not flip the row to `paid` on top of that.
+      const claim = await this.prisma.withdrawal.updateMany({
+        where: { id, status: 'approved', resolvedManually: false },
         data: { status: 'paid', transferStatus: 'success', paidAt: new Date() },
       })
+      if (claim.count === 0) {
+        this.log.error(
+          `payout ${id}: Paystack says SENT, but it is already ${row.status}` +
+            (row.status === 'failed' ? ' and the money was returned to the agent. Check Paystack before doing anything.' : '.'),
+        )
+        return { applied: false }
+      }
       this.log.log(`payout ${id} confirmed paid to ${row.agentPhone}`)
       return { applied: true }
     }
@@ -818,9 +927,13 @@ export class PaymentsService {
       })
       if (claim.count === 0) return
 
+      // Amount and fee, both held at request, both returned, the same as
+      // `WithdrawalsService.failPayout`. Only the amount used to come back
+      // here, leaving the agent GHS 1 short per failed transfer.
+      const total = row.amount + row.transferFee
       const after = await tx.user.update({
         where: { id: row.userId },
-        data: { balance: { increment: row.amount } },
+        data: { balance: { increment: total } },
         select: { balance: true },
       })
 
@@ -828,21 +941,25 @@ export class PaymentsService {
         data: {
           userId: row.userId,
           type: 'withdrawal',
-          amount: row.amount,
+          amount: total,
           balanceAfter: after.balance,
-          description: 'Payout did not reach you, amount returned to your balance',
+          description: 'Payout did not reach you, amount and fee returned to your balance',
           reference: `WDR-${id.slice(0, 8).toUpperCase()}-R`,
           depth: 0,
         },
       })
 
-      // No money left the platform, so the payout line comes off the books.
+      // No money left the platform, so the payout and its fee come off the books.
       await tx.ledgerEntry.deleteMany({
-        where: { idempotencyKey: LedgerService.key('withdrawal', id, 'payout') },
+        where: {
+          idempotencyKey: {
+            in: [LedgerService.key('withdrawal', id, 'payout'), LedgerService.key('withdrawal', id, 'payout_fee')],
+          },
+        },
       })
     })
 
-    this.log.warn(`payout ${id} ${event}, GHS ${(row.amount / 100).toFixed(2)} returned to the agent`)
+    this.log.warn(`payout ${id} ${event}, GHS ${((row.amount + row.transferFee) / 100).toFixed(2)} returned to the agent`)
     return { applied: true }
   }
 }

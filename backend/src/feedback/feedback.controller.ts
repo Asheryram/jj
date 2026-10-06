@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { FeedbackService } from './feedback.service'
+import { ForbiddenError } from '../common/domain-errors'
 
 export class SubmitFeedbackDto {
   @IsIn(['suggestion', 'issue'])
@@ -98,6 +99,11 @@ export class AdminFeedbackController {
     // Never trusted blindly; see `FeedbackService.feedbackItemUrl`.
     @Headers('origin') origin?: string,
   ) {
+    // `@Roles('admin')` also admits a superadmin (the role above it), so the
+    // admin-only rule described above is enforced here.
+    if (user.role === 'superadmin') {
+      throw new ForbiddenError('A superadmin already sees every ticket, there is nobody to escalate to.')
+    }
     return this.feedback.escalate(id, user.id, user.name, origin)
   }
 }

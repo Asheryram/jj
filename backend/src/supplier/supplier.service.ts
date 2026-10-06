@@ -210,9 +210,24 @@ export class SupplierService implements OnModuleInit {
       : null
     const provider = supplier?.provider ?? 'datahub-gh'
     const live = this.isLiveFor(provider)
+    /**
+     * In production the simulator must never stand in for a real provider:
+     * a `*_LIVE` typo, or routing a network to a provider that isn't live,
+     * used to mark a paid order "delivered" (agent margin booked) with
+     * nothing ever sent. Left unresolved instead, it lands on Needs
+     * attention and "Retry" sends it for real once the provider is live.
+     */
     const result = live
       ? await this.dispatchLive(order, supplier, provider, attempt)
-      : await this.decide(order, supplier)
+      : this.config.get<string>('NODE_ENV') === 'production'
+        ? {
+            outcome: 'unknown' as const,
+            reason: `${provider} is not live on this server (${this.liveEnvKeyFor(provider)}), nothing was sent. Retry once it is.`,
+          }
+        : await this.decide(order, supplier)
+    if (!live && this.config.get<string>('NODE_ENV') === 'production') {
+      this.log.error(`${order.reference}: ${provider} is not live in production, order NOT sent, left for retry`)
+    }
 
     if (supplierCode) {
       await this.prisma.supplierDispatch.create({

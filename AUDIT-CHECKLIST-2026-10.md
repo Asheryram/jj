@@ -70,6 +70,7 @@ Tick a line only once the fix is built, type-checked, and verified against the s
       refunding by hand; from now on M1 handles it automatically.
 - [ ] **A3** Two delivered orders still show a refund note "On hold, reordering by hand"
       (JDC-104614453, JDC-377814297). Cosmetic; can be reworded with one SQL update.
+- [ ] **A4** The two payouts you sent by hand (GHS 85.00 and GHS 40.00) were recorded as advances without the GHS 1 sending fee each. Once deployed, the new rule applies to new payouts; to make these two match, raise each advance by 100 pesewas (one SQL update on the two capital_in rows tied to those withdrawals) before reimbursing them.
 
 ## P1: wrong figures on admin screens
 
@@ -114,14 +115,17 @@ Tick a line only once the fix is built, type-checked, and verified against the s
 
 ## P2: books wrong in edge cases, races
 
-- [ ] **L1** Supplier cost is keyed per order, not per attempt: a reorder that is charged again
+- [x] **L1** Supplier cost is keyed per order, not per attempt: a reorder that is charged again
       is never booked, and a reorder to the other provider books the cost against the wrong
       float (`supplierCodeAtSale` is overwritten). `fulfilment.service.ts`.
-- [ ] **L2** Supplier cost stays booked when the provider fails and refunds the order.
-- [ ] **L3** Payouts sent by hand still charge the agent the GHS 1 "Paystack transfer fee" and
+      **Done:** supplier cost is booked per attempt (attempt 1 keeps the old key, so nothing booked before can double) and stamped with the provider that charged it; per-provider totals and the order list prefer the stamp and add up every attempt.
+- [x] **L2** Supplier cost stays booked when the provider fails and refunds the order.
+      **Done:** a failed GMPL order reverses its booked cost (GMPL refunds to the wallet); DataHub unchanged (its charge on a failed order is real money gone). The live GMPL reading now shows it if that ever stops being true.
+- [x] **L3** Payouts sent by hand still charge the agent the GHS 1 "Paystack transfer fee" and
       book it as a cost, though Paystack never sent anything. Needs a decision: keep charging
       it (then book it as income, not a cost) or stop charging it on manual payouts.
       **Needs your decision**, then a small change either way.
+      **Done:** decision: keep the GHS 1 (sending by hand costs about the same as Paystack). The manual advance now includes the fee, so whoever sent it is repaid in full.
 - [x] **L4** Agent cancelling a withdrawal, and an admin rejecting a refund, are read-then-write;
       racing an approval can leave the wrong state. Fix: status-guarded claims.
       **Done:** agent cancel and refund reject now claim on pending; a lost race says "just decided, refresh".
@@ -129,32 +133,43 @@ Tick a line only once the fix is built, type-checked, and verified against the s
       expiry clock starts at the order's creation, not the hold. `fulfilment.service.ts`,
       `reconciler.service.ts`.
       **Done:** a hold no longer overwrites a settled order; hold expiry is timed from the latest needs-approval attempt (orders with none fall back to their age).
-- [ ] **L6** An underpaid or wrong-currency charge leaves the order hanging forever and can fill
+- [x] **L6** An underpaid or wrong-currency charge leaves the order hanging forever and can fill
       the sweep's 25-row batch. `payments.service.ts`, `reconciler.service.ts`.
       **Needs your decision:** when a charge arrives short, refund what arrived, or hold the order and ask the buyer to pay the difference? None in production today.
+      **Done:** decision: refund what arrived. The payment is closed, the order fails, a refund is queued for the amount actually received, booked as income so the refund nets profit to zero; no longer hangs or clogs the sweep.
 - [x] **L7** An approved manual payout cannot be undone if the admin decides not to send it.
       **Done:** "Not sending it?" on an approved payout with no Paystack transfer returns amount + fee to the agent (reason required); failPayout now claims atomically so it cannot race "Paid another way".
-- [ ] **L8** A late "delivered" signal on a refunded order is only flagged; refund approval does
+- [x] **L8** A late "delivered" signal on a refunded order is only flagged; refund approval does
       not check that flag.
-- [ ] **L9** Settlement ledger writes are unchecked: `LedgerService.record` swallows errors, and
+      **Done:** refund approval and "Paid another way" stop on a flagged order until the flag is acknowledged on Needs attention.
+- [x] **L9** Settlement ledger writes are unchecked: `LedgerService.record` swallows errors, and
       an agent margin row is written even when the agent no longer exists.
+      **Done:** ledger writes inside a transaction now roll back with the money movement instead of being swallowed; no margin cost is booked for an agent that no longer exists.
 - [x] **L10** Withdrawal failure note says "top up and approve it again", but a failed withdrawal
       cannot be approved again.
       **Done:** the note now says the money went back to the agent and they can request again.
-- [ ] **L11** A missing Paystack fee is booked as 0 (the comment says it must not be).
-- [ ] **L12** The agent's payout earning shows their profile phone, not the number actually paid.
+- [x] **L11** A missing Paystack fee is booked as 0 (the comment says it must not be).
+      **Done:** a fee Paystack did not report is booked at the checkout rate, labelled as an estimate.
+- [x] **L12** The agent's payout earning shows their profile phone, not the number actually paid.
+      **Done:** the payout line shows the Mobile Money number actually paid.
 
 ## P3: before switching on automated Paystack transfers
 
-- [ ] **T1** `transfer.failed` / `transfer.reversed` on a withdrawal returns the amount but not
+- [x] **T1** `transfer.failed` / `transfer.reversed` on a withdrawal returns the amount but not
       the held fee, and leaves the `payout_fee` ledger row.
-- [ ] **T2** A refund retried after a webhook failure is stranded (`transferCode` not cleared,
+      **Done:** a failed or reversed payout returns amount plus fee and removes both ledger rows, matching the in-app failure path.
+- [x] **T2** A refund retried after a webhook failure is stranded (`transferCode` not cleared,
       the same `RFD-` reference reused).
-- [ ] **T3** OTP and unknown transfers have no admin way out; "unknown" plus "paid another way"
+      **Done:** a failed refund clears its transfer code, and each approval gets its own reference (RFD-<id>_<approval>), so a retry actually sends instead of looping as a duplicate.
+- [x] **T3** OTP and unknown transfers have no admin way out; "unknown" plus "paid another way"
       can pay an agent twice with nothing flagging it.
-- [ ] **T4** A late `transfer.success` after a failure flips the row to paid.
-- [ ] **T5** Paystack's own transfer fee is never subtracted from "Should be at Paystack".
-- [ ] **T6** Wallet refunds reduce profit for revenue that was never booked (wallet is off).
+      **Done:** "Paid another way" and "Not sending it?" on an unknown or OTP transfer require ticking "I checked Paystack and it did not go out"; refunds stuck in those states can now be settled that way (there was no way out before).
+- [x] **T4** A late `transfer.success` after a failure flips the row to paid.
+      **Done:** a late transfer.success only applies to a payout or refund still approved and in flight; after a failure it is logged for a human, never applied.
+- [x] **T5** Paystack's own transfer fee is never subtracted from "Should be at Paystack".
+      **Done:** "Should be at Paystack" (live and warehouse) subtracts each real transfer's fee: the payout's own fee, the configured transfer fee per refund.
+- [x] **T6** Wallet refunds reduce profit for revenue that was never booked (wallet is off).
+      **Done:** a refund only reduces profit if the sale's revenue was booked (MoMo sales); a failed wallet sale's refund does not.
 
 ---
 
@@ -165,44 +180,58 @@ Findings are added below as they come in.
 
 ### Superadmin, access and security
 
-- [ ] **S1** (P0) Production can deliver without taking payment, or take payment without
+- [x] **S1** (P0) Production can deliver without taking payment, or take payment without
       delivering. A missing `PAYSTACK_SECRET_KEY` makes orders skip payment and go straight to
       a live provider; a provider whose `*_LIVE` isn't exactly `true` "delivers" paid orders as a
       simulation (agent margin still booked); routing a network to a provider that isn't live
       does the same. `orders.service.ts:122`, `supplier.service.ts`, `app.module.ts`,
       `admin.service.ts:974`. Fix: in production refuse to boot without a Paystack key, refuse to
       place or dispatch for a provider that isn't live, and reject routing to one.
-- [ ] **S2** (P0) Suspending an admin, or resetting their password, does not end their session:
+      **Done:** production refuses to boot without a Paystack key; a dispatch to a provider that is not live is left unresolved (Needs attention, Retry) instead of simulated as delivered; routing to a non-live provider is refused.
+- [x] **S2** (P0) Suspending an admin, or resetting their password, does not end their session:
       the role in the 12-hour token is trusted and admin routes never re-check status.
       `common/auth.ts`, `team.service.ts`. Fix: a token version on the user, checked by the guard
       for admin roles and bumped on suspend and password set.
-- [ ] **S3** (P1) No record of who did what for withdrawals, capital entries, settings, routing,
+      **Done:** new token_version column (migration 20261006090000): carried in the token, checked with account status on every admin request; bumped on suspension and on any new password (every profile of that email).
+- [x] **S3** (P1) No record of who did what for withdrawals, capital entries, settings, routing,
       or hand-resolved orders (39 capital rows in production, none with an actor). Fix: an admin
       action audit table written by every admin and superadmin write.
-- [ ] **S4** (P2) An admin can be kept locked out forever (10 wrong passwords lock 15 minutes,
+      **Done:** new admin_actions table (migration 20261006091000) written by a global interceptor for every non-GET admin or superadmin request: who, what, redacted body, result. Shown to a superadmin as "Recent admin actions" on the Team screen.
+- [x] **S4** (P2) An admin can be kept locked out forever (10 wrong passwords lock 15 minutes,
       repeatable within the IP throttle), and a reset link doesn't clear the lockout.
       `auth.service.ts`. Fix: clear on reset link, superadmin "clear lockout".
-- [ ] **S5** (P2) Platform-level switches are open to any admin: `simulateFailure`,
+      **Done:** a reset or setup link now clears that email's lockout; a superadmin can unlock anyone by issuing a reset link.
+- [x] **S5** (P2) Platform-level switches are open to any admin: `simulateFailure`,
       `paystackBusinessAccount`, `walletEnabled`, provider routing, analytics recompute/prune.
       Fix: superadmin only, or confirm plus audit.
-- [ ] **S6** (P2) Registering with someone else's phone number shows all their guest orders
+      **Done:** simulateFailure, paystackBusinessAccount and walletEnabled are superadmin-only (shown read-only to admins); analytics recompute and prune are superadmin-only. Routing stays with admins (S1 guards it).
+- [x] **S6** (P2) Registering with someone else's phone number shows all their guest orders
       (recipients, vouchers): phone numbers are never verified. 170 guest orders across 46
       phones today. `orders.service.ts:943`. Fix: verify the phone (OTP) before matching on it.
-- [ ] **S7** (P2) "Add admin" with an email that already exists silently makes that account an
+      **Done:** customers see only orders placed signed in to their account (no phone match); guest orders stay reachable on Track with reference plus phone. Same rule in their reports.
+- [x] **S7** (P2) "Add admin" with an email that already exists silently makes that account an
       admin. `team.service.ts:70-132`. Fix: show whose account it is and require confirmation.
-- [ ] **S8** (P2) An admin can approve their own agent profile's withdrawal (both admins have
+      **Done:** an email that already has an account is refused with whose it is and their roles; the Team screen asks for confirmation before adding the admin profile.
+- [x] **S8** (P2) An admin can approve their own agent profile's withdrawal (both admins have
       agent profiles). Fix: refuse when the withdrawal's owner shares the approver's email.
-- [ ] **S9** (P2) Public endpoints have no rate limit; `verify-recipient` calls GMPL with
+      **Done:** approving, or marking as sent, a payout to the approver's own agent profile is refused; a superadmin approves those.
+- [x] **S9** (P2) Public endpoints have no rate limit; `verify-recipient` calls GMPL with
       `record: true`, so a script can flood MTN's approval queue and the approvals table.
       Fix: throttle verify-recipient, track, credits and place.
-- [ ] **S10** (P3) Superadmin "restore" can activate an agent application nobody decided.
-- [ ] **S11** (P3) "Promote somebody else first" points at an action that doesn't exist; the
+      **Done:** order placement, verify-recipient, track and credits are rate-limited per IP.
+- [x] **S10** (P3) Superadmin "restore" can activate an agent application nobody decided.
+      **Done:** restore/suspend on the Team screen only applies to admin and superadmin accounts.
+- [x] **S11** (P3) "Promote somebody else first" points at an action that doesn't exist; the
       only way to make a superadmin is `SUPERADMIN_EMAIL` plus a redeploy.
-- [ ] **S12** (P3) Changing `SUPERADMIN_EMAIL` promotes whatever account has that address, even a
+      **Done:** the message now says how to make another superadmin (SUPERADMIN_EMAIL plus redeploy).
+- [x] **S12** (P3) Changing `SUPERADMIN_EMAIL` promotes whatever account has that address, even a
       self-registered stranger's. Fix: only promote an existing admin.
-- [ ] **S13** (P3) Upline agents see downline orders' buyer phones and margins although referral
+      **Done:** boot only promotes an account already on the platform team; an agent or customer account with that email is refused with a loud log line. Checked: the real superadmin's password row is the superadmin row, unaffected.
+- [x] **S13** (P3) Upline agents see downline orders' buyer phones and margins although referral
       is off (6 agents have an upline).
-- [ ] **S14** (P3) Superadmin can still escalate feedback (harmless, comment says admin only).
+      **Done:** agents see their own sales only, in orders and in their reports; the downline lookup is gone.
+- [x] **S14** (P3) Superadmin can still escalate feedback (harmless, comment says admin only).
+      **Done:** escalation is refused for a superadmin.
 
 ### Buyer, agent and admin walkthroughs
 

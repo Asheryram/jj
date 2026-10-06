@@ -22,6 +22,27 @@ export class TeamService {
   ) {}
 
   /** Everyone with platform access, and whether they have signed in yet. */
+  /** The newest 200 admin writes, with who made each (name and email), see `AdminAuditInterceptor`. */
+  async recentActions() {
+    const rows = await this.prisma.adminAction.findMany({ orderBy: { createdAt: 'desc' }, take: 200 })
+    const actors = await this.prisma.user.findMany({
+      where: { id: { in: [...new Set(rows.map((r) => r.actorId))] } },
+      select: { id: true, name: true, email: true },
+    })
+    const byId = new Map(actors.map((a) => [a.id, a]))
+    return rows.map((r) => ({
+      id: r.id,
+      at: r.createdAt.toISOString(),
+      actorName: byId.get(r.actorId)?.name ?? 'Unknown',
+      actorEmail: byId.get(r.actorId)?.email ?? null,
+      actorRole: r.actorRole,
+      method: r.method,
+      path: r.path,
+      body: r.body,
+      statusCode: r.statusCode,
+    }))
+  }
+
   async list() {
     const rows = await this.prisma.user.findMany({
       where: { role: { in: ['admin', 'superadmin'] } },
@@ -56,7 +77,10 @@ export class TeamService {
    * That is honest about the channel: the superadmin passes it on however they
    * already talk to this person, and the link dies in 48 hours or on first use.
    */
-  async createAdmin(input: { name: string; email: string; phone: string }, invitedBy?: string) {
+  async createAdmin(
+    input: { name: string; email: string; phone: string; confirmExisting?: boolean },
+    invitedBy?: string,
+  ) {
     const email = input.email.trim().toLowerCase()
 
     /**
@@ -80,6 +104,21 @@ export class TeamService {
       throw new ConflictError(
         'EMAIL_IN_USE',
         `${email} already has an admin profile. Send them a new sign-in link instead of creating a second one.`,
+      )
+    }
+
+    /**
+     * An existing account gains admin silently otherwise: one typo that
+     * happens to match an agent's email hands that agent the admin screens
+     * through their profile switcher. Say whose account it is, and only go
+     * ahead once that has been confirmed.
+     */
+    if (owner && !input.confirmExisting) {
+      const roles = await this.prisma.user.findMany({ where: { email }, select: { role: true } })
+      throw new ConflictError(
+        'EXISTING_ACCOUNT',
+        `${email} already belongs to ${owner.name} (${roles.map((r) => r.role).join(', ')}). ` +
+          'Confirm to give that same person an admin profile.',
       )
     }
 
@@ -215,6 +254,14 @@ export class TeamService {
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } })
     if (!user) throw new NotFoundError('We could not find that account.')
+    // The platform team's own accounts only. Restoring through here used to
+    // activate any user, including an agent application nobody had decided,
+    // skipping the applications step; agents have their own screens.
+    if (user.role !== 'admin' && user.role !== 'superadmin') {
+      throw new ValidationError(
+        'Agents are suspended and restored under Users, and applications are decided under Agent applications.',
+      )
+    }
 
     if (user.role === 'superadmin' && status === 'suspended') {
       const others = await this.prisma.user.count({
@@ -223,12 +270,20 @@ export class TeamService {
       if (others === 0) {
         throw new ConflictError(
           'LAST_SUPERADMIN',
-          'That is the only active superadmin. Promote somebody else first.',
+          // There is no promote button: a superadmin is made by setting
+          // SUPERADMIN_EMAIL on the server and redeploying, so say exactly that.
+          'That is the only active superadmin. Make somebody else superadmin first ' +
+            '(set SUPERADMIN_EMAIL to their email on the server and redeploy).',
         )
       }
     }
 
-    await this.prisma.user.update({ where: { id: userId }, data: { status } })
+    // A suspension also ends that account's live sessions at once (see
+    // `AuthGuard`), rather than leaving its token working for up to 12 hours.
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { status, ...(status === 'suspended' ? { tokenVersion: { increment: 1 } } : {}) },
+    })
 
     // Any outstanding link dies with the suspension, or it would be a way back in.
     if (status === 'suspended') {
