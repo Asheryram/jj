@@ -54,8 +54,16 @@ export class PaymentsService implements OnModuleDestroy {
   private static readonly WATCH_FIRST_CHECK_MS = 10_000
   /** Between asks for the same checkout once it is being chased. */
   private static readonly WATCH_GAP_MS = 10_000
-  /** Past this the buyer has walked away; the ten-minute sweep takes over. */
-  private static readonly WATCH_FOR_MS = 20 * 60_000
+  /**
+   * How long a checkout Paystack reports `failed` or `abandoned` stays open
+   * for the buyer to retry on the same page, see `confirm`.
+   */
+  private static readonly CHECKOUT_RETRY_WINDOW_MS = 30 * 60_000
+  /**
+   * Past this the buyer has walked away; the ten-minute sweep takes over and
+   * closes it. Just past the retry window, so a late retry is still caught fast.
+   */
+  private static readonly WATCH_FOR_MS = 31 * 60_000
 
   constructor(
     private readonly prisma: PrismaService,
@@ -356,6 +364,20 @@ export class PaymentsService implements OnModuleDestroy {
       const after = await this.prisma.payment.findUnique({ where: { reference }, select: { status: true } })
       return { status: after?.status === 'paid' ? 'paid' : 'pending' }
     }
+
+    /**
+     * `failed`/`abandoned` describe the last attempt, not the checkout. On
+     * Mobile Money a prompt that timed out or was declined reads `failed`,
+     * and the buyer can still retry on the same Paystack page and pay, the
+     * same reference turning `success` minutes later (JDC-352342368: closed
+     * as unpaid at 1:49, paid at 1:54, by then a duplicate at the provider).
+     * So a young checkout is left open on either answer; only after
+     * `CHECKOUT_RETRY_WINDOW_MS` is it closed. `reversed` is final at any age.
+     */
+    const stillRetryable =
+      ['failed', 'abandoned'].includes(result.status) &&
+      Date.now() - payment.createdAt.getTime() < PaymentsService.CHECKOUT_RETRY_WINDOW_MS
+    if (stillRetryable) return { status: 'pending' }
 
     // Their terminal failures. Anything else (pending, ongoing) is still in
     // flight and must not close the order.
