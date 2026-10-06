@@ -223,6 +223,8 @@ export function toSession(row: User) {
      * the field's own comment on the schema.
      */
     whatsappChannelSeenUrl: row.whatsappChannelSeenUrl,
+    /** Guided tours finished, for the "Learn" checklist. */
+    toursCompleted: row.toursCompleted,
   }
 }
 

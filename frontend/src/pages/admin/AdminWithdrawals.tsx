@@ -49,12 +49,19 @@ export default function AdminWithdrawals() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
   const [payoutTransferFee, setPayoutTransferFee] = useState(0)
+  // Null until known. On a Starter account approving only queues the payout
+  // for sending by hand, so the explainer must not promise Paystack sends it.
+  const [businessAccount, setBusinessAccount] = useState<boolean | null>(null)
 
   useEffect(() => {
     let live = true
     api
       .adminSettings()
-      .then((s) => live && setPayoutTransferFee(s.payoutTransferFee))
+      .then((s) => {
+        if (!live) return
+        setPayoutTransferFee(s.payoutTransferFee)
+        setBusinessAccount(s.paystackBusinessAccount)
+      })
       .catch(() => undefined)
     return () => {
       live = false
@@ -154,7 +161,7 @@ export default function AdminWithdrawals() {
         subtitle="Agents asking to move their wallet balance to Mobile Money."
       />
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div data-tour="withdrawals-tiles" className="grid gap-3 sm:grid-cols-3">
         <StatTile
           label="Awaiting your decision"
           value={String(pending.length)}
@@ -174,7 +181,15 @@ export default function AdminWithdrawals() {
         />
       </div>
 
-      <div className="mt-3">
+      <div data-tour="withdrawals-how-it-works" className="mt-3">
+        {businessAccount === false ? (
+          <Callout tone="info" title="You send the money by hand" icon={<AlertIcon className="size-4" />}>
+            Your Paystack account can&apos;t send payouts, so approving only accepts the request.
+            Then send the amount to the agent&apos;s Mobile Money yourself and record it with{' '}
+            <strong>Paid another way?</strong> on their row. If you paid from the business Mobile Money linked
+            to Paystack, also click <strong>Reimbursed</strong> under &quot;Paid out of pocket&quot; straight away.
+          </Callout>
+        ) : (
         <Callout tone="info" title="Approving sends the money" icon={<AlertIcon className="size-4" />}>
           Approving hands the transfer to Paystack, which pays the agent&apos;s Mobile Money
           directly. It is checked against your Paystack balance first, so nobody is marked paid
@@ -189,9 +204,10 @@ export default function AdminWithdrawals() {
             </>
           )}
         </Callout>
+        )}
       </div>
 
-      <div className="mt-3 mb-3">
+      <div data-tour="withdrawals-tabs" className="mt-3 mb-3">
         <Segmented<Filter>
           options={[
             { value: 'pending', label: `Pending ${pending.length}` },
@@ -218,6 +234,7 @@ export default function AdminWithdrawals() {
         </div>
       )}
 
+      <div data-tour="withdrawals-table">
       <Card>
         <CardHead title={filter === 'pending' ? 'Pending requests' : 'All requests'} />
         {visible.length === 0 ? (
@@ -393,6 +410,7 @@ export default function AdminWithdrawals() {
           </TableWrap>
         )}
       </Card>
+      </div>
 
       <ManualAdvancesCard />
 

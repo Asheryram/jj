@@ -164,7 +164,7 @@ export default function Refunds() {
         subtitle="Money owed back to customers whose orders failed. Nothing is returned until you approve it."
       />
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div data-tour="refunds-tiles" className="grid gap-3 sm:grid-cols-2">
         <StatTile
           label={filter === 'pending' ? 'Owed to customers' : 'In this view'}
           value={cedis(owed)}
@@ -184,7 +184,7 @@ export default function Refunds() {
         />
       </div>
 
-      <div className="mt-4">
+      <div data-tour="refunds-tabs" className="mt-4">
         <Segmented<Filter>
           options={[
             { value: 'pending', label: 'Waiting' },
@@ -217,6 +217,7 @@ export default function Refunds() {
         </div>
       )}
 
+      <div data-tour="refunds-table">
       <Card className="mt-3">
         <CardHead title="Refund requests" />
         <div className="p-4 sm:p-5">
@@ -403,6 +404,7 @@ export default function Refunds() {
           )}
         </div>
       </Card>
+      </div>
 
       <ManualAdvancesCard />
 

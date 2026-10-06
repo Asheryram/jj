@@ -83,13 +83,13 @@ export default function Pricing() {
         title="My prices"
         subtitle="You buy at your own cost and charge what you like. The difference is yours."
         action={
-          <Button variant="outline" disabled={bulkBusy} onClick={() => setBulkOpen(true)}>
+          <Button data-tour="agent-prices-markup" variant="outline" disabled={bulkBusy} onClick={() => setBulkOpen(true)}>
             <TrendUpIcon className="size-4" /> Apply markup to all
           </Button>
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div data-tour="agent-prices-stats" className="grid gap-3 sm:grid-cols-3">
         <StatTile
           label="Products you have priced"
           value={`${priced.length} of ${products.length}`}
@@ -108,17 +108,16 @@ export default function Pricing() {
         />
       </div>
 
-      <div className="mt-4 space-y-3">
+      <div data-tour="agent-prices-cost-note" className="mt-4 space-y-3">
         <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-          Your cost is what your upline charges you, it already includes their margin and James&apos;s.
-          You can never price below it, so everyone above you is paid automatically on every sale
-          you make.
+          Your cost is the price the shop charges agents for each bundle. You can never price below
+          it, so every sale you make earns you the difference between your price and your cost.
         </Callout>
       </div>
 
       {/* -mx-3/px-3 cancels AppShell's own px-3 on mobile, not px-4, which
           overshoots the viewport by the 4px difference. */}
-      <div className="mt-4 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
+      <div data-tour="agent-prices-categories" className="mt-4 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
         <Segmented<Category>
           options={CATEGORY_ORDER.map((key) => ({ value: key, label: CATEGORY_META[key].short }))}
           value={category}
@@ -163,6 +162,7 @@ export default function Pricing() {
         </div>
       )}
 
+      <div data-tour="agent-prices-table">
       <Card className="mt-3">
         <CardHead title={CATEGORY_META[category].label} subtitle={`${visible.length} products`} />
         <TableWrap caption="Your resale prices by product">
@@ -251,6 +251,7 @@ export default function Pricing() {
           </tbody>
         </TableWrap>
       </Card>
+      </div>
 
       <EditPriceModal
         product={editing}

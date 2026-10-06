@@ -190,6 +190,7 @@ export default function ShopBranding() {
             </Callout>
           )}
 
+          <div data-tour="agent-look-name">
           <Card className="mt-3">
             <CardHead
               title="Shop name and mark"
@@ -241,7 +242,9 @@ export default function ShopBranding() {
               </div>
             </div>
           </Card>
+          </div>
 
+          <div data-tour="agent-look-send">
           <Card className="mt-3">
             <div className="space-y-3 p-4 sm:p-5">
               <Callout tone="info" icon={<StoreIcon className="size-4" />}>
@@ -270,6 +273,7 @@ export default function ShopBranding() {
               </Button>
             </div>
           </Card>
+          </div>
 
           {state?.live && (
             <Card className="mt-3">
@@ -285,11 +289,17 @@ export default function ShopBranding() {
             </Card>
           )}
 
-          <ShopColorCard live={state?.live ?? null} onApplied={load} />
+          <div data-tour="agent-look-colour">
+            <ShopColorCard live={state?.live ?? null} onApplied={load} />
+          </div>
 
-          <ShopTileStyleCard live={state?.live ?? null} onApplied={load} />
+          <div data-tour="agent-look-tiles">
+            <ShopTileStyleCard live={state?.live ?? null} onApplied={load} />
+          </div>
 
-          <CustomDomainCard />
+          <div data-tour="agent-look-domain">
+            <CustomDomainCard />
+          </div>
         </>
       )}
     </div>

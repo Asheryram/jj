@@ -77,6 +77,7 @@ export default function Orders() {
 
   return (
     <div>
+      <div data-tour="agent-sales-summary">
       <PageHead
         title={isAgent ? 'Sales' : 'My orders'}
         subtitle={
@@ -85,8 +86,9 @@ export default function Orders() {
             : `${counts.all} orders · ${counts.completed} completed`
         }
       />
+      </div>
 
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div data-tour="agent-sales-filters" className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Segmented<Filter>
           options={[
             { value: 'all', label: `All ${counts.all}` },
@@ -109,6 +111,7 @@ export default function Orders() {
         </div>
       </div>
 
+      <div data-tour="agent-sales-list">
       <Card>
         {visible.length === 0 ? (
           <EmptyState
@@ -197,6 +200,7 @@ export default function Orders() {
           </TableWrap>
         )}
       </Card>
+      </div>
 
       <OrderDetail order={selected} onClose={() => setSelected(null)} isAgent={isAgent} />
     </div>
@@ -231,9 +235,9 @@ function OrderDetail({
           </div>
 
           {order.status === 'failed' && (
-            <Callout tone="success" title="Refunded">
-              This order failed at the provider, so {cedis(order.salePrice)} was returned to the
-              buyer automatically. Any earnings on it were reversed.
+            <Callout tone="info" title="Failed, buyer is refunded">
+              This order failed at the provider, so the {cedis(order.salePrice)} the buyer paid is
+              being refunded to them. You earn nothing on it, any earnings were reversed.
             </Callout>
           )}
 

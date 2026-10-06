@@ -78,15 +78,18 @@ export default function Finance() {
     <div>
       <PageHead title="Finance" subtitle="What's held, what's owed, and where every cedi went." />
 
-      <ReservePanel />
+      <div data-tour="finance-reserve">
+        <ReservePanel />
+      </div>
 
       {/* `id` is the admin Overview "Get set up" checklist's jump target,
           linking here as `/admin/finance#float-panel`. */}
-      <div className="mt-3 scroll-mt-20" id="float-panel">
+      <div className="mt-3 scroll-mt-20" id="float-panel" data-tour="finance-float-panel">
         <FloatPanel />
       </div>
 
       {/* FR-6.6, where every cedi that came in actually went. */}
+      <div data-tour="finance-where-money-goes">
       <Card className="mt-3">
         <CardHead
           title="Where the money goes"
@@ -145,6 +148,7 @@ export default function Finance() {
           </p>
         </div>
       </Card>
+      </div>
     </div>
   )
 }

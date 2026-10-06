@@ -1,3 +1,4 @@
+import { LearnCard } from '../../tours/LearnCard'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../../state/store'
@@ -125,9 +126,15 @@ export default function Dashboard() {
         </p>
       </div>
 
+      {isAgent && (
+        <div className="mb-5">
+          <LearnCard title="Learn how selling works" />
+        </div>
+      )}
+
       {/* ── Balance card, first thing on the page ── */}
       <Card className="overflow-hidden">
-        <div className="flex flex-wrap items-end justify-between gap-4 bg-brand-700 px-5 py-5 text-white">
+        <div data-tour="agent-dash-balance" className="flex flex-wrap items-end justify-between gap-4 bg-brand-700 px-5 py-5 text-white">
           <div>
             <p className="text-sm text-brand-100">
               {isAgent ? 'Earnings available to withdraw' : 'Wallet balance'}
@@ -166,7 +173,7 @@ export default function Dashboard() {
 
       {/* ── Stat tiles, right after the balance so the headline numbers don't
           sit below every notice card on every single visit ── */}
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div data-tour="agent-dash-stats" className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {isAgent ? (
           <>
             <StatTile
@@ -230,6 +237,7 @@ export default function Dashboard() {
 
       {/* ── The sell link, right where an agent will look for it ── */}
       {isAgent && (
+        <div data-tour="agent-dash-sell-link">
         <Card className="mt-3 p-4">
           <div className="mb-2.5 flex items-center justify-between gap-3">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
@@ -247,6 +255,7 @@ export default function Dashboard() {
             Customers who buy here pay your prices, and your margin is credited automatically.
           </p>
         </Card>
+        </div>
       )}
 
       {/* ── The admin's WhatsApp channel, always one tap away ── */}
@@ -322,7 +331,7 @@ export default function Dashboard() {
         </Callout>
       )}
 
-      <div className="mt-3 grid gap-3 lg:grid-cols-3">
+      <div data-tour="agent-dash-activity" className="mt-3 grid gap-3 lg:grid-cols-3">
         {/* ── Recent orders ── */}
         <Card className="lg:col-span-2">
           <CardHead
@@ -409,6 +418,7 @@ export default function Dashboard() {
             </Card>
           )}
 
+          <div data-tour="agent-dash-quick-actions">
           <Card>
             <CardHead title="Quick actions" />
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -439,6 +449,7 @@ export default function Dashboard() {
               ))}
             </div>
           </Card>
+          </div>
         </div>
       </div>
 

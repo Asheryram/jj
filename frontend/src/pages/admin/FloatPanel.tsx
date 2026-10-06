@@ -208,7 +208,7 @@ export default function FloatPanel() {
         title="Provider float"
         subtitle={`What ${providerLabel} has left to buy bundles with`}
         action={
-          <div className="flex gap-2">
+          <div className="flex gap-2" data-tour="float-refresh-buttons">
             {provider === 'gmpl' && (
               <Button size="sm" variant="ghost" loading={checkingLive} onClick={() => void checkLiveBalance()}>
                 <RefreshIcon className="size-4" /> Check live
@@ -235,7 +235,7 @@ export default function FloatPanel() {
                 left," each coloured on its own merits, so if they ever
                 disagree, which one is actually the problem is visible at a
                 glance instead of hidden behind whichever the alert picked. */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3" data-tour="float-should-vs-live">
               <div>
                 <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
                   Should hold
@@ -336,7 +336,7 @@ export default function FloatPanel() {
               )}
             </>
           )}
-          <div className="mt-2 flex gap-2">
+          <div className="mt-2 flex gap-2" data-tour="float-log-topup">
             <Button size="sm" variant="outline" onClick={() => setLogging('in')}>
               Log a top-up
             </Button>
@@ -494,7 +494,7 @@ function CapitalModal({
     <Modal
       open
       onClose={onClose}
-      title={`${direction === 'in' ? 'Log a top-up' : 'Log money taken out'} — ${providerLabel}`}
+      title={`${direction === 'in' ? 'Log a top-up' : 'Log money taken out'} for ${providerLabel}`}
     >
       <div className="space-y-4">
         {/* Repeated here, not just implied by whatever tab was open behind

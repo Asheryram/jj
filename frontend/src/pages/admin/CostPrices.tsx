@@ -327,7 +327,7 @@ export default function CostPrices() {
         subtitle="What agents pay and what walk-up customers pay. What you pay comes from the provider catalogue; agents set their own retail price."
       />
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-3" data-tour="prices-margins">
         <StatTile
           label="Products in catalogue"
           value={String(products.length)}
@@ -360,7 +360,7 @@ export default function CostPrices() {
         />
       </div>
 
-      <div className="mt-3 space-y-3">
+      <div className="mt-3 space-y-3" data-tour="prices-alerts">
         {pendingChanges.length > 0 && (
           <Callout
             tone="info"
@@ -413,7 +413,7 @@ export default function CostPrices() {
 
       {/* -mx-3/px-3 cancels AppShell's own px-3 on mobile, not px-4, which
           overshoots the viewport by the 4px difference. */}
-      <div className="mt-4 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
+      <div className="mt-4 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0" data-tour="prices-category">
         <Segmented<Category>
           options={CATEGORY_ORDER.map((key) => ({
             value: key,
@@ -437,7 +437,11 @@ export default function CostPrices() {
       {/* Only data has a second provider to route or filter by, see
           `NetworkProviderRouting`'s own comment for why this is a separate
           control from the read-only provider badge on each group below. */}
-      {category === 'data' && <NetworkProviderRouting gmplState={gmplState} />}
+      {category === 'data' && (
+        <div data-tour="prices-routing">
+          <NetworkProviderRouting gmplState={gmplState} />
+        </div>
+      )}
 
       {category === 'data' && (
         <div className="mt-3 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
@@ -455,7 +459,7 @@ export default function CostPrices() {
 
       {/* Only worth showing once there's something in this category at all. */}
       {categoryProducts.length > 0 && (
-        <div className="mt-3 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
+        <div className="mt-3 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0" data-tour="prices-review-filter">
           <Segmented<'all' | 'outdated' | 'current' | 'none'>
             options={[
               { value: 'all', label: 'All' },
@@ -469,13 +473,14 @@ export default function CostPrices() {
         </div>
       )}
 
+      <div data-tour="prices-table">
       <Card className="mt-3">
         <CardHead
           title={CATEGORY_META[category].label}
           subtitle={`${visible.length} products`}
           action={
             visible.length > 0 && (
-              <Button size="sm" variant="outline" onClick={() => setMarking(true)}>
+              <Button size="sm" variant="outline" onClick={() => setMarking(true)} data-tour="prices-set-markup">
                 <TrendUpIcon className="size-4" /> Set markup
               </Button>
             )
@@ -757,8 +762,9 @@ export default function CostPrices() {
           </tbody>
         </TableWrap>
       </Card>
+      </div>
 
-      <div id="supplier-catalogue" className="mt-3 scroll-mt-20">
+      <div id="supplier-catalogue" className="mt-3 scroll-mt-20" data-tour="prices-supplier-catalogue">
         <ProviderCatalogue />
       </div>
 

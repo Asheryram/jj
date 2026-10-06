@@ -214,6 +214,11 @@ model User {
   /// longer exists.
   whatsappChannelSeenUrl String? @map("whatsapp_channel_seen_url")
 
+  /// Guided tours this profile has finished, by tour id (see the frontend's
+  /// `tours/` folder). On the account rather than in the browser so the
+  /// "Learn" checklist carries across a phone and a laptop.
+  toursCompleted String[] @default([]) @map("tours_completed")
+
   /// Customers: spendable wallet. Agents: withdrawable earnings. One column,
   /// because a user holds exactly one role. Guarded by CHECK (balance >= 0).
   balance Int @default(0)

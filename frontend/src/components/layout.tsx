@@ -1,3 +1,4 @@
+import { TourButton } from '../tours/LearnCard'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useStore, type Toast } from '../state/store'
@@ -673,9 +674,10 @@ export function AppShell() {
                 </Badge>
               )
             )}
-            <span className="flex size-9 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-white dark:bg-slate-200 dark:text-slate-900">
+            <span className="hidden size-9 items-center sm:flex justify-center rounded-full bg-slate-800 text-xs font-bold text-white dark:bg-slate-200 dark:text-slate-900">
               {initials(session.name)}
             </span>
+            <TourButton />
             <ThemeToggle />
             <button
               type="button"
@@ -838,9 +840,10 @@ export function AnalyticsShell() {
               <ChevronLeftIcon className="size-4" />
               <span className="hidden sm:inline">Back to admin</span>
             </Link>
-            <span className="flex size-9 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-white dark:bg-slate-200 dark:text-slate-900">
+            <span className="hidden size-9 items-center sm:flex justify-center rounded-full bg-slate-800 text-xs font-bold text-white dark:bg-slate-200 dark:text-slate-900">
               {initials(session.name)}
             </span>
+            <TourButton />
             <ThemeToggle />
             <button
               type="button"

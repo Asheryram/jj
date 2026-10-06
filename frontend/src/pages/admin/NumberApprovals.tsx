@@ -259,6 +259,7 @@ export default function NumberApprovals() {
         subtitle="MTN numbers your suppliers must approve. Until they are, a sale to them is refused rather than charged."
       />
 
+      <div data-tour="approvals-list">
       <Card className="mt-3">
         <CardHead
           title="Waiting on approval"
@@ -272,6 +273,7 @@ export default function NumberApprovals() {
                 </span>
               )}
               <Button
+                data-tour="approvals-recheck"
                 size="sm"
                 variant="outline"
                 loading={busy === 'recheck'}
@@ -367,6 +369,7 @@ export default function NumberApprovals() {
           )}
         </div>
       </Card>
+      </div>
     </div>
   )
 }

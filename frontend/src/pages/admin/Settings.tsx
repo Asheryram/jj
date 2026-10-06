@@ -56,6 +56,7 @@ export default function Settings() {
           there is no rate to set and no switch to explain. */}
 
       {/* ── NFR-2.4, credentials live in the environment, and the UI says so ── */}
+      <div data-tour="settings-integrations">
       <Card className="mt-3">
         <CardHead
           title="Integrations"
@@ -122,9 +123,11 @@ export default function Settings() {
           </Callout>
         </div>
       </Card>
+      </div>
 
       {/* ── Live fulfilment: status only. The switch is DATAHUB_LIVE in the
              server's environment, deliberately not a button here. ── */}
+      <div data-tour="settings-live-fulfilment">
       <Card className="mt-3">
         <CardHead
           title="Live fulfilment"
@@ -183,30 +186,43 @@ export default function Settings() {
           </Callout>
         </div>
       </Card>
+      </div>
 
       <div id="your-details" className="scroll-mt-20">
         <YourDetails />
       </div>
 
-      <AgentApproval />
+      <div data-tour="settings-new-agents">
+        <AgentApproval />
+      </div>
 
       <YourProfiles />
 
-      <PaystackFeeSetting />
+      <div data-tour="settings-paystack-fee">
+        <PaystackFeeSetting />
+      </div>
 
-      <PaystackPayoutSetting />
+      <div data-tour="settings-paystack-account">
+        <PaystackPayoutSetting />
+      </div>
 
       <PayoutTransferFeeSetting />
 
-      <NetworkProviderRouting gmplState={gmplState} />
+      <div data-tour="settings-routing">
+        <NetworkProviderRouting gmplState={gmplState} />
+      </div>
 
-      <FloatThresholds />
+      <div data-tour="settings-float-warnings">
+        <FloatThresholds />
+      </div>
 
       <MinWithdrawalSetting />
 
       <WhatsAppChannelSetting />
 
-      <SiteNoticeSetting />
+      <div data-tour="settings-site-notice">
+        <SiteNoticeSetting />
+      </div>
     </div>
   )
 }
@@ -1017,7 +1033,7 @@ function SiteNoticeSetting() {
     <Card className="mt-3">
       <CardHead
         title="Site-wide notice"
-        subtitle="Shown to everyone, everywhere on the site — a banner for agents/admins, a popup for guests"
+        subtitle="Shown to everyone, everywhere on the site: a banner for agents/admins, a popup for guests"
         action={<AlertIcon className="size-5 text-amber-600 dark:text-amber-400" />}
       />
       <div className="space-y-3 px-4 pb-4">

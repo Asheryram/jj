@@ -1,3 +1,4 @@
+import { LearnCard } from '../../tours/LearnCard'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../../state/store'
@@ -170,6 +171,10 @@ export default function Overview() {
           numbers mean anything. Disappears for good once every step is done. */}
       <GettingStartedCard />
 
+      <div className="mb-5">
+        <LearnCard title="Learn the admin" />
+      </div>
+
       {/* One list, not three separately-styled callouts fighting for grid
           cells: needing action is the common thread, so it reads as one
           queue with several rows, not several unrelated banners. Every row
@@ -177,7 +182,7 @@ export default function Overview() {
           actually acts on it rather than doing the work here. */}
       <AttentionCard needsAttentionCount={needsAttentionCount} pendingWithdrawals={pendingWithdrawals} failedTotal={failedTotal} />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div data-tour="overview-stat-tiles" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
           label="Revenue, last 7 days"
           value={cedisCompact(weekRevenue)}
@@ -269,7 +274,7 @@ export default function Overview() {
         </Card>
       </div>
 
-      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+      <div data-tour="overview-agents-orders" className="mt-3 grid gap-3 lg:grid-cols-2">
         {/* Top agents by volume */}
         <Card>
           <CardHead
@@ -357,7 +362,7 @@ export default function Overview() {
           hardcoded: a badge that always says "Operational" answers nothing. */}
       <Card className="mt-3">
         <CardHead title="Integrations" subtitle="What's actually live right now, not what's configured" />
-        <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
+        <div data-tour="overview-integrations" className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
           {[
             {
               name: 'DataHub GH API',
@@ -472,6 +477,7 @@ function FinanceSummaryCard() {
   }, [])
 
   return (
+    <div data-tour="overview-money">
     <Card className="mt-3">
       <CardHead
         title="Money held and money owed"
@@ -528,6 +534,7 @@ function FinanceSummaryCard() {
         )}
       </div>
     </Card>
+    </div>
   )
 }
 
@@ -600,6 +607,7 @@ function AttentionCard({
   if (rows.length === 0) return null
 
   return (
+    <div data-tour="overview-attention">
     <Card className="mb-3 border-amber-200 dark:border-amber-800">
       <CardHead title="Needs your attention" />
       <ul className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -619,6 +627,7 @@ function AttentionCard({
         ))}
       </ul>
     </Card>
+    </div>
   )
 }
 

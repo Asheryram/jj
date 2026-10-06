@@ -1,3 +1,4 @@
+import { TourProvider } from './tours/TourProvider'
 import { useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-dom'
 import { StoreProvider, useStore } from './state/store'
@@ -224,6 +225,7 @@ export default function App() {
             inside the store because that is what resolves the code. */}
         <ShopTheme forceCode={customDomainCode}>
         <RouteMeta />
+        <TourProvider>
         <Routes>
           {/* Public storefront, buyable without an account (FR-4.8) */}
           <Route element={<PublicShell />}>
@@ -365,6 +367,7 @@ export default function App() {
 
             <Route path="*" element={<NotFound />} />
           </Routes>
+        </TourProvider>
         </ShopTheme>
         </BrowserRouter>
       </Boot>

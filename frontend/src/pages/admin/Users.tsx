@@ -78,7 +78,7 @@ export default function Users() {
           the person who should notice that three of them cannot trade yet. */}
       <AgentApplications />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" data-tour="users-stats">
         <StatTile label="Total users" value={String(users.length)} icon={<UsersIcon className="size-5" />} />
         <StatTile label="Agents" value={String(agents.length)} tone="brand" />
         <StatTile
@@ -92,7 +92,7 @@ export default function Users() {
           hint="Customer money you are holding"
         />
         <StatTile
-          label="Paid to agents, all-time"
+          label="Earned by agents, all-time"
           value={agentSummary ? cedis(agentSummary.totalEarned) : '-'}
           hint={agentSummary ? `across ${agentSummary.agentCount} agent${agentSummary.agentCount === 1 ? '' : 's'}` : undefined}
           tone="success"
@@ -108,7 +108,7 @@ export default function Users() {
         </Callout>
       </div>
 
-      <div className="mt-3 mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mt-3 mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-tour="users-filters">
         <Segmented<Filter>
           options={[
             { value: 'all', label: 'All' },
@@ -131,6 +131,7 @@ export default function Users() {
         </div>
       </div>
 
+      <div data-tour="users-table">
       <Card>
         {visible.length === 0 ? (
           <EmptyState
@@ -243,11 +244,12 @@ export default function Users() {
             </tbody>
           </TableWrap>
         )}
-        <p className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+        <p className="border-t border-slate-100 dark:border-slate-800 px-4 py-3 text-xs text-slate-500 dark:text-slate-400" data-tour="users-suspend-note">
           Suspending an account blocks new orders and withdrawals. Nothing is deleted, order history
           and the wallet ledger stay intact.
         </p>
       </Card>
+      </div>
 
       <Modal
         open={Boolean(confirming)}

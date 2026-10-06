@@ -402,13 +402,13 @@ export default function AdminOrders() {
         title="All orders"
         subtitle="Every order placed on the platform, by anyone."
         action={
-          <Button variant="outline" loading={exporting} onClick={() => void exportCsv()}>
+          <Button data-tour="orders-export" variant="outline" loading={exporting} onClick={() => void exportCsv()}>
             <DownloadIcon className="size-4" /> Export CSV
           </Button>
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div data-tour="orders-money-tiles" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatTile
           label="Orders matching"
           value={String(total)}
@@ -458,7 +458,7 @@ export default function AdminOrders() {
         />
       </div>
 
-      <div className="mt-3 mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+      <div data-tour="orders-filters" className="mt-3 mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <Segmented<Filter>
           options={[
             { value: 'all', label: 'All' },
@@ -517,6 +517,7 @@ export default function AdminOrders() {
         </div>
       </div>
 
+      <div data-tour="orders-table">
       <Card>
         {loading ? (
           <div className="py-10 text-center">
@@ -724,6 +725,7 @@ export default function AdminOrders() {
           </>
         )}
       </Card>
+      </div>
 
       {!loading && !loadError && total > 0 && (
         <div className="mt-3 flex items-center justify-between gap-3">

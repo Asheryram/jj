@@ -1891,6 +1891,10 @@ export const api = {
       body: { phone },
     }),
 
+  /** Tick a guided tour off this profile's "Learn" checklist. */
+  markTourDone: (tourId: string) =>
+    request<{ user: Session }>(`/auth/me/tours/${encodeURIComponent(tourId)}/done`, { method: 'POST' }),
+
   /** Dismissing or acting on the WhatsApp-channel popup both count as "seen". */
   markWhatsappChannelSeen: () =>
     request<{ user: Session }>('/auth/me/whatsapp-seen', { method: 'POST' }),

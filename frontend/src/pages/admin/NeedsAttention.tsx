@@ -217,7 +217,7 @@ export default function NeedsAttention() {
         title="Needs your attention"
         subtitle="Stuck at the provider, or flagged after settling one way and then hearing another, the reconciler will not guess at either."
         action={
-          <Button size="sm" variant="outline" loading={sweeping} onClick={() => void runSweep()}>
+          <Button data-tour="attention-check-now" size="sm" variant="outline" loading={sweeping} onClick={() => void runSweep()}>
             Check now
           </Button>
         }
@@ -263,6 +263,7 @@ export default function NeedsAttention() {
         </Card>
       )}
 
+      <div data-tour="attention-stuck-orders">
       <Card className="mt-3">
         <CardHead
           title="Stuck orders"
@@ -338,6 +339,7 @@ export default function NeedsAttention() {
           )}
         </div>
       </Card>
+      </div>
 
       {transfers !== null && transfers.length > 0 && (
         <Card className="mt-3">

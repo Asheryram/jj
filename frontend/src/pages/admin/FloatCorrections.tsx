@@ -121,14 +121,14 @@ export default function FloatCorrections() {
 
       <Card className="mt-3">
         <CardHead title="Search for the entry to correct" />
-        <div className="space-y-3 p-4 sm:p-5">
+        <div className="space-y-3 p-4 sm:p-5" data-tour="float-corrections-panel">
           {error && (
             <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
               {error}
             </Callout>
           )}
 
-          <div className="relative">
+          <div className="relative" data-tour="float-corrections-search">
             <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400" />
             <TextInput
               className="pl-9"

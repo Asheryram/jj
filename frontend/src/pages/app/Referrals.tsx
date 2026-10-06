@@ -87,6 +87,7 @@ export default function Referrals() {
       />
 
       {/* ── The sell link. This is how an agent actually makes money. ── */}
+      <div data-tour="agent-sell-link">
       <Card className="overflow-hidden">
         <div className="bg-brand-700 px-5 py-5 text-white">
           <p className="flex items-center gap-2 text-sm font-semibold text-brand-100">
@@ -100,13 +101,14 @@ export default function Referrals() {
         </div>
         <div className="space-y-3 p-4 sm:p-5">
           <CopyField label="Sell link" value={sellLink} />
-          <a href={`https://wa.me/?text=${shareSell}`} target="_blank" rel="noreferrer" className="block">
+          <a data-tour="agent-sell-whatsapp" href={`https://wa.me/?text=${shareSell}`} target="_blank" rel="noreferrer" className="block">
             <Button block size="lg" variant="whatsapp">
               <WhatsAppIcon className="size-5" /> Share my shop on WhatsApp
             </Button>
           </a>
         </div>
       </Card>
+      </div>
 
       {/* ── Your own domain, once it's actually live, the same shop, your own
           address. Shown only once DNS has confirmed it; before that, ShopBranding
@@ -130,6 +132,7 @@ export default function Referrals() {
       )}
 
       {/* ── The referral link. Recruiting, not selling. ── */}
+      <div data-tour="agent-referral-link">
       <Card className="mt-3">
         <CardHead
           title="Your referral link"
@@ -145,8 +148,9 @@ export default function Referrals() {
           </a>
         </div>
       </Card>
+      </div>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+      <div data-tour="agent-chain-stats" className="mt-3 grid gap-3 sm:grid-cols-3">
         <StatTile
           label="Agents under you"
           value={String(active.length)}
@@ -167,7 +171,7 @@ export default function Referrals() {
           The bonus on a referral's sales was removed at the client's request, so
           this says plainly that there is nothing to wait for, a page that left the
           question open would have agents watching for money that is never coming. */}
-      <div className="mt-3">
+      <div data-tour="agent-invite-note" className="mt-3">
         <Callout tone="info" title="What you get for inviting someone">
           They join under you and show up in your chain below. You are not paid anything from what
           they sell, now or ever, every agent earns from their own sales only, at the same price
@@ -177,6 +181,7 @@ export default function Referrals() {
       </div>
 
       {/* FR-5.2 */}
+      <div data-tour="agent-chain-list">
       <Card className="mt-3">
         <CardHead
           title="Agents in your chain"
@@ -287,6 +292,7 @@ export default function Referrals() {
           </p>
         )}
       </Card>
+      </div>
     </div>
   )
 }

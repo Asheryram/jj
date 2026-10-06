@@ -84,7 +84,7 @@ export default function AgentApplications() {
           }
           subtitle="They cannot sell until you approve them, their shop link falls back to your standard prices."
         />
-        <div className="space-y-3 p-4 sm:p-5">
+        <div className="space-y-3 p-4 sm:p-5" data-tour="users-applications">
           {rows === null ? (
             <div className="py-6 text-center">
               <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />

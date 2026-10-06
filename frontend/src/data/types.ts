@@ -386,4 +386,6 @@ export interface Session {
    * channel James replaces later should be shown again, once.
    */
   whatsappChannelSeenUrl: string | null
+  /** Guided tours this profile has finished, by tour id (see `tours/`). */
+  toursCompleted: string[]
 }

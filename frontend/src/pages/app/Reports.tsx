@@ -216,17 +216,19 @@ export default function Reports() {
         title={isAgent ? 'Sales summary' : 'My spending'}
         subtitle="Pick a range to see how much you moved and what you kept."
         action={
-          <Button variant="outline" onClick={exportCsv}>
+          <Button data-tour="agent-reports-export" variant="outline" onClick={exportCsv}>
             <DownloadIcon className="size-4" /> Export CSV
           </Button>
         }
       />
 
+      <div data-tour="agent-reports-range">
       <Card className="p-4">
         <DateRangePicker label={range.label} onPreset={handlePreset} onCustomRange={handleCustomRange} />
       </Card>
+      </div>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div data-tour="agent-reports-stats" className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
           label={isAgent ? 'Volume sold' : 'Total spent'}
           value={cedis(revenue)}
@@ -251,12 +253,12 @@ export default function Reports() {
         <StatTile
           label="Failed orders"
           value={String(failed)}
-          hint={failed > 0 ? 'All refunded automatically' : 'Nothing failed'}
+          hint={failed > 0 ? 'Buyers are refunded' : 'Nothing failed'}
           tone={failed > 0 ? 'warning' : 'neutral'}
         />
       </div>
 
-      <div className="mt-3 grid gap-3 lg:grid-cols-5">
+      <div data-tour="agent-reports-categories" className="mt-3 grid gap-3 lg:grid-cols-5">
         <Card className="lg:col-span-2">
           <CardHead title="What sells" subtitle="Share of revenue by category" />
           <div className="p-4 sm:p-5">
@@ -301,6 +303,7 @@ export default function Reports() {
       </div>
 
       <button
+        data-tour="agent-reports-detail"
         type="button"
         onClick={() => setShowDetail((v) => !v)}
         aria-expanded={showDetail}

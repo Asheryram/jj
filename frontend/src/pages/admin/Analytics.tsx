@@ -116,20 +116,20 @@ export default function Analytics() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-tour="analytics-range">
           <DateRangePicker
             label={label}
             onPreset={(p) => update({ preset: p, from: null, to: null })}
             onCustomRange={(from, to) => update({ preset: null, from: String(from), to: String(to) })}
           />
-          <Button variant="outline" size="sm" onClick={() => void refresh()} loading={refreshing} aria-label="Refresh with the latest orders">
+          <Button variant="outline" size="sm" onClick={() => void refresh()} loading={refreshing} aria-label="Refresh with the latest orders" data-tour="analytics-refresh">
             <RefreshIcon className="size-4" />
             <span className="hidden sm:inline">Refresh</span>
           </Button>
         </div>
       </div>
 
-      <nav className="sticky top-14 z-20 -mx-4 mt-4 border-b border-slate-200 bg-slate-50/95 px-4 backdrop-blur sm:-mx-6 sm:px-6 dark:border-slate-800 dark:bg-slate-950/95" aria-label="Analytics sections">
+      <nav className="sticky top-14 z-20 -mx-4 mt-4 border-b border-slate-200 bg-slate-50/95 px-4 backdrop-blur sm:-mx-6 sm:px-6 dark:border-slate-800 dark:bg-slate-950/95" aria-label="Analytics sections" data-tour="analytics-tabs">
         <div className="-mb-px flex gap-1 overflow-x-auto [scrollbar-width:none]">
           {TABS.map((t) => (
             <button

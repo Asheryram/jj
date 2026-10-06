@@ -68,13 +68,13 @@ export default function Withdrawals() {
         title="Withdraw earnings"
         subtitle="Move your earnings to your Mobile Money account."
         action={
-          <Button size="lg" onClick={() => setOpen(true)} disabled={balance <= payoutTransferFee}>
+          <Button data-tour="agent-withdraw-request" size="lg" onClick={() => setOpen(true)} disabled={balance <= payoutTransferFee}>
             <CashIcon className="size-4" /> Request withdrawal
           </Button>
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div data-tour="agent-withdraw-stats" className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Available to withdraw" value={cedis(balance)} tone="brand" />
         <StatTile
           label="Awaiting approval"
@@ -85,20 +85,21 @@ export default function Withdrawals() {
         <StatTile label="Paid out to date" value={cedis(paidOut)} />
       </div>
 
-      <div className="mt-3">
+      <div data-tour="agent-withdraw-how" className="mt-3">
         <Callout tone="info" title="How payouts work right now" icon={<AlertIcon className="size-4" />}>
           James reviews and pays each request by hand, usually within 24 hours. You will get an SMS
           once the money has been sent. Automatic payouts are planned for a later version.
           {payoutTransferFee > 0 && (
             <>
               {' '}
-              A flat {cedis(payoutTransferFee)} transfer fee is deducted from your balance when a
-              request is approved, on top of the amount you asked for.
+              A flat {cedis(payoutTransferFee)} sending fee is set aside from your balance as soon as
+              you ask, on top of the amount. If the request is rejected or cancelled, both come back.
             </>
           )}
         </Callout>
       </div>
 
+      <div data-tour="agent-withdraw-requests">
       <Card className="mt-3">
         <CardHead title="Your requests" subtitle={`${mine.length} in total`} />
         {mine.length === 0 ? (
@@ -183,6 +184,7 @@ export default function Withdrawals() {
           </TableWrap>
         )}
       </Card>
+      </div>
 
       <RequestModal
         open={open}

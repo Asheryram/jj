@@ -74,14 +74,14 @@ export default function Earnings() {
         subtitle="Your margin lands here the moment each order completes."
         action={
           <Link to="/app/withdrawals?open=1">
-            <Button size="lg">
+            <Button data-tour="agent-earnings-withdraw" size="lg">
               <CashIcon className="size-4" /> Withdraw
             </Button>
           </Link>
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div data-tour="agent-earnings-balance" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Card tone="brand" className="p-4 sm:col-span-2 lg:col-span-1">
           <p className="text-sm text-brand-100">Available to withdraw</p>
           <p className="tabular mt-2 text-3xl font-bold tracking-tight">{cedis(agentBalance)}</p>
@@ -101,7 +101,7 @@ export default function Earnings() {
       </div>
 
       {/* The model, stated once where it matters most. */}
-      <div className="mt-3">
+      <div data-tour="agent-earnings-how" className="mt-3">
         <Callout tone="info" icon={<AlertIcon className="size-4" />} title="How this works">
           You do not buy stock or hold a float. When someone buys through your sell link, the
           platform takes the payment and credits you the difference between your price and what you
@@ -110,13 +110,16 @@ export default function Earnings() {
         </Callout>
       </div>
 
+      <div data-tour="agent-earnings-chart">
       <Card className="mt-3">
         <CardHead title="Earnings, last 7 days" subtitle="Your own sales, day by day" />
         <div className="p-4 sm:p-5">
           <BarChart data={agentEarningsByDay} />
         </div>
       </Card>
+      </div>
 
+      <div data-tour="agent-earnings-ledger">
       <Card className="mt-3">
         <CardHead
           title="Earnings ledger"
@@ -181,6 +184,7 @@ export default function Earnings() {
           correction is always a new entry.
         </p>
       </Card>
+      </div>
     </div>
   )
 }

@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService } from '../settings/settings.service'
 import { toSession } from '../common/mappers'
 import type { TokenPayload } from '../common/auth'
-import { ConflictError, ForbiddenError, UnauthorisedError } from '../common/domain-errors'
+import { ConflictError, ForbiddenError, UnauthorisedError, ValidationError } from '../common/domain-errors'
 import type { LoginDto, RegisterDto } from './auth.dto'
 
 @Injectable()
@@ -269,6 +269,20 @@ export class AuthService {
    * replaces the channel, the stored value no longer matches the live setting
    * and the popup is shown again, once, for the new one.
    */
+  /**
+   * Tick one guided tour off this profile's list. Idempotent: finishing a
+   * tour twice (replaying it) leaves one entry. Capped so a client cannot
+   * grow the array without limit.
+   */
+  async markTourDone(userId: string, tourId: string) {
+    if (!/^[a-z0-9-]{1,60}$/.test(tourId)) throw new ValidationError('That is not a tour.')
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { toursCompleted: true } })
+    if (!user) throw new UnauthorisedError('Please log in again.')
+    const next = user.toursCompleted.includes(tourId) ? user.toursCompleted : [...user.toursCompleted, tourId].slice(-200)
+    const updated = await this.prisma.user.update({ where: { id: userId }, data: { toursCompleted: next } })
+    return { user: toSession(updated) }
+  }
+
   async markWhatsappChannelSeen(userId: string) {
     const current = await this.settings.get('whatsappChannelUrl')
     const updated = await this.prisma.user.update({

@@ -159,6 +159,8 @@ interface Store {
   whatsappChannelUrl: string | null
   /** Call once the popup has been acted on or dismissed, so it does not return. */
   markWhatsappChannelSeen: () => Promise<void>
+  /** Tick a guided tour off the "Learn" checklist, on the account so every device sees it. */
+  markTourDone: (tourId: string) => Promise<void>
   /** Paystack's flat fee on a Mobile Money payout, in pesewas, charged to the agent at approval. */
   payoutTransferFee: number
   /** The wildcard root a free subdomain is composed against. Null means subdomains are not set up yet. */
@@ -1038,6 +1040,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  /**
+   * Ticked locally first so the checklist updates the moment a tour ends,
+   * then saved. Silent on failure: the worst case is a tour that shows as
+   * not done on another device, never a toast about a tutorial.
+   */
+  const markTourDone = useCallback(async (tourId: string) => {
+    setSession((current) =>
+      current && !current.toursCompleted.includes(tourId)
+        ? { ...current, toursCompleted: [...current.toursCompleted, tourId] }
+        : current,
+    )
+    try {
+      const result = await api.markTourDone(tourId)
+      setSession(result.user)
+    } catch {
+      // See above.
+    }
+  }, [])
+
   const refreshUnreadAnnouncements = useCallback(async () => {
     if (!session || (session.role !== 'agent' && session.role !== 'admin')) return
     await api.announcementUnreadCount().then(setUnreadAnnouncementsCount).catch(() => undefined)
@@ -1171,6 +1192,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       paystackFeeBp,
       whatsappChannelUrl,
       markWhatsappChannelSeen,
+      markTourDone,
       payoutTransferFee,
       domainSubdomainRoot,
       siteNotice,
@@ -1233,6 +1255,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       paystackFeeBp,
       whatsappChannelUrl,
       markWhatsappChannelSeen,
+      markTourDone,
       payoutTransferFee,
       domainSubdomainRoot,
       siteNotice,

@@ -176,6 +176,15 @@ export class AuthController {
     return this.auth.updatePhone(user.id, dto.phone)
   }
 
+  /** Finishing a guided tour, so the "Learn" checklist ticks it off on every device. */
+  @SkipThrottle({ burst: true, grind: true })
+  @Roles()
+  @ApiBearerAuth()
+  @Post('me/tours/:tourId/done')
+  markTourDone(@CurrentUser() user: AuthUser, @Param('tourId') tourId: string) {
+    return this.auth.markTourDone(user.id, tourId)
+  }
+
   /** Dismissing or acting on the WhatsApp-channel popup both count as "seen". */
   @SkipThrottle({ burst: true, grind: true })
   @Roles()
