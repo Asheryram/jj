@@ -86,6 +86,12 @@ export interface AmbienceScene {
   layers: ParticleLayer[]
   /** Fireworks: this many burst points, each going off on its own staggered clock. */
   bursts?: { colors: string[]; count: number }
+  /**
+   * How strongly the whole scene shows, 0 to 1 (default 0.7): tint, light,
+   * set pieces and particles all scale by it. Lower for a scene whose light
+   * and colour grade sit heavily over the page, so text stays easy to read.
+   */
+  strength?: number
 }
 
 export interface HolidayTheme {
@@ -318,10 +324,13 @@ export const HOLIDAYS: HolidayTheme[] = [
       trim: { kind: 'lights', colors: ['#ef4444', '#22c55e', '#fbbf24', '#3b82f6'] },
       atmosphere: { kind: 'frost' },
       tint: { color: '#dbeafe', blend: 'multiply', opacity: 0.55 },
+      // The heaviest scene (icy grade, frosted edges, fog and snow all at
+      // once), so it is turned down the most.
+      strength: 0.45,
       decor: [{ kind: 'frost-corners' }, { kind: 'mist', color: '#e0f2fe' }, { kind: 'snowbank' }],
       layers: [
-        { motion: 'blow', shape: 'snowflake', colors: ['#bae6fd', '#e0f2fe', '#7dd3fc', '#ffffff'], count: 30, size: [8, 26] },
-        { motion: 'blow', shape: 'dot', colors: ['#e0f2fe', '#ffffff'], count: 28, size: [2, 5], glow: true },
+        { motion: 'blow', shape: 'snowflake', colors: ['#bae6fd', '#e0f2fe', '#7dd3fc', '#ffffff'], count: 22, size: [8, 22] },
+        { motion: 'blow', shape: 'dot', colors: ['#e0f2fe', '#ffffff'], count: 20, size: [2, 5], glow: true },
         { motion: 'streak', shape: 'gust', colors: ['#e0f2fe'], count: 6, size: [140, 280] },
       ],
     },

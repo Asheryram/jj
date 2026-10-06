@@ -405,13 +405,23 @@
   initial-value: 0deg;
 }
 
+/*
+ * How strongly a scene shows, 0 to 1, set per holiday by SeasonalAmbience
+ * (`AmbienceScene.strength`). The scene is decoration over a page people
+ * are reading and buying on, so it is kept see-through. Animated opacity
+ * below multiplies by it, so the breathing and flicker survive the dimming.
+ */
+[data-seasonal-layer] {
+  opacity: var(--seasonal-strength, 0.7);
+}
+
 @keyframes atmo-breathe {
   0%,
   100% {
-    opacity: 0.8;
+    opacity: calc(0.8 * var(--seasonal-strength, 0.7));
   }
   50% {
-    opacity: 1;
+    opacity: var(--seasonal-strength, 0.7);
   }
 }
 
@@ -419,19 +429,19 @@
 @keyframes atmo-flicker {
   0%,
   100% {
-    opacity: 0.85;
+    opacity: calc(0.85 * var(--seasonal-strength, 0.7));
   }
   20% {
-    opacity: 1;
+    opacity: var(--seasonal-strength, 0.7);
   }
   35% {
-    opacity: 0.78;
+    opacity: calc(0.78 * var(--seasonal-strength, 0.7));
   }
   55% {
-    opacity: 0.95;
+    opacity: calc(0.95 * var(--seasonal-strength, 0.7));
   }
   70% {
-    opacity: 0.82;
+    opacity: calc(0.82 * var(--seasonal-strength, 0.7));
   }
 }
 
@@ -449,6 +459,7 @@
   inset: 0;
   z-index: 15;
   pointer-events: none;
+  opacity: var(--seasonal-strength, 0.7);
 }
 
 /* Frost creeping in from every edge, like breath on a cold window. */

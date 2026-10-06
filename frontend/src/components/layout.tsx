@@ -1361,15 +1361,19 @@ function SeasonalAmbience({ holiday, previewing }: { holiday: HolidayTheme; prev
     }
   }
 
+  const strength = scene.strength ?? 0.7
+
   return (
     <>
-      {scene.tint && <SeasonalTint tint={scene.tint} />}
+      {/* Every layer reads --seasonal-strength (index.css), so one number dims the whole scene. */}
+      <style>{`:root { --seasonal-strength: ${strength}; }`}</style>
+      {scene.tint && <SeasonalTint tint={{ ...scene.tint, opacity: scene.tint.opacity * strength }} />}
       {scene.atmosphere && <AtmosphereLayer atmosphere={scene.atmosphere} />}
       {scene.decor?.map((decor) => <SeasonalDecor key={decor.kind} decor={decor} />)}
       {scene.trim && <HeaderTrim trim={scene.trim} />}
       {moment && <SeasonalMomentHost spec={moment} />}
       {(particles.length > 0 || bursts.length > 0) && (
-        <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-20 overflow-hidden">
+        <div aria-hidden="true" data-seasonal-layer className="pointer-events-none fixed inset-0 z-20 overflow-hidden">
           {bursts.map((burst) => (
             <FireworkBurst key={burst.id} burst={burst} />
           ))}

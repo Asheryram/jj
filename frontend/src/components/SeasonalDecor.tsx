@@ -85,7 +85,7 @@ function growCrystals(): Crystal[] {
 function FrostCorners() {
   const [corners] = useState(() => ({ tl: growCrystals(), tr: growCrystals(), bl: growCrystals(), br: growCrystals() }))
   return (
-    <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-20" style={{ top: HEADER_PX }}>
+    <div aria-hidden="true" data-seasonal-layer className="pointer-events-none fixed inset-0 z-20" style={{ top: HEADER_PX }}>
       {(Object.keys(corners) as Corner[]).map((corner) => (
         <FrostCorner key={corner} corner={corner} crystals={corners[corner]} />
       ))}
@@ -102,7 +102,7 @@ function FrostCorner({ corner, crystals }: { corner: Corner; crystals: Crystal[]
   }
   return (
     <div
-      className="decor-frost-corner absolute h-56 w-56"
+      className="decor-frost-corner absolute h-56 w-56 max-sm:scale-[0.55]"
       style={{
         ...anchor,
         transformOrigin: `${top ? 'top' : 'bottom'} ${left ? 'left' : 'right'}`,
@@ -136,7 +136,7 @@ function Snowbank() {
   return (
     <svg
       aria-hidden="true"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-[21] h-7 w-full"
+      data-seasonal-layer className="pointer-events-none fixed inset-x-0 bottom-0 z-[21] h-7 w-full"
       viewBox="0 0 1200 40"
       preserveAspectRatio="none"
       style={{ filter: 'drop-shadow(0 -3px 6px rgb(186 230 253 / 0.7))' }}
@@ -164,7 +164,7 @@ function Mist({ color }: { color: string }) {
     { bottom: '22vh', durationS: 80, delayS: -45, width: '60vw' },
   ]
   return (
-    <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-20 overflow-hidden">
+    <div aria-hidden="true" data-seasonal-layer className="pointer-events-none fixed inset-0 z-20 overflow-hidden">
       {banks.map((bank, i) => (
         <div
           key={i}
@@ -172,7 +172,7 @@ function Mist({ color }: { color: string }) {
           style={{
             bottom: bank.bottom,
             width: bank.width,
-            background: `radial-gradient(ellipse at center, color-mix(in srgb, ${color} 70%, transparent), transparent 70%)`,
+            background: `radial-gradient(ellipse at center, color-mix(in srgb, ${color} 35%, transparent), transparent 70%)`,
             animationDuration: `${bank.durationS}s`,
             animationDelay: `${bank.delayS}s`,
           }}
@@ -217,7 +217,7 @@ function Bunting({ colors }: { colors: string[] }) {
   return (
     <svg
       aria-hidden="true"
-      className="pointer-events-none fixed inset-x-0 z-20 h-20 w-full"
+      data-seasonal-layer className="pointer-events-none fixed inset-x-0 z-20 h-20 w-full"
       style={{ top: HEADER_PX }}
       viewBox="0 0 1200 80"
       preserveAspectRatio="xMidYMin slice"
@@ -261,7 +261,7 @@ const LANTERN_SLOTS = [
 
 function HangingLanterns({ colors }: { colors: string[] }) {
   return (
-    <div aria-hidden="true" className="pointer-events-none fixed inset-x-0 z-20" style={{ top: HEADER_PX }}>
+    <div aria-hidden="true" data-seasonal-layer className="pointer-events-none fixed inset-x-0 z-20" style={{ top: HEADER_PX }}>
       {LANTERN_SLOTS.map((slot, i) => {
         const color = colors[i % colors.length]
         return (
@@ -316,7 +316,7 @@ function WheatField() {
   return (
     <svg
       aria-hidden="true"
-      className="pointer-events-none fixed inset-x-0 bottom-0 z-[21] h-[72px] w-full"
+      data-seasonal-layer className="pointer-events-none fixed inset-x-0 bottom-0 z-[21] h-[72px] w-full"
       viewBox="0 0 1200 72"
       preserveAspectRatio="xMidYMax slice"
     >
@@ -374,7 +374,7 @@ function Bokeh({ colors, count }: { colors: string[]; count: number }) {
     })),
   )
   return (
-    <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[16] overflow-hidden">
+    <div aria-hidden="true" data-seasonal-layer className="pointer-events-none fixed inset-0 z-[16] overflow-hidden">
       {orbs.map((o, i) => (
         <span
           key={i}
