@@ -988,8 +988,7 @@ export interface PlaceOrderBody {
   idempotencyKey?: string
 }
 
-// ─── Analytics: shapes match the warehouse rollup tables, one row per day
-// (or per day + dimension) ──────────────────────────────────────────────────
+// ─── Analytics: one call per date range, see `InsightsService` ──────────────
 
 /** An exact, inclusive window, both ends YYYYMMDD integers. */
 export interface AnalyticsRange {
@@ -997,242 +996,179 @@ export interface AnalyticsRange {
   to: number
 }
 
-function rangeQuery(range: AnalyticsRange): string {
-  return `from=${range.from}&to=${range.to}`
+/** A figure for the range, and the same figure for the equally long period before it. */
+export interface Compared {
+  value: number
+  previous: number
 }
 
-export interface AnalyticsDailySummary {
-  date: number
-  ordersCount: number
-  completedCount: number
-  failedCount: number
-  revenue: number
-  supplierCost: number
-  paystackFees: number
-  agentMargins: number
-  refundsAmount: number
-  profit: number
-  /** The slice of `profit` from orders both sold and cost-settled this same day. */
-  sameDayProfit: number
-  /**
-   * The rest of `profit`: cost/margin/fee entries logged today for a sale
-   * recognised on an earlier day, DataHub settling a bundle's real charge
-   * after the sale itself. Negative here means "catching up on an earlier
-   * sale", not "today lost money".
-   */
-  carryoverAdjustment: number
+export type InsightsGranularity = 'day' | 'week' | 'month'
+
+export interface InsightsAttention {
+  level: 'danger' | 'warning' | 'info'
+  title: string
+  detail: string
+  link: string
 }
 
-export interface AnalyticsNetworkSummary {
-  date: number
-  network: string
-  ordersCount: number
+export interface MoneyTotals {
   revenue: number
   supplierCost: number
   paystackFee: number
   agentMargin: number
+  /** Refunds, write-offs and overpayments that hit profit, signed. */
+  adjustments: number
   profit: number
 }
 
-export interface AnalyticsCategorySummary {
-  date: number
-  category: string
-  ordersCount: number
+export interface MoneyCut {
+  key: string
+  orders: number
   revenue: number
-  supplierCost: number
-  paystackFee: number
-  agentMargin: number
   profit: number
+  previousProfit: number
 }
 
-/** `network`/`category` are plain attributes here (a product belongs to exactly one of each), not the grouping key, so this same fetch can be filtered client-side, e.g. down to one network's products. */
-export interface AnalyticsProductSummary {
-  date: number
+export interface ProductRow {
   productId: string
-  productName: string
+  name: string
   network: string
-  category: string
-  ordersCount: number
+  orders: number
   revenue: number
-  supplierCost: number
-  paystackFee: number
-  agentMargin: number
   profit: number
+  cost: number
+  marginPct: number
 }
 
-export interface AnalyticsDispatchReliability {
-  date: number
-  network: string
-  totalAttempts: number
-  successful: number
-  noReply: number
-  manualQueue: number
-  otherFailed: number
+export interface SpeedStats {
+  orders: number
+  paidToSent: { p50: number | null; p90: number | null }
+  sentToDelivered: { p50: number | null; p90: number | null }
+  paidToDelivered: { p50: number | null; p90: number | null }
+  within15m: number
 }
 
-export interface AnalyticsAgentSummary {
-  date: number
+export interface AgentRow {
   agentId: string
-  agentName: string
-  agentCode: string
-  ordersCount: number
+  name: string
+  status: string
+  orders: number
   revenue: number
-  margin: number
-}
-
-export interface AnalyticsAgentHealth {
-  date: number
-  totalAgents: number
-  activeAgents: number
-  dormantAgents: number
-  newSignups: number
-  pendingApplications: number
-}
-
-export interface AnalyticsDownlineDepth {
-  date: number
-  depth: number
-  agentCount: number
-}
-
-export interface AnalyticsHourlyVolume {
-  date: number
-  hour: number
-  ordersCount: number
-  completedCount: number
-  failedCount: number
-  revenue: number
-  supplierCost: number
-  paystackFees: number
-  agentMargins: number
-  refundsAmount: number
   profit: number
-  sameDayProfit: number
-  carryoverAdjustment: number
+  earnings: number
+  lastSaleAt: string | null
+  previousProfit: number
+  previousOrders: number
 }
 
-export interface AnalyticsCheckoutFunnel {
-  date: number
-  started: number
-  paid: number
-  abandoned: number
-}
-
-export interface AnalyticsCustomerBehavior {
-  date: number
-  uniqueBuyers: number
-  repeatBuyers: number
-}
-
-export interface AnalyticsMarginAccuracy {
-  date: number
-  ordersCount: number
-  avgSalePrice: number
-  avgSupplierCost: number
-  avgMarginBp: number
-}
-
-export interface AnalyticsRefundSummary {
-  date: number
-  count: number
-  amount: number
-  avgTurnaroundHours: number
-  decidedUnder1h: number
-  decided1to4h: number
-  decided4to24h: number
-  decidedOver24h: number
-}
-
-export interface AnalyticsRefundNetworkSummary {
-  date: number
-  network: string
-  count: number
-  amount: number
-}
-
-export interface AnalyticsRefundReasonSummary {
-  date: number
-  reason: string
-  count: number
-  amount: number
-}
-
-export interface AnalyticsPayoutSummary {
-  date: number
-  requestedCount: number
-  requestedAmount: number
-  paidCount: number
-  paidAmount: number
-  avgHoursToPay: number
-  paidUnder1h: number
-  paid1to4h: number
-  paid4to24h: number
-  paidOver24h: number
-}
-
-export interface AnalyticsFeedbackSummary {
-  date: number
-  category: string
-  openCount: number
-  reviewedCount: number
-  resolvedCount: number
-  escalatedCount: number
-  total: number
-}
-
-export interface AnalyticsApplicationFunnel {
-  date: number
-  applied: number
-  approved: number
-  rejected: number
-  avgHoursToDecide: number
-  decidedUnder1h: number
-  decided1to4h: number
-  decided4to24h: number
-  decidedOver24h: number
-}
-
-export interface AnalyticsSolvencySnapshot {
-  date: number
-  expectedAtPaystack: number
-  spentOnBundles: number
-  freeToSpend: number
-  owedToAgents: number
-  owedToCustomers: number
-  undeliveredOrders: number
-  queuedPayouts: number
-  manualRefundAdvances: number
-  manualPayoutAdvances: number
-  liabilitiesTotal: number
-  floatBalance: number | null
-}
-
-export interface AnalyticsFloatSnapshot {
-  date: number
-  balance: number
-  reference: number
-  level: 'ok' | 'watch' | 'risk'
+export interface FloatState {
+  provider: string
+  balance: number | null
+  expected: number | null
+  usable: number | null
+  level: string
   observedAt: string | null
+  avgDailySpend: number
+  daysLeft: number | null
 }
 
-/**
- * `newlyBlocked`/`resolved` are day-scoped and backfillable, like every other
- * daily table. `stillBlocked`/`stillBlockedValue` are a current snapshot
- * written into every day's row (same caveat as `AnalyticsSolvencySnapshot`):
- * summing them across days double-counts a number that never went away.
- */
-export interface AnalyticsLostRevenue {
-  date: number
-  newlyBlocked: number
-  newlyBlockedValue: number
-  resolved: number
-  avgHoursToResolve: number
-  stillBlocked: number
-  stillBlockedValue: number
-  resolvedUnder1h: number
-  resolved1to4h: number
-  resolved4to24h: number
-  resolvedOver24h: number
+export interface Insights {
+  meta: {
+    from: number
+    to: number
+    previousFrom: number
+    previousTo: number
+    granularity: InsightsGranularity
+    dataAsOf: string | null
+  }
+  summary: {
+    revenue: Compared
+    profit: Compared
+    marginPct: Compared
+    delivered: Compared
+    buyers: Compared
+    avgOrderValue: Compared
+    successRate: Compared
+    conversion: Compared
+  }
+  attention: InsightsAttention[]
+  money: {
+    totals: MoneyTotals
+    previousTotals: MoneyTotals
+    series: (MoneyTotals & { bucket: number })[]
+    byNetwork: MoneyCut[]
+    byCategory: MoneyCut[]
+    byProvider: MoneyCut[]
+    byChannel: MoneyCut[]
+    topProducts: ProductRow[]
+    thinProducts: ProductRow[]
+  }
+  sales: {
+    kpis: { placed: Compared; paid: Compared; buyers: Compared; avgOrderValue: Compared; conversion: Compared }
+    series: { bucket: number; placed: number; paid: number; delivered: number; buyers: number; newBuyers: number }[]
+    /** [weekday 0 Monday .. 6 Sunday][hour 0..23], paid orders. */
+    heatmap: number[][]
+    funnel: { placed: number; paid: number; delivered: number; failedAfterPay: number; neverPaid: number }
+    buyers: { total: number; new: number; returning: number; boughtTwiceOrMore: number }
+    networkShare: { key: string; orders: number }[]
+  }
+  operations: {
+    kpis: { successRate: Compared; medianMinutes: Compared; failedAfterPay: Compared }
+    overall: SpeedStats
+    byProvider: ({ provider: string; delivered: number; failed: number; rate: number; previousRate: number; speed: SpeedStats; retried: number })[]
+    providers: string[]
+    /** Keys `${provider}:rate` (percent) and `${provider}:minutes` (median paid to delivered), null when no orders. */
+    series: ({ bucket: number } & Record<string, number | null>)[]
+    failureReasons: { reason: string; count: number; amount: number }[]
+    refunds: {
+      count: number
+      amount: number
+      medianHoursToSettle: number | null
+      waitingNow: { count: number; amount: number; oldestHours: number }
+    }
+    inFlight: { count: number; value: number; over60m: number; oldestMinutes: number }
+    blockedNumbers: {
+      stillBlocked: number
+      stillBlockedValue: number
+      newInRange: number
+      resolvedInRange: number
+      medianHoursToResolve: number | null
+    }
+  }
+  agents: {
+    kpis: { activeAgents: Compared; profitShare: Compared; agentEarnings: Compared; newAgents: Compared }
+    leaderboard: AgentRow[]
+    quiet: AgentRow[]
+    series: { bucket: number; activeAgents: number; agentOrders: number; directOrders: number }[]
+    payouts: {
+      requested: { count: number; amount: number }
+      paid: { count: number; amount: number; fees: number }
+      medianHoursToPay: number | null
+      waitingNow: { count: number; amount: number; oldestHours: number }
+    }
+    applications: { applied: number; approved: number; rejected: number; pendingNow: number; medianHoursToDecide: number | null }
+  }
+  cash: {
+    now: {
+      expectedAtPaystack: number
+      spentOnBundles: number
+      freeToSpend: number
+      liabilities: {
+        agentEarnings: number
+        customerMoney: number
+        undeliveredOrders: number
+        queuedPayouts: number
+        manualRefundAdvances: number
+        manualPayoutAdvances: number
+        total: number
+      }
+      pendingRefunds: { count: number; amount: number }
+      pendingPayouts: { count: number; amount: number }
+    }
+    history: { date: number; freeToSpend: number; liabilities: number; expectedAtPaystack: number; spentOnBundles: number }[]
+    floats: FloatState[]
+    floatHistory: { date: number; provider: string; balance: number; expected: number | null }[]
+  }
 }
 
 // ─── Endpoints ──────────────────────────────────────────────────────────────
@@ -2149,80 +2085,16 @@ export const api = {
       { method: 'POST' },
     ),
 
-  // Analytics: every rollup is read-only, computed by the ETL job against
-  // its own separate warehouse database, never the production one. `range`
-  // is an exact, inclusive YYYYMMDD window (a day, a month, a year, or any
-  // custom span), built by the dashboard's date-range picker.
+  // Analytics: one call returns the whole page for a range, see InsightsService.
+  analyticsInsights: (range: AnalyticsRange) =>
+    request<Insights>(`/analytics/insights?from=${range.from}&to=${range.to}`),
+
+  /** Pull the latest from production now, instead of waiting for the hourly run. */
   analyticsRefresh: () => request<{ daysProcessed: number }>('/analytics/refresh', { method: 'POST' }),
 
-  /** Rewinds the ETL checkpoint to just before `dateInt` and reruns, recomputing every day from there through today. */
+  /** Superadmin: rebuild every order fact and the reserve history from `dateInt`. */
   analyticsRecomputeFrom: (dateInt: number) =>
     request<{ daysProcessed: number }>(`/analytics/recompute-from?date=${dateInt}`, { method: 'POST' }),
-
-  analyticsDailySummary: (range: AnalyticsRange) =>
-    request<AnalyticsDailySummary[]>(`/analytics/daily-summary?${rangeQuery(range)}`),
-
-  analyticsNetworkSummary: (range: AnalyticsRange) =>
-    request<AnalyticsNetworkSummary[]>(`/analytics/network-summary?${rangeQuery(range)}`),
-
-  analyticsCategorySummary: (range: AnalyticsRange) =>
-    request<AnalyticsCategorySummary[]>(`/analytics/category-summary?${rangeQuery(range)}`),
-
-  analyticsProductSummary: (range: AnalyticsRange) =>
-    request<AnalyticsProductSummary[]>(`/analytics/product-summary?${rangeQuery(range)}`),
-
-  analyticsDispatchReliability: (range: AnalyticsRange) =>
-    request<AnalyticsDispatchReliability[]>(`/analytics/dispatch-reliability?${rangeQuery(range)}`),
-
-  analyticsAgentSummary: (range: AnalyticsRange) =>
-    request<AnalyticsAgentSummary[]>(`/analytics/agent-summary?${rangeQuery(range)}`),
-
-  analyticsAgentHealth: (range: AnalyticsRange) =>
-    request<AnalyticsAgentHealth[]>(`/analytics/agent-health?${rangeQuery(range)}`),
-
-  /** Structure, not a trend: the latest snapshot at or before `to`. */
-  analyticsDownlineDepth: (to: number) =>
-    request<AnalyticsDownlineDepth[]>(`/analytics/downline-depth?to=${to}`),
-
-  analyticsHourlyVolume: (range: AnalyticsRange) =>
-    request<AnalyticsHourlyVolume[]>(`/analytics/hourly-volume?${rangeQuery(range)}`),
-
-  analyticsCheckoutFunnel: (range: AnalyticsRange) =>
-    request<AnalyticsCheckoutFunnel[]>(`/analytics/checkout-funnel?${rangeQuery(range)}`),
-
-  analyticsCustomerBehavior: (range: AnalyticsRange) =>
-    request<AnalyticsCustomerBehavior[]>(`/analytics/customer-behavior?${rangeQuery(range)}`),
-
-  analyticsMarginAccuracy: (range: AnalyticsRange) =>
-    request<AnalyticsMarginAccuracy[]>(`/analytics/margin-accuracy?${rangeQuery(range)}`),
-
-  analyticsRefundSummary: (range: AnalyticsRange) =>
-    request<AnalyticsRefundSummary[]>(`/analytics/refund-summary?${rangeQuery(range)}`),
-
-  analyticsRefundNetworkSummary: (range: AnalyticsRange) =>
-    request<AnalyticsRefundNetworkSummary[]>(`/analytics/refund-network-summary?${rangeQuery(range)}`),
-
-  analyticsRefundReasonSummary: (range: AnalyticsRange) =>
-    request<AnalyticsRefundReasonSummary[]>(`/analytics/refund-reason-summary?${rangeQuery(range)}`),
-
-  analyticsPayoutSummary: (range: AnalyticsRange) =>
-    request<AnalyticsPayoutSummary[]>(`/analytics/payout-summary?${rangeQuery(range)}`),
-
-  analyticsFeedbackSummary: (range: AnalyticsRange) =>
-    request<AnalyticsFeedbackSummary[]>(`/analytics/feedback-summary?${rangeQuery(range)}`),
-
-  analyticsApplicationFunnel: (range: AnalyticsRange) =>
-    request<AnalyticsApplicationFunnel[]>(`/analytics/application-funnel?${rangeQuery(range)}`),
-
-  /** A daily snapshot, not backfillable, a past day with no row genuinely has none. */
-  analyticsSolvencySnapshot: (range: AnalyticsRange) =>
-    request<AnalyticsSolvencySnapshot[]>(`/analytics/solvency-snapshot?${rangeQuery(range)}`),
-
-  analyticsFloatSnapshot: (range: AnalyticsRange) =>
-    request<AnalyticsFloatSnapshot[]>(`/analytics/float-snapshot?${rangeQuery(range)}`),
-
-  analyticsLostRevenue: (range: AnalyticsRange) =>
-    request<AnalyticsLostRevenue[]>(`/analytics/lost-revenue?${rangeQuery(range)}`),
 }
 
 /**

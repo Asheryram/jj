@@ -95,7 +95,7 @@ Tick a line only once the fix is built, type-checked, and verified against the s
       Only DataHub's dispatch calls `float.record`. The GMPL shortfall check therefore never
       fires. Fix: refresh GMPL's real wallet balance after an accepted GMPL order (throttled),
       and fix the ETL comment that says GMPL's reading is always null.
-      **Done:** after every accepted GMPL order the real wallet balance is fetched in the background (at most once a minute) and recorded, so the reading moves with orders and the shortfall check can fire. Still open: the warehouse float history is DataHub-only until its table gets a provider column.
+      **Done:** after every accepted GMPL order the real wallet balance is fetched in the background (at most once a minute) and recorded, so the reading moves with orders and the shortfall check can fire. The warehouse float history now records each provider separately (analytics rebuild, 2026-10-06).
 - [x] **D4** "Projected profit" counts the supplier cost of accepted, still-open orders twice
       (booked at acceptance, then subtracted again from the split). `ledger.service.ts`.
       **Done:** only open orders with no supplier cost booked yet subtract the estimate.
