@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import type { FactOrder } from '@prisma-analytics/client'
+import { LedgerService } from '../finance/ledger.service'
 import { SolvencyService } from '../finance/solvency.service'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
 import { KNOWN_PROVIDERS } from '../settings/settings.service'
@@ -96,6 +97,7 @@ export class InsightsService {
     private readonly warehouse: AnalyticsPrismaService,
     private readonly solvency: SolvencyService,
     private readonly floats: FloatMonitorService,
+    private readonly ledger: LedgerService,
   ) {}
 
   async insights(from: number, to: number) {
@@ -135,12 +137,17 @@ export class InsightsService {
     const firstPaidDay = new Map(firstOrders.map((r) => [r.buyerPhone, r._min.dateKey ?? 0]))
 
     const now = new Date()
-    const [position, floatStates] = await Promise.all([
+    const [position, earnedProfit, floatStates] = await Promise.all([
       this.solvency.position(),
+      this.ledger.earnedProfit(),
       Promise.all(
         KNOWN_PROVIDERS.map(async (provider) => {
-          const [latest, expected] = await Promise.all([this.floats.latest(provider), this.floats.expectedBalance(provider)])
-          return { provider, latest, expected }
+          const [latest, expected, capital] = await Promise.all([
+            this.floats.latest(provider),
+            this.floats.expectedBalance(provider),
+            this.floats.capitalSummary(provider),
+          ])
+          return { provider, latest, expected, overReimbursed: capital.overReimbursed }
         }),
       ),
     ])
@@ -149,7 +156,7 @@ export class InsightsService {
     const sales = this.sales(cur, prev, from, to, granularity, firstPaidDay)
     const operations = this.operations(cur, prev, from, to, granularity, openOrders, blocked, now)
     const agents = this.agents(cur, prev, from, to, prevFrom, prevTo, granularity, withdrawals, applications, agentsDim, now)
-    const cash = this.cash(all, today, position, floatStates, solvencyHistory, floatHistory)
+    const cash = this.cash(all, today, position, earnedProfit, floatStates, solvencyHistory, floatHistory)
 
     const summary = {
       revenue: { value: money.totals.revenue, previous: money.previousTotals.revenue },
@@ -621,7 +628,13 @@ export class InsightsService {
     recent: FactOrder[],
     today: number,
     position: Awaited<ReturnType<SolvencyService['position']>>,
-    floatStates: { provider: string; latest: { balance: number; reference: number; level: string; observedAt: string } | null; expected: { balance: number } | null }[],
+    earnedProfit: number,
+    floatStates: {
+      provider: string
+      latest: { balance: number; reference: number; level: string; observedAt: string } | null
+      expected: { balance: number } | null
+      overReimbursed: number
+    }[],
     history: { date: number; freeToSpend: number; liabilitiesTotal: number; expectedAtPaystack: number; spentOnBundles: number }[],
     floatHistory: { date: number; provider: string; balance: number; expected: number | null }[],
   ) {
@@ -647,7 +660,26 @@ export class InsightsService {
       }
     })
 
+    /**
+     * Why "free to spend" is not the same number as profit earned, so an
+     * admin who sees both is told the difference instead of left to guess.
+     * Profit is what sales made; free to spend is cash left in Paystack
+     * after everything owed. The one large, known difference is profit
+     * already moved into a supplier float beyond what that float was owed:
+     * still yours, but stock now, not cash. Anything else (Paystack fees on
+     * orders that later failed, payout sending fees, rounding) is shown as
+     * one remainder rather than guessed at.
+     */
+    const inFloats = sumBy(floatStates, (f) => f.overReimbursed)
+    const bridge = {
+      earnedProfit,
+      profitInFloats: inFloats,
+      other: position.freeToSpend - (earnedProfit - inFloats),
+      freeToSpend: position.freeToSpend,
+    }
+
     return {
+      bridge,
       now: {
         expectedAtPaystack: position.expectedAtPaystack,
         spentOnBundles: position.spentOnBundles,

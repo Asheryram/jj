@@ -203,13 +203,17 @@ export class LedgerService {
    * successfully," not just today's uncorrected running total.
    */
   async projectedProfit(): Promise<number> {
-    const [{ profit }, openOrders] = await Promise.all([
+    const [{ profit }, openOrders, owedBack] = await Promise.all([
       this.statement(new Date(0)),
       this.prisma.order.findMany({
-        where: { status: { in: ['awaiting_approval', 'processing'] } },
+        where: { status: { in: ['pending', 'awaiting_approval', 'processing'] }, OR: [{ paidWith: 'wallet' }, { payment: { is: { status: 'paid' } } }] },
         select: { reference: true, split: true },
       }),
+      this.refundsOwedRefs(),
     ])
+    // A failed order whose refund is still owed carries its sale as profit
+    // until the refund books; that money is going back, not finishing.
+    const owedBackProfit = await this.bookedProfitFor(owedBack)
 
     // An accepted order's real supplier cost is booked the moment the
     // provider accepts it (see `FulfilmentService`), so it is already in
@@ -232,7 +236,54 @@ export class LedgerService {
       return sum + (costBooked.has(order.reference) ? 0 : split.supplierCost) + agentMargin
     }, 0)
 
-    return profit - pendingCost
+    return profit - pendingCost - owedBackProfit
+  }
+
+  /**
+   * All-time profit from settled sales only: delivered orders, and failed
+   * ones whose refund was paid or refused. The same definition the
+   * Analytics page uses, so the two screens show the same number.
+   *
+   * `statement().profit` alone counts a sale the moment it is paid for,
+   * before its supplier cost and agent margin are booked and before a failed
+   * one's refund goes back, so it read higher than the money the business
+   * had actually made.
+   */
+  async earnedProfit(): Promise<number> {
+    const [{ profit }, inFlight, owedBack] = await Promise.all([
+      this.statement(new Date(0)),
+      this.prisma.order.findMany({
+        where: { status: { in: ['pending', 'awaiting_approval', 'processing'] } },
+        select: { reference: true },
+      }),
+      this.refundsOwedRefs(),
+    ])
+    return profit - (await this.bookedProfitFor([...inFlight.map((o) => o.reference), ...owedBack]))
+  }
+
+  /** Failed orders whose refund is still to be paid (pending, or approved and not yet sent). */
+  private async refundsOwedRefs(): Promise<string[]> {
+    const rows = await this.prisma.refundRequest.findMany({
+      where: {
+        order: { status: 'failed' },
+        OR: [{ status: 'pending' }, { status: 'approved', method: 'transfer', paidAt: null }],
+      },
+      select: { orderRef: true },
+    })
+    return rows.map((r) => r.orderRef)
+  }
+
+  /** Signed profit already booked against these orders, their Paystack fees included. */
+  private async bookedProfitFor(refs: string[]): Promise<number> {
+    if (refs.length === 0) return 0
+    const [byOrder, byPayment] = await Promise.all([
+      this.prisma.ledgerEntry.aggregate({ where: { affectsProfit: true, orderRef: { in: refs } }, _sum: { amount: true } }),
+      this.prisma.ledgerEntry.aggregate({
+        where: { affectsProfit: true, orderRef: null, paymentRef: { in: refs } },
+        _sum: { amount: true },
+      }),
+    ])
+    return (byOrder._sum.amount ?? 0) + (byPayment._sum.amount ?? 0)
   }
 
   /** The statement lines themselves, newest first, for an admin to read. */

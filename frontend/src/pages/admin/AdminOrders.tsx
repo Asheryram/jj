@@ -186,11 +186,16 @@ export default function AdminOrders() {
    * successfully, not just today's uncorrected running total.
    */
   const [projectedProfit, setProjectedProfit] = useState<number | null>(null)
+  const [earnedProfit, setEarnedProfit] = useState<number | null>(null)
   useEffect(() => {
     let live = true
     api
       .projectedProfit()
-      .then((result) => live && setProjectedProfit(result.projectedProfit))
+      .then((result) => {
+        if (!live) return
+        setProjectedProfit(result.projectedProfit)
+        setEarnedProfit(result.earnedProfit)
+      })
       .catch(() => undefined)
     return () => {
       live = false
@@ -431,19 +436,20 @@ export default function AdminOrders() {
           hint="All-time. Their commission, never counted as your profit"
         />
         <StatTile
-          label="Your profit"
-          value={freeToSpendNow === null ? '-' : cedis(freeToSpendNow)}
-          hint="What you could actually take out today without touching money a pending order, an undecided refund, or a customer's wallet still needs, the same figure as the Reserve panel's Actually free to spend. This is the real, safe number, the ones beside it can still move before they're final"
+          label="Profit earned"
+          value={earnedProfit === null ? '-' : cedis(earnedProfit)}
+          hint="All-time, from finished sales: delivered orders, and failed ones whose refund was paid or refused. An order still being delivered, or a refund still owed, counts once it settles. The same figure Analytics shows for all time"
           tone="success"
         />
         <StatTile
-          label="Projected profit, once all sales complete"
-          value={
-            projectedProfit === null || profitAtFloat === null
-              ? '-'
-              : cedis(projectedProfit - profitAtFloat)
-          }
-          hint="All-time. Every sale's revenue less every real cost, including the supplier cost and agent margin still owed on orders currently in flight, less whatever became float capital instead of staying yours (see the tile beside this one). Assumes every open order finishes successfully; a failure instead means a refund, not this margin"
+          label="Profit once open orders finish"
+          value={projectedProfit === null ? '-' : cedis(projectedProfit)}
+          hint="Profit earned, plus what the orders still being delivered will add if they all succeed, using each order's expected cost. Refunds still owed are left out, that money goes back"
+        />
+        <StatTile
+          label="Free to spend now"
+          value={freeToSpendNow === null ? '-' : cedis(freeToSpendNow)}
+          hint="Cash, not profit: what you could take out of Paystack today without touching money owed to agents, customers or an order still being delivered. Same as Finance's Actually free to spend. Analytics, Cash tab, explains why it differs from profit earned"
         />
         <StatTile
           label="Profit that became capital"

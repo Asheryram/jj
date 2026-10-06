@@ -1149,6 +1149,8 @@ export interface Insights {
     applications: { applied: number; approved: number; rejected: number; pendingNow: number; medianHoursToDecide: number | null }
   }
   cash: {
+    /** Profit earned (all time) to free to spend now, see InsightsService.cash. */
+    bridge: { earnedProfit: number; profitInFloats: number; other: number; freeToSpend: number }
     now: {
       expectedAtPaystack: number
       spentOnBundles: number
@@ -1800,7 +1802,7 @@ export const api = {
     request<FinanceStatement>(`/admin/finance/statement?days=${days}`),
 
   /** All-time profit, adjusted for every order still open, see LedgerService.projectedProfit. */
-  projectedProfit: () => request<{ projectedProfit: number }>('/admin/finance/projected-profit'),
+  projectedProfit: () => request<{ projectedProfit: number; earnedProfit: number }>('/admin/finance/projected-profit'),
 
   /**
    * Whether the catalogue's believed cost still matches what the supplier

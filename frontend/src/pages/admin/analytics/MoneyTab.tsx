@@ -36,7 +36,7 @@ export default function MoneyTab({ data }: { data: Insights }) {
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Profit" value={cedis(t.profit)} compared={{ value: t.profit, previous: p.profit }} emphasis />
+        <Kpi label="Profit earned" value={cedis(t.profit)} compared={{ value: t.profit, previous: p.profit }} emphasis />
         <Kpi label="Sales delivered" value={cedis(t.revenue)} compared={{ value: t.revenue, previous: p.revenue }} />
         <Kpi
           label="Profit margin"

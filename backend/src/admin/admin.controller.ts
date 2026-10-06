@@ -622,10 +622,15 @@ export class AdminController {
     return this.ledger.statement(since)
   }
 
-  /** All-time profit, adjusted for every order still open, see `LedgerService.projectedProfit`. */
+  /**
+   * All-time profit two ways: earned from settled sales (what Analytics
+   * shows), and projected once every open order finishes. See
+   * `LedgerService.earnedProfit` and `projectedProfit`.
+   */
   @Get('finance/projected-profit')
   async projectedProfit() {
-    return { projectedProfit: await this.ledger.projectedProfit() }
+    const [projectedProfit, earnedProfit] = await Promise.all([this.ledger.projectedProfit(), this.ledger.earnedProfit()])
+    return { projectedProfit, earnedProfit }
   }
 
   /**

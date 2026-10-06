@@ -54,6 +54,43 @@ export default function CashTab({ data }: { data: Insights }) {
         </Panel>
       </div>
 
+      <Panel
+        question="Why isn't free to spend the same as profit?"
+        answer={
+          Math.abs(cash.bridge.earnedProfit - cash.bridge.freeToSpend) < 500
+            ? 'They match: the profit you have earned is sitting in Paystack as cash.'
+            : 'Profit is what sales earned. Free to spend is the cash left after everything owed. Here is the difference.'
+        }
+      >
+        <dl className="max-w-xl space-y-2 text-sm">
+          <div className="flex justify-between gap-3">
+            <dt className="text-slate-600 dark:text-slate-300">Profit earned, all time (finished sales)</dt>
+            <dd className="font-semibold tabular-nums text-slate-900 dark:text-slate-50">{cedis(cash.bridge.earnedProfit)}</dd>
+          </div>
+          {cash.bridge.profitInFloats !== 0 && (
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-600 dark:text-slate-300">Profit moved into supplier floats (still yours, but stock now)</dt>
+              <dd className="font-semibold tabular-nums text-slate-900 dark:text-slate-50">−{cedis(cash.bridge.profitInFloats)}</dd>
+            </div>
+          )}
+          {Math.abs(cash.bridge.other) >= 1 && (
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-600 dark:text-slate-300">Other (Paystack fees on failed orders, payout fees, rounding)</dt>
+              <dd className="font-semibold tabular-nums text-slate-900 dark:text-slate-50">{cash.bridge.other < 0 ? '−' : '+'}{cedis(Math.abs(cash.bridge.other))}</dd>
+            </div>
+          )}
+          <div className="flex justify-between gap-3 border-t border-slate-200 pt-2 dark:border-slate-700">
+            <dt className="font-semibold text-slate-900 dark:text-slate-50">Free to spend now</dt>
+            <dd className="font-bold tabular-nums text-slate-900 dark:text-slate-50">{cedis(cash.bridge.freeToSpend)}</dd>
+          </div>
+        </dl>
+        {Math.abs(cash.bridge.other) >= 2000 && (
+          <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
+            The "other" line is bigger than fees and rounding usually explain. Check Finance for a capital entry or a hand-sent refund or payout that may be recorded wrongly.
+          </p>
+        )}
+      </Panel>
+
       <Panel question="How long will each float last?" answer="At the pace of the last seven days.">
         <div className="grid gap-3 md:grid-cols-2">
           {cash.floats.map((f) => {

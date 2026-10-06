@@ -58,7 +58,7 @@ export default function OverviewTab({ data, onTab }: { data: Insights; onTab: (t
       <AttentionList items={data.attention} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Profit" value={cedis(summary.profit.value)} compared={summary.profit} emphasis hint={`${pct(summary.marginPct.value, 1)} of sales`} />
+        <Kpi label="Profit earned" value={cedis(summary.profit.value)} compared={summary.profit} emphasis hint={`${pct(summary.marginPct.value, 1)} of sales`} />
         <Kpi label="Sales delivered" value={cedis(summary.revenue.value)} compared={summary.revenue} />
         <Kpi label="Orders delivered" value={count(summary.delivered.value)} compared={summary.delivered} />
         <Kpi label="Paying customers" value={count(summary.buyers.value)} compared={summary.buyers} />

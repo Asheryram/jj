@@ -50,7 +50,10 @@ model EtlCheckpoint {
 /// order was placed (`dateKey`), whenever the ledger entry itself landed, so
 /// a range's profit is the profit of the sales made in it. Costs are stored
 /// as positive amounts; `profit` is the signed sum of every entry that
-/// affects profit, exactly `LedgerService.statement()`'s own arithmetic.
+/// affects profit, exactly `LedgerService.statement()`'s own arithmetic,
+/// but only once the order is settled (delivered, or its refund paid or
+/// refused). Until then it is 0: revenue is booked at payment, and an
+/// unsettled sale may still go to the supplier or back to the customer.
 model FactOrder {
   orderId   String   @id @map("order_id")
   reference String
@@ -84,7 +87,7 @@ model FactOrder {
   buyerUserId String? @map("buyer_user_id")
 
   salePrice    Int @map("sale_price")
-  revenue      Int @default(0) /// Booked on delivery, so 0 for an undelivered order.
+  revenue      Int @default(0) /// 0 until the order is settled: delivered, or its refund paid or refused.
   supplierCost Int @default(0) @map("supplier_cost")
   paystackFee  Int @default(0) @map("paystack_fee")
   agentMargin  Int @default(0) @map("agent_margin")

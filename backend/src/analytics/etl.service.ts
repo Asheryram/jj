@@ -60,7 +60,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
   private running: Promise<{ daysProcessed: number }> | null = null
 
   /** Bump to rebuild every order fact from scratch on the next run. */
-  static readonly FACT_VERSION = 1
+  static readonly FACT_VERSION = 2
   /** How far back each run re-reads orders that may still be changing. */
   static readonly RECENT_DAYS = 45
   /** Ghana hours (UTC) the hourly run is allowed in, inclusive. */
@@ -235,6 +235,19 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
         const refund = o.refundRequest
         const refundSettledAt =
           refund?.status === 'approved' ? (refund.method === 'wallet' ? refund.decidedAt : refund.paidAt) : null
+        /**
+         * Only a settled order's money counts. Revenue is booked the moment
+         * Paystack confirms payment, so an order still being delivered, or a
+         * failed one whose refund isn't paid yet, already shows its full
+         * sale as profit: money that may still go to the supplier or back to
+         * the customer. Counting it read as more profit than the business
+         * had, next to a lower "free to spend". It counts once delivered, or
+         * once its refund is paid or refused.
+         */
+        const settled =
+          o.status === 'completed' ||
+          (o.status === 'failed' && (!refund || refund.status === 'rejected' || refundSettledAt !== null))
+        const money = (amount: number) => (settled ? amount : 0)
 
         rows.push({
           orderId: o.id,
@@ -260,14 +273,16 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
           buyerPhone: o.buyerPhone,
           buyerUserId: o.buyerUserId,
           salePrice: o.salePrice,
-          revenue: sum(['revenue']),
-          supplierCost: -sum(['supplier_cost']),
-          paystackFee: -(fee.amount + sum(['payment_fee'])),
-          agentMargin: -sum(['agent_margin', 'referral_bonus']),
-          adjustments: o.ledgerEntries
-            .filter((e) => e.affectsProfit && ['refund', 'agent_margin_writeoff', 'overpayment'].includes(e.kind))
-            .reduce((total, e) => total + e.amount, 0),
-          profit: orderProfit + fee.profit,
+          revenue: money(sum(['revenue'])),
+          supplierCost: money(-sum(['supplier_cost'])),
+          paystackFee: money(-(fee.amount + sum(['payment_fee']))),
+          agentMargin: money(-sum(['agent_margin', 'referral_bonus'])),
+          adjustments: money(
+            o.ledgerEntries
+              .filter((e) => e.affectsProfit && ['refund', 'agent_margin_writeoff', 'overpayment'].includes(e.kind))
+              .reduce((total, e) => total + e.amount, 0),
+          ),
+          profit: money(orderProfit + fee.profit),
           paidAt: o.paidWith === 'wallet' ? (isPaid ? o.createdAt : null) : (o.payment?.paidAt ?? null),
           firstSentAt: o.dispatches[0]?.createdAt ?? null,
           completedAt: o.completedAt,
