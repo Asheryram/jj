@@ -37,7 +37,10 @@ export function TourProvider({ children }: { children: ReactNode }) {
   const role = roleOf(session?.role)
   const [active, setActive] = useState<{ tour: Tour; index: number } | null>(null)
 
-  const tours = useMemo(() => (role ? ALL_TOURS.filter((t) => t.role === role) : []), [role])
+  const tours = useMemo(
+    () => (role ? ALL_TOURS.filter((t) => t.role === role && (!t.superadminOnly || session?.role === 'superadmin')) : []),
+    [role, session?.role],
+  )
   const pageTour = useMemo(
     () => tours.find((t) => t.kind === 'page' && t.route === location.pathname) ?? null,
     [tours, location.pathname],

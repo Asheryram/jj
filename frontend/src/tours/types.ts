@@ -32,4 +32,6 @@ export interface Tour {
   /** The page it starts on. A page tour is offered there by "Take the tour". */
   route: string
   steps: TourStep[]
+  /** Only offered to a superadmin (their own pages, like their wallet). */
+  superadminOnly?: boolean
 }

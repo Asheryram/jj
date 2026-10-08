@@ -84,12 +84,13 @@ ALTER TABLE transactions ADD CONSTRAINT transactions_sign_matches_type
 -- the agent requests and the amount is held, positive when James rejects it and
 -- the hold is released. `domain_fee` has a fixed direction like `reversal`
 -- does, a charge, never a credit, see `DomainsService.chargeCycle`.
--- Everything else has a fixed direction too.
+-- `domain_share` is its mirror on the superadmin's side, always a credit, see
+-- `DomainsService.bookPaidCycle`. Everything else has a fixed direction too.
 ALTER TABLE earnings DROP CONSTRAINT IF EXISTS earnings_sign_matches_type;
 ALTER TABLE earnings ADD CONSTRAINT earnings_sign_matches_type
   CHECK ((type = 'reversal' AND amount < 0)
       OR (type = 'domain_fee' AND amount < 0)
-      OR (type IN ('sale', 'downline') AND amount > 0)
+      OR (type IN ('sale', 'downline', 'domain_share') AND amount > 0)
       OR (type = 'withdrawal' AND amount <> 0));
 
 -- A payment for an order must ask for exactly what that order sold for. Not

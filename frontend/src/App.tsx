@@ -53,6 +53,7 @@ import BrandingReview from './pages/admin/BrandingReview'
 import BrandingRequests from './pages/admin/BrandingRequests'
 import Team from './pages/admin/Team'
 import DomainRequests from './pages/admin/DomainRequests'
+import SuperadminWallet from './pages/admin/SuperadminWallet'
 import Settings from './pages/admin/Settings'
 import AdminFeedback from './pages/admin/AdminFeedback'
 import AdminAnnouncements from './pages/admin/AdminAnnouncements'
@@ -178,6 +179,27 @@ function CustomDomainSeller({ code }: { code: string }) {
   return null
 }
 
+/** Pages that belong to the platform itself, never to an agent's shop address. */
+const PLATFORM_ONLY_PATHS = ['/app', '/admin', '/analytics', '/login', '/register', '/set-password', '/forgot-password', '/info']
+
+/**
+ * On an agent's shop address only the shop itself is served: buying,
+ * tracking, checkers. Logging in and every dashboard live on the main
+ * site, so an agent's address can never front the admin login. Sent there
+ * with the same path, unless the main site is this same address (a
+ * misconfigured `VITE_SITE_ORIGIN`), which would only loop.
+ */
+function ShopPagesOnly() {
+  const { pathname, search } = useLocation()
+  useEffect(() => {
+    const platformOnly = PLATFORM_ONLY_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+    if (!platformOnly) return
+    const target = new URL(`${pathname}${search}`, SITE_ORIGIN)
+    if (target.origin !== window.location.origin) window.location.replace(target.toString())
+  }, [pathname, search])
+  return null
+}
+
 function DomainNotConfigured() {
   return (
     <div className="flex min-h-dvh items-center justify-center px-4">
@@ -224,6 +246,7 @@ export default function App() {
         {/* Inside the router because it themes from the /s/<code> route, and
             inside the store because that is what resolves the code. */}
         <ShopTheme forceCode={customDomainCode}>
+        {customDomainCode && <ShopPagesOnly />}
         <RouteMeta />
         <TourProvider>
         <Routes>
@@ -341,6 +364,7 @@ export default function App() {
               <Route path="/admin/subscriptions" element={<Subscriptions />} />
               <Route path="/admin/team" element={<Team />} />
               <Route path="/admin/domains" element={<DomainRequests />} />
+              <Route path="/admin/wallet" element={<SuperadminWallet />} />
               <Route path="/admin/settings" element={<Settings />} />
               <Route path="/admin/assistant" element={<Assistant />} />
             </Route>

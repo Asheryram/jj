@@ -5,7 +5,8 @@ import {
   api,
   ApiError,
   type BillingInterval,
-  type DomainMode,
+  type DomainPaymentMethod,
+  type DomainStage,
   type DomainPrice,
   type MyBranding,
   type MyDomainStatus,
@@ -21,7 +22,6 @@ import {
   Callout,
   Card,
   CardHead,
-  CopyField,
   Field,
   Modal,
   PageHead,
@@ -647,26 +647,28 @@ function ShopTileStyleCard({
 }
 
 /**
- * An agent's own domain, pointed at their shop instead of a `/s/<code>` link.
+ * The agent's shop address, `kwame.<root>`, which opens their shop.
  *
- * Separate from the branding form above and submitted on its own: a domain
- * change is a different kind of review (verifying ownership, not taste), and
- * the two have no reason to succeed or fail together.
+ * The agent picks a name, monthly or yearly, and how to pay: taken from their
+ * earnings automatically, or paid by them by Mobile Money or card. Once the
+ * superadmin approves and hosting serves it, an earnings payer goes live on
+ * their own; a Mobile Money payer gets "Pay to go live".
  */
 function CustomDomainCard() {
-  const { pushToast, domainSubdomainRoot } = useStore()
+  const { pushToast, domainSubdomainRoot, paystackFeeBp } = useStore()
   const [searchParams, setSearchParams] = useSearchParams()
   const [status, setStatus] = useState<MyDomainStatus | null | undefined>(undefined)
   const [prices, setPrices] = useState<DomainPrice[] | null>(null)
-  const [mode, setMode] = useState<DomainMode>(domainSubdomainRoot ? 'subdomain' : 'custom')
   const [interval, setBillingInterval] = useState<BillingInterval>('monthly')
+  const [method, setMethod] = useState<DomainPaymentMethod>('balance')
   const [label, setLabel] = useState('')
-  const [domain, setDomain] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [editing, setEditing] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   const [payBusy, setPayBusy] = useState<'balance' | 'paystack' | null>(null)
+  const [methodBusy, setMethodBusy] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -674,10 +676,9 @@ function CustomDomainCard() {
       setStatus(result)
       setPrices(priceRows)
       if (result) {
-        setMode(result.mode)
         setBillingInterval(result.billingInterval)
-        if (result.mode === 'custom') setDomain(result.domain)
-        else setLabel(result.domain.split('.')[0])
+        setMethod(result.paymentMethod)
+        setLabel(result.domain.split('.')[0])
       }
     } catch {
       setStatus(null)
@@ -688,10 +689,8 @@ function CustomDomainCard() {
     void load()
   }, [load])
 
-  // Back from Paystack, `PLATFORM_ROOT_DOMAIN` composed this exact
-  // `callbackUrl` in `DomainRenewalsService.startPaystackPayment`. A fresh
-  // server-side verify, same "never trust the redirect" reasoning as
-  // `PaymentReturn.tsx`'s own order-checkout confirm.
+  // Back from Paystack. The server checks the payment with Paystack itself;
+  // it is also confirmed in the background if this page is never reached.
   const confirming = useRef(false)
   useEffect(() => {
     const reference = searchParams.get('domainPayment')
@@ -702,12 +701,12 @@ function CustomDomainCard() {
       .then((result) => {
         pushToast(
           result.ok
-            ? { tone: 'success', title: 'Paid', detail: 'Your domain is caught up.' }
-            : { tone: 'error', title: 'Payment not confirmed', detail: 'Nothing was charged, try again.' },
+            ? { tone: 'success', title: 'Paid', detail: 'Your shop address is paid up and live.' }
+            : { tone: 'info', title: 'Waiting for the payment', detail: 'If you approved it, it will show here within a few minutes.' },
         )
         void load()
       })
-      .catch(() => pushToast({ tone: 'error', title: 'Could not confirm that payment.' }))
+      .catch(() => pushToast({ tone: 'error', title: 'Could not check that payment just now.' }))
       .finally(() => {
         searchParams.delete('domainPayment')
         setSearchParams(searchParams, { replace: true })
@@ -715,39 +714,42 @@ function CustomDomainCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
-  const priceFor = (m: DomainMode, i: BillingInterval) =>
-    prices?.find((p) => p.mode === m && p.interval === i)?.priceAmount ?? 0
-  const currentPrice = priceFor(mode, interval)
+  const priceFor = (i: BillingInterval) => prices?.find((p) => p.mode === 'subdomain' && p.interval === i)?.priceAmount ?? 0
+  const feeOn = (amount: number) => Math.ceil((amount * paystackFeeBp) / 10_000)
   const preview = label.trim() && domainSubdomainRoot ? `${label.trim().toLowerCase()}.${domainSubdomainRoot}` : ''
+  const every = (i: BillingInterval) => (i === 'monthly' ? 'month' : 'year')
 
   const submit = async () => {
-    if (mode === 'subdomain') {
-      if (!label.trim()) {
-        setError('Pick a label, like "kwame".')
-        return
-      }
-    } else if (!domain.trim()) {
-      setError('Enter a domain, like yourshop.com.')
+    if (!label.trim()) {
+      setError('Pick a name, like "kwame".')
       return
     }
     setBusy(true)
     setError('')
     try {
-      const result = await api.requestDomain({
-        mode,
-        billingInterval: interval,
-        ...(mode === 'subdomain' ? { label: label.trim() } : { domain: domain.trim() }),
-      })
+      const result = await api.requestDomain({ mode: 'subdomain', label: label.trim(), billingInterval: interval, paymentMethod: method })
       setStatus(result)
-      pushToast({
-        tone: 'success',
-        title: 'Sent for approval',
-        detail: 'It will not carry your shop until it is approved and pointed at us correctly.',
-      })
+      setEditing(false)
+      pushToast({ tone: 'success', title: 'Sent for approval', detail: 'You will be told as soon as it is approved.' })
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'We could not send that.')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const changeMethod = async (next: DomainPaymentMethod) => {
+    setMethod(next)
+    if (!status) return
+    setMethodBusy(true)
+    try {
+      setStatus(await api.setDomainPaymentMethod(next))
+      pushToast({ tone: 'success', title: next === 'balance' ? 'Paying from your earnings' : 'Paying by Mobile Money or card' })
+    } catch (caught) {
+      setMethod(status.paymentMethod)
+      pushToast({ tone: 'error', title: 'Could not change that', detail: caught instanceof ApiError ? caught.message : undefined })
+    } finally {
+      setMethodBusy(false)
     }
   }
 
@@ -756,20 +758,11 @@ function CustomDomainCard() {
     try {
       await api.removeDomain()
       setStatus(null)
-      setDomain('')
       setLabel('')
       setConfirmingRemove(false)
-      pushToast({
-        tone: 'success',
-        title: 'Domain removed',
-        detail: 'Your shop is back on your /s/ link only.',
-      })
+      pushToast({ tone: 'success', title: 'Shop address removed', detail: 'Your shop is back on your /s/ link only.' })
     } catch (caught) {
-      pushToast({
-        tone: 'error',
-        title: 'Could not remove it',
-        detail: caught instanceof ApiError ? caught.message : 'Try again in a moment.',
-      })
+      pushToast({ tone: 'error', title: 'Could not remove it', detail: caught instanceof ApiError ? caught.message : 'Try again in a moment.' })
     } finally {
       setRemoving(false)
     }
@@ -778,23 +771,11 @@ function CustomDomainCard() {
   const payByBalance = async () => {
     setPayBusy('balance')
     try {
-      const result = await api.payDomainByBalance()
-      if (result.ok) {
-        pushToast({ tone: 'success', title: 'Paid', detail: 'Your domain is caught up.' })
-        await load()
-      } else {
-        pushToast({
-          tone: 'error',
-          title: 'Not enough balance',
-          detail: 'Try Mobile Money or card instead.',
-        })
-      }
+      await api.payDomainByBalance()
+      pushToast({ tone: 'success', title: 'Paid from your earnings', detail: 'Your shop address is live.' })
+      await load()
     } catch (caught) {
-      pushToast({
-        tone: 'error',
-        title: 'Could not pay from balance',
-        detail: caught instanceof ApiError ? caught.message : 'Try again in a moment.',
-      })
+      pushToast({ tone: 'error', title: 'Could not pay from earnings', detail: caught instanceof ApiError ? caught.message : 'Try again in a moment.' })
     } finally {
       setPayBusy(null)
     }
@@ -806,29 +787,53 @@ function CustomDomainCard() {
       const result = await api.startDomainPaystackPayment()
       window.location.href = result.authorizationUrl
     } catch (caught) {
-      pushToast({
-        tone: 'error',
-        title: 'Could not start that payment',
-        detail: caught instanceof ApiError ? caught.message : 'Try again in a moment.',
-      })
+      pushToast({ tone: 'error', title: 'Could not start that payment', detail: caught instanceof ApiError ? caught.message : 'Try again in a moment.' })
       setPayBusy(null)
     }
   }
 
-  const waiting = status && status.reviewedAt === null
-  const live = status && status.allowed && status.active
-  const approvedNotLive = status && status.allowed && !status.active
-  const refused = status && !status.allowed && status.reviewedAt !== null
-  const needsDns = Boolean((waiting || approvedNotLive) && status?.mode === 'custom')
-  /** Behind on a payment, still serving on borrowed time, or already switched off for it. */
-  const behindOnPayment = Boolean(status?.graceEndsAt)
+  if (!domainSubdomainRoot) {
+    return (
+      <Card className="mt-3">
+        <CardHead title="Your shop address" subtitle="A web address of your own that opens your shop." />
+        <div className="p-4 sm:p-5">
+          <Callout tone="info" icon={<GlobeIcon className="size-4" />}>
+            Shop addresses aren't available yet. Share your /s/ link in the meantime.
+          </Callout>
+        </div>
+      </Card>
+    )
+  }
+
+  const stage = status?.stage
+  const due = status ? status.priceAmount : priceFor(interval)
+  const payButtons = (
+    <div className="mt-3 flex flex-wrap gap-2">
+      <Button
+        size="sm"
+        variant={status?.paymentMethod === 'balance' ? 'primary' : 'outline'}
+        loading={payBusy === 'balance'}
+        disabled={Boolean(payBusy)}
+        onClick={() => void payByBalance()}
+      >
+        Pay {cedis(due)} from earnings
+      </Button>
+      <Button
+        size="sm"
+        variant={status?.paymentMethod === 'paystack' ? 'primary' : 'outline'}
+        loading={payBusy === 'paystack'}
+        disabled={Boolean(payBusy)}
+        onClick={() => void payByPaystack()}
+      >
+        Pay {cedis(due + feeOn(due))} by Mobile Money or card
+      </Button>
+    </div>
+  )
+  const showForm = !status || stage === 'refused' || editing
 
   return (
     <Card className="mt-3">
-      <CardHead
-        title="Your own web address"
-        subtitle="A subdomain we host for you, or a domain you already own, either way it's billed and reviewed the same."
-      />
+      <CardHead title="Your shop address" subtitle={`A web address like kwame.${domainSubdomainRoot} that opens straight to your shop.`} />
       <div className="space-y-4 p-4 sm:p-5">
         {status === undefined ? (
           <div className="py-6 text-center">
@@ -836,175 +841,165 @@ function CustomDomainCard() {
           </div>
         ) : (
           <>
-            {waiting && (
-              <Callout tone="info" title="Waiting to be checked" icon={<ClockIcon className="size-4" />}>
-                You asked for this on {dateTime(status.requestedAt)}. We check that you actually
-                control it before it goes anywhere near your shop.
-              </Callout>
-            )}
-            {approvedNotLive && (
-              <Callout tone="info" title="Approved, not live yet" icon={<ClockIcon className="size-4" />}>
-                {status.mode === 'subdomain'
-                  ? 'Approved, this goes live any moment now.'
-                  : "Approved. We check every 6 hours for whether it's pointed at us yet and switch it on the moment it is, no need to come back and check yourself."}
-              </Callout>
-            )}
-            {live && !behindOnPayment && (
-              <Callout tone="success" title="Live" icon={<CheckIcon className="size-4" />}>
-                {status.domain} carries your shop now, the same as your /s/ link. Renews{' '}
-                {status.nextRenewalAt ? dateTime(status.nextRenewalAt) : 'soon'} for{' '}
-                {cedis(status.priceAmount)} ({status.billingInterval}).
-              </Callout>
-            )}
-            {refused && (
-              <Callout tone="warning" title="Not approved" icon={<AlertIcon className="size-4" />}>
-                {status.reason ?? 'No reason was given.'} Fix it and send it again.
-              </Callout>
-            )}
-
-            {behindOnPayment && (
-              <Callout tone="warning" title={status?.active ? 'Payment needed' : 'Switched off'} icon={<AlertIcon className="size-4" />}>
-                <p className="mb-3">
-                  {status?.active
-                    ? `${status.domain} is still live, but its renewal (${cedis(status.priceAmount)}) ` +
-                      `couldn't be covered by your balance. Pay before ${status.graceEndsAt ? dateTime(status.graceEndsAt) : 'soon'} to keep it running.`
-                    : `${status?.domain} was switched off, its renewal went unpaid. Pay any time to bring it straight back.`}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button size="sm" loading={payBusy === 'balance'} disabled={Boolean(payBusy)} onClick={() => void payByBalance()}>
-                    Pay from balance
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    loading={payBusy === 'paystack'}
-                    disabled={Boolean(payBusy)}
-                    onClick={() => void payByPaystack()}
-                  >
-                    Pay by Mobile Money/card
-                  </Button>
-                </div>
-              </Callout>
-            )}
-
-            {needsDns && (
-              <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  Point your domain at us
-                </p>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  At your domain's registrar, add this record. It can take a while to take effect
-                  after you save it.
-                </p>
-                <CopyField label="CNAME record" value="cname.vercel-dns.com" mono />
+            {status && (
+              <div data-tour="agent-domain-status" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3.5 py-3 dark:border-slate-700">
+                <span className="font-mono text-sm font-semibold text-slate-900 dark:text-slate-50">{status.domain}</span>
+                <Badge tone={stage === 'live' ? 'success' : stage === 'grace' || stage === 'payment_needed' ? 'warning' : stage === 'suspended' || stage === 'refused' || stage === 'lapsed' ? 'danger' : 'neutral'}>
+                  {STAGE_LABEL[stage ?? 'waiting']}
+                </Badge>
               </div>
             )}
 
-            {!status && (
-              <>
-                {domainSubdomainRoot && (
-                  <Segmented
-                    options={[
-                      { value: 'subdomain', label: 'Free subdomain' },
-                      { value: 'custom', label: 'My own domain' },
-                    ]}
-                    value={mode}
-                    onChange={setMode}
-                  />
-                )}
-
-                {mode === 'subdomain' && domainSubdomainRoot ? (
-                  <Field
-                    label="Pick a label"
-                    htmlFor="shop-label"
-                    hint={preview ? `Live at ${preview}` : `Letters, digits and hyphens, e.g. "kwame".`}
-                    error={error}
-                  >
-                    <TextInput
-                      id="shop-label"
-                      value={label}
-                      placeholder="kwame"
-                      invalid={Boolean(error)}
-                      onChange={(event) => {
-                        setLabel(event.target.value.replace(/[^a-zA-Z0-9-]/g, ''))
-                        setError('')
-                      }}
-                    />
-                  </Field>
+            {stage === 'waiting' && (
+              <Callout tone="info" title="Waiting for approval" icon={<ClockIcon className="size-4" />}>
+                You asked for this on {dateTime(status!.requestedAt)}. Nothing is charged until it is approved and working.
+              </Callout>
+            )}
+            {stage === 'setting_up' && (
+              <Callout tone="info" title="Approved, being set up" icon={<ClockIcon className="size-4" />}>
+                {status!.paymentMethod === 'balance'
+                  ? `It goes live by itself in a few minutes, and ${cedis(status!.priceAmount)} is taken from your earnings then.`
+                  : 'You will be asked to pay as soon as it is ready, usually within a few minutes.'}
+              </Callout>
+            )}
+            {stage === 'payment_needed' && (
+              <Callout tone="warning" title="Ready, pay to go live" icon={<AlertIcon className="size-4" />}>
+                {status!.domain} is ready. Pay {cedis(status!.priceAmount)} for the first {every(status!.billingInterval)} to switch it on.
+                {payButtons}
+              </Callout>
+            )}
+            {stage === 'live' && (
+              <Callout tone="success" title="Live" icon={<CheckIcon className="size-4" />}>
+                {status!.domain} opens your shop.{' '}
+                {status!.priceAmount <= 0 ? (
+                  'It is free for now.'
                 ) : (
-                  <Field
-                    label="Domain"
-                    htmlFor="shop-domain"
-                    hint="Just the domain, like yourshop.com, no https:// or www."
-                    error={error}
-                  >
-                    <TextInput
-                      id="shop-domain"
-                      value={domain}
-                      placeholder="yourshop.com"
-                      invalid={Boolean(error)}
-                      onChange={(event) => {
-                        setDomain(event.target.value)
-                        setError('')
-                      }}
-                    />
-                  </Field>
+                  <>
+                    Next payment: {cedis(status!.priceAmount)} on{' '}
+                    {status!.nextRenewalAt ? dateTime(status!.nextRenewalAt) : 'its renewal date'},{' '}
+                    {status!.paymentMethod === 'balance' ? 'taken from your earnings automatically.' : 'you will be asked to pay by Mobile Money or card.'}
+                  </>
                 )}
+              </Callout>
+            )}
+            {stage === 'grace' && (
+              <Callout tone="warning" title="Renewal due" icon={<AlertIcon className="size-4" />}>
+                Still live, but pay before {status!.graceEndsAt ? dateTime(status!.graceEndsAt) : 'the deadline'} or it switches off.
+                {payButtons}
+              </Callout>
+            )}
+            {stage === 'lapsed' && (
+              <Callout tone="warning" title="Switched off" icon={<AlertIcon className="size-4" />}>
+                Its renewal went unpaid. Pay any time to bring it straight back.
+                {payButtons}
+              </Callout>
+            )}
+            {stage === 'suspended' && (
+              <Callout tone="warning" title="Switched off by the admin" icon={<AlertIcon className="size-4" />}>
+                Contact the admin to have it restored. Paying cannot switch it back on.
+              </Callout>
+            )}
+            {stage === 'refused' && (
+              <Callout tone="warning" title="Not approved" icon={<AlertIcon className="size-4" />}>
+                {status!.reason ?? 'No reason was given.'} You can pick a different name below.
+              </Callout>
+            )}
 
+            {status && !showForm && stage !== 'suspended' && (
+              <div data-tour="agent-domain-method">
+              <Field label="How you pay" htmlFor="domain-pay-method">
+                <Segmented
+                  options={[
+                    { value: 'balance', label: 'From my earnings' },
+                    { value: 'paystack', label: 'Mobile Money or card' },
+                  ]}
+                  value={method}
+                  onChange={(next) => void changeMethod(next)}
+                  className={methodBusy ? 'pointer-events-none opacity-60' : undefined}
+                />
+              </Field>
+              </div>
+            )}
+
+            {showForm && (
+              <div data-tour="agent-domain-form" className="space-y-4">
+                <Field label="Pick a name" htmlFor="shop-label" hint={preview ? `Your shop at ${preview}` : 'Letters, digits and hyphens, e.g. "kwame".'} error={error}>
+                  <TextInput
+                    id="shop-label"
+                    value={label}
+                    placeholder="kwame"
+                    invalid={Boolean(error)}
+                    onChange={(event) => {
+                      setLabel(event.target.value.replace(/[^a-zA-Z0-9-]/g, ''))
+                      setError('')
+                    }}
+                  />
+                </Field>
                 <Field label="Billing" htmlFor="shop-domain-interval">
                   <Segmented
                     options={[
-                      { value: 'monthly', label: `Monthly · ${cedis(priceFor(mode, 'monthly'))}` },
-                      { value: 'yearly', label: `Yearly · ${cedis(priceFor(mode, 'yearly'))}` },
+                      { value: 'monthly', label: `Monthly · ${cedis(priceFor('monthly'))}` },
+                      { value: 'yearly', label: `Yearly · ${cedis(priceFor('yearly'))}` },
                     ]}
                     value={interval}
                     onChange={setBillingInterval}
                   />
                 </Field>
-
+                <Field label="How you pay" htmlFor="shop-domain-method">
+                  <Segmented
+                    options={[
+                      { value: 'balance', label: 'From my earnings' },
+                      { value: 'paystack', label: 'Mobile Money or card' },
+                    ]}
+                    value={method}
+                    onChange={setMethod}
+                  />
+                </Field>
                 <Callout tone="info" icon={<GlobeIcon className="size-4" />}>
-                  {currentPrice > 0
-                    ? `${cedis(currentPrice)} ${interval}, charged from your balance once this is approved and live, and again every ${interval === 'monthly' ? 'month' : 'year'} after that.`
-                    : 'Free for now, nothing is charged.'}
+                  {priceFor(interval) <= 0
+                    ? 'Free for now, nothing is charged.'
+                    : method === 'balance'
+                      ? `${cedis(priceFor(interval))} a ${every(interval)}, taken from your earnings automatically once it is live, and each ${every(interval)} after. If your earnings are short, you can pay by Mobile Money instead.`
+                      : `${cedis(priceFor(interval))} a ${every(interval)}, plus ${cedis(feeOn(priceFor(interval)))} Paystack fee, paid by you by Mobile Money or card when it is ready and each ${every(interval)} after.`}
                 </Callout>
-              </>
+                <div className="flex gap-2">
+                  <Button block loading={busy} onClick={() => void submit()}>
+                    Send for approval
+                  </Button>
+                  {editing && (
+                    <Button variant="outline" className="shrink-0" onClick={() => setEditing(false)}>
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </div>
             )}
 
-            {status && (
-              <Callout tone="info" icon={<GlobeIcon className="size-4" />}>
-                Asking for a different domain replaces this one, only one can be live for your
-                shop at a time.
-              </Callout>
-            )}
-
-            <div className="flex gap-2">
-              <Button block loading={busy} onClick={() => void submit()}>
-                {status ? 'Send again' : 'Send for approval'}
-              </Button>
-              {status && (
-                <Button
-                  variant="outline"
-                  className="shrink-0"
-                  onClick={() => setConfirmingRemove(true)}
-                  aria-label="Remove domain"
-                >
-                  <XIcon className="size-4" />
+            {status && !showForm && (
+              <div className="flex flex-wrap gap-2">
+                {stage !== 'suspended' && (
+                  <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                    Change name or billing
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={() => setConfirmingRemove(true)}>
+                  <XIcon className="size-4" /> Remove
                 </Button>
-              )}
-            </div>
+              </div>
+            )}
           </>
         )}
       </div>
 
-      <Modal open={confirmingRemove} onClose={() => setConfirmingRemove(false)} title="Remove this domain?">
+      <Modal open={confirmingRemove} onClose={() => setConfirmingRemove(false)} title="Remove your shop address?">
         <div className="space-y-4">
           <Callout tone="warning" title="What happens next">
-            {status?.domain} stops carrying your shop right away, live or not, and its billing
-            stops too. You go back to sharing your /s/ link, and can send a domain again any time.
+            {status?.domain} stops opening your shop right away, and its billing stops too. Nothing already paid is refunded. You can ask
+            for an address again any time.
           </Callout>
           <div className="flex gap-2">
             <Button block variant="danger" loading={removing} onClick={() => void remove()}>
-              <XIcon className="size-4" /> Remove domain
+              <XIcon className="size-4" /> Remove
             </Button>
             <Button block variant="outline" onClick={() => setConfirmingRemove(false)}>
               Cancel
@@ -1015,3 +1010,15 @@ function CustomDomainCard() {
     </Card>
   )
 }
+
+const STAGE_LABEL: Record<DomainStage, string> = {
+  waiting: 'Waiting for approval',
+  refused: 'Not approved',
+  setting_up: 'Setting up',
+  payment_needed: 'Pay to go live',
+  live: 'Live',
+  grace: 'Renewal due',
+  lapsed: 'Switched off',
+  suspended: 'Suspended',
+}
+

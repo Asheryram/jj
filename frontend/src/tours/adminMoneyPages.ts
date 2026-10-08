@@ -264,4 +264,59 @@ export const adminMoneyPageTours: Tour[] = [
       },
     ],
   },
+  {
+    id: 'admin-shop-addresses',
+    role: 'admin',
+    kind: 'page',
+    title: 'Shop addresses',
+    summary: "Agents' own web addresses on your domain, and what they pay.",
+    route: '/admin/domains',
+    steps: [
+      {
+        target: 'domains-pricing',
+        title: 'What agents pay',
+        body: "Each address costs the agent a monthly or yearly price. Part of it is the superadmin's share, credited to their wallet; the rest is the business's. The admin sets the price, the superadmin sets their share, and the price can never be below the share.",
+      },
+      {
+        target: 'domains-queue',
+        title: 'Approving requests (superadmin)',
+        body: 'Requests wait here. **Approve** adds the address to hosting, and it goes live by itself within minutes: an agent paying from earnings is charged then, one paying by Mobile Money is asked to pay. **Refuse** needs a reason the agent sees.',
+      },
+      {
+        target: 'domains-legend',
+        title: 'Every button explained',
+        body: 'Open **What do these buttons do?** for Suspend, Revoke and Mark as live. Suspending switches an address off; only you can bring it back, paying cannot.',
+      },
+      {
+        title: 'When an agent does not pay',
+        body: 'A renewal that is not paid gives the agent 5 days, then the address switches off by itself. It comes back the moment they pay, with no new charge for time already paid.',
+      },
+    ],
+  },
+  {
+    id: 'admin-wallet',
+    role: 'admin',
+    kind: 'page',
+    superadminOnly: true,
+    title: 'My wallet',
+    summary: 'Your share of shop-address payments, and withdrawing it.',
+    route: '/admin/wallet',
+    steps: [
+      {
+        target: 'wallet-balance',
+        title: 'Your money, separate from the business',
+        body: 'Orders belong to the business. This wallet only holds your share of each shop-address payment agents make, and the business counts it as owed to you.',
+      },
+      {
+        target: 'wallet-withdraw',
+        title: 'Withdrawing',
+        body: 'Request it like an agent does. Another admin approves and sends it, never you, so the business always signs off on money leaving.',
+      },
+      {
+        target: 'wallet-shares',
+        title: 'Every share credited',
+        body: 'One line per payment an agent made, with the address it was for.',
+      },
+    ],
+  },
 ]

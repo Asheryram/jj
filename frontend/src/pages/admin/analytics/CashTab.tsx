@@ -49,6 +49,7 @@ export default function CashTab({ data }: { data: Insights }) {
               { key: 'payouts', label: 'Payouts approved, not sent', value: l.queuedPayouts },
               { key: 'refundAdv', label: 'Refunds paid by hand, to repay', value: l.manualRefundAdvances },
               { key: 'payoutAdv', label: 'Payouts paid by hand, to repay', value: l.manualPayoutAdvances },
+              { key: 'superadmin', label: "Superadmin's share, not withdrawn", value: l.superadminShare ?? 0 },
             ].filter((r) => r.value !== 0)}
           />
         </Panel>

@@ -502,9 +502,13 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         select: { withdrawalId: true },
       }),
     ])
+    // The superadmin's wallet holds their share of agents' shop-address
+    // payments: the business owes it to them exactly as it owes agents their earnings.
+    const superadminWallet = await this.prisma.user.aggregate({ where: { role: 'superadmin' }, _sum: { balance: true } })
 
     const undelivered = heldOrders._sum.salePrice ?? 0
     const owedToAgents = agents._sum.balance ?? 0
+    const owedToSuperadmin = superadminWallet._sum.balance ?? 0
     /**
      * Requesting a withdrawal debits the agent's balance immediately (see
      * `WithdrawalsService.request`), so by the time it is sitting here as
@@ -529,7 +533,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       .filter((advance) => !reimbursedWithdrawalIds.has(advance.withdrawalId))
       .reduce((sum, advance) => sum + advance.amount, 0)
     const liabilities =
-      owedToAgents + owedToCustomers + undelivered + queuedPayouts + owedForManualRefunds + owedForManualPayouts
+      owedToAgents + owedToSuperadmin + owedToCustomers + undelivered + queuedPayouts + owedForManualRefunds + owedForManualPayouts
     const spentOnBundles = await this.spentOnBundles()
 
     const expectedAtPaystack = await this.expectedBalance()
@@ -570,6 +574,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         manualRefundAdvances: owedForManualRefunds,
         /** Owed to whoever personally covered a payout with nowhere automatic to send it from. */
         manualPayoutAdvances: owedForManualPayouts,
+        superadminShare: owedToSuperadmin,
         total: liabilities,
       },
       pendingPayouts: {
@@ -705,11 +710,24 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
 
   /** All-time, net of Paystack's own fee, every Mobile Money payment ever confirmed paid. */
   private async collectedSince(): Promise<number> {
-    const paid = await this.prisma.payment.aggregate({
-      where: { status: 'paid' },
-      _sum: { amount: true, fee: true },
-    })
-    return (paid._sum.amount ?? 0) - (paid._sum.fee ?? 0)
+    const [paid, domainPayments] = await Promise.all([
+      this.prisma.payment.aggregate({
+        where: { status: 'paid' },
+        _sum: { amount: true, fee: true },
+      }),
+      // Agents paying for a shop address through Paystack land in the same
+      // balance, but are recorded on their own table, not as a Payment.
+      this.prisma.domainRenewal.aggregate({
+        where: { status: 'paid', method: 'paystack' },
+        _sum: { amount: true, paystackFee: true },
+      }),
+    ])
+    return (
+      (paid._sum.amount ?? 0) -
+      (paid._sum.fee ?? 0) +
+      (domainPayments._sum.amount ?? 0) -
+      (domainPayments._sum.paystackFee ?? 0)
+    )
   }
 
   /**

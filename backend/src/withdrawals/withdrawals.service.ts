@@ -240,12 +240,17 @@ export class WithdrawalsService {
    * second pair of eyes. A superadmin approves those instead.
    */
   private async refuseOwnPayout(id: string, approver: AuthUser): Promise<void> {
-    if (approver.role === 'superadmin') return
     const [row, me] = await Promise.all([
-      this.prisma.withdrawal.findUnique({ where: { id }, select: { user: { select: { email: true } } } }),
+      this.prisma.withdrawal.findUnique({ where: { id }, select: { user: { select: { email: true, role: true } } } }),
       this.prisma.user.findUnique({ where: { id: approver.id }, select: { email: true } }),
     ])
-    if (row?.user.email && me?.email && row.user.email === me.email) {
+    const ownPayout = Boolean(row?.user.email && me?.email && row.user.email === me.email)
+    // The superadmin's own wallet (their domain share) is paid by the business,
+    // so someone else in the business approves it, never any of their own profiles.
+    if (ownPayout && row?.user.role === 'superadmin') {
+      throw new ForbiddenError('This payout is to your own superadmin wallet. Another admin has to approve it.')
+    }
+    if (ownPayout && approver.role !== 'superadmin') {
       throw new ForbiddenError('This payout is to your own agent profile. A superadmin has to approve it.')
     }
   }

@@ -132,6 +132,8 @@ enum EarningType {
   /// rather than `withdrawal`: nothing is being withdrawn, the agent is
   /// paying for something, the same distinction `sale` already draws.
   domain_fee
+  /// The superadmin's share of an agent's domain payment, credited to the superadmin.
+  domain_share
 }
 
 enum WithdrawalStatus {
@@ -994,6 +996,9 @@ enum LedgerKind {
   /// requested (`Payment.amount`), so the difference is genuinely extra,
   /// not owed to anyone. See `PaymentsService.applyPaid`.
   overpayment
+  /// The superadmin's share of a domain payment, a cost to the business,
+  /// negative, paired with the `domain_share` earning that credits them.
+  superadmin_share
 }
 
 /// Every movement of money, once.
@@ -1375,6 +1380,23 @@ model CustomDomain {
   /// whichever of the balance or Paystack path actually paid it.
   graceEndsAt     DateTime?       @map("grace_ends_at")
 
+  /// The superadmin's share of every cycle, pesewas, frozen at request time
+  /// like `priceAmount`: a later cost change only applies to new requests,
+  /// never to a split an agent already signed up to.
+  costAmount    Int                 @default(0) @map("cost_amount")
+  /// How the agent chose to pay: taken from their earnings automatically, or
+  /// paid by them through Paystack when a cycle is due. Changeable any time.
+  paymentMethod DomainRenewalMethod @default(balance) @map("payment_method")
+  /// Switched off by the superadmin. Unlike an unpaid lapse, paying does not
+  /// bring it back; only the superadmin can.
+  suspended     Boolean             @default(false)
+  /// When hosting confirmed the domain serves the shop over HTTPS. A domain
+  /// is only charged and made live after this.
+  readyAt       DateTime?           @map("ready_at")
+  /// Plain-words hosting state for the screens ("Adding to hosting",
+  /// "Waiting for the security certificate", an error), from the go-live checker.
+  hostingStatus String?             @map("hosting_status")
+
   renewals DomainRenewal[]
 
   @@map("custom_domains")
@@ -1464,6 +1486,13 @@ model DomainRenewal {
   /// duplicate-reference rejection is exactly what stops this from ever
   /// being started twice for the same cycle.
   paystackReference String? @unique @map("paystack_reference")
+
+  /// The superadmin's share of `amount`, credited to their wallet when paid.
+  shareAmount Int  @default(0) @map("share_amount")
+  /// The processing fee added on top of the price for a Paystack payment, part of `amount`.
+  feeAmount   Int  @default(0) @map("fee_amount")
+  /// What Paystack actually kept, as reported when the payment was verified.
+  paystackFee Int? @map("paystack_fee")
 
   createdAt DateTime  @default(now()) @map("created_at")
   paidAt    DateTime? @map("paid_at")

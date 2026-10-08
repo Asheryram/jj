@@ -683,9 +683,17 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
 
     const advancesRepaid = -manualReimbursements.reduce((sum, r) => sum + r.amount, 0)
 
+    // Shop-address payments made through Paystack land in the same balance.
+    const domainPayments = await this.prisma.domainRenewal.aggregate({
+      where: { status: 'paid', method: 'paystack', paidAt: { lt: end } },
+      _sum: { amount: true, paystackFee: true },
+    })
+
     const expectedAtPaystack =
       (collected._sum.amount ?? 0) -
-      (collected._sum.fee ?? 0) -
+      (collected._sum.fee ?? 0) +
+      (domainPayments._sum.amount ?? 0) -
+      (domainPayments._sum.paystackFee ?? 0) -
       (transferredPayouts._sum.amount ?? 0) -
       (transferredPayouts._sum.transferFee ?? 0) -
       (transferredRefunds._sum.amount ?? 0) -

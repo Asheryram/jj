@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common'
 import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger'
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min, ValidateIf } from 'class-validator'
-import type { BillingInterval, DomainMode } from '@prisma/client'
+import type { BillingInterval, DomainMode, DomainRenewalMethod } from '@prisma/client'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { DomainsService } from './domains.service'
 import { DomainRenewalsService } from './domain-renewals.service'
@@ -33,6 +33,16 @@ export class RequestDomainDto {
 
   @IsIn(['monthly', 'yearly'])
   billingInterval!: BillingInterval
+
+  /** Taken from earnings automatically, or paid by the agent through Paystack. */
+  @IsOptional()
+  @IsIn(['balance', 'paystack'])
+  paymentMethod?: DomainRenewalMethod
+}
+
+export class SetPaymentMethodDto {
+  @IsIn(['balance', 'paystack'])
+  paymentMethod!: DomainRenewalMethod
 }
 
 export class SetDomainPriceDto {
@@ -87,7 +97,14 @@ export class DomainsController {
       label: dto.label,
       domain: dto.domain,
       billingInterval: dto.billingInterval,
+      paymentMethod: dto.paymentMethod,
     })
+  }
+
+  @Roles('agent')
+  @Patch('mine/payment-method')
+  setPaymentMethod(@CurrentUser() user: AuthUser, @Body() dto: SetPaymentMethodDto) {
+    return this.domains.setPaymentMethod(user.id, dto.paymentMethod)
   }
 
   @Roles('agent')
@@ -149,7 +166,10 @@ export class DomainsController {
 @Controller('admin/domains')
 @Roles('superadmin')
 export class AdminDomainsController {
-  constructor(private readonly domains: DomainsService) {}
+  constructor(
+    private readonly domains: DomainsService,
+    private readonly renewals: DomainRenewalsService,
+  ) {}
 
   @Get()
   list(@Query('pending') pending?: string) {
@@ -167,8 +187,11 @@ export class AdminDomainsController {
   }
 
   @Patch(':id')
-  review(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ReviewDomainDto) {
-    return this.domains.review(id, user.id, dto)
+  async review(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ReviewDomainDto) {
+    const row = await this.domains.review(id, user.id, dto)
+    // An approval goes live as soon as hosting serves it, not at the next round of checks.
+    if (dto.allowed === true) this.renewals.soon()
+    return row
   }
 }
 
@@ -202,5 +225,22 @@ export class DomainPricingController {
   @Roles('admin')
   setPrice(@Body() dto: SetDomainPriceDto) {
     return this.domains.setPrice(dto.mode, dto.interval, dto.amount)
+  }
+}
+
+/**
+ * The superadmin's own wallet: their share of agents' shop-address payments,
+ * and the payouts they have taken from it (requested like an agent's, at
+ * POST /withdrawals, and approved by another admin).
+ */
+@ApiTags('admin')
+@Controller('admin/superadmin-wallet')
+@Roles('superadmin')
+export class SuperadminWalletController {
+  constructor(private readonly domains: DomainsService) {}
+
+  @Get()
+  wallet(@CurrentUser() user: AuthUser) {
+    return this.domains.superadminWallet(user.id)
   }
 }

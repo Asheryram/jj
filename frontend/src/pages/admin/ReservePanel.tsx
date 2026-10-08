@@ -136,6 +136,14 @@ export default function ReservePanel() {
               }
             />
           )}
+          {(liabilities.superadminShare ?? 0) > 0 && (
+            <Row
+              label="Owed to the superadmin"
+              value={liabilities.superadminShare}
+              negative
+              hint="Their share of agents' shop-address payments, not withdrawn yet."
+            />
+          )}
           {liabilities.manualPayoutAdvances > 0 && (
             <Row
               label="Owed for payouts paid out of pocket"

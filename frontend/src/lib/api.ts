@@ -634,19 +634,30 @@ export interface BrandingRequestRow {
 export type DomainMode = 'subdomain' | 'custom'
 export type BillingInterval = 'monthly' | 'yearly'
 
+/** Taken from the agent's earnings automatically, or paid by them through Paystack. */
+export type DomainPaymentMethod = 'balance' | 'paystack'
+
+/** Where a shop address stands, see `DomainsService.stageOf`. */
+export type DomainStage = 'waiting' | 'refused' | 'setting_up' | 'payment_needed' | 'live' | 'grace' | 'lapsed' | 'suspended'
+
 export interface MyDomainStatus {
   domain: string
   mode: DomainMode
+  stage: DomainStage
   allowed: boolean
   active: boolean
+  suspended: boolean
   requestedAt: string
   reviewedAt: string | null
   reason: string | null
   billingInterval: BillingInterval
-  /** Pesewas, per `billingInterval`, frozen at request/last-renewal time. */
+  /** Pesewas, per `billingInterval`, frozen at request time. */
   priceAmount: number
+  paymentMethod: DomainPaymentMethod
+  /** Plain words from the hosting check while it is being set up. */
+  hostingStatus: string | null
   nextRenewalAt: string | null
-  /** Set while a renewal charge has failed and this is running on borrowed time. */
+  /** Set while a renewal is unpaid and the address is running on borrowed time. */
   graceEndsAt: string | null
 }
 
@@ -655,6 +666,24 @@ export interface AdminDomainRow extends MyDomainStatus {
   userId: string
   agentName: string
   agentCode: string
+  /** The superadmin's share per cycle, frozen at request time. */
+  costAmount: number
+}
+
+export interface SuperadminWallet {
+  balance: number
+  totalEarned: number
+  shares: { id: string; amount: number; description: string; createdAt: string }[]
+  withdrawals: {
+    id: string
+    amount: number
+    transferFee: number
+    status: string
+    agentPhone: string
+    momoNetwork: string
+    requestedAt: string
+    paidAt: string | null
+  }[]
 }
 
 export interface DomainPrice {
@@ -846,6 +875,8 @@ export interface ReservePosition {
     manualRefundAdvances: number
     /** Owed to whoever personally covered a payout with nowhere automatic to send it from. */
     manualPayoutAdvances: number
+    /** The superadmin's wallet: their share of agents' shop-address payments, not yet withdrawn. */
+    superadminShare: number
     total: number
   }
   /** Same total as `spentOnBundles`, split by which supplier actually charged it. */
@@ -1162,6 +1193,7 @@ export interface Insights {
         queuedPayouts: number
         manualRefundAdvances: number
         manualPayoutAdvances: number
+        superadminShare: number
         total: number
       }
       pendingRefunds: { count: number; amount: number }
@@ -1219,7 +1251,7 @@ export const api = {
   /** Agent-facing, never carries `costAmount`. */
   domainPricing: () => request<DomainPrice[]>('/domains/pricing'),
 
-  requestDomain: (input: { mode: DomainMode; label?: string; domain?: string; billingInterval: BillingInterval }) =>
+  requestDomain: (input: { mode: DomainMode; label?: string; domain?: string; billingInterval: BillingInterval; paymentMethod?: DomainPaymentMethod }) =>
     request<MyDomainStatus>('/domains/request', { method: 'POST', body: input }),
 
   removeDomain: () => request<void>('/domains/mine', { method: 'DELETE' }),
@@ -1228,8 +1260,15 @@ export const api = {
   payDomainByBalance: () => request<{ ok: boolean }>('/domains/mine/renew/pay-balance', { method: 'POST' }),
 
   /** Starts a live Paystack charge for the same, returns where to send the agent to pay. */
+  /** Switch between paying from earnings and paying by Mobile Money or card. */
+  setDomainPaymentMethod: (paymentMethod: DomainPaymentMethod) =>
+    request<MyDomainStatus>('/domains/mine/payment-method', { method: 'PATCH', body: { paymentMethod } }),
+
+  /** The superadmin's own wallet: their share of shop-address payments and their payouts. */
+  superadminWallet: () => request<SuperadminWallet>('/admin/superadmin-wallet'),
+
   startDomainPaystackPayment: () =>
-    request<{ authorizationUrl: string; reference: string }>('/domains/mine/renew/pay-paystack', {
+    request<{ authorizationUrl: string; reference: string; amount: number }>('/domains/mine/renew/pay-paystack', {
       method: 'POST',
     }),
 

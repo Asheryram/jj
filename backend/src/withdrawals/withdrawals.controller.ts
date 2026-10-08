@@ -72,7 +72,8 @@ export class WithdrawalsController {
    * `status` at all.
    */
   @Post()
-  @Roles('agent')
+  // The superadmin withdraws their domain share the same way an agent withdraws earnings.
+  @Roles('agent', 'superadmin')
   @RequireActive()
   request(@CurrentUser() user: AuthUser, @Body() dto: RequestWithdrawalDto) {
     return this.withdrawals.request(user, dto.amount, dto.momoNetwork, dto.momoNumber)
@@ -80,7 +81,7 @@ export class WithdrawalsController {
 
   /** Take back a request only its own agent made, while it is still pending. */
   @Post(':id/cancel')
-  @Roles('agent')
+  @Roles('agent', 'superadmin')
   cancel(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.withdrawals.cancel(user, id)
   }

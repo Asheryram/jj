@@ -153,8 +153,8 @@ export const agentTours: Tour[] = [
       },
       {
         target: 'agent-look-domain',
-        title: 'Your own web address',
-        body: 'Want a nicer address than your sell link? Ask for one here: it is checked before it carries your shop, and any monthly or yearly price is taken from your earnings once it is live.',
+        title: 'Your shop address',
+        body: 'Want a nicer address than your sell link, like **kwame.** followed by our domain? Pick a name here, choose monthly or yearly, and choose how to pay: from your earnings automatically, or by Mobile Money or card. Nothing is charged until it is approved and working.',
       },
     ],
   },
@@ -404,6 +404,41 @@ export const agentTours: Tour[] = [
         route: '/app/withdrawals',
         title: 'If it is taking a while',
         body: 'Payouts are sent by hand, usually within 24 hours, so a short wait is normal. If nothing has moved after a day, send a message from **Feedback**. You can have up to 3 requests waiting at once.',
+      },
+    ],
+  },
+  {
+    id: 'agent-task-shop-address',
+    role: 'agent',
+    kind: 'task',
+    title: 'Get my own shop address',
+    summary: 'Pick a name, choose how to pay, and get it live.',
+    route: '/app/shop-look',
+    steps: [
+      {
+        route: '/app/shop-look',
+        target: 'agent-look-domain',
+        title: 'Your shop address',
+        body: 'A short web address that opens straight to your shop, easier to share than your sell link. Everything happens in this card.',
+      },
+      {
+        target: 'agent-domain-form',
+        title: 'Pick a name and how to pay',
+        body: 'Type a name, choose **Monthly** or **Yearly**, then choose **From my earnings** (taken automatically) or **Mobile Money or card** (you pay each time, with a small Paystack fee on top). Then press **Send for approval**.',
+      },
+      {
+        target: 'agent-domain-status',
+        title: 'Follow its progress',
+        body: 'The badge shows where it is: **Waiting for approval**, then **Setting up** for a few minutes, then **Live**. If you pay by Mobile Money, it says **Pay to go live** with a button once it is ready.',
+      },
+      {
+        target: 'agent-domain-method',
+        title: 'Change how you pay any time',
+        body: 'Switch between earnings and Mobile Money here whenever you like. It applies from your next payment.',
+      },
+      {
+        title: 'Renewals',
+        body: 'At the end of each month or year it renews. Paying from earnings happens automatically. If your earnings are short, or you pay by Mobile Money, you get 5 days to pay before it switches off, and paying brings it straight back.',
       },
     ],
   },

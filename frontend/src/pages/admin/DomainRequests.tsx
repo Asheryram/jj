@@ -5,6 +5,7 @@ import {
   type AdminDomainRow,
   type BillingInterval,
   type DomainMode,
+  type DomainStage,
   type DomainPrice,
 } from '../../lib/api'
 import { useStore } from '../../state/store'
@@ -26,10 +27,21 @@ import {
 } from '../../components/ui'
 import { AlertIcon, GlobeIcon } from '../../components/icons'
 
-const MODE_LABEL: Record<DomainMode, string> = { subdomain: 'Subdomain', custom: 'Own domain' }
+const MODE_LABEL: Record<DomainMode, string> = { subdomain: 'Shop address', custom: 'Own domain' }
 const INTERVAL_LABEL: Record<BillingInterval, string> = { monthly: 'monthly', yearly: 'yearly' }
 
 type Filter = 'pending' | 'all'
+
+const STAGE_BADGE: Record<DomainStage, string> = {
+  waiting: 'waiting',
+  refused: 'refused',
+  setting_up: 'setting up',
+  payment_needed: 'awaiting payment',
+  live: 'live',
+  grace: 'renewal due',
+  lapsed: 'switched off (unpaid)',
+  suspended: 'suspended',
+}
 
 /**
  * Superadmin-only (see `AdminDomainsController`), approving a domain is
@@ -44,15 +56,28 @@ type Filter = 'pending' | 'all'
  * and each gets its own action.
  */
 export default function DomainRequests() {
+  const { session } = useStore()
+  const isSuperadmin = session?.role === 'superadmin'
   return (
     <div>
       <PageHead
-        title="Custom domains"
-        subtitle="Domains agents have asked to point at their own shop."
+        title="Shop addresses"
+        subtitle="Agents' own web addresses on your domain, like kwame.yourshop.com, and what they pay for them."
       />
-      <DomainPricingCard />
-      <ActionLegend />
-      <DomainQueue />
+      <div data-tour="domains-pricing">
+        <DomainPricingCard />
+      </div>
+      {/* Approving addresses is the superadmin's call; an admin only sets the price. */}
+      {isSuperadmin && (
+        <>
+          <div data-tour="domains-legend">
+            <ActionLegend />
+          </div>
+          <div data-tour="domains-queue">
+            <DomainQueue />
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -121,11 +146,11 @@ function DomainPricingCard() {
   return (
     <Card className="mt-3">
       <CardHead
-        title="Domain pricing"
+        title="Pricing"
         subtitle={
           canEditCost
-            ? "Your own wholesale cost. James's price must clear it."
-            : "What an agent pays. Must clear Asher's own cost."
+            ? 'Your share of every payment, credited to your wallet. The price agents pay must be at least this.'
+            : "What an agent pays. Part of it is the superadmin's share, the rest is the business's."
         }
       />
       <div className="p-4 sm:p-5">
@@ -135,7 +160,7 @@ function DomainPricingCard() {
           </div>
         ) : (
           <div className="space-y-3">
-            {(['subdomain', 'custom'] as const).map((mode) => (
+            {(['subdomain'] as const).map((mode) => (
               <div key={mode} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
                 <p className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-100">{MODE_LABEL[mode]}</p>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -146,9 +171,15 @@ function DomainPricingCard() {
                     return (
                       <Field
                         key={interval}
-                        label={`${INTERVAL_LABEL[interval]} (GHS)`}
+                        label={`${canEditCost ? 'Your share' : 'Price'}, ${INTERVAL_LABEL[interval]} (GHS)`}
                         htmlFor={`price-${key}`}
-                        hint={canEditCost && row ? `James's price: ${cedis(row.priceAmount)}` : undefined}
+                        hint={
+                          row
+                            ? canEditCost
+                              ? `Agents pay ${cedis(row.priceAmount)}, the business keeps ${cedis(Math.max(0, row.priceAmount - (row.costAmount ?? 0)))}`
+                              : `Superadmin's share ${cedis(row.costAmount ?? 0)}, the business keeps ${cedis(Math.max(0, row.priceAmount - (row.costAmount ?? 0)))}`
+                            : undefined
+                        }
                       >
                         <TextInput
                           id={`price-${key}`}
@@ -177,7 +208,7 @@ const LEGEND: { term: string; meaning: string }[] = [
   {
     term: 'Approve',
     meaning:
-      "Grants a waiting request permission to use that domain at all. Does not make it live yet, DNS still has to be pointed here first.",
+      'Adds the address to hosting (automatically when hosting is connected). It goes live by itself once it works: an agent paying from earnings is charged then, an agent paying by Mobile Money is asked to pay.',
   },
   {
     term: 'Refuse',
@@ -186,21 +217,21 @@ const LEGEND: { term: string; meaning: string }[] = [
   {
     term: 'Mark as live',
     meaning:
-      "Flips an approved domain active straight away, this is what makes it start serving the agent's shop. Usually you won't need this button at all, an approved domain is checked automatically every 6 hours and flips itself live the moment it actually resolves here. Use it only to skip that wait once you've confirmed it yourself.",
+      'Only when hosting is not connected: after you have added the address to the hosting project yourself, this confirms it works and puts it live (charging the first period if the agent pays from earnings).',
   },
   {
     term: 'Suspend',
     meaning:
-      "Takes a live domain offline temporarily, without withdrawing its approval. Reversible with one click, \"Mark as live\" brings it straight back.",
+      'Switches a live address off. Paying cannot bring it back, only you can, with "Lift suspension". A period already paid is not charged again.',
   },
   {
     term: 'Revoke',
     meaning:
-      "Fully withdraws approval, not a pause. Needs a reason, takes the domain offline immediately if it was live, and it will not work again until someone re-approves it.",
+      'Withdraws approval completely and takes the address off hosting. Needs a reason, shown to the agent.',
   },
   {
     term: 'Approve after all',
-    meaning: 'Reconsiders a refused or revoked domain, putting it back in the approved state.',
+    meaning: 'Reconsiders a refused or revoked address, approving it again.',
   },
 ]
 
@@ -267,7 +298,7 @@ function DomainQueue() {
       <Card className="mt-3">
         <CardHead
           title="Requests"
-          subtitle="Look up who owns a domain before approving it, a shop takes card and Mobile Money details."
+          subtitle="Agents asking for a shop address. Approving puts it on hosting; it goes live by itself once it works."
           action={
             <Segmented<Filter>
               options={[
@@ -290,7 +321,7 @@ function DomainQueue() {
               title={filter === 'pending' ? 'Nothing waiting' : 'No domains yet'}
               detail={
                 filter === 'pending'
-                  ? 'No agent has asked for a custom domain.'
+                  ? 'No agent is waiting for a shop address.'
                   : 'No agent has ever requested one.'
               }
             />
@@ -337,10 +368,13 @@ function DomainRow({
   onSuspend: () => void
   onReconsider: () => void
 }) {
-  const waiting = row.reviewedAt === null
-  const refused = !waiting && !row.allowed
-  const live = row.allowed && row.active
-  const approvedNotLive = row.allowed && !row.active
+  const stage = row.stage
+  const waiting = stage === 'waiting'
+  const refused = stage === 'refused'
+  const live = stage === 'live' || stage === 'grace'
+  const settingUp = stage === 'setting_up'
+  const awaitingPayment = stage === 'payment_needed' || stage === 'lapsed'
+  const suspended = stage === 'suspended'
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
@@ -348,28 +382,32 @@ function DomainRow({
         <div>
           <div className="flex flex-wrap items-center gap-1.5">
             <p className="font-mono font-semibold text-slate-900 dark:text-slate-50">{row.domain}</p>
-            <Badge tone="neutral">{MODE_LABEL[row.mode]}</Badge>
+            {row.mode === 'custom' && <Badge tone="neutral">{MODE_LABEL[row.mode]}</Badge>}
           </div>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
             {row.agentName} · {row.agentCode} · requested {dateTime(row.requestedAt)}
           </p>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-            {cedis(row.priceAmount)} {INTERVAL_LABEL[row.billingInterval]}
+            {cedis(row.priceAmount)} {INTERVAL_LABEL[row.billingInterval]} (your share {cedis(row.costAmount)}) ·{' '}
+            {row.paymentMethod === 'balance' ? 'paid from earnings' : 'paid by Mobile Money/card'}
             {row.nextRenewalAt && !row.graceEndsAt && <> · renews {dateTime(row.nextRenewalAt)}</>}
             {row.graceEndsAt && (
               <span className="font-semibold text-amber-700 dark:text-amber-400">
                 {' '}
-                · payment overdue, grace until {dateTime(row.graceEndsAt)}
+                · renewal unpaid, switches off {dateTime(row.graceEndsAt)}
               </span>
             )}
           </p>
+          {settingUp && row.hostingStatus && <p className="mt-1 text-xs text-sky-700 dark:text-sky-400">{row.hostingStatus}</p>}
+          {awaitingPayment && (
+            <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">Ready, waiting for the agent to pay.</p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {waiting && <Badge tone="warning">waiting</Badge>}
-          {live && <Badge tone="success">live</Badge>}
-          {approvedNotLive && <Badge tone="info">approved, not live</Badge>}
-          {refused && <Badge tone="danger">refused</Badge>}
+          <Badge tone={live ? 'success' : waiting || awaitingPayment ? 'warning' : refused || suspended ? 'danger' : 'info'}>
+            {STAGE_BADGE[stage]}
+          </Badge>
 
           {waiting && (
             <>
@@ -381,10 +419,25 @@ function DomainRow({
               </Button>
             </>
           )}
-          {approvedNotLive && (
+          {settingUp && (
+            <>
+              <Button size="sm" variant="outline" loading={busy} onClick={onGoLive}>
+                Mark as live
+              </Button>
+              <Button size="sm" variant="outline" disabled={busy} onClick={onReject}>
+                Revoke
+              </Button>
+            </>
+          )}
+          {awaitingPayment && (
+            <Button size="sm" variant="outline" disabled={busy} onClick={onReject}>
+              Revoke
+            </Button>
+          )}
+          {suspended && (
             <>
               <Button size="sm" loading={busy} onClick={onGoLive}>
-                Mark as live
+                Lift suspension
               </Button>
               <Button size="sm" variant="outline" disabled={busy} onClick={onReject}>
                 Revoke

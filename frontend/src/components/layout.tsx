@@ -252,16 +252,19 @@ function navFor(
       // admin must not be shown a door they cannot open. Approving a custom
       // domain is the same kind of trust decision, vouching that whoever
       // asked for it actually controls it, so it sits here too.
+      // Shop addresses: the superadmin approves them; an admin only sets
+      // the price, so the page shows them pricing alone.
+      {
+        to: '/admin/domains',
+        label: 'Shop addresses',
+        icon: GlobeIcon,
+        section: 'Platform',
+        badge: role === 'superadmin' && pendingDomainsCount > 0 ? pendingDomainsCount : undefined,
+      },
       ...(role === 'superadmin'
         ? [
             { to: '/admin/team', label: 'Platform team', icon: ShieldIcon, section: 'Platform' },
-            {
-              to: '/admin/domains',
-              label: 'Custom domains',
-              icon: GlobeIcon,
-              section: 'Platform',
-              badge: pendingDomainsCount > 0 ? pendingDomainsCount : undefined,
-            },
+            { to: '/admin/wallet', label: 'My wallet', icon: WalletIcon, section: 'Platform' },
           ]
         : []),
     ]
