@@ -1,7 +1,12 @@
-import { Inject, Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common'
 import { PrismaService } from '../prisma/prisma.service'
 import { priceFromMarkup } from '../domain/pricing'
 import { CATALOGUE_SOURCES, type CatalogueSource, type SourceSku } from './catalogue-source'
+
+/** The first scheduled sync, a little after start so it never slows a boot. */
+const FIRST_SYNC_DELAY_MS = 5 * 60_000
+/** Then every six hours: supplier prices and stock move slowly, and each run calls them. */
+const SYNC_INTERVAL_MS = 6 * 60 * 60_000
 
 export interface SourceResult {
   provider: string
@@ -42,8 +47,11 @@ export interface ImportResult {
  * rather than letting one outage withdraw a catalogue that is perfectly fine.
  */
 @Injectable()
-export class CatalogueImportService {
+export class CatalogueImportService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = new Logger(CatalogueImportService.name)
+  private timer: NodeJS.Timeout | null = null
+  private firstRun: NodeJS.Timeout | null = null
+  private running: Promise<ImportResult> | null = null
 
   constructor(
     private readonly prisma: PrismaService,
@@ -59,7 +67,39 @@ export class CatalogueImportService {
     }))
   }
 
-  async importFromProvider(): Promise<ImportResult> {
+  /**
+   * Keeps costs, stock and new products current without anyone clicking
+   * Sync: once a few minutes after start, then every few hours. Safe to run
+   * unattended: it never puts anything on or off sale, it only records what
+   * the supplier now charges and whether they stock it.
+   */
+  onApplicationBootstrap(): void {
+    const run = () =>
+      void this.importFromProvider()
+        .then((r) => this.log.log(`scheduled sync: ${r.created} new, ${r.repriced} repriced, ${r.withdrawn} unavailable`))
+        .catch((error) => this.log.error(`scheduled sync failed: ${String(error)}`))
+    this.firstRun = setTimeout(run, FIRST_SYNC_DELAY_MS)
+    this.firstRun.unref?.()
+    this.timer = setInterval(run, SYNC_INTERVAL_MS)
+    this.timer.unref?.()
+  }
+
+  onModuleDestroy(): void {
+    if (this.firstRun) clearTimeout(this.firstRun)
+    if (this.timer) clearInterval(this.timer)
+  }
+
+  /** One sync at a time: a click on Sync during a scheduled run gets that run's result. */
+  importFromProvider(): Promise<ImportResult> {
+    if (!this.running) {
+      this.running = this.runImport().finally(() => {
+        this.running = null
+      })
+    }
+    return this.running
+  }
+
+  private async runImport(): Promise<ImportResult> {
     const results: SourceResult[] = []
 
     for (const source of this.sources) {
@@ -161,23 +201,31 @@ export class CatalogueImportService {
     // Anything from this source that it no longer lists. Not deleted, orders
     // and dispatches point at these rows, and a sale that happened still
     // happened. Withdrawn from sale is the whole of what we can honestly say.
+    //
+    // Marked unavailable only, never switched off sale: an unavailable SKU is
+    // already hidden from the shop and refused at checkout, and it comes back
+    // by itself the next time the supplier lists it. Switching the product
+    // off used to make a supplier's bad afternoon (a checker outage, a
+    // briefly short list) permanent until someone noticed and switched each
+    // one back on. On sale or not stays the admin's decision alone.
     const gone = await this.prisma.supplierProduct.findMany({
-      where: { provider: source.provider, code: { notIn: [...seen] } },
+      where: { provider: source.provider, available: true, code: { notIn: [...seen] } },
       select: { code: true },
     })
-    const goneCodes = gone.map((row) => row.code)
+    // An empty list from a supplier that had products is almost certainly
+    // their glitch, not a real withdrawal of everything. Leave it be.
+    const goneCodes = skus.length === 0 ? [] : gone.map((row) => row.code)
+    if (skus.length === 0 && gone.length > 0) {
+      this.log.warn(`${source.label} returned an empty catalogue, nothing withdrawn, check their API`)
+    }
 
     if (goneCodes.length > 0) {
       await this.prisma.supplierProduct.updateMany({
         where: { code: { in: goneCodes } },
         data: { available: false },
       })
-      await this.prisma.product.updateMany({
-        where: { supplierCode: { in: goneCodes } },
-        data: { active: false },
-      })
       this.log.warn(
-        `${source.label} no longer lists ${goneCodes.length} SKU(s), withdrawn: ` +
+        `${source.label} no longer lists ${goneCodes.length} SKU(s), marked unavailable: ` +
           goneCodes.join(', '),
       )
     }
