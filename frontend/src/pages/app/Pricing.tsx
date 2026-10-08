@@ -41,10 +41,14 @@ import { AlertIcon, TagIcon, TrendUpIcon } from '../../components/icons'
 export default function Pricing() {
   const { products, myBand, myResalePrice, hasOwnPrice, setAgentPrice, clearAgentPrice } = useStore()
   const [resettingId, setResettingId] = useState<string | null>(null)
-  const [category, setCategory] = useSearchParamState('category', 'data') as [
+  const [requestedCategory, setCategory] = useSearchParamState('category', 'data') as [
     Category,
     (v: Category) => void,
   ]
+  // Only what is actually on sale right now (Data and Checkers today), the
+  // same rule as the shop's own tabs: a category with nothing to sell is noise.
+  const categories = CATEGORY_ORDER.filter((key) => products.some((p) => p.active && p.category === key))
+  const category = categories.includes(requestedCategory) ? requestedCategory : (categories[0] ?? 'data')
   const [networkParam, setNetworkParam] = useSearchParamState('network')
   const network = (networkParam || null) as Network | null
   const setNetwork = (value: Network | null) => setNetworkParam(value ?? '')
@@ -119,7 +123,7 @@ export default function Pricing() {
           overshoots the viewport by the 4px difference. */}
       <div data-tour="agent-prices-categories" className="mt-4 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
         <Segmented<Category>
-          options={CATEGORY_ORDER.map((key) => ({ value: key, label: CATEGORY_META[key].short }))}
+          options={categories.map((key) => ({ value: key, label: CATEGORY_META[key].short }))}
           value={category}
           onChange={setCategory}
         />

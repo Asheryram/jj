@@ -81,7 +81,11 @@ export class CatalogueService {
     const visible = isAdminRole(role)
       ? products
       : products.filter(
-          (p) => (p.supplier?.provider ?? 'datahub-gh') === this.settings.providerFor(settings.networkProviderRouting, p.network, p.category),
+          // No network (result checkers) means nothing to route: such a product
+          // is simply sold by whichever provider it belongs to.
+          (p) =>
+            p.network === null ||
+            (p.supplier?.provider ?? 'datahub-gh') === this.settings.providerFor(settings.networkProviderRouting, p.network, p.category),
         )
 
     return {

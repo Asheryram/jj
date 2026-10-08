@@ -6,7 +6,7 @@ import { PaymentsService } from '../payments/payments.service'
 import { SupplierService, resolveSupplierProvider } from './supplier.service'
 import type { SupplierProviderCode } from '../settings/settings.service'
 import { DatahubClient, mapProviderStatus } from './datahub.client'
-import { GmplClient, mapGmplOrderStatus } from './gmpl.client'
+import { checkerPaymentReference, GmplClient, mapGmplOrderStatus } from './gmpl.client'
 import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
 import { appUrl } from '../common/app-links'
@@ -268,6 +268,42 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * One pass. Public so it can be triggered by hand from an admin route or a
    * test, rather than only on the clock.
    */
+  /**
+   * A GMPL checker purchase whose reply never arrived. Their purchase is
+   * all-or-nothing and findable by our own reference, so this asks: bought
+   * (deliver it, with the serial and PIN), failed (refund), or never made
+   * (leave it; retrying from Needs attention is then safe, nothing was bought).
+   */
+  private async resolveUnknownCheckers(): Promise<number> {
+    const cutoff = new Date(Date.now() - 2 * 60_000)
+    const orders = await this.prisma.order.findMany({
+      where: { category: 'checker', status: { in: ['pending', 'processing'] }, createdAt: { lt: cutoff } },
+      select: {
+        id: true,
+        reference: true,
+        dispatches: { orderBy: { createdAt: 'desc' }, take: 1, select: { outcome: true, attempt: true, supplier: { select: { provider: true } } } },
+      },
+      take: 25,
+    })
+    let settled = 0
+    for (const order of orders) {
+      const last = order.dispatches[0]
+      if (!last || last.outcome !== 'unknown' || last.supplier.provider !== 'gmpl') continue
+      const found = await this.gmpl.checkerByReference(checkerPaymentReference(order.reference, last.attempt))
+      if (found.kind === 'approved') {
+        await this.fulfilment.settleFromProvider(order.id, 'delivered', undefined, { serial: found.serial, pin: found.pin })
+        this.log.log(`${order.reference}: checker found at GMPL after a lost reply, delivered`)
+        settled++
+      } else if (found.kind === 'rejected') {
+        await this.fulfilment.settleFromProvider(order.id, 'rejected', found.reason)
+        settled++
+      } else if (found.kind === 'not_found') {
+        this.log.warn(`${order.reference}: no checker was bought at GMPL, safe to retry from Needs attention`)
+      }
+    }
+    return settled
+  }
+
   async sweep(): Promise<{ checked: number; settled: number }> {
     // Payments do not depend on the supplier being live, money can be owed and
     // owing whether or not DataHub is simulated, so these run before the guard
@@ -283,6 +319,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     if (!this.supplier.isLiveFor('datahub-gh') && !this.supplier.isLiveFor('gmpl')) {
       return { checked: 0, settled }
     }
+    if (this.supplier.isLiveFor('gmpl')) settled += await this.resolveUnknownCheckers()
 
     const cutoff = new Date(Date.now() - this.graceMs)
     const waiting = await this.prisma.order.findMany({

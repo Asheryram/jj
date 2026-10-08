@@ -53,7 +53,7 @@ export default function Checkers() {
             </ul>
             <Link to={shopPath(`/buy/${product.id}`)} className="mt-5">
               <Button block size="lg" variant="cta">
-                Buy {product.name.replace(' Result Checker', '')} checker
+                Buy {product.name.replace(/ (result )?checker$/i, '')} checker
               </Button>
             </Link>
           </Card>

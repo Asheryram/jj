@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import type { Network } from '@prisma/client'
 import { GmplClient } from './gmpl.client'
 import type { CatalogueSource, SourceSku } from './catalogue-source'
@@ -6,8 +6,28 @@ import type { CatalogueSource, SourceSku } from './catalogue-source'
 const NETWORKS: Record<'MTN' | 'TELECEL', Network> = { MTN: 'MTN', TELECEL: 'Telecel' }
 
 /**
- * Data bundles from GMPL. Their agent API sells nothing else, no airtime, no
- * result checkers, and no AirtelTigo at all (see `GmplClient`'s own header).
+ * A GMPL result checker as a SKU. `networkKey` carries the examination type
+ * (BECE, WASSCE, NOVDEC, CTVET), what their checker order endpoint takes; no
+ * network, checkers are not routed per network.
+ */
+export function checkerSku(examinationType: string, name: string, costPrice: number, available: boolean): SourceSku {
+  const type = examinationType.toUpperCase()
+  return {
+    code: `GMPL-CHK-${type}`,
+    productId: `gmpl-checker-${type.toLowerCase()}`,
+    category: 'checker',
+    network: null,
+    name,
+    costPrice,
+    available,
+    networkKey: type,
+    capacityGb: null,
+  }
+}
+
+/**
+ * Data bundles and result checkers from GMPL. No airtime, and no AirtelTigo
+ * at all (see `GmplClient`'s own header).
  *
  * `productId`/`code` are namespaced `gmpl-*`/`GMPL-*`, deliberately never the
  * same as `DatahubSource`'s `mtn-data-*`/`DH-*`: GMPL's own bundle sizes and
@@ -21,6 +41,7 @@ const NETWORKS: Record<'MTN' | 'TELECEL', Network> = { MTN: 'MTN', TELECEL: 'Tel
 export class GmplSource implements CatalogueSource {
   readonly provider = 'gmpl'
   readonly label = 'GMPL'
+  private readonly log = new Logger(GmplSource.name)
 
   constructor(private readonly client: GmplClient) {}
 
@@ -52,6 +73,19 @@ export class GmplSource implements CatalogueSource {
           capacityGb: null,
         })
       }
+    }
+
+    // Result checkers. A failure here never fails the data sync above: GMPL
+    // switching checker reselling off (403), or the key lacking the checker
+    // scopes, must not take every data bundle off sale with it. Switched off
+    // means "keep what we have, marked unavailable" rather than "withdrawn".
+    const checkers = await this.client.checkerCatalogue()
+    if (checkers.kind === 'ok') {
+      for (const checker of checkers.checkers) {
+        skus.push(checkerSku(checker.examinationType, checker.name, checker.unitPricePesewas, checker.inStock))
+      }
+    } else {
+      this.log.warn(`GMPL checkers not synced: ${checkers.reason}`)
     }
 
     return skus

@@ -17,8 +17,8 @@ import { ConfigService } from '@nestjs/config'
  *     is the opposite of DataHub's contract (see `datahub.client.ts`'s own
  *     header), and it is what makes `purchase()` here safe to retry on a
  *     timeout, a 5xx, or a 429, unlike DataHub's single-shot rule.
- *  2. **They only sell MTN and Telecel data bundles.** No AirtelTigo, no
- *     airtime, no result-checker endpoint exists on this API at all.
+ *  2. **They sell MTN and Telecel data, and result checkers.** No AirtelTigo,
+ *     no airtime. Checkers complete in one call, see `buyChecker`.
  */
 
 export type PurchaseOutcome =
@@ -114,6 +114,56 @@ interface RawBundle {
 }
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
+interface RawChecker {
+  publicId?: string
+  examinationType?: string
+  name?: string
+  inStock?: boolean
+  availableCount?: number
+  unitPrice?: number | string
+}
+
+export interface GmplChecker {
+  /** BECE, WASSCE, NOVDEC or CTVET. */
+  examinationType: string
+  name: string
+  inStock: boolean
+  unitPricePesewas: number
+}
+
+export type CheckerCatalogueOutcome =
+  | { kind: 'ok'; checkers: GmplChecker[] }
+  | { kind: 'switched_off'; reason: string }
+  | { kind: 'failed'; reason: string }
+
+export type CheckerPurchaseOutcome =
+  | { kind: 'approved'; providerReference: string; serial: string; pin: string; charged: number | null; raw: string }
+  | { kind: 'rejected'; reason: string; raw: string }
+  | { kind: 'unknown'; reason: string; raw: string }
+
+/** One checker purchase out of GMPL's order shape (POST reply or lookup). */
+function parseCheckerOrder(data: unknown, raw: string): CheckerPurchaseOutcome {
+  const order = data as
+    | { id?: string; status?: string; amount?: string | number; checkers?: { serialNumber?: string; pin?: string }[] }
+    | undefined
+  const status = String(order?.status ?? '').toLowerCase()
+  const first = order?.checkers?.[0]
+  if (status === 'approved' && first?.serialNumber && first.pin) {
+    return {
+      kind: 'approved',
+      providerReference: String(order?.id ?? ''),
+      serial: String(first.serialNumber),
+      pin: String(first.pin),
+      charged: order?.amount != null ? Math.round(Number(order.amount) * 100) : null,
+      raw,
+    }
+  }
+  if (['failed', 'rejected', 'cancelled', 'declined'].includes(status)) {
+    return { kind: 'rejected', reason: `GMPL marked it ${status}.`, raw }
+  }
+  return { kind: 'unknown', reason: `GMPL replied ${status || 'without a status'} and no serial/PIN.`, raw }
+}
 
 /**
  * A deterministic, RFC-4122-shaped v4 UUID from a stable seed.
@@ -358,6 +408,114 @@ export class GmplClient {
     }
   }
 
+  // ─── Result checkers (BECE, WASSCE, NOVDEC, CTVET) ──────────────────────────
+  //
+  // Unlike data, a checker purchase completes in the same call: it comes back
+  // approved with the serial and PIN, or fails with nothing debited, never a
+  // partial fill. GMPL also SMSes the serial/PIN to `phoneNumber` itself.
+  // Needs the checkers:read / checkers:write scopes; answers 403 while GMPL
+  // has checker reselling switched off.
+
+  /** The checkers GMPL sells to this key: price for one, and whether in stock. */
+  async checkerCatalogue(): Promise<CheckerCatalogueOutcome> {
+    if (!this.configured) return { kind: 'failed', reason: 'No GMPL API key configured.' }
+    let response: Response
+    try {
+      response = await this.fetchRepeatable(
+        this.url('/agent/checkers/catalogue'),
+        { headers: this.headers(), signal: AbortSignal.timeout(20_000) },
+        'checker-catalogue',
+      )
+    } catch (error) {
+      return { kind: 'failed', reason: `Could not reach GMPL, ${String(error)}.` }
+    }
+    const body = (await response.json().catch(() => ({}))) as GmplEnvelope & { data?: RawChecker[] }
+    if (response.status === 403) return { kind: 'switched_off', reason: gmplErrorReason(body, 'Checker reselling is switched off at GMPL.') }
+    if (!response.ok || body.success === false || !Array.isArray(body.data)) {
+      return { kind: 'failed', reason: gmplErrorReason(body, `GMPL returned HTTP ${response.status}.`) }
+    }
+    const checkers = body.data
+      .filter((c): c is RawChecker & { examinationType: string } => Boolean(c?.examinationType))
+      .map((c) => ({
+        examinationType: String(c.examinationType).toUpperCase(),
+        name: String(c.name ?? `${c.examinationType} Result Checker`),
+        inStock: c.inStock !== false && Number(c.availableCount ?? 1) > 0,
+        unitPricePesewas: Math.round(Number(c.unitPrice ?? 0) * 100),
+      }))
+      .filter((c) => Number.isFinite(c.unitPricePesewas) && c.unitPricePesewas > 0)
+    return { kind: 'ok', checkers }
+  }
+
+  /**
+   * Buy one checker. Idempotent on `idempotencyKey` (same key and body
+   * returns the original purchase), and `paymentReference` lets
+   * `checkerByReference` find it again if the reply is lost.
+   */
+  async buyChecker(input: {
+    examinationType: string
+    phoneNumber: string
+    idempotencyKey: string
+    paymentReference: string
+  }): Promise<CheckerPurchaseOutcome> {
+    if (!this.configured) return { kind: 'rejected', reason: 'No GMPL API key configured.', raw: '' }
+    let response: Response
+    try {
+      response = await this.fetchRepeatable(
+        this.url('/agent/checkers/orders'),
+        {
+          method: 'POST',
+          headers: this.headers({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ ...input, quantity: 1 }),
+          signal: AbortSignal.timeout(30_000),
+        },
+        'checker-order',
+      )
+    } catch (error) {
+      const reason = (error as Error)?.name === 'TimeoutError' ? 'timed out' : String(error)
+      return { kind: 'unknown', reason: `Request ${reason} before a reply arrived.`, raw: String(error) }
+    }
+    const rawText = await response.text().catch(() => '')
+    const raw = `HTTP ${response.status} ${rawText}`.slice(0, 2000)
+    let body: GmplEnvelope = {}
+    try {
+      body = JSON.parse(rawText) as GmplEnvelope
+    } catch {
+      body = {}
+    }
+    if (response.status >= 500) return { kind: 'unknown', reason: `Provider returned ${response.status}.`, raw }
+    if (!response.ok || body.success === false) {
+      const reason =
+        response.status === 403 ? 'Checker sales are switched off at GMPL right now.' : gmplErrorReason(body, `HTTP ${response.status}`)
+      return { kind: 'rejected', reason, raw }
+    }
+    return parseCheckerOrder(body.data, raw)
+  }
+
+  /** A checker purchase by our own `paymentReference`. `not_found` means none was ever made. */
+  async checkerByReference(paymentReference: string): Promise<CheckerPurchaseOutcome | { kind: 'not_found' }> {
+    if (!this.configured) return { kind: 'unknown', reason: 'No GMPL API key configured.', raw: '' }
+    try {
+      const response = await this.fetchRepeatable(
+        this.url(`/agent/checkers/orders/reference/${encodeURIComponent(paymentReference)}`),
+        { headers: this.headers(), signal: AbortSignal.timeout(15_000) },
+        'checker-lookup',
+      )
+      const rawText = await response.text().catch(() => '')
+      const raw = `HTTP ${response.status} ${rawText}`.slice(0, 2000)
+      if (response.status === 404) return { kind: 'not_found' }
+      let body: GmplEnvelope = {}
+      try {
+        body = JSON.parse(rawText) as GmplEnvelope
+      } catch {
+        body = {}
+      }
+      if (!response.ok || body.success === false) return { kind: 'unknown', reason: gmplErrorReason(body, `HTTP ${response.status}`), raw }
+      return parseCheckerOrder(body.data, raw)
+    } catch (error) {
+      return { kind: 'unknown', reason: String(error), raw: String(error) }
+    }
+  }
+
   /**
    * Their one genuinely live read: unlike DataHub, which only ever reveals a
    * balance as a side effect of an order reply (see `DatahubClient`'s own
@@ -520,4 +678,14 @@ export function mapGmplOrderStatus(status: string): 'completed' | 'failed' | nul
     default:
       return null
   }
+}
+
+/**
+ * Our reference for one checker purchase attempt, sent as GMPL's
+ * `paymentReference` so a purchase whose reply was lost can be found again
+ * (`GmplClient.checkerByReference`). One per attempt, so a deliberate retry
+ * is a separate purchase, never confused with the first.
+ */
+export function checkerPaymentReference(orderReference: string, attempt: number): string {
+  return attempt <= 1 ? orderReference : `${orderReference}-${attempt}`
 }

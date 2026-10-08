@@ -4,7 +4,7 @@ import type { Order, SupplierProduct } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { SettingsService, type SupplierProviderCode } from '../settings/settings.service'
 import { DatahubClient } from './datahub.client'
-import { GmplClient, gmplIdempotencyKey } from './gmpl.client'
+import { checkerPaymentReference, GmplClient, gmplIdempotencyKey } from './gmpl.client'
 import { FloatMonitorService } from './float-monitor.service'
 
 export interface DispatchResult {
@@ -407,7 +407,60 @@ export class SupplierService implements OnModuleInit {
    * here at all, only the log line below if a purchase ever reports the
    * wallet empty.
    */
+  /**
+   * A result checker from GMPL. Unlike their data orders this completes in
+   * the same call: approved with the serial and PIN (delivered on the spot),
+   * or failed with nothing debited (a clean refund). A lost reply is
+   * `unknown`, and `checkerPaymentReference` is how it is looked up again
+   * before anyone retries it, so a checker is never bought twice.
+   */
+  private async dispatchGmplChecker(order: Order, supplier: SupplierProduct, attempt: number): Promise<DispatchResult> {
+    // A retry after a lost reply: the earlier attempt may have bought it after
+    // all. Look first, so the buyer is never charged by GMPL twice.
+    if (attempt > 1) {
+      const earlier = await this.gmpl.checkerByReference(checkerPaymentReference(order.reference, attempt - 1))
+      if (earlier.kind === 'approved') {
+        return {
+          outcome: 'delivered',
+          voucher: { serial: earlier.serial, pin: earlier.pin },
+          providerReference: earlier.providerReference || undefined,
+          providerStatus: 'approved',
+          providerCharged: earlier.charged ?? undefined,
+          providerResponse: earlier.raw,
+        }
+      }
+      if (earlier.kind === 'unknown') {
+        return { outcome: 'unknown', reason: `Could not confirm the earlier attempt yet: ${earlier.reason}`, providerResponse: earlier.raw }
+      }
+    }
+    const result = await this.gmpl.buyChecker({
+      examinationType: supplier.networkKey as string,
+      phoneNumber: order.recipient,
+      idempotencyKey: gmplIdempotencyKey(order.reference, attempt),
+      paymentReference: checkerPaymentReference(order.reference, attempt),
+    })
+    if (result.kind === 'approved') {
+      void this.float
+        .noteOrderPlaced('gmpl', order.reference)
+        .catch((error: unknown) => this.log.warn(`GMPL float read after ${order.reference} failed: ${String(error)}`))
+      return {
+        outcome: 'delivered',
+        voucher: { serial: result.serial, pin: result.pin },
+        providerReference: result.providerReference || undefined,
+        providerStatus: 'approved',
+        providerCharged: result.charged ?? undefined,
+        providerResponse: result.raw,
+      }
+    }
+    if (result.kind === 'unknown') {
+      this.log.error(`UNRESOLVED GMPL checker for ${order.reference}: ${result.reason}`)
+      return { outcome: 'unknown', reason: result.reason, providerResponse: result.raw }
+    }
+    return { outcome: 'rejected', reason: result.reason, providerResponse: result.raw }
+  }
+
   private async dispatchLiveGmpl(order: Order, supplier: SupplierProduct, attempt: number): Promise<DispatchResult> {
+    if (order.category === 'checker') return this.dispatchGmplChecker(order, supplier, attempt)
     if (supplier.network === 'MTN') {
       const check = await this.gmpl.precheckBeneficiary('MTN', [order.recipient]).catch((error: unknown) => {
         this.log.warn(`${order.reference}: GMPL precheck threw unexpectedly, ${String(error)}`)

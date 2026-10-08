@@ -465,7 +465,8 @@ export class OrdersService {
     if (supplierRow) {
       const settingsNow = await this.settings.all(tx)
       const selectedProvider = this.settings.providerFor(settingsNow.networkProviderRouting, row.network, row.category)
-      if (supplierRow.provider !== selectedProvider) {
+      // No network (result checkers): not routable, sold by its own provider.
+      if (row.network !== null && supplierRow.provider !== selectedProvider) {
         throw new ConflictError(
           'PRODUCT_INACTIVE',
           `${row.name} is not on sale at the moment. Pick another bundle.`,
