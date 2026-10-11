@@ -11,7 +11,7 @@ import { WalletModule } from './wallet/wallet.module'
 import { AgentsModule } from './agents/agents.module'
 import { WithdrawalsModule } from './withdrawals/withdrawals.module'
 import { AdminModule } from './admin/admin.module'
-import { HealthController } from './health/health.controller'
+import { HealthController, KeepAliveController } from './health/health.controller'
 import { SupplierModule } from './supplier/supplier.module'
 import { SettingsModule } from './settings/settings.module'
 import { PaymentsModule } from './payments/payments.module'
@@ -119,7 +119,7 @@ import { AuthGuard } from './common/auth'
     SubscriptionsModule,
     AnalyticsModule,
   ],
-  controllers: [HealthController],
+  controllers: [HealthController, KeepAliveController],
   providers: [
     // Global so a new controller is authenticated by default. A route is public
     // only by omitting @Roles(), which is a visible choice in the code.

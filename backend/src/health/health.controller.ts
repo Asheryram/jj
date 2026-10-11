@@ -3,6 +3,15 @@ import { ApiTags } from '@nestjs/swagger'
 import { PrismaService } from '../prisma/prisma.service'
 import { SupplierService } from '../supplier/supplier.service'
 
+@ApiTags('health')
+@Controller('health')
+export class KeepAliveController {
+  @Get('ping')
+  ping() {
+    return { status: 'ok' }
+  }
+}
+
 /**
  * How long a real database check stays good enough to reuse.
  *

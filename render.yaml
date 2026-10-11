@@ -49,6 +49,8 @@ services:
       # rerunning the ETL job against the real one.
       - key: ANALYTICS_DATABASE_URL
         sync: false
+      - key: KEEP_ALIVE_URL
+        sync: false # full URL to the database-free ping endpoint
 
       # ── Set these in the dashboard; they are secrets or they are per-deploy ──
       # sync: false means Render prompts rather than storing a value in git.

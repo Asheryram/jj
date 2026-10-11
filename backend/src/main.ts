@@ -132,6 +132,42 @@ async function bootstrap() {
   await app.listen(port, '0.0.0.0')
 
   const log = new Logger('bootstrap')
+  const keepAliveUrl = process.env.KEEP_ALIVE_URL
+  if (keepAliveUrl) {
+    let pingUrl: URL
+    try {
+      pingUrl = new URL(keepAliveUrl)
+      if (pingUrl.protocol !== 'http:' && pingUrl.protocol !== 'https:') {
+        throw new Error('KEEP_ALIVE_URL must use http or https')
+      }
+    } catch (error) {
+      throw new Error(
+        `Invalid KEEP_ALIVE_URL: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
+    let pingInProgress = false
+    setInterval(async () => {
+      if (pingInProgress) return
+      pingInProgress = true
+      try {
+        const response = await fetch(pingUrl, { signal: AbortSignal.timeout(10_000) })
+        if (!response.ok) {
+          log.warn(`Keep-alive request returned HTTP ${response.status}`)
+        }
+      } catch (error) {
+        log.warn(
+          `Keep-alive request failed: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      } finally {
+        pingInProgress = false
+      }
+    }, 60_000)
+    log.log(`Keep-alive enabled for ${pingUrl}`)
+  } else if (isProduction) {
+    log.warn('Keep-alive is disabled; set KEEP_ALIVE_URL to enable it.')
+  }
+
   if (isProduction && allowTunnels) {
     log.warn(
       'ALLOW_TUNNEL_ORIGINS is on in production, any ngrok or trycloudflare ' +

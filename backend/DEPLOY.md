@@ -108,6 +108,14 @@ second replica, and not before.
 to be a separate managed service (Neon or Render Postgres) rather than one
 Railway provisions, so `DATABASE_URL` is a plain secret there.
 
+Set `KEEP_ALIVE_URL` in the Render dashboard to
+`https://jdc-api-5sgb.onrender.com/api/health/ping`. When set, the API calls
+that URL once a minute; `/api/health/ping` does not query the database. The
+timer runs inside the web service, so it cannot wake the service after Render
+has spun it down, and Render may not count a request originating from the
+service as inbound activity. An external request may still be needed to wake
+it. This does not extend Render's monthly free instance-hour allowance.
+
 ## A database somewhere other than Railway
 
 The app needs one `DATABASE_URL` and nothing else, so Neon, Supabase and Render
