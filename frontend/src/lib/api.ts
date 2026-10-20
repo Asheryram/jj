@@ -21,24 +21,12 @@ import type { UserStatus } from '../data/types'
 /**
  * HTTP client for the NestJS API. The only source of data in the app.
  *
- * Where the API lives, in order of preference:
- *   1. `window.__ENV__.API_URL`, written at container start by `/env.js` from the infra platform's variables, so ONE
- *      image serves production, staging, develop and every preview, each pointed at its own API;
- *   2. `VITE_API_URL`, baked in at build time (local development, static hosts such as Vercel);
- *   3. a same-origin `/api`, the shape of a deployment where the SPA and the API sit behind one host.
- * Without (1) a container deployment silently falls through to (3), which is the website itself.
+ * `VITE_API_URL` points at the API. It falls back to a same-origin `/api`, which
+ * is the shape of a production deployment where the SPA and the API sit behind
+ * one host and no build-time URL has to be baked in.
  */
-declare global {
-  interface Window {
-    /** Written by `/env.js` (frontend/deploy-spa/40-runtime-env.sh); absent when the app is not served by that image. */
-    __ENV__?: { API_URL?: string }
-  }
-}
-
-const RUNTIME_API_URL = typeof window === 'undefined' ? undefined : window.__ENV__?.API_URL
-
 export const API_URL = (
-  RUNTIME_API_URL || (import.meta.env.VITE_API_URL as string | undefined) || '/api'
+  (import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
 ).replace(/\/$/, '')
 
 /**
