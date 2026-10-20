@@ -1,13 +1,13 @@
 # How the infra platform runs this repository: two independent services, a frontend and an API.
-#   web -> jkbk-datahub.<domain>          api -> api-jkbk-datahub.<domain>
+#   web -> jkbk.<domain>          api -> api-jkbk.<domain>
 #   (develop / staging add -develop / -staging, previews add -pr-<number>)
-# Register it once with:  infra project add jkbk-datahub --repo Asheryram/jj
-name: jkbk-datahub
+# Register it once with:  infra project add jkbk --repo Asheryram/jj
+name: jkbk
 
 services:
   web:
     # Built from this commit by CI. On a server that pulls from GitHub's registry use: ghcr.io/asheryram/jj-web
-    image: local/jkbk-datahub-web
+    image: local/jkbk-web
     build_context: ./frontend
     dockerfile: frontend/Dockerfile.infra
     port: 80
@@ -17,13 +17,13 @@ services:
 
   api:
     # On a server that pulls from GitHub's registry use: ghcr.io/asheryram/jj-api
-    image: local/jkbk-datahub-api
+    image: local/jkbk-api
     build_context: ./backend
     dockerfile: backend/Dockerfile.infra
     port: 3001
     health_path: /api/health/ping       # liveness only: no database round trip
 
-    # Set per environment in the console (Variables → jkbk-datahub). The two URLs below arrive by themselves once the
+    # Set per environment in the console (Variables → jkbk). The two URLs below arrive by themselves once the
     # databases are created, so the deploy waits (blocked, with the reason shown) until you press "Create database".
     required_env:
       - DATABASE_URL
