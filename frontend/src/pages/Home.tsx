@@ -5,9 +5,7 @@ import { cedis } from '../lib/format'
 import Catalogue from '../components/Catalogue'
 import { Badge, Button, Card, cn } from '../components/ui'
 import {
-  CertificateIcon,
   CheckIcon,
-  ShieldIcon,
   TrendUpIcon,
   UsersIcon,
   WalletIcon,
@@ -58,29 +56,14 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
           <div className="flex flex-wrap items-end justify-between gap-5">
             <div className="max-w-xl">
-              <Badge tone="onBrand">
-                MTN · Telecel · AirtelTigo
-              </Badge>
-              <h1 className="mt-3 text-2xl leading-tight font-extrabold tracking-tight text-white sm:text-3xl">
-                Data, airtime and result checkers in about ten seconds.
+              <h1 className="text-2xl leading-tight font-extrabold tracking-tight text-white sm:text-3xl">
+                Data, airtime and result checkers, paid by Mobile Money.
               </h1>
               <p className="mt-2 text-brand-50/90">
                 Pick a bundle, enter the number, pay with Mobile Money.{' '}
                 <strong className="font-semibold text-white">No account needed.</strong>
               </p>
             </div>
-            <dl className="flex gap-6">
-              {[
-                ['12,400+', 'orders delivered'],
-                ['340+', 'active agents'],
-                ['~9s', 'average delivery'],
-              ].map(([value, label]) => (
-                <div key={label}>
-                  <dt className="text-lg font-bold text-white sm:text-xl">{value}</dt>
-                  <dd className="mt-0.5 text-xs text-brand-100/80">{label}</dd>
-                </div>
-              ))}
-            </dl>
           </div>
         </div>
       </section>
@@ -92,31 +75,30 @@ export default function Home() {
 
       {/* ── Reassurance, once they have seen prices. ── */}
       <section className="mx-auto max-w-6xl px-4 pb-10">
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Card className="flex items-start gap-3 p-4">
-            <ShieldIcon className="size-5 shrink-0 text-brand-600 dark:text-brand-300" />
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              <strong className="block font-semibold text-slate-900 dark:text-slate-50">Payments via Paystack</strong>
+        <dl className="grid gap-x-8 gap-y-5 border-t border-slate-200 dark:border-slate-700 pt-6 sm:grid-cols-3">
+          <div>
+            <dt className="font-semibold text-slate-900 dark:text-slate-50">Payments via Paystack</dt>
+            <dd className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
               MTN MoMo, Telecel Cash, AirtelTigo Money and cards. We never see your card details.
-            </p>
-          </Card>
-          <Card className="flex items-start gap-3 p-4">
-            <WalletIcon className="size-5 shrink-0 text-brand-600 dark:text-brand-300" />
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              <strong className="block font-semibold text-slate-900 dark:text-slate-50">Failed order? Refunded.</strong>
-              If a bundle does not reach the number, your money comes straight back.
-            </p>
-          </Card>
-          <Card className="flex items-start gap-3 p-4">
-            <CertificateIcon className="size-5 shrink-0 text-brand-600 dark:text-brand-300" />
-            <p className="text-sm text-slate-600 dark:text-slate-300">
-              <strong className="block font-semibold text-slate-900 dark:text-slate-50">
-                Checkers: independent reseller
-              </strong>
-              We sell genuine vouchers but are not affiliated with WAEC.
-            </p>
-          </Card>
-        </div>
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-slate-900 dark:text-slate-50">If an order fails, you get a refund</dt>
+            <dd className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+              A person checks each refund, so it usually takes a few hours.{' '}
+              <Link to={shopPath('/refunds')} className="font-semibold text-brand-700 dark:text-brand-300 hover:underline">
+                Read the refund policy
+              </Link>
+              .
+            </dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-slate-900 dark:text-slate-50">Independent reseller</dt>
+            <dd className="mt-1 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+              We are not affiliated with WAEC, MTN, Telecel or AirtelTigo.
+            </dd>
+          </div>
+        </dl>
       </section>
 
       {/* ── How it works ── */}
@@ -130,7 +112,7 @@ export default function Home() {
               ['Pick the bundle', 'Prices are shown up front, before anything else.'],
               ['Enter the number', 'We detect the network and confirm it back to you.'],
               ['Pay', 'Mobile Money prompt on your phone. Handled by Paystack.'],
-              ['Delivered', 'On screen and by SMS, usually under ten seconds.'],
+              ['Delivered', 'On screen and by SMS, as soon as the network confirms it.'],
             ].map(([title, detail], index) => (
               <li key={title}>
                 <span className="flex size-9 items-center justify-center rounded-full bg-brand-700 text-sm font-bold text-white">

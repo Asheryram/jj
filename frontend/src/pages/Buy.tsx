@@ -572,6 +572,21 @@ export default function Buy() {
             <Button block variant="ghost" disabled={placing} onClick={() => setStep(1)}>
               Change number
             </Button>
+            <p className="pt-1 text-center text-xs text-slate-500 dark:text-slate-400">
+              By paying you agree to our{' '}
+              <Link to={shopPath('/terms')} target="_blank" className="font-semibold underline">
+                Terms
+              </Link>
+              ,{' '}
+              <Link to={shopPath('/refunds')} target="_blank" className="font-semibold underline">
+                Refund Policy
+              </Link>{' '}
+              and{' '}
+              <Link to={shopPath('/privacy')} target="_blank" className="font-semibold underline">
+                Privacy Policy
+              </Link>
+              .
+            </p>
           </div>
 
           {/* Transparency for people inside the chain; customers never see this. */}

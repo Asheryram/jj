@@ -13,6 +13,7 @@ import { AlertIcon, SearchIcon } from './components/icons'
 
 import Home from './pages/Home'
 import Info from './pages/Info'
+import { Contact, CookiePolicy, DataRequest, Privacy, RefundPolicy, Terms } from './pages/Legal'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import Shop from './pages/Shop'
@@ -236,6 +237,12 @@ export default function App() {
             <Route path="/shop" element={<Shop />} />
             <Route path="/checkers" element={<Checkers />} />
             <Route path="/track" element={<Track />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/refunds" element={<RefundPolicy />} />
+            <Route path="/cookies" element={<CookiePolicy />} />
+            <Route path="/data-request" element={<DataRequest />} />
+            <Route path="/contact" element={<Contact />} />
             {/* Where Paystack sends the customer back to. Public: a guest paying
                 with Mobile Money has no account, and the reference in the URL is
                 checked with Paystack rather than believed. */}
@@ -261,6 +268,12 @@ export default function App() {
               <Route path="shop" element={<Shop />} />
               <Route path="checkers" element={<Checkers />} />
               <Route path="track" element={<Track />} />
+            <Route path="privacy" element={<Privacy />} />
+            <Route path="terms" element={<Terms />} />
+            <Route path="refunds" element={<RefundPolicy />} />
+            <Route path="cookies" element={<CookiePolicy />} />
+            <Route path="data-request" element={<DataRequest />} />
+            <Route path="contact" element={<Contact />} />
               <Route path="buy/:productId" element={<Buy />} />
               {/* Where Paystack sends a buyer back to, when they paid from
                   inside this shop, the backend builds this URL itself from

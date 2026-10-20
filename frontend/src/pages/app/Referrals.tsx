@@ -68,11 +68,11 @@ export default function Referrals() {
     : subAgents
 
   const shareSell = encodeURIComponent(
-    `Buy data, airtime and result checkers from me, instant delivery: ${sellLink}`,
+    `Buy data, airtime and result checkers from me, quick delivery: ${sellLink}`,
   )
   const shareDomain = domainUrl
     ? encodeURIComponent(
-        `Buy data, airtime and result checkers from me, instant delivery: ${domainUrl}`,
+        `Buy data, airtime and result checkers from me, quick delivery: ${domainUrl}`,
       )
     : ''
   const shareRefer = encodeURIComponent(

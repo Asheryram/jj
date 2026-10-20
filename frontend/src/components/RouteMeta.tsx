@@ -27,11 +27,19 @@ const SITE_ORIGIN = import.meta.env.VITE_SITE_ORIGIN ?? 'https://app.jkbkdatahub
 
 const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
   {
+    match: (p) => /^\/(s\/[^/]+\/)?(privacy|terms|refunds|cookies|data-request|contact)$/.test(p),
+    meta: {
+      title: `Legal and Contact | ${SITE}`,
+      description:
+        'Privacy Policy, Terms of Service, Refund Policy, cookies and storage, data requests and contact details for JKBK DATA HUB.',
+    },
+  },
+  {
     match: (p) => p === '/',
     meta: {
       title: `Buy Data Bundles, Airtime & Result Checkers in Ghana | ${SITE}`,
       description:
-        'Buy MTN, Telecel and AirtelTigo data bundles, airtime, voice and SMS bundles, MTN AFA registration and BECE/WASSCE result checkers. Pay with Mobile Money, no account needed, delivered in seconds.',
+        'Buy MTN, Telecel and AirtelTigo data bundles, airtime, voice and SMS bundles, MTN AFA registration and BECE/WASSCE result checkers. Pay with Mobile Money, no account needed, delivered quickly.',
     },
   },
   {
@@ -47,7 +55,7 @@ const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
     meta: {
       title: `BECE & WASSCE Result Checker Vouchers | ${SITE}`,
       description:
-        'Buy a BECE or WASSCE result checker voucher and get the serial number and PIN instantly on screen and by SMS. Independent reseller, not affiliated with WAEC.',
+        'Buy a BECE or WASSCE result checker voucher and get the serial number and PIN on screen and by SMS. Independent reseller, not affiliated with WAEC.',
     },
   },
   {
@@ -87,7 +95,7 @@ const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
     meta: {
       title: `Buy From an Authorised Agent | ${SITE}`,
       description:
-        'Buy data bundles, airtime and result checkers directly from an authorised JKBK DATA HUB agent. Pay with Mobile Money, delivered in seconds.',
+        'Buy data bundles, airtime and result checkers directly from an authorised JKBK DATA HUB agent. Pay with Mobile Money, delivered quickly.',
     },
   },
   {
@@ -127,7 +135,7 @@ const ROUTES: { match: (path: string) => boolean; meta: Meta }[] = [
 const FALLBACK: Meta = {
   title: `${SITE}, Data Bundles, Airtime & Result Checkers`,
   description:
-    'Buy data bundles, airtime and BECE/WASSCE result checkers in Ghana. Paid by Mobile Money, delivered in seconds.',
+    'Buy data bundles, airtime and BECE/WASSCE result checkers in Ghana. Paid by Mobile Money, delivered quickly.',
 }
 
 function setMetaTag(selector: string, attr: 'name' | 'property', key: string, content: string) {
