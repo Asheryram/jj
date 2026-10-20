@@ -29,4 +29,11 @@ if { [ -z "${PUBLIC_APP_URL:-}" ] || [ -z "${CORS_ORIGINS:-}" ]; } &&
   export CORS_ORIGINS="${CORS_ORIGINS:-$app_url}"
 fi
 
+# Prisma reads a direct (un-pooled) connection for migrations from DIRECT_URL. The platform's own Postgres has no pooler in
+# front of it, so the direct URL is simply DATABASE_URL. An explicit DIRECT_URL (for example a managed database behind a
+# pooler) still wins.
+if [ -z "${DIRECT_URL:-}" ] && [ -n "${DATABASE_URL:-}" ]; then
+  export DIRECT_URL="$DATABASE_URL"
+fi
+
 exec "$@"

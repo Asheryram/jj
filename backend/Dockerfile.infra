@@ -31,5 +31,9 @@ COPY scripts/infra-entrypoint.sh ./scripts/infra-entrypoint.sh
 RUN chmod 755 ./scripts/infra-entrypoint.sh
 USER node
 EXPOSE 3001
+# Ready = the app answers. The start period covers the Prisma migrations the entrypoint runs before it listens,
+# so the platform only calls a deploy live once the API really serves (liveness only: no database round trip).
+HEALTHCHECK --interval=10s --timeout=3s --start-period=90s --retries=6 \
+  CMD wget -qO- http://127.0.0.1:3001/api/health/ping >/dev/null || exit 1
 ENTRYPOINT ["./scripts/infra-entrypoint.sh"]
 CMD ["npm", "run", "start:prod"]
