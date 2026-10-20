@@ -3,7 +3,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
-RUN npm run build \
+# VITE_API_URL is fixed into the bundle at build time, so build with a placeholder; the container swaps in the real
+# address (the VITE_API_URL variable from the platform) when it starts. One image then serves every environment.
+RUN VITE_API_URL=__INFRA_VITE_API_URL__ npm run build \
   && sed -i 's#<head>#<head><script src="/env.js"></script>#' dist/index.html
 
 FROM nginx:1.27-alpine
