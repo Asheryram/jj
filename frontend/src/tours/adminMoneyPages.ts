@@ -46,7 +46,7 @@ export const adminMoneyPageTours: Tour[] = [
       {
         target: 'float-log-topup',
         title: 'Log every top-up',
-        body: 'Each time you send money to a supplier, press **Log a top-up** and pick where it came from. Choose **Outside the business** if it came from your own pocket. Choose **Paystack, paying back** if it came from the business MoMo linked to Paystack, as that repays the bundles the float already bought.',
+        body: 'Each time you send money to a supplier, press **Log a top-up** and pick where it came from. Choose **Outside the business** if it came from your own pocket. Choose **Paystack, paying {supplier} back** if it came from the business MoMo linked to Paystack, as that repays the bundles the float already bought.',
       },
       {
         target: 'finance-where-money-goes',

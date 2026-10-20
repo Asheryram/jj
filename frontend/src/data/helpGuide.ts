@@ -38,7 +38,7 @@ export const adminGuide: GuideGroup[] = [
         why: 'Three things have to be in place before a customer can actually buy something: money in your float, prices on your bundles, and somewhere for your own earnings to go.',
         steps: [
           'Open `Overview`, it shows a **"Get set up"** checklist until all three steps below are done.',
-          'Log your first float top-up. Scroll to the **Provider float** card and click **"Log a top-up."** Every order spends from this prepaid DataHub balance, without it, a paid order can still fail to deliver.',
+          'Log your first float top-up. Open `Finance`, pick the **DataHub GH** or **GMPL** tab on the **Provider float** card, and click **"Log a top-up."** Every order spends from this prepaid DataHub balance, without it, a paid order can still fail to deliver.',
           'Price your catalogue. Go to `Cost prices` and set what agents and walk-up customers pay, see "Price my catalogue" below. Nothing sells until this is done.',
           'Set your own payout number. Go to `Settings` → **Your details** and enter the Mobile Money number your own earnings and any manual payouts should go to.',
         ],
@@ -52,7 +52,7 @@ export const adminGuide: GuideGroup[] = [
           'Pick a category along the top (Data, Airtime, and so on).',
           'For the whole category at once, click **"Set markup,"** enter what agents pay over cost and what walk-up customers pay over cost (it starts at 15% / 25%), and click **"Apply to {N}."** The markup is remembered, so a future cost change moves prices with it.',
           'For one product, click **"Edit"** on its row, type exact GHS prices for "Your price to agents" and "Your own walk-up price," and click **"Save prices."** Both must clear what you pay the provider.',
-          'Click the **"Off sale"** button on any row to flip it to **"On sale"** once its price is set.',
+          'Click the **"Off sale"** button on any row to flip it to **"On sale"** once its price is set. Products priced with **"Set markup"** go on sale straight away, so this is only needed for ones you priced one by one or switched off.',
         ],
         notes: [
           {
@@ -90,9 +90,9 @@ export const adminGuide: GuideGroup[] = [
         why: "A plain \"Completed\" or \"Failed\" doesn't say everything worth knowing about an order, these small badges do.",
         steps: [
           'A **"DataHub manual"** badge, with a number and a copy icon, means DataHub routed this one to a person on their side to clear by hand, not their automated system, it can take much longer to settle. The number is their own ticket ID, for their support if it needs chasing.',
-          'A **"Code"** badge means their automated system handled it, nothing to chase.',
+          'A **"Code"** badge means an automated system handled it (DataHub\'s automation, or any GMPL order, which has no manual queue), nothing to chase.',
           'A **"Resolved by admin"** badge means someone here used "Resolve by hand" on `Needs attention`, DataHub\'s own webhook or polling never actually confirmed this one.',
-          'A **"Refund pending"** or **"Refund rejected"** badge on a failed order tells you where its refund stands without opening `Refunds` first, "Refunded" (a different badge) means it\'s already paid.',
+          'A **"Never paid"** badge on a failed order means the customer was never charged, so there is nothing to refund, and an **"Unresolved"** badge means the supplier never answered at all and it waits for a person. A **"Refund pending"** or **"Refund rejected"** badge on a failed order tells you where its refund stands without opening `Refunds` first, "Refunded" (a different badge) means it\'s already paid.',
         ],
       },
       {
@@ -100,9 +100,9 @@ export const adminGuide: GuideGroup[] = [
         title: 'Sort out a stuck or disputed order',
         why: "The reconciler checks and settles almost everything on its own. This is where the rest (the handful it refuses to guess at) waits for you.",
         steps: [
-          'Go to `Needs attention`, the number in its badge tells you how many are waiting.',
-          'If it’s under "Flagged for review", this order was settled one way, then a later signal disagreed. Check Paystack’s or DataHub’s own dashboard (or the customer directly), then click **"Acknowledge"** and say what you checked.',
-          'If it’s under "Stuck orders", click **"Resolve by hand,"** choose **"Actually delivered"** or **"Actually failed,"** explain how you know, and click **"Confirm."** This runs the real settlement path: the agent is credited, or the refund is queued, exactly as if DataHub had reported it themselves.',
+          'Go to `Needs attention`, the number in its badge tells you how many are waiting. Press **"Check now"** at the top first to ask DataHub and GMPL for an answer straight away, since many clear themselves.',
+          'If it’s under "Flagged for review", this order was settled one way, then a later signal disagreed. Check Paystack’s or DataHub’s own dashboard (or the customer directly), then click **"Acknowledge"** and say what you checked (at least five characters).',
+          'If it’s under "Stuck orders", click **"Resolve by hand,"** choose **"Mark as delivered"** or **"Mark as failed,"** explain how you know (at least five characters), and click **"Confirm."** This runs the real settlement path: the agent is credited, or the refund is queued, exactly as if DataHub had reported it themselves.',
         ],
         notes: [
           {
@@ -119,8 +119,8 @@ export const adminGuide: GuideGroup[] = [
         steps: [
           'Go to `Refunds`, the queue is sorted oldest first.',
           'To pay it, click **"Refund."** A wallet refund lands instantly; a Mobile Money refund opens a modal to confirm the network and click **"Send {amount}."**',
-          'To turn it down, click **"Refuse,"** and give a reason of at least five characters. This is kept on the record.',
-          'If a Paystack transfer keeps failing, some accounts refuse third-party payouts outright. Once it’s failed, click **"Paid another way?"** and record how you sent it by hand, so the books still match what actually happened.',
+          'To turn it down, click **"Refuse,"** and give a reason of at least five characters. This is kept on the record. If the failure itself was wrong (a mapping since fixed, stock back), click **"Reorder instead?"** to try delivering the bundle again, which cancels the refund if it delivers.',
+          'On a Starter Paystack account nothing is sent automatically: clicking **"Refund"** on a Mobile Money refund parks the row under **Refunded** marked **"send by hand."** A transfer that fails, shows "needs OTP" or gets "no answer" ends up in the same place. Send the money yourself first, then click **"Paid another way?"** and record how you sent it by hand, so the books still match what actually happened.',
         ],
         notes: [
           {
@@ -133,13 +133,13 @@ export const adminGuide: GuideGroup[] = [
       {
         id: 'withdrawal',
         title: 'Approve or reject a withdrawal',
-        why: "An agent's balance is held the moment they ask, approving here is what actually sends the Mobile Money.",
+        why: "An agent's balance is held the moment they ask, approving here accepts the request, and the Mobile Money goes out through Paystack on a business account or by your own hand on a Starter one.",
         steps: [
           'Go to `Withdrawals`, filter "Pending" to see what’s waiting on you.',
-          'Click **"Review"** on a request. The number and amount to send are shown as copyable fields.',
-          'Click **"Approve."** Your Paystack balance is checked first, and the transfer is handed to Paystack automatically. If it’s ever refused or reversed, the amount goes straight back to the agent.',
+          'Check the Mobile Money number, network and amount on the request row (the transfer fee held shows under the amount and is not sent). There is no Review button, each pending row has **"Approve"** and **"Reject"** directly.',
+          'Click **"Approve."** The banner at the top of the page tells you which case you are in. If Settings says this is a live Paystack business account, your Paystack balance is checked first, the transfer is handed to Paystack automatically, and if it is refused or reversed the amount goes straight back to the agent. On a Starter account (the "You send the money by hand" banner) approving only accepts the request and nothing is sent. You cannot approve a payout to your own agent profile, a superadmin has to.',
           'Click **"Reject"** instead if it shouldn’t be paid, the held amount returns to the agent’s balance immediately.',
-          'If Paystack keeps refusing the transfer outright (a Starter account that can’t send payouts at all), once it’s failed, click **"Paid another way?"** and record how and where you sent it by hand.',
+          'On a Starter account, send the amount (not the fee) to the number yourself after approving, then click **"Paid another way?"** on the row, say how and where you sent it, and press **"Mark as sent."** Changed your mind before sending? **"Not sending it?"** gives the agent their money back. If you paid from the business Mobile Money linked to Paystack, also click **"Reimbursed"** under "Paid out of pocket, not yet reimbursed."',
         ],
         notes: [
           {
@@ -156,7 +156,7 @@ export const adminGuide: GuideGroup[] = [
         steps: [
           'Go to `Catalogue accuracy`.',
           'Read the table, one row per product, biggest loss first, going only by each product’s most recent sale.',
-          'Fix it, go to `Cost prices` and update that product’s cost so future sales stop losing the difference.',
+          'Fix it, go to `Cost prices`, click **"Sync"** under **"Supplier catalogue"** to pull the real supplier cost (costs cannot be typed by hand), then reprice that product with **"Edit"** or **"Set markup"** so future sales stop losing the difference.',
         ],
       },
       {
@@ -165,8 +165,8 @@ export const adminGuide: GuideGroup[] = [
         why: "A product priced above what the float can currently pay for is one whose next sale is likely to fail after the customer has already paid, worth catching before that happens, not after.",
         steps: [
           'Go to `Float risk`.',
-          'Read **"Priced above the float"**, on-sale products that currently cost more than the float can cover, worst first.',
-          'Click **"Take it off sale"** on one you want to stop selling until the float catches up.',
+          'Read **"Priced above the float"**, on-sale products that cost more than what each supplier float should hold going by your logged top-ups and costs (not the live reading, and only once you have logged a top-up for that supplier), costliest first.',
+          'Click **"Turn off"** on one you want to stop selling until the float catches up.',
           'Check **"Currently inactive"** below it for anything off sale that might be safe to turn back on, click **"Turn on"** once you\'re satisfied it\'s priced above cost.',
         ],
         notes: [
@@ -182,8 +182,8 @@ export const adminGuide: GuideGroup[] = [
         title: 'Top up and track my DataHub float',
         why: "DataHub's balance is prepaid, an empty float doesn't slow orders down, it fails them after the customer has already paid.",
         steps: [
-          'Go to `Overview` and find the **Provider float** card.',
-          'Top up your DataHub account directly with them first (this platform never moves that money for you), then click **"Log a top-up"** here and record the amount so your figures stay honest.',
+          'Go to `Finance` and find the **Provider float** card, then pick the **DataHub GH** or **GMPL** tab for the supplier you topped up.',
+          'Top up your DataHub account directly with them first (this platform never moves that money for you), then click **"Log a top-up"** here, record the amount, and choose where it came from: **"Outside the business"** for your own money, or **"Paystack, paying {supplier} back"** if it came from the business Mobile Money linked to Paystack (the only kind that clears "Already spent on bundles").',
           'Log money you take back out the same way, with **"Log money taken out."**',
         ],
         notes: [
@@ -198,26 +198,26 @@ export const adminGuide: GuideGroup[] = [
         id: 'check-books',
         title: 'Check what I can actually spend',
         steps: [
-          'Go to `Overview` and find **"Money held and money owed."**',
-          'Read **"Actually free to spend."** It’s what should be at Paystack, minus everything already owed to an agent, a customer, or the float, the same figure "Your profit" shows on the Orders page.',
-          'See the real breakdown lower on the same page under **"Where the money goes"**, switch between 7 days, 30 days and all time.',
+          'Go to `Finance` (Overview only shows a short **"Money held and money owed"** card with the headline figure) and find **"Money held and money owed."**',
+          'Read **"Actually free to spend."** It’s what should be at Paystack, minus everything already owed to an agent, a customer, or the float, the same figure the **"Free to spend now"** tile shows on `All orders`. It is cash, not profit, so it can differ from **"Profit earned"**.',
+          'See the real breakdown lower on `Finance` under **"Where the money goes"**, switch between 7 days, 30 days and all time.',
         ],
       },
       {
         id: 'unapproved-numbers',
         title: 'Get an MTN number approved for delivery',
-        why: "MTN bundles can't reach a number DataHub hasn't approved yet, each one here is a real sale that was turned away without being charged.",
+        why: "MTN bundles can't reach a number DataHub hasn't approved yet, most of these are real sales turned away without being charged, and any paid for before the check existed are held until the number is approved.",
         steps: [
           'Go to `Number approvals`, the page itself is titled "Approvals."',
-          'Try automatically first, click **"Try sending automatically."** If it works, a toast confirms how many were sent.',
-          'Otherwise, copy and enter them by hand, click **"Copy all {N},"** paste the list into your DataHub dashboard, add them there. A single number changed since the last batch? Click the small copy icon on just that row instead of the whole list.',
+          'Try automatically first, click **"Try sending automatically."** If it works, a toast confirms how many were sent. GMPL numbers are submitted for real this way, but DataHub numbers usually still need the copy step below, as the page says DataHub\'s own automatic submission is failing on their side.',
+          'Otherwise, copy and enter them by hand, click **"Copy all {N} DataHub numbers,"** paste the list into your DataHub dashboard, add them there. A single number changed since the last batch? Click the small copy icon on just that row instead of the whole list.',
           'Click **"Re-check"** once you’re done, anything DataHub has approved releases its held order for delivery automatically.',
         ],
         notes: [
           {
             tone: 'info',
-            title: 'The "Copied" column',
-            body: 'Every number remembers when it was last copied, showing "Not yet" until then, and how long ago after. That\'s the checkpoint: a number that turns up after your last batch is easy to spot, instead of relying on memory for who\'s already been sent.',
+            title: 'The "Copied" badge',
+            body: 'Every number remembers when it was last copied. In the DataHub column, a number you have copied that is still waiting shows a "Copied 3 hours ago" badge, while one you have not copied yet shows "Pending" with a small copy icon beside the number. That\'s the checkpoint: a number that turns up after your last batch is easy to spot, instead of relying on memory for who\'s already been sent.',
           },
         ],
       },
@@ -241,7 +241,7 @@ export const adminGuide: GuideGroup[] = [
         title: 'Suspend or reactivate an account',
         steps: [
           'Go to `Users` and find the account, or search by name, phone or email.',
-          'Click **"Suspend"** (or "Reactivate") and confirm in the dialog.',
+          'Click **"Suspend"** (or **"Reactivate"**) and confirm in the dialog. Admin accounts show **"Manage in Platform team"** instead (superadmin only), suspend or **"Restore"** them there, and you cannot suspend yourself. Someone still waiting for approval shows "Decide above", use Approve or Refuse.',
         ],
         notes: [
           {
@@ -260,11 +260,30 @@ export const adminGuide: GuideGroup[] = [
         ],
       },
       {
+        id: 'feedback-admin',
+        title: 'Read feedback from agents',
+        steps: [
+          'Go to `Feedback`, the nav badge counts open items.',
+          'Filter by **"Open,"** **"Reviewed,"** **"Resolved"** or **"All,"** and by kind (Suggestions or Issues).',
+          'Add a note on what is being done, then click **"Mark reviewed"** or **"Mark resolved."** The platform owner only sees what an admin escalated to them.',
+        ],
+      },
+      {
+        id: 'announcements-admin',
+        title: 'Send an announcement to agents and admins',
+        why: 'A one-way notice for scheduled maintenance or something new, emailed and shown in the app.',
+        steps: [
+          'Go to `Announcements` and click **"New announcement."**',
+          'Fill in **"Title"** and **"Message,"** then pick who gets it under **"Send to"**: everyone, agents, admins, or **"Choose people."**',
+          'Click **"Send announcement."** Past ones are listed under **"Sent."** A plain admin also has a **"Received"** button for notices sent to them.',
+        ],
+      },
+      {
         id: 'add-admin',
         title: 'Add someone to the platform team',
         steps: [
-          'Go to `Platform team`.',
-          'Click **"Add an admin"** and fill in their name, email and phone.',
+          'Go to `Platform team`. Only the platform owner (superadmin) sees it, a plain admin does not have this page.',
+          'Click **"Add an admin"**, fill in their name, the email they will sign in with and their phone number (10 digits), then click **"Create and get link."**',
           'Pass on the one-time link. It’s usually emailed to them automatically; if not, copy it and send it yourself, WhatsApp, a message, however you’d normally reach them. It works once and expires in 48 hours.',
         ],
       },
@@ -278,7 +297,7 @@ export const adminGuide: GuideGroup[] = [
         title: "Review an agent's shop look",
         why: 'Every agent shop takes payment details, so a shop badged like a bank or a mobile network is a fraud risk you carry, not them.',
         steps: [
-          'Go to `Branding` → **"Agent requests."**',
+          'Go to `Agent requests` in the Catalogue section of the menu (a separate page from `Branding`), and use the **"Waiting"** tab.',
           'Check the proposed name and logo. Nothing here is live yet.',
           'Click **"Approve"** if it’s fine, or **"Refuse"** with a reason they can act on, they see it directly.',
         ],
@@ -287,19 +306,29 @@ export const adminGuide: GuideGroup[] = [
         id: 'domain',
         title: "Approve an agent's own domain",
         steps: [
-          'Go to `Custom domains`.',
-          'Satisfy yourself they actually own it, then click **"Approve."** This is a trust decision, not a taste one.',
-          'Click **"Mark as live"** once you can see the domain actually pointed here, that can take a while after the agent updates their DNS.',
-          'Use **"Suspend"** to take a live one offline temporarily (one click brings it back), or **"Revoke"** to withdraw approval entirely, with a reason.',
+          'Go to `Custom domains` (platform owner only, a plain admin does not see it). Agents\' requests sit under **"Waiting"**.',
+          'Satisfy yourself they actually own it, then click **"Approve."** This is a trust decision, not a taste one. To turn one down click **"Refuse"** and give a reason (at least 5 characters), the agent is shown it. **"Approve after all"** reverses a refusal.',
+          'Usually nothing more to do: an approved domain is checked automatically every 6 hours and goes live by itself once it points here. Click **"Mark as live"** only to skip that wait after you have confirmed it yourself.',
+          'Use **"Suspend"** to take a live one offline temporarily (**"Mark as live"** brings it straight back), or **"Revoke"** to withdraw approval entirely, with a reason. The **"Domain pricing"** card at the top is what agents pay for a subdomain or custom domain, monthly and yearly, you set the price and the platform owner sets the cost it must clear.',
         ],
       },
       {
         id: 'my-branding',
         title: "Set the platform's own name and colour",
         steps: [
-          'Go to `Branding` → **"Your platform"** at the top.',
+          'Go to `Branding`, the **"Your platform"** card.',
           'Set a platform name, logo and colour the same way an agent would for their own shop, this is what shows everywhere except inside an agent’s own approved shop.',
-          'Click **"Save platform branding."** It applies immediately, reload the page to see it everywhere.',
+          'Click **"Save platform branding."** It applies immediately, reload the page to see it everywhere. A "Use a different colour in dark mode" option and the catalogue tile look are on the same card.',
+        ],
+      },
+      {
+        id: 'subscriptions-admin',
+        title: 'Track what the platform pays for',
+        why: 'Hosting, domain, Paystack and DataHub renewals, so nothing lapses without warning.',
+        steps: [
+          'Go to `Subscriptions` (Money section). Each service shows when it expires and a badge for how close that is.',
+          'The platform owner clicks **"Add a service"** to track a new one with its renewal date, and **"Renewed"** to roll a recurring one forward, or **"Edit"** or **"Remove."**',
+          'A plain admin sees what is coming up but cannot change it.',
         ],
       },
     ],
@@ -315,7 +344,7 @@ export const adminGuide: GuideGroup[] = [
           '**Paystack’s fee**, the % shown to every buyer at checkout as a processing fee, on top of the price.',
           '**Float warnings**, set "Warn me at" and "Urgent at" GHS amounts; you’re emailed once each time the float crosses one, not on every order.',
           '**Smallest withdrawal**, the least an agent can ask to withdraw at once.',
-          '**Your details**, the number your own withdrawals are paid to. Each field saves as soon as you leave it.',
+          '**Your details**, your Mobile Money number, the one your own earnings are paid to (10 digits, like 0209876543). Click **"Save"** beside it. The other fields on this page save as soon as you leave them.',
         ],
         notes: [
           {
@@ -331,7 +360,7 @@ export const adminGuide: GuideGroup[] = [
         why: 'Lets every agent join one shared WhatsApp channel from inside the app, without you sending each one the link by hand.',
         steps: [
           'Go to `Settings` and find **"WhatsApp channel."**',
-          'Paste your channel\'s invite link into **"Channel invite link"** and save.',
+          'Paste your channel\'s invite link into **"Channel invite link"** and click out of the box to save. Leave it blank to stop offering one.',
           'Every agent gets a one-time popup the first time it\'s set (or whenever you change it), plus a standing card on their Dashboard to join whenever they like.',
         ],
       },
@@ -341,8 +370,8 @@ export const adminGuide: GuideGroup[] = [
         why: "For something everyone needs to know right now (a network running slow, planned downtime) without messaging each person.",
         steps: [
           'Go to `Settings` and find **"Site-wide notice."**',
-          'Type the message into **"Banner message"** and save, it appears at the top of every page, for every agent, customer and guest, immediately.',
-          'Clear the field and save again to take it down. It never expires on its own.',
+          'Type the message into **"Notice message"** (up to 500 characters) and click out of the box to save, it is live immediately. Agents and admins see it as a banner at the top of every page, guests on the public storefront see it once as a popup.',
+          'Clear the field and click out of it to take it down. It never expires on its own.',
         ],
       },
       {
@@ -350,9 +379,17 @@ export const adminGuide: GuideGroup[] = [
         title: 'Ask the assistant instead of hunting for a page',
         why: 'Plain answers about your own float, refund queue, or stuck orders, from your real numbers, faster than opening each page yourself.',
         steps: [
-          'Go to ` Assistant `.',
+          'Go to `Assistant` in the menu.',
           'Type a question, or tap one of the suggestions, "Is the float okay right now?", "Any refunds waiting on me?"',
           'It can only look things up, never act, it will always say where to click yourself to actually approve, resolve, or change something.',
+        ],
+      },
+      {
+        id: 'analytics-admin',
+        title: 'See how the business is doing in Analytics',
+        steps: [
+          'Go to `Analytics`. It reads a separate reporting store that is computed on a schedule, so it is not a live view like the other pages.',
+          'Use the tabs: **"Overview,"** **"Money,"** **"Sales,"** **"Operations,"** **"Agents"** and **"Cash."** Each answers one question, for example Cash answers whether you can keep selling tomorrow.',
         ],
       },
     ],
@@ -370,7 +407,7 @@ export const agentGuide: GuideGroup[] = [
         steps: [
           'Go to the register page (`/register`), or use the link an agent invited you with, it fills in their referral code for you.',
           'Fill in your full name, phone number, email and a password (at least 8 characters). Your phone number is also your login.',
-          'Accept the terms and click **"Create account."**',
+          'Tick the box confirming you are 18 or over and accept the Terms of Service and Privacy Policy (you can’t continue without it), then click **"Create account."**',
           'Wait for approval. You’ll land on a status page saying your application is being reviewed, you’ll get an email the moment you’re approved, and your shop link works from then on.',
         ],
         notes: [
@@ -435,8 +472,8 @@ export const agentGuide: GuideGroup[] = [
         title: "Customise my shop's look",
         steps: [
           'Go to `Shop look`.',
-          'Set your shop name and logo (PNG, JPEG or WebP, under 100KB), and choose a colour, pick it visually or type the hex code. Turn on a separate dark-mode colour if you want one.',
-          'Click **"Send for approval."** Your shop keeps its current look until it’s approved, sending again replaces whatever was waiting.',
+          'Set your shop name (up to 40 characters) and logo (PNG, JPEG or WebP, under 100KB).',
+          'Click **"Send for approval."** Your shop keeps its current name and logo until they’re approved, sending again replaces whatever was waiting. Colour is separate and needs no approval: pick one from the gallery, or choose **"Or pick your own colour"** and type a hex code (with an optional separate dark-mode colour), then click **"Apply colour"** and it goes live straight away. You can also choose a product tile style and click **"Apply this style"**, also with no review.',
         ],
         notes: [
           {
@@ -451,9 +488,9 @@ export const agentGuide: GuideGroup[] = [
         title: 'Request my own domain',
         why: 'Point a domain you already own at your shop instead of sharing your /s/ link.',
         steps: [
-          'Go to `Shop look` and scroll to the bottom, to **"Your own domain."**',
-          'Type your domain, just the domain itself, like `yourshop.com`, no `https://` or `www`.',
-          'Click **"Send for approval."** Once approved, point your domain’s DNS at the platform, it goes live as soon as that’s confirmed, which can take a little while.',
+          'Go to `Shop look` and scroll to the bottom, to **"Your own web address."**',
+          'If you see a choice, pick **"My own domain"** (**"Free subdomain"** instead lets you just pick a label). Type your domain, just the domain itself, like `yourshop.com`, no `https://` or `www`, and choose **Monthly** or **Yearly** billing.',
+          'Click **"Send for approval."** Once approved, add the CNAME record shown on the page (`cname.vercel-dns.com`) at your domain’s registrar. The platform checks every 6 hours and switches it on once it points at us, no need to come back and check. The monthly or yearly price is charged from your balance once it’s live.',
           'Once it’s live, it shows as a real, clickable link on your Dashboard and under "Your own domain" on `Sell & refer`, click the small copy icon beside either to copy it instantly.',
         ],
         notes: [
@@ -474,7 +511,7 @@ export const agentGuide: GuideGroup[] = [
         title: 'See my sales and earnings',
         steps: [
           'For every order (go to `Sales`) filter by All, Completed, In progress or Failed, or search by number, reference or product.',
-          'For your money (go to `Earnings`) every credit, reversal and withdrawal is listed, oldest first, and it’s append-only: nothing here can ever be edited, only added to.',
+          'For your money (go to `Earnings`) every credit, reversal and withdrawal is listed, newest first, and it’s append-only: nothing here can ever be edited, only added to.',
         ],
       },
       {
@@ -497,14 +534,14 @@ export const agentGuide: GuideGroup[] = [
         title: 'Withdraw my earnings',
         steps: [
           'Go to `Withdraw`.',
-          'Click **"Request withdrawal,"** enter an amount (or click "Withdraw everything"), pick your Mobile Money network, and enter the number to pay it to, it doesn’t have to be the one you sign in with.',
-          'Click **"Send request."** The amount leaves your available balance right away and is held until it’s decided.',
+          'Click **"Request withdrawal,"** enter an amount (or click "Withdraw the max," which already leaves room for the fee), pick your Mobile Money network, and enter the number to pay it to, it doesn’t have to be the one you sign in with.',
+          'Click **"Send request."** The amount plus a flat GHS 1.00 sending fee leave your available balance right away and are held until it’s decided. If the request is rejected or cancelled, both come back.',
         ],
         notes: [
           {
             tone: 'info',
             title: 'What happens next',
-            body: 'James reviews and pays each request by hand, usually within 24 hours, you’ll get an SMS once it’s sent.',
+            body: 'James reviews and pays each request by hand, usually within 24 hours, you’ll get an SMS once it’s sent. The smallest withdrawal is GHS 10.00 (the admin can change it), and you can have up to 3 requests waiting at once.',
           },
         ],
       },
@@ -513,7 +550,7 @@ export const agentGuide: GuideGroup[] = [
         title: 'Cancel a withdrawal request',
         steps: [
           'Go to `Withdraw` and find the request in **"Your requests."**',
-          'Click **"Cancel"**, only shown while it’s still "Awaiting review." The amount returns to your available balance immediately.',
+          'Click **"Cancel"**, only shown while it’s still "Awaiting review." The amount and the GHS 1.00 sending fee return to your available balance immediately.',
         ],
       },
       {
@@ -521,7 +558,7 @@ export const agentGuide: GuideGroup[] = [
         title: 'Pull a sales report',
         steps: [
           'Go to `Reports`.',
-          'Pick a range, Last 7 days, Last 30 days, or Custom dates.',
+          'Pick a range from the date list (Today, Yesterday, Last 7, 30 or 90 days, This month, Last month, This year and more), or choose your own dates.',
           'Click **"Export CSV"** to download the same figures as a spreadsheet.',
         ],
       },
@@ -530,9 +567,34 @@ export const agentGuide: GuideGroup[] = [
         title: 'Ask the assistant instead of hunting for a page',
         why: 'Plain answers about your own earnings, prices, downline or domain, from your real numbers, not a generic guide.',
         steps: [
-          'Go to ` Assistant `.',
+          'Go to `Assistant` in the menu.',
           'Type a question, or tap one of the suggestions, "How much have I earned?", "What are my current prices?"',
           'It can only look things up, never act on your behalf, it will always explain how to actually do something yourself in the app.',
+        ],
+      },
+      {
+        id: 'feedback-agent',
+        title: 'Send feedback to the admin',
+        why: 'A suggestion, or something not working right, goes straight to the admin and the platform team.',
+        steps: [
+          'Go to `Feedback` in the menu.',
+          'Choose **"Suggestion"** or **"Something is wrong,"** then write what would help, or what went wrong, in the box. It needs at least five characters.',
+          'Click **"Send."** It appears under **"What you\'ve sent,"** newest first, and shows as reviewed or resolved once someone has looked at it.',
+        ],
+        notes: [
+          {
+            tone: 'info',
+            title: 'What it is for',
+            body: 'Suggestions and problems with the app itself. It is not a place for customer support questions.',
+          },
+        ],
+      },
+      {
+        id: 'announcements-agent',
+        title: 'Read announcements from the admin',
+        steps: [
+          'Go to `Announcements`. A number beside it in the menu counts what you have not read yet.',
+          'Read the notices from the admin and the platform team. They are marked as read as soon as the list is shown.',
         ],
       },
     ],
@@ -551,7 +613,7 @@ export const customerGuide: GuideGroup[] = [
           'Go to the shop (`/shop`), or straight from the homepage, which shows the same bundles.',
           'Pick a category and network (MTN, Telecel or AirtelTigo), then click any bundle, that takes you straight into checkout, no cart or basket step.',
           'Enter the recipient’s phone number (the number that receives the bundle) and click **"Continue."**',
-          'Check the number carefully on the confirm screen, choose **Mobile Money** and your network (MTN MoMo, Telecel Cash or AirtelTigo Money), then click **"Confirm and pay."**',
+          'Check the number carefully on the confirm screen. Mobile Money is the payment method, and the screen lists the bundle price, a small processing fee and the total you pay, with links to the Terms, Refund Policy and Privacy Policy, which you agree to by paying. Then click **"Confirm and pay."**',
           'Approve the payment prompt on your phone. You’re brought back automatically, and the bundle lands within seconds, on screen and by SMS.',
         ],
         notes: [
@@ -612,7 +674,7 @@ export const customerGuide: GuideGroup[] = [
         id: 'track',
         title: 'Track an order I already placed',
         steps: [
-          'Go to Track an order (`/track`), linked from the homepage.',
+          'Go to Track your order (`/track`), linked from the homepage.',
           'Enter your order reference (looks like `JDC-884120384`, from your receipt or SMS) and the phone number you paid with.',
           'Click **"Find my order"** to see its status, and your voucher details again if it was a checker.',
         ],
@@ -624,7 +686,7 @@ export const customerGuide: GuideGroup[] = [
         steps: [
           'Do nothing yet. If a bundle fails to deliver, the amount is logged as owed to you the moment it fails.',
           'It’s checked by a person before it’s sent back (usually within a few hours, not instantly) then paid to the same Mobile Money number you paid from.',
-          'Check on it any time by going to Track an order with your reference and phone number.',
+          'Check on it any time by going to Track your order with your reference and phone number.',
         ],
         notes: [
           {
@@ -639,7 +701,7 @@ export const customerGuide: GuideGroup[] = [
         title: 'Save my orders under an account',
         why: 'Entirely optional, most buyers never create one.',
         steps: [
-          'On the Track an order page, look for **"Create an account"** at the bottom, every order you place afterwards is saved automatically.',
+          'On the Track your order page, look for **"Create an account"** at the bottom, every order you place afterwards is saved automatically.',
         ],
         notes: [
           {
