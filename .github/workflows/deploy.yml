@@ -1,3 +1,16 @@
+# Drop-in CI/CD for any repo: one service or many.
+# Everything app-specific lives in .infradeploy/infra.yml — you normally never edit this file.
+#
+#   pull request opened/updated → preview  pr-<number>  (+ comment with the URL)
+#   pull request closed         → preview destroyed (containers + database)
+#   push to develop             → develop
+#   push to staging             → staging
+#   push to main                → prod   (add required reviewers on the "prod" GitHub Environment)
+#
+# One-time: DevOps registers the project (`infra project add <name from infra.yml> --repo <owner/repo>`) and
+# gives you INFRA_WEBHOOK_URL + INFRA_WEBHOOK_SECRET → add both as repo Actions secrets.
+# Replace Asheryram/infra_template_multideployment below with the infra repo, and make sure that repo
+# allows access from org repos (Settings → Actions → General → Access).
 name: deploy
 
 on:
@@ -21,6 +34,7 @@ permissions:
 
 jobs:
   plan:
+    # Fork PRs never reach the server.
     if: >-
       github.event.action != 'closed' &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -36,7 +50,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: .deploy
+          sparse-checkout: .infradeploy
+
       - id: plan
         env:
           EVENT: ${{ github.event_name }}
@@ -46,8 +61,6 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
-          set -a; . .deploy/manifest.env; set +a
-
           if [[ $EVENT == pull_request ]]; then
             env_name="pr-$PR_NUMBER"; gh_env=preview; branch=$HEAD_REF
           else
@@ -62,21 +75,13 @@ jobs:
             gh_env=$env_name
           fi
 
-          case $TYPE in
-            monolith) comps="app" ;;
-            frontend) comps="web" ;;
-            backend)  comps="api" ;;
-            split)    comps="web api" ;;
-            *) echo "::error::TYPE must be monolith|frontend|backend|split"; exit 1 ;;
-          esac
-
-          matrix=$(for c in $comps; do
-            C=${c^^}; img="${C}_IMAGE"; ctx="${C}_CONTEXT"; df="${C}_DOCKERFILE"
-            [[ -n ${!img:-} ]] && continue
-            context=${!ctx:-.}
-            jq -cn --arg component "$c" --arg context "$context" --arg dockerfile "${!df:-$context/Dockerfile}" \
-              '{component: $component, context: $context, dockerfile: $dockerfile}'
-          done | jq -cs '{include: .}')
+          # One build per service (yq ships on GitHub-hosted runners).
+          matrix=$(yq -o=json '.services | to_entries' .infradeploy/infra.yml | jq -c '
+            {include: [ .[] | select(.value.image != null) | {
+              service: .key,
+              image: .value.image,
+              context: (.value.build_context // "."),
+              dockerfile: (.value.dockerfile // ((.value.build_context // ".") + "/Dockerfile")) } ]}')
 
           {
             echo "skip=false"
@@ -98,10 +103,16 @@ jobs:
       packages: write
     uses: Asheryram/infra_template_multideployment/.github/workflows/build-image.yml@main
     with:
-      component: ${{ matrix.component }}
+      service: ${{ matrix.service }}
+      image: ${{ matrix.image }}
       context: ${{ matrix.context }}
       dockerfile: ${{ matrix.dockerfile }}
       tag: ${{ needs.plan.outputs.tag }}
+
+  # ── How deploys reach the server ────────────────────────────────────────────────
+  # Default: signed webhook (needs repo secrets INFRA_WEBHOOK_URL + INFRA_WEBHOOK_SECRET, which
+  #          DevOps gets from `infra project add`). Nothing is installed per repo.
+  # Option:  self-hosted runner on the server — set the repo variable INFRA_TRIGGER=runner.
 
   deploy:
     needs: [plan, build]
