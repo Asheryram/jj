@@ -10,7 +10,7 @@ environment's API, so the same image works for production, staging, develop and 
 1. **Register the repository** (the name must equal `name:` in `infra.yml`; a token is recommended, a private repo needs one):
 
    ```bash
-   sudo -u deploy infra project add jkbk-datahub --repo Asheryram/jj --gh-token <token>
+   sudo -u deploy infra project add jkbk --repo Asheryram/jj --gh-token <token>
    ```
 
    In the console (Access) assign the project to its organization. For deploys from GitHub Actions (instead of the
@@ -21,7 +21,7 @@ environment's API, so the same image works for production, staging, develop and 
    demand per environment (this replaces the old `analytics-db` sidecar container). The API entrypoint applies the Prisma
    migrations and SQL constraints before it serves traffic, so there is no `migrate:` step. `DIRECT_URL` (Prisma's direct
    connection) defaults to `DATABASE_URL`; set it explicitly only for a database behind a connection pooler.
-3. **Set these variables per environment** in the console (Variables → jkbk-datahub). A deploy is held ("blocked", with the
+3. **Set these variables per environment** in the console (Variables → jkbk). A deploy is held ("blocked", with the
    missing names shown) until they exist:
    - `JWT_SECRET`: unique random secret, at least 32 characters.
    - `SUPERADMIN_EMAIL`: the operator who receives the first setup link.
@@ -42,16 +42,16 @@ from `main`: add required reviewers on the "prod" GitHub Environment if it needs
 
 | Environment | Frontend | API |
 | --- | --- | --- |
-| Production | `https://jkbk-datahub.<domain>` | `https://api-jkbk-datahub.<domain>` |
-| Develop | `https://jkbk-datahub-develop.<domain>` | `https://api-jkbk-datahub-develop.<domain>` |
-| Staging | `https://jkbk-datahub-staging.<domain>` | `https://api-jkbk-datahub-staging.<domain>` |
-| Preview | `https://jkbk-datahub-pr-<number>.<domain>` | `https://api-jkbk-datahub-pr-<number>.<domain>` |
+| Production | `https://jkbk.<domain>` | `https://api-jkbk.<domain>` |
+| Develop | `https://jkbk-develop.<domain>` | `https://api-jkbk-develop.<domain>` |
+| Staging | `https://jkbk-staging.<domain>` | `https://api-jkbk-staging.<domain>` |
+| Preview | `https://jkbk-pr-<number>.<domain>` | `https://api-jkbk-pr-<number>.<domain>` |
 
 Never point preview or staging at production data. Back up the production databases (`infra db dump`) before accepting live
 payments.
 
 ## Images
 
-`infra.yml` uses local image names (`local/jkbk-datahub-web`, `local/jkbk-datahub-api`) so a server builds them itself from
+`infra.yml` uses local image names (`local/jkbk-web`, `local/jkbk-api`) so a server builds them itself from
 the commit. For a server that pulls from GitHub's registry, change them to `ghcr.io/asheryram/jj-web` and
 `ghcr.io/asheryram/jj-api` (and make sure Actions may publish those packages and the host can pull them).
