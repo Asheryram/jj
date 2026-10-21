@@ -44,6 +44,29 @@ export const adminGuide: GuideGroup[] = [
         ],
       },
       {
+        id: 'subscription-status',
+        title: 'Check my subscription and pay it',
+        why: 'The platform has a subscription, and a late payment eventually pauses new sales. Knowing where you stand takes a few seconds.',
+        steps: [
+          'Open `Subscriptions`, the **"Your Data Hub subscription"** card is at the top, with the invoice to pay. It also shows as a banner on every page in the last 14 days before a payment is due, and once it is overdue.',
+          'Read when the next payment is due, how long everything keeps working after that, and what happens if it is still unpaid.',
+          'Click **"Pay this invoice"** to open it and pay.',
+          'Afterwards, click **"I have paid, check again"** (or **"Check again"** on the card) and it updates straight away. Otherwise it updates by itself within the hour.',
+        ],
+        notes: [
+          {
+            tone: 'warning',
+            title: 'What a late payment does',
+            body: 'There are a few days of grace when nothing changes. After that, new sign-ups, wallet top-ups and Mobile Money orders pause. Payouts, refunds, orders already paid for, and your data are never blocked. Paying brings everything back at once.',
+          },
+          {
+            tone: 'info',
+            title: 'Report only',
+            body: 'If the card says "Nothing yet (report only)" next to "What happens when it lapses", the check is running but nothing is being blocked.',
+          },
+        ],
+      },
+      {
         id: 'price-catalogue',
         title: 'Price my catalogue',
         why: 'A bundle arrives from the provider priced at cost and stays out of the shop until you say what it sells for.',
@@ -319,16 +342,6 @@ export const adminGuide: GuideGroup[] = [
           'Go to `Branding`, the **"Your platform"** card.',
           'Set a platform name, logo and colour the same way an agent would for their own shop, this is what shows everywhere except inside an agent’s own approved shop.',
           'Click **"Save platform branding."** It applies immediately, reload the page to see it everywhere. A "Use a different colour in dark mode" option and the catalogue tile look are on the same card.',
-        ],
-      },
-      {
-        id: 'subscriptions-admin',
-        title: 'Track what the platform pays for',
-        why: 'Hosting, domain, Paystack and DataHub renewals, so nothing lapses without warning.',
-        steps: [
-          'Go to `Subscriptions` (Money section). Each service shows when it expires and a badge for how close that is.',
-          'The platform owner clicks **"Add a service"** to track a new one with its renewal date, and **"Renewed"** to roll a recurring one forward, or **"Edit"** or **"Remove."**',
-          'A plain admin sees what is coming up but cannot change it.',
         ],
       },
     ],

@@ -4,6 +4,8 @@ import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-do
 import { StoreProvider, useStore } from './state/store'
 import { BrandingProvider } from './state/branding'
 import { ThemeProvider } from './lib/theme'
+import { LicenseProvider } from './state/license'
+import { PauseGate } from './components/license'
 import { SITE_ORIGIN } from './lib/origin'
 import { api } from './lib/api'
 import { AnalyticsShell, AppShell, PublicShell, RequireAuth } from './components/layout'
@@ -221,6 +223,7 @@ export default function App() {
     <StoreProvider>
       <Boot>
         {customDomainCode && <CustomDomainSeller code={customDomainCode} />}
+        <LicenseProvider>
         <BrowserRouter>
         {/* Inside the router because it themes from the /s/<code> route, and
             inside the store because that is what resolves the code. */}
@@ -231,11 +234,11 @@ export default function App() {
           {/* Public storefront, buyable without an account (FR-4.8) */}
           <Route element={<PublicShell />}>
             {/* The front door is the shop itself, buying is never a page away. */}
-            <Route path="/" element={<Home />} />
+            <Route path="/" element={<PauseGate kind="browse"><Home /></PauseGate>} />
             <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/shop" element={<Shop />} />
-            <Route path="/checkers" element={<Checkers />} />
+            <Route path="/register" element={<PauseGate kind="signup"><Register /></PauseGate>} />
+            <Route path="/shop" element={<PauseGate kind="browse"><Shop /></PauseGate>} />
+            <Route path="/checkers" element={<PauseGate kind="browse"><Checkers /></PauseGate>} />
             <Route path="/track" element={<Track />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/terms" element={<Terms />} />
@@ -252,7 +255,7 @@ export default function App() {
             <Route path="/set-password" element={<SetPassword />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             {/* A guest must be able to complete a purchase (FR-4.8) */}
-            <Route path="/buy/:productId" element={<Buy />} />
+            <Route path="/buy/:productId" element={<PauseGate kind="buy"><Buy /></PauseGate>} />
 
             {/*
               An agent's sell link (FR-5.7), and the whole shop beneath it.
@@ -264,9 +267,9 @@ export default function App() {
               duplicated but the route table.
             */}
             <Route path="/s/:code" element={<Storefront />}>
-              <Route index element={<Home />} />
-              <Route path="shop" element={<Shop />} />
-              <Route path="checkers" element={<Checkers />} />
+              <Route index element={<PauseGate kind="browse"><Home /></PauseGate>} />
+              <Route path="shop" element={<PauseGate kind="browse"><Shop /></PauseGate>} />
+              <Route path="checkers" element={<PauseGate kind="browse"><Checkers /></PauseGate>} />
               <Route path="track" element={<Track />} />
             <Route path="privacy" element={<Privacy />} />
             <Route path="terms" element={<Terms />} />
@@ -274,7 +277,7 @@ export default function App() {
             <Route path="cookies" element={<CookiePolicy />} />
             <Route path="data-request" element={<DataRequest />} />
             <Route path="contact" element={<Contact />} />
-              <Route path="buy/:productId" element={<Buy />} />
+              <Route path="buy/:productId" element={<PauseGate kind="buy"><Buy /></PauseGate>} />
               {/* Where Paystack sends a buyer back to, when they paid from
                   inside this shop, the backend builds this URL itself from
                   the order's own seller code (see PaymentsService.callbackUrl),
@@ -287,7 +290,7 @@ export default function App() {
                   domain points at /s/<code>, nothing outside that path is
                   reachable from it at all. */}
               <Route path="login" element={<Login />} />
-              <Route path="register" element={<Register />} />
+              <Route path="register" element={<PauseGate kind="signup"><Register /></PauseGate>} />
               <Route path="forgot-password" element={<ForgotPassword />} />
               <Route path="set-password" element={<SetPassword />} />
             </Route>
@@ -383,6 +386,7 @@ export default function App() {
         </TourProvider>
         </ShopTheme>
         </BrowserRouter>
+        </LicenseProvider>
       </Boot>
     </StoreProvider>
     </ThemeProvider>

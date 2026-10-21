@@ -1,4 +1,5 @@
 import { TourButton } from '../tours/LearnCard'
+import { LicenseBanner } from './license'
 import { BUSINESS } from '../lib/business'
 import StorageNotice from './StorageNotice'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
@@ -696,6 +697,7 @@ export function AppShell() {
       </header>
 
       <SiteNotice />
+      <LicenseBanner />
       <UnreadAnnouncementsModal />
 
       <div className="mx-auto flex max-w-7xl gap-6 px-3 sm:px-4">
