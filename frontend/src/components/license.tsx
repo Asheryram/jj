@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { api, type AdminLicenseStatus } from '../lib/api'
 import { isAdmin } from '../lib/roles'
 import { longDate } from '../lib/format'
@@ -61,6 +61,7 @@ export function LicenseBanner() {
   const admin = Boolean(session && isAdmin(session.role))
   const { status, checkNow } = useAdminLicense(admin)
   const [checking, setChecking] = useState(false)
+  const onSubscriptions = useLocation().pathname.endsWith('/admin/subscriptions')
 
   if (!session) return null
 
@@ -145,11 +146,13 @@ export function LicenseBanner() {
           <Button size="sm" variant="outline" loading={checking} onClick={() => void check()}>
             I have paid, check again
           </Button>
-          <Link to="/admin/subscriptions">
-            <Button size="sm" variant="ghost">
-              See the invoice
-            </Button>
-          </Link>
+          {!onSubscriptions && (
+            <Link to="/admin/subscriptions">
+              <Button size="sm" variant="ghost">
+                See the invoice
+              </Button>
+            </Link>
+          )}
         </div>
       </Callout>
     </Shell>
