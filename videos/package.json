@@ -1,0 +1,30 @@
+{
+  "name": "jj-videos",
+  "private": true,
+  "type": "module",
+  "description": "Scripted screen walkthroughs of the app, one per role. See README.md.",
+  "scripts": {
+    "agent": "node build.mjs agent",
+    "admin-1-start": "node build.mjs admin-1-start",
+    "admin-2-catalogue": "node build.mjs admin-2-catalogue",
+    "admin-3-orders": "node build.mjs admin-3-orders",
+    "admin-4-money-out": "node build.mjs admin-4-money-out",
+    "admin-5-finance": "node build.mjs admin-5-finance",
+    "admin-6-people": "node build.mjs admin-6-people",
+    "admin-7-shops": "node build.mjs admin-7-shops",
+    "admin-8-settings": "node build.mjs admin-8-settings",
+    "admin:all": "node build.mjs admin-1-start && node build.mjs admin-2-catalogue && node build.mjs admin-3-orders && node build.mjs admin-4-money-out && node build.mjs admin-5-finance && node build.mjs admin-6-people && node build.mjs admin-7-shops && node build.mjs admin-8-settings",
+    "admin:combine": "node combine.mjs admin",
+    "agent-1-start": "node build.mjs agent-1-start",
+    "agent-2-sell": "node build.mjs agent-2-sell",
+    "agent-3-shop": "node build.mjs agent-3-shop",
+    "agent-4-money": "node build.mjs agent-4-money",
+    "agent-5-help": "node build.mjs agent-5-help",
+    "agent:all": "node build.mjs agent-1-start && node build.mjs agent-2-sell && node build.mjs agent-3-shop && node build.mjs agent-4-money && node build.mjs agent-5-help",
+    "agent:combine": "node combine.mjs agent"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "playwright": "^1.49.0"
+  }
+}

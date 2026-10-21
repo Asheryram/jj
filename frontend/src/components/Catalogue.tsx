@@ -285,7 +285,7 @@ function ProductCard({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="truncate font-medium text-slate-900 dark:text-slate-50">{product.name}</p>
-              <p className="mt-0.5 text-sm text-slate-400 dark:text-slate-500">{product.validity}</p>
+              <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{product.validity}</p>
             </div>
             {network}
           </div>

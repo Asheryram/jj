@@ -39,3 +39,16 @@ esac
 escaped_api_url=$(printf '%s' "$API_URL" | sed 's/\\/\\\\/g; s/"/\\"/g')
 printf 'window.__ENV__ = {"API_URL":"%s"};\n' "$escaped_api_url" \
   > /usr/share/nginx/html/env.js
+
+# The app reads VITE_API_URL, which the build fixed to a placeholder. Put the real address in its place: the VITE_API_URL
+# variable if one is set, otherwise the same address /env.js carries. Only the placeholder is touched.
+vite_api_url="${VITE_API_URL:-$API_URL}"
+case "$vite_api_url" in
+  https://*|http://*) ;;
+  *)
+    echo "VITE_API_URL must be an absolute HTTP(S) URL" >&2
+    exit 1
+    ;;
+esac
+escaped_vite=$(printf '%s' "$vite_api_url" | sed 's/[\\&|]/\\&/g')
+find /usr/share/nginx/html -name '*.js' -exec sed -i "s|__INFRA_VITE_API_URL__|$escaped_vite|g" {} +

@@ -28,7 +28,8 @@
     "catalogue:purge": "tsx scripts/purge-unsupplied.ts",
     "constraints:prod": "prisma db execute --file scripts/constraints.sql --schema prisma/schema.prisma",
     "release": "prisma migrate deploy && npm run analytics:migrate:deploy && npm run constraints:prod",
-    "db:backup": "node scripts/backup.mjs"
+    "db:backup": "node scripts/backup.mjs",
+    "test": "node --import tsx --test \"src/**/*.spec.ts\""
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

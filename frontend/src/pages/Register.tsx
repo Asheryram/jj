@@ -3,8 +3,8 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useStore } from '../state/store'
 import { useShopPath } from '../lib/shopPath'
 import { checkPhone } from '../lib/networks'
-import { Button, Callout, Card, Field, TextInput, cn } from '../components/ui'
-import { AlertIcon, CheckIcon, StoreIcon, UsersIcon } from '../components/icons'
+import { Button, Callout, Card, Field, TextInput } from '../components/ui'
+import { AlertIcon, StoreIcon, UsersIcon } from '../components/icons'
 
 /**
  * Only agents register.
@@ -51,7 +51,7 @@ export default function Register() {
     if (!phoneCheck?.ok) next.phone = phoneCheck?.ok === false ? phoneCheck.reason : 'Enter your phone number.'
     if (!/^\S+@\S+\.\S+$/.test(email)) next.email = 'Enter an email we can send your receipts to.'
     if (password.length < 8) next.password = 'Use at least 8 characters.'
-    if (!accepted) next.accepted = 'You need to accept the Terms and Privacy Policy to continue.'
+    if (!accepted) next.accepted = 'You need to confirm you are 18 or over and accept the Terms and Privacy Policy to continue.'
 
     setErrors(next)
     if (Object.keys(next).length > 0) return
@@ -226,30 +226,38 @@ export default function Register() {
 
           {/* NFR-7.3 */}
           <div>
-            <button
-              type="button"
-              onClick={() => setAccepted(!accepted)}
-              className="flex w-full items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800"
-            >
-              <span
-                className={cn(
-                  'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors',
-                  accepted ? 'border-brand-600 bg-brand-600 text-white' : 'border-slate-300 dark:border-slate-600',
-                )}
-                role="checkbox"
-                aria-checked={accepted}
-              >
-                {accepted && <CheckIcon className="size-3.5" strokeWidth={3} />}
-              </span>
-              <span className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-                I accept the{' '}
-                <span className="font-semibold text-brand-700 dark:text-brand-300 underline">Terms of Service</span> and{' '}
-                <span className="font-semibold text-brand-700 dark:text-brand-300 underline">Privacy Policy</span>, and I
-                consent to my details being used to fulfil my orders.
-              </span>
-            </button>
+            <div className="flex items-start gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
+              <input
+                id="accept-terms"
+                type="checkbox"
+                checked={accepted}
+                onChange={(e) => setAccepted(e.target.checked)}
+                aria-describedby={errors.accepted ? 'accept-terms-error' : undefined}
+                className="mt-0.5 size-5 shrink-0 cursor-pointer accent-brand-700"
+              />
+              <label htmlFor="accept-terms" className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                I am 18 or over and I accept the{' '}
+                <Link
+                  to={shopPath('/terms')}
+                  target="_blank"
+                  className="font-semibold text-brand-700 dark:text-brand-300 underline"
+                >
+                  Terms of Service
+                </Link>{' '}
+                and{' '}
+                <Link
+                  to={shopPath('/privacy')}
+                  target="_blank"
+                  className="font-semibold text-brand-700 dark:text-brand-300 underline"
+                >
+                  Privacy Policy
+                </Link>
+                , and I consent to my details being used to run my agent account and fulfil my
+                orders.
+              </label>
+            </div>
             {errors.accepted && (
-              <p className="mt-1.5 flex items-start gap-1.5 text-sm text-red-600 dark:text-red-400">
+              <p id="accept-terms-error" className="mt-1.5 flex items-start gap-1.5 text-sm text-red-600 dark:text-red-400">
                 <AlertIcon className="mt-0.5 size-4 shrink-0" />
                 {errors.accepted}
               </p>
