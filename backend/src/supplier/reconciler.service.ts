@@ -506,13 +506,12 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * nothing back, timed out or errored before DataHub said anything, and
    * nobody but an admin opening Needs attention would ever know.
    *
-   * Deliberately not a one-time alert like `SubscriptionsService.alertExpiring`:
-   * this keeps re-sending for as long as any order is still stuck this way,
-   * rather than firing once and going quiet while the problem persists. A
-   * subscription lapsing is a single event worth telling someone once; a
-   * customer still waiting for a bundle they paid for, with no idea whether
-   * it even reached the delivery partner, is an ongoing problem that deserves
-   * a standing reminder until it is actually fixed. It is throttled to at
+   * Deliberately not a one-time alert: this keeps re-sending for as long as
+   * any order is still stuck this way, rather than firing once and going quiet
+   * while the problem persists. A customer still waiting for a bundle they
+   * paid for, with no idea whether it even reached the delivery partner, is an
+   * ongoing problem that deserves a standing reminder until it is actually
+   * fixed. It is throttled to at
    * most once every `STUCK_ALERT_THROTTLE_MS`, though, the sweep itself still
    * checks every ten minutes so a lost webhook is chased promptly, but that
    * used to also mean re-sending the same email every ten minutes for as long

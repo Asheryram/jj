@@ -36,13 +36,13 @@ export const adminTaskTours: Tour[] = [
         route: '/admin/needs-attention',
         target: 'attention-stuck-orders',
         title: 'Settle it yourself if the supplier is silent',
-        body: 'An order listed here has no clear answer. Check the supplier\'s own dashboard first, then press **Resolve by hand** and mark it **delivered** or **failed**. Never guess: marking it failed refunds the customer, so be sure they did not get it.',
+        body: 'An order listed here has no clear answer. Check the supplier\'s own dashboard first, then press **Resolve by hand**, choose **Mark as delivered** or **Mark as failed**, give a reason and press **Confirm**. Never guess: marking it failed refunds the customer, so be sure they did not get it.',
       },
       {
         route: '/admin/refunds',
         target: 'refunds-tabs',
         title: 'If it failed, refund them',
-        body: 'A failed paid order waits on **Refunds** under **Waiting**. Approve it to send the money back. Tell the customer you are on it, that is usually all they want to hear.',
+        body: 'A failed paid order waits on **Refunds** under **Waiting**. Press **Refund** on its row to send the money back. Tell the customer you are on it, that is usually all they want to hear.',
       },
     ],
   },
@@ -100,7 +100,7 @@ export const adminTaskTours: Tour[] = [
         route: '/admin/withdrawals',
         target: 'withdrawals-table',
         title: 'Approve it',
-        body: 'Check the Mobile Money number and network on the row, then press **Approve**. Something looks wrong? **Reject** returns the full amount and fee to the agent.',
+        body: 'Check the Mobile Money number and network on the row, then press **Approve**. Something looks wrong? **Reject** returns the full amount and fee to the agent. You cannot approve a payout to your own agent profile, a superadmin has to.',
       },
       {
         route: '/admin/withdrawals',
@@ -142,7 +142,7 @@ export const adminTaskTours: Tour[] = [
         route: '/admin/finance',
         target: 'float-log-topup',
         title: 'Log the top-up, choosing the right source',
-        body: 'Press **Log a top-up** and enter the exact amount. Choose **Paystack, paying back** if the money came from the business MoMo linked to Paystack. Choose **Outside the business** if it came from your own pocket. Getting this right is what keeps profit and free to spend in step.',
+        body: 'Press **Log a top-up** and enter the exact amount. Choose **Paystack, paying {supplier} back** if the money came from the business MoMo linked to Paystack. Choose **Outside the business** if it came from your own pocket. Getting this right is what keeps profit and free to spend in step.',
       },
       {
         route: '/admin/finance',

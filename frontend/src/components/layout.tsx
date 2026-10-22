@@ -1,4 +1,7 @@
 import { TourButton } from '../tours/LearnCard'
+import { LicenseBanner } from './license'
+import { BUSINESS } from '../lib/business'
+import StorageNotice from './StorageNotice'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useStore, type Toast } from '../state/store'
@@ -694,6 +697,7 @@ export function AppShell() {
       </header>
 
       <SiteNotice />
+      <LicenseBanner />
       <UnreadAnnouncementsModal />
 
       <div className="mx-auto flex max-w-7xl gap-6 px-3 sm:px-4">
@@ -966,6 +970,7 @@ export function PublicShell() {
         <Outlet />
       </main>
       <PublicFooter />
+      <StorageNotice />
       <ToastHost />
       <SeasonalEffects />
     </div>
@@ -1404,7 +1409,7 @@ export function PublicFooter() {
           <Logo />
           <p className="mt-3 max-w-xs text-sm text-slate-500 dark:text-slate-400">
             Data bundles, airtime, voice and SMS bundles, MTN AFA registration and result checkers
-            delivered in seconds.
+            delivered quickly.
           </p>
         </div>
         <FooterColumn
@@ -1423,14 +1428,17 @@ export function PublicFooter() {
             ['Log in', shopPath('/login')],
           ]}
         />
-        <div>
-          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Legal</p>
-          <ul className="mt-3 space-y-2 text-sm text-slate-500 dark:text-slate-400">
-            <li>Terms of Service</li>
-            <li>Privacy Policy</li>
-            <li>Refund Policy</li>
-          </ul>
-        </div>
+        <FooterColumn
+          title="Legal"
+          links={[
+            ['Terms of Service', shopPath('/terms')],
+            ['Privacy Policy', shopPath('/privacy')],
+            ['Refund Policy', shopPath('/refunds')],
+            ['Cookies and storage', shopPath('/cookies')],
+            ['Your data requests', shopPath('/data-request')],
+            ['Contact', shopPath('/contact')],
+          ]}
+        />
       </div>
       <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-5">
         <div className="mx-auto max-w-6xl space-y-2 text-xs text-slate-500 dark:text-slate-400">
@@ -1444,6 +1452,17 @@ export function PublicFooter() {
             Personal data is handled in line with Ghana&apos;s Data Protection Act, 2012 (Act 843)
             and is shared only as needed to fulfil your order.
           </p>
+          {(BUSINESS.legalName || BUSINESS.registrationNumber || BUSINESS.address) && (
+            <p>
+              {[
+                BUSINESS.legalName,
+                BUSINESS.registrationNumber && `Reg. no. ${BUSINESS.registrationNumber}`,
+                BUSINESS.address,
+              ]
+                .filter(Boolean)
+                .join(', ')}
+            </p>
+          )}
           <p className="pt-1">© 2026 JKBK DATA HUB. All rights reserved.</p>
         </div>
       </div>

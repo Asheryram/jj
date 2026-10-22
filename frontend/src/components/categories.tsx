@@ -53,7 +53,7 @@ export const CATEGORY_META: Record<
   checker: {
     label: 'Result Checkers',
     short: 'Checkers',
-    blurb: 'BECE and WASSCE vouchers delivered instantly.',
+    blurb: 'BECE and WASSCE vouchers delivered on screen and by SMS.',
     icon: CertificateIcon,
     accent: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400',
   },

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useStore } from '../../state/store'
+import { useLicense } from '../../state/license'
 import { useSearchParamState } from '../../lib/useSearchParamState'
 import { cedis, dateTime, parseCedis } from '../../lib/format'
 import { NETWORKS } from '../../lib/networks'
@@ -47,6 +48,7 @@ const TX_META: Record<TxType, { label: string; tone: 'success' | 'neutral' | 'in
  */
 export default function Wallet() {
   const { customerBalance: balance, transactions, topUpWallet } = useStore()
+  const { level } = useLicense()
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useSearchParamState('filter', 'all') as [
     'all' | TxType,
@@ -66,7 +68,12 @@ export default function Wallet() {
         title="Wallet"
         subtitle="Top up once, then buy without a Mobile Money prompt each time."
         action={
-          <Button size="lg" onClick={() => setOpen(true)}>
+          <Button
+            size="lg"
+            disabled={level !== 'ok'}
+            title={level !== 'ok' ? 'Top-ups are paused for a short while' : undefined}
+            onClick={() => setOpen(true)}
+          >
             <WalletIcon className="size-4" /> Top up
           </Button>
         }

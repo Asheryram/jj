@@ -3,6 +3,7 @@ import { Throttle } from '@nestjs/throttler'
 import { LoginThrottleGuard } from '../auth/login-throttle.guard'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
+import { LicenseGate } from '../license/license.gate'
 import { OrdersService } from './orders.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
 import { FulfilmentService } from './fulfilment.service'
@@ -32,6 +33,9 @@ export class OrdersController {
    */
   // Per IP, generous enough for a busy agent's walk-in sales, tight enough
   // that a script cannot pump out unpaid orders.
+  // Refused while the subscription is lapsed, unless it is paid from a wallet balance the
+  // customer already holds (see LicenseGate). Orders already paid for still finish.
+  @LicenseGate('unless-wallet', 'Ordering is paused for a short while. Please try again later.')
   @Post()
   @UseGuards(LoginThrottleGuard)
   @Throttle({ burst: { limit: 20, ttl: 60_000 }, grind: { limit: 120, ttl: 900_000 } })

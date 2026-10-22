@@ -9,7 +9,7 @@ import { appUrl } from '../common/app-links'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 import { DomainsService, GRACE_PERIOD_DAYS, addInterval } from './domains.service'
 
-/** Twice a day, the same cadence `SubscriptionsService` checks expiring third-party services on. */
+/** Twice a day: a domain renewal is slow-moving, it does not need per-minute watching. */
 const SWEEP_INTERVAL_MS = 12 * 60 * 60_000
 
 /** Every 6 hours, see `checkPendingGoLive`. Independent of `SWEEP_INTERVAL_MS`, a different concern on its own clock. */

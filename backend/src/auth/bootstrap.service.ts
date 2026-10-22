@@ -76,6 +76,23 @@ export class BootstrapService implements OnApplicationBootstrap {
       return
     }
 
+    // The operator account this method created on an earlier boot and nobody has set a password for yet. It does not match
+    // the lookup above (that one wants a password), and boots repeat: every restart and every redeploy runs this again.
+    // Creating a second one would hit the unique referral_code and crash the API on every start until someone opens the
+    // setup link. So never create twice: mint a fresh link instead (the earlier one may have expired or scrolled away).
+    const pending = await this.prisma.user.findFirst({ where: { email, passwordHash: null } })
+    if (pending) {
+      if (pending.role !== 'superadmin') {
+        this.log.error(
+          `SUPERADMIN_EMAIL ${email} belongs to an account with role ${pending.role} and no password, NOT promoting it. ` +
+            'Check the address, or add that person as an admin first.',
+        )
+        return
+      }
+      await this.announce(pending.id, email, 'still has no password yet')
+      return
+    }
+
     const created = await this.prisma.user.create({
       data: {
         name: 'Platform operator',

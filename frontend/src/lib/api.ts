@@ -86,6 +86,57 @@ export const token = {
  * An error carrying the API's stable code alongside the sentence meant for the
  * user. NFR-4.3, components show `message` and never build copy from `code`.
  */
+/** What anyone may learn: whether selling is paused, and how far. Nothing about money. */
+export interface PublicLicenseStatus {
+  level: 'ok' | 'restricted' | 'suspended'
+}
+
+export type LicenseStage = 'active' | 'grace' | 'restricted' | 'suspended'
+
+/** The admin's full view of the subscription, from /license/admin. */
+export interface AdminLicenseStatus {
+  configured: boolean
+  /** Whether a lapsed subscription really blocks anything, or is only reported. */
+  enforced: boolean
+  source: 'disabled' | 'misconfigured' | 'unverified' | 'live' | 'cached' | 'stale'
+  stage: LicenseStage
+  paused: boolean
+  exempt: boolean
+  message: string
+  payUrl: string | null
+  /** The app, as the invoicing application knows it. */
+  project: string
+  /** Everything this app has to keep paying for. Amounts in pesewas. */
+  subscriptions: {
+    name: string
+    amount: number
+    currency: string
+    interval: string
+    stage: LicenseStage
+    dueAt: string
+    mode: string
+  }[]
+  /** Every invoice for this app still waiting to be paid. */
+  invoices: {
+    number: string
+    amount: number
+    currency: string
+    dueDate: string | null
+    periodStart: string | null
+    periodEnd: string | null
+    description: string
+    subscription: string | null
+    payUrl: string | null
+  }[]
+  dueAt: string | null
+  graceEndsAt: string | null
+  suspendsAt: string | null
+  daysUntilDue: number | null
+  lastCheckedAt: string | null
+  lastAttemptAt: string | null
+  lastError: string | null
+}
+
 export class ApiError extends Error {
   // Declared as fields rather than constructor parameter properties: the app
   // builds with `erasableSyntaxOnly`, which forbids the shorthand.
@@ -178,6 +229,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     // An expired token is not an error the user can act on, drop it so the app
     // falls back to a signed-out state rather than looping on 401s.
     if (response.status === 401) token.clear()
+
+    // Selling was paused while this person was on the page. Tell the licence state
+    // straight away so the page changes now, not at the next five minute check.
+    if (envelope.code === 'SERVICE_PAUSED' && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('license:refresh'))
+    }
 
     throw new ApiError(
       envelope.code ?? 'INTERNAL',
@@ -707,24 +764,6 @@ export interface AnnouncementHistoryRow {
   createdAt: string
   recipientCount: number
   readCount: number
-}
-
-export type SubscriptionStatus = 'ok' | 'expiring_soon' | 'expired'
-export type SubscriptionRecurrence = 'monthly' | 'yearly'
-
-export interface ServiceSubscription {
-  id: string
-  name: string
-  provider: string | null
-  renewalUrl: string | null
-  notes: string | null
-  expiresAt: string
-  alertDaysBefore: number
-  recurrence: SubscriptionRecurrence | null
-  daysUntilExpiry: number
-  status: SubscriptionStatus
-  createdAt: string
-  updatedAt: string
 }
 
 export interface RefundRequest {
@@ -1261,6 +1300,11 @@ export const api = {
 
   myFeedback: () => request<FeedbackReport[]>('/feedback/mine'),
 
+  // Subscription: whether selling is paused (public), and the admin's full picture
+  licenseStatus: () => request<PublicLicenseStatus>('/license/status', { auth: false }),
+  licenseAdmin: () => request<AdminLicenseStatus>('/license/admin'),
+  licenseCheck: () => request<AdminLicenseStatus>('/license/check', { method: 'POST' }),
+
   // Feedback: admin/superadmin's shared queue
   adminFeedback: (filters: { status?: FeedbackStatus; category?: FeedbackCategory; escalated?: boolean } = {}) => {
     const params = new URLSearchParams()
@@ -1304,40 +1348,6 @@ export const api = {
 
   markAnnouncementRead: (id: string) =>
     request<void>(`/announcements/${encodeURIComponent(id)}/read`, { method: 'POST' }),
-
-  // Service subscriptions: admin/superadmin watching third-party renewals
-  subscriptions: () => request<ServiceSubscription[]>('/admin/subscriptions'),
-
-  createSubscription: (body: {
-    name: string
-    provider?: string
-    renewalUrl?: string
-    notes?: string
-    expiresAt: string
-    alertDaysBefore?: number
-    recurrence?: SubscriptionRecurrence
-  }) => request<ServiceSubscription>('/admin/subscriptions', { method: 'POST', body }),
-
-  updateSubscription: (
-    id: string,
-    body: Partial<{
-      name: string
-      provider: string
-      renewalUrl: string
-      notes: string
-      expiresAt: string
-      alertDaysBefore: number
-      /** '' clears a previously-set recurrence back to a one-off. */
-      recurrence: SubscriptionRecurrence | ''
-    }>,
-  ) => request<ServiceSubscription>(`/admin/subscriptions/${encodeURIComponent(id)}`, { method: 'PATCH', body }),
-
-  deleteSubscription: (id: string) =>
-    request<void>(`/admin/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-
-  /** One click after actually paying a recurring service's invoice, advances it one cycle. */
-  renewSubscription: (id: string) =>
-    request<ServiceSubscription>(`/admin/subscriptions/${encodeURIComponent(id)}/renew`, { method: 'POST' }),
 
   // Orders
   /**

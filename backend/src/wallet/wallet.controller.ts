@@ -3,6 +3,7 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { CurrentUser, Roles, type AuthUser } from '../common/auth'
 import { WalletService } from './wallet.service'
 import { TopUpDto } from './wallet.dto'
+import { LicenseGate } from '../license/license.gate'
 
 /** Customers only, an agent's balance is an earnings account, not a wallet. */
 @ApiTags('wallet')
@@ -17,6 +18,7 @@ export class WalletController {
     return this.wallet.summary(user.id)
   }
 
+  @LicenseGate('always', 'Top-ups are paused for a short while. Please try again later.')
   @Post('topup')
   topUp(@CurrentUser() user: AuthUser, @Body() dto: TopUpDto) {
     return this.wallet.topUp(user.id, dto.amount, dto.network)

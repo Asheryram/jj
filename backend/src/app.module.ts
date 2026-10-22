@@ -22,9 +22,9 @@ import { MailModule } from './mail/mail.module'
 import { AssistantModule } from './assistant/assistant.module'
 import { FeedbackModule } from './feedback/feedback.module'
 import { AnnouncementsModule } from './announcements/announcements.module'
-import { SubscriptionsModule } from './subscriptions/subscriptions.module'
 import { AnalyticsModule } from './analytics/analytics.module'
 import { AuthGuard } from './common/auth'
+import { LicenseModule } from './license/license.module'
 
 @Module({
   imports: [
@@ -116,8 +116,8 @@ import { AuthGuard } from './common/auth'
     AssistantModule,
     FeedbackModule,
     AnnouncementsModule,
-    SubscriptionsModule,
     AnalyticsModule,
+    LicenseModule,
   ],
   controllers: [HealthController, KeepAliveController],
   providers: [

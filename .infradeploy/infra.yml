@@ -1,0 +1,50 @@
+# How the infra platform runs this repository: two independent services, a frontend and an API.
+#   web -> jkbk.<domain>          api -> api-jkbk.<domain>
+#   (develop / staging add -develop / -staging, previews add -pr-<number>)
+# Register it once with:  infra project add jkbk --repo Asheryram/jj
+name: jkbk
+
+services:
+  web:
+    # Built from this commit by CI. On a server that pulls from GitHub's registry use: ghcr.io/asheryram/jj-web
+    image: local/jkbk-web
+    build_context: ./frontend
+    dockerfile: frontend/Dockerfile.infra
+    port: 80
+    health_path: /healthz
+    # The page learns where the API lives from /env.js, which the image derives from the injected app/environment/domain
+    # (api-<app>[-<env>].<domain>/api). To point it elsewhere, set an API_URL variable in the console.
+
+  api:
+    # On a server that pulls from GitHub's registry use: ghcr.io/asheryram/jj-api
+    image: local/jkbk-api
+    build_context: ./backend
+    dockerfile: backend/Dockerfile.infra
+    port: 3001
+    health_path: /api/health/ping       # liveness only: no database round trip
+
+    # Set per environment in the console (Variables → jkbk). The two URLs below arrive by themselves once the
+    # databases are created, so the deploy waits (blocked, with the reason shown) until you press "Create database".
+    required_env:
+      - DATABASE_URL
+      - ANALYTICS_DATABASE_URL
+      - JWT_SECRET                      # unique random secret, at least 32 characters
+      - SUPERADMIN_EMAIL                # receives the first setup link
+      - PAYSTACK_SECRET_KEY             # a live key in production: the API refuses to start there with a test key
+
+    # Declared, not created: open the environment in the console → Database → "Create database".
+    # Each environment gets its own pair, so prod, staging, develop and every preview are isolated.
+    databases:
+      - inject_as: DATABASE_URL         # the primary database (Prisma also reads it as DIRECT_URL, see the entrypoint)
+      - inject_as: ANALYTICS_DATABASE_URL   # the analytics warehouse: a separate database, replaces the old analytics-db sidecar
+
+# The API image's entrypoint applies the Prisma migrations and SQL constraints itself before it serves traffic,
+# so there is deliberately no `migrate:` block here (it would run them a second time).
+
+max_previews_per_app: 3
+
+environments:
+  preview:
+    auth: true                          # previews require a Keycloak sign-in …
+    api:
+      auth: false                       # … except the API, which the browser calls directly from the preview page

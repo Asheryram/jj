@@ -20,6 +20,7 @@ import { AuthService } from './auth.service'
 import { LoginDto, RegisterDto } from './auth.dto'
 import { SetupTokensService } from './setup-tokens.service'
 import { TeamService } from './team.service'
+import { LicenseGate } from '../license/license.gate'
 
 export class SetPasswordDto {
   @IsString()
@@ -96,6 +97,7 @@ export class AuthController {
   }
 
   @Throttle({ burst: { limit: 5, ttl: 60_000 } })
+  @LicenseGate('always', 'Sign-ups are paused for a short while. Please try again later.')
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.auth.register(dto)

@@ -1,0 +1,39 @@
+# Infra-server image. The regular Dockerfile remains unchanged for existing
+# development and hosting deployments.
+FROM node:22-alpine AS build
+WORKDIR /app
+RUN apk add --no-cache openssl
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY prisma ./prisma
+COPY prisma-analytics ./prisma-analytics
+RUN npx prisma generate
+RUN npx prisma generate --schema prisma-analytics/schema.prisma
+COPY tsconfig*.json nest-cli.json ./
+COPY src ./src
+RUN npm run build
+RUN npm prune --omit=dev
+RUN npx prisma generate --schema prisma-analytics/schema.prisma
+
+FROM node:22-alpine AS runtime
+WORKDIR /app
+RUN apk add --no-cache openssl
+ENV NODE_ENV=production
+ENV PORT=3001
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/prisma-analytics ./prisma-analytics
+COPY scripts/constraints.sql ./scripts/constraints.sql
+COPY scripts/analytics-migrate-deploy.mjs ./scripts/analytics-migrate-deploy.mjs
+COPY scripts/infra-entrypoint.sh ./scripts/infra-entrypoint.sh
+RUN chmod 755 ./scripts/infra-entrypoint.sh
+USER node
+EXPOSE 3001
+# Ready = the app answers. The start period covers the Prisma migrations the entrypoint runs before it listens,
+# so the platform only calls a deploy live once the API really serves (liveness only: no database round trip).
+HEALTHCHECK --interval=10s --timeout=3s --start-period=90s --retries=6 \
+  CMD wget -qO- http://127.0.0.1:3001/api/health/ping >/dev/null || exit 1
+ENTRYPOINT ["./scripts/infra-entrypoint.sh"]
+CMD ["npm", "run", "start:prod"]
