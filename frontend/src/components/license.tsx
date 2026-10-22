@@ -105,7 +105,7 @@ export function LicenseBanner() {
   }
 
   // Could not confirm lately. Said once, plainly, and nothing is blocked because of it.
-  if (status.stage === 'active' && (status.source === 'stale' || (status.source === 'unverified' && status.lastError))) {
+  if (status.stage === 'active' && (status.source === 'stale' || status.source === 'unreachable' || (status.source === 'unverified' && status.lastError))) {
     return (
       <Shell>
         <Callout tone="warning" title="We could not confirm your subscription" icon={<AlertIcon className="size-4" />}>

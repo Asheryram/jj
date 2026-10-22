@@ -11,8 +11,14 @@ export type LicenseSource =
   | 'unverified'
   /** A recent, verified answer. */
   | 'live'
-  /** A verified answer, but the last few checks failed. Still trusted. */
+  /** A verified answer that is a little old (a check is overdue), with no failure since. Still trusted. */
   | 'cached'
+  /**
+   * The billing server did not answer the latest check. Whatever it said before is set aside:
+   * the app runs as if everything is paid, with nothing shown, until it answers again. A
+   * billing problem on our side must never stop the client's business.
+   */
+  | 'unreachable'
   /** No successful check for longer than the tolerance. Ignored. */
   | 'stale'
 
@@ -163,6 +169,8 @@ export class LicenseService implements OnModuleInit, OnModuleDestroy {
     if (!this.url) return 'disabled'
     if (!this.publicKey || !this.expectedApp) return 'misconfigured'
     if (!this.received) return 'unverified'
+    // The latest check failed: unknown, and unknown means carry on as if paid.
+    if (this.lastError) return 'unreachable'
     const age = now.getTime() - this.received.at.getTime()
     if (age > this.offlineDays * MS_DAY) return 'stale'
     return age > 2 * this.intervalMinutes * 60_000 ? 'cached' : 'live'
@@ -210,7 +218,7 @@ export class LicenseService implements OnModuleInit, OnModuleDestroy {
       if (before !== payload.stage) this.log.log(`Subscription stage: ${before ?? 'unknown'} to ${payload.stage}.`)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (message !== this.lastError) this.log.warn(`Could not confirm the subscription: ${message}. Carrying on as before.`)
+      if (message !== this.lastError) this.log.warn(`Could not confirm the subscription: ${message}. Carrying on as if everything is paid.`)
       this.lastError = message
     }
   }
@@ -226,7 +234,7 @@ export class LicenseService implements OnModuleInit, OnModuleDestroy {
 
     // Fall back to asking again if the timer has somehow stopped.
     if (
-      (source === 'cached' || source === 'stale' || source === 'unverified') &&
+      (source === 'cached' || source === 'stale' || source === 'unverified' || source === 'unreachable') &&
       this.lastAttemptAt &&
       now.getTime() - this.lastAttemptAt.getTime() > this.intervalMinutes * 60_000
     ) {

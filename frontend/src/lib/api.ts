@@ -102,7 +102,7 @@ export interface AdminLicenseStatus {
   configured: boolean
   /** Whether a lapsed subscription really blocks anything, or is only reported. */
   enforced: boolean
-  source: 'disabled' | 'misconfigured' | 'unverified' | 'live' | 'cached' | 'stale'
+  source: 'disabled' | 'misconfigured' | 'unverified' | 'live' | 'cached' | 'unreachable' | 'stale'
   stage: LicenseStage
   paused: boolean
   exempt: boolean

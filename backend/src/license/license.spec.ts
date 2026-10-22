@@ -241,27 +241,27 @@ test('a failing billing server never blocks anyone', async () => {
   }
 })
 
-test('a good answer survives later failures for a while, and is dropped when too old', async () => {
+test('the moment the billing server stops answering, the app runs as if everything is paid, and picks up again when it is back', async () => {
   let up = true
-  const s = service(
-    { LICENSE_ENFORCE: 'true', LICENSE_OFFLINE_DAYS: '7' },
-    async () => {
-      if (!up) throw new Error('billing is down')
-      return new Response(JSON.stringify({ token: tokenFor(payloadFor('restricted')) }), { status: 200 })
-    },
-  )
+  const s = service({ LICENSE_ENFORCE: 'true' }, async () => {
+    if (!up) throw new Error('billing is down')
+    return new Response(JSON.stringify({ token: tokenFor(payloadFor('suspended')) }), { status: 200 })
+  })
   await s.refresh()
-  assert.equal(s.status().paused, true)
+  assert.equal(s.status().paused, true, 'suspended while the billing server says so')
 
   up = false
   await s.refresh()
-  const during = s.status(new Date(Date.now() + 3 * 3_600_000))
-  assert.equal(during.paused, true, 'still trusted shortly after the billing server went quiet')
-  assert.equal(during.source, 'cached')
+  const down = s.status()
+  assert.equal(down.source, 'unreachable')
+  assert.equal(down.paused, false, 'not a minute of blocking because the billing server is down')
+  assert.equal(down.stage, 'active')
+  assert.deepEqual([down.subscriptions, down.invoices, down.message, down.payUrl], [[], [], '', null], 'the subscription is simply blank')
 
-  const afterTolerance = s.status(new Date(Date.now() + 8 * 86_400_000))
-  assert.equal(afterTolerance.paused, false, 'after 8 days with no answer it is ignored: carry on')
-  assert.equal(afterTolerance.source, 'stale')
+  up = true
+  await s.refresh()
+  assert.equal(s.status().source, 'live')
+  assert.equal(s.status().paused, true, 'once it answers again, its answer counts again')
 })
 
 test('payment is seen on the very next check', async () => {
