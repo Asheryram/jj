@@ -57,7 +57,7 @@ function useAdminLicense(enabled: boolean) {
 /** At the top of every signed-in page. Quiet unless there is something to know. */
 export function LicenseBanner() {
   const { session } = useStore()
-  const { level } = useLicense()
+  const { level, pausesSoon } = useLicense()
   const admin = Boolean(session && isAdmin(session.role))
   const { status, checkNow } = useAdminLicense(admin)
   const [checking, setChecking] = useState(false)
@@ -66,6 +66,16 @@ export function LicenseBanner() {
   if (!session) return null
 
   if (!admin) {
+    // A day's notice for agents, only when the owner chose to give it.
+    if (level === 'ok' && pausesSoon && session.role === 'agent') {
+      return (
+        <Shell>
+          <Callout tone="info" icon={<ClockIcon className="size-4" />}>
+            New orders and sign-ups may pause for a short while from tomorrow. Your earnings, withdrawals and sales history will not be affected.
+          </Callout>
+        </Shell>
+      )
+    }
     if (level === 'ok') return null
     const message =
       session.role === 'agent'
@@ -169,6 +179,7 @@ function Shell({ children }: { children: ReactNode }) {
 /** Shown in place of a page that would take an order or a sign-up. */
 export function PausedNotice({ kind }: { kind: 'buy' | 'signup' }) {
   const shopPath = useShopPath()
+  const { notice } = useLicense()
   return (
     <div className="mx-auto max-w-lg px-4 py-14">
       <Card className="p-6 text-center">
@@ -179,7 +190,7 @@ export function PausedNotice({ kind }: { kind: 'buy' | 'signup' }) {
           {kind === 'buy' ? 'Ordering is paused for a short while' : 'Sign-ups are paused for a short while'}
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-          Please try again later. If you have already paid for something, nothing is lost: you can still check on it.
+          {notice || 'Please try again later.'} If you have already paid for something, nothing is lost: you can still check on it.
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
           <Link to={shopPath('/track')}>
@@ -197,6 +208,7 @@ export function PausedNotice({ kind }: { kind: 'buy' | 'signup' }) {
 /** The whole public shop, while it is suspended. Staff can still log in. */
 export function ServiceUnavailable() {
   const shopPath = useShopPath()
+  const { notice } = useLicense()
   return (
     <div className="mx-auto max-w-lg px-4 py-20">
       <Card className="p-7 text-center">
@@ -205,7 +217,7 @@ export function ServiceUnavailable() {
         </div>
         <h1 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">We will be back soon</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-          This shop is temporarily unavailable. Please check again a little later.
+          {notice || 'This shop is temporarily unavailable. Please check again a little later.'}
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
           <Link to={shopPath('/track')}>
@@ -253,7 +265,14 @@ const SOURCE_TEXT: Record<AdminLicenseStatus['source'], string> = {
   stale: 'Billing server not answering for too long, ignored',
 }
 
-const INTERVAL_TEXT: Record<string, string> = { monthly: 'a month', quarterly: 'every 3 months', yearly: 'a year', once: 'one time' }
+const INTERVAL_TEXT: Record<string, string> = {
+  monthly: 'a month',
+  every_2_months: 'every 2 months',
+  quarterly: 'every 3 months',
+  every_6_months: 'every 6 months',
+  yearly: 'a year',
+  once: 'one time',
+}
 
 /** Amounts arrive in pesewas. Falls back to plain digits for a currency the browser does not know. */
 function money(amount: number, currency: string): string {
@@ -416,7 +435,9 @@ export function SubscriptionCard() {
                             <p className="font-semibold text-slate-900 dark:text-slate-50">{item.name}</p>
                             <p className="text-xs text-slate-500 dark:text-slate-400">
                               {money(item.amount, item.currency)} {INTERVAL_TEXT[item.interval] ?? item.interval}
-                              {item.mode === 'exempt' || item.mode === 'paused'
+                              {item.trialUntil && new Date(item.trialUntil).getTime() > Date.now()
+                                ? `, free trial until ${longDate(item.trialUntil)}`
+                                : item.mode === 'exempt' || item.mode === 'paused'
                                 ? ''
                                 : `, ${item.stage === 'active' ? (item.interval === 'once' ? 'due' : 'renews') : 'was due'} ${longDate(item.dueAt)}`}
                             </p>

@@ -89,6 +89,10 @@ export const token = {
 /** What anyone may learn: whether selling is paused, and how far. Nothing about money. */
 export interface PublicLicenseStatus {
   level: 'ok' | 'restricted' | 'suspended'
+  /** While paused: what the business wants the public told, in its own words. */
+  notice?: string
+  /** Only if the owner turned it on: selling pauses within a day. */
+  pausesSoon?: boolean
 }
 
 export type LicenseStage = 'active' | 'grace' | 'restricted' | 'suspended'
@@ -115,7 +119,11 @@ export interface AdminLicenseStatus {
     stage: LicenseStage
     dueAt: string
     mode: string
+    /** The end of a free trial, while there is one. */
+    trialUntil: string | null
   }[]
+  /** What the public is told while paused (set in the invoicing app). */
+  publicNotice: string
   /** Every invoice for this app still waiting to be paid. */
   invoices: {
     number: string

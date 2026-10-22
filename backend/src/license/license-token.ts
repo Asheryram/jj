@@ -15,6 +15,8 @@ export interface LicenseSubscription {
   stage: LicenseStage
   dueAt: string
   mode: string
+  /** The end of a free trial, while there is one. */
+  trialUntil: string | null
 }
 
 /** An invoice for this app that is still waiting to be paid. */
@@ -66,6 +68,8 @@ export interface LicensePayload {
   invoices: LicenseInvoice[]
   /** The most useful single place to pay. */
   payUrl: string | null
+  /** What the client wants the public told while the app is paused, in their own words. */
+  publicNotice: string
   issuedAt: string
   expiresAt: string
 }
@@ -102,6 +106,7 @@ function parseSubscriptions(value: unknown): LicenseSubscription[] {
       stage: item.stage,
       dueAt: item.dueAt,
       mode: typeof item.mode === 'string' ? item.mode : 'auto',
+      trialUntil: isDate(item.trialUntil) ? item.trialUntil : null,
     })
   }
   return out
@@ -170,6 +175,7 @@ export function verifyLicenseToken(token: string, publicKey: string): LicensePay
       subscriptions: parseSubscriptions(payload.subscriptions),
       invoices: parseInvoices(payload.invoices),
       payUrl: typeof payload.payUrl === 'string' ? payload.payUrl : null,
+      publicNotice: typeof payload.publicNotice === 'string' ? payload.publicNotice.slice(0, 300) : '',
       issuedAt: payload.issuedAt,
       expiresAt: payload.expiresAt,
     }

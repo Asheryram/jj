@@ -28,6 +28,12 @@ export interface LicenseStatus {
   exempt: boolean
   message: string
   payUrl: string | null
+  /** What the client wants the public told while paused (may be empty). */
+  publicNotice: string
+  /** Selling pauses within a day (the last day of grace). */
+  pausesSoon: boolean
+  /** Once suspended, wallet orders are refused too. */
+  strictSuspend: boolean
   /** The project this app is, in the invoicing application. */
   project: string
   /** Everything this app has to keep paying for. */
@@ -108,6 +114,28 @@ export class LicenseService implements OnModuleInit, OnModuleDestroy {
     return (this.config.get<string>('LICENSE_PUBLIC_KEY') ?? '').trim()
   }
 
+  /**
+   * LICENSE_PUBLIC_KEY can hold more than one key, separated by commas, while the billing
+   * app's signing key is being changed: the new one is trusted before it is used, the old
+   * one until it is gone. A licence signed by any of them is accepted.
+   */
+  private get publicKeys(): string[] {
+    return this.publicKey
+      .split(',')
+      .map((key) => key.trim())
+      .filter(Boolean)
+  }
+
+  /** LICENSE_STRICT_SUSPEND=true: once suspended, even orders paid from a wallet are refused. */
+  get strictSuspend(): boolean {
+    return (this.config.get<string>('LICENSE_STRICT_SUSPEND') ?? '').trim().toLowerCase() === 'true'
+  }
+
+  /** LICENSE_WARN_AGENTS=true: in the last day before selling pauses, agents see a short heads-up. */
+  get warnAgents(): boolean {
+    return (this.config.get<string>('LICENSE_WARN_AGENTS') ?? '').trim().toLowerCase() === 'true'
+  }
+
   get enforced(): boolean {
     return (this.config.get<string>('LICENSE_ENFORCE') ?? '').trim().toLowerCase() === 'true'
   }
@@ -164,7 +192,12 @@ export class LicenseService implements OnModuleInit, OnModuleDestroy {
       if (!response.ok) throw new Error(`the billing server answered ${response.status}`)
 
       const body = (await response.json()) as { token?: unknown }
-      const payload = typeof body.token === 'string' ? verifyLicenseToken(body.token, this.publicKey) : null
+      const token = typeof body.token === 'string' ? body.token : null
+      let payload: LicensePayload | null = null
+      for (const key of this.publicKeys) {
+        payload = token ? verifyLicenseToken(token, key) : null
+        if (payload) break
+      }
       if (!payload) throw new Error('the answer was not a valid, signed licence')
       if (payload.app !== this.expectedApp) throw new Error('the licence is for a different app')
       // A token is good for a day. One that has already run out is an old answer
@@ -209,6 +242,14 @@ export class LicenseService implements OnModuleInit, OnModuleDestroy {
       exempt,
       message: payload?.message ?? '',
       payUrl: payload?.payUrl ?? null,
+      publicNotice: payload?.publicNotice ?? '',
+      pausesSoon:
+        enforced &&
+        !exempt &&
+        stage === 'grace' &&
+        !!payload &&
+        new Date(payload.graceEndsAt).getTime() - now.getTime() <= MS_DAY,
+      strictSuspend: this.strictSuspend,
       project: payload?.project ?? '',
       subscriptions: payload?.subscriptions ?? [],
       invoices: payload?.invoices ?? [],
