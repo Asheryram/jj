@@ -119,7 +119,13 @@ export interface AdminLicenseStatus {
   /** Every invoice for this app still waiting to be paid. */
   invoices: {
     number: string
+    /** What is still owed, after any part payments. */
     amount: number
+    total: number
+    paid: number
+    /** A one-time item rather than a renewal, and whether leaving it unpaid can limit the app. */
+    oneTime: boolean
+    pausesProject: boolean
     currency: string
     dueDate: string | null
     periodStart: string | null

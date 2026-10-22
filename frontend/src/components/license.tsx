@@ -111,13 +111,14 @@ export function LicenseBanner() {
 
   const tone = status.stage === 'active' ? 'info' : status.stage === 'grace' ? 'warning' : 'danger'
   const title =
+    // Worded for any kind of bill: a renewal or a one-time payment.
     status.stage === 'active'
-      ? 'Your subscription renews soon'
+      ? 'A payment is due soon'
       : status.stage === 'grace'
-        ? 'Your subscription is overdue'
+        ? 'A payment is overdue'
         : status.paused
-          ? 'Selling is paused: your subscription is overdue'
-          : 'Your subscription is overdue'
+          ? 'Selling is paused: a payment is overdue'
+          : 'A payment is overdue'
 
   const check = async () => {
     setChecking(true)
@@ -252,7 +253,7 @@ const SOURCE_TEXT: Record<AdminLicenseStatus['source'], string> = {
   stale: 'Billing server not answering for too long, ignored',
 }
 
-const INTERVAL_TEXT: Record<string, string> = { monthly: 'a month', quarterly: 'every 3 months', yearly: 'a year' }
+const INTERVAL_TEXT: Record<string, string> = { monthly: 'a month', quarterly: 'every 3 months', yearly: 'a year', once: 'one time' }
 
 /** Amounts arrive in pesewas. Falls back to plain digits for a currency the browser does not know. */
 function money(amount: number, currency: string): string {
@@ -365,6 +366,11 @@ export function SubscriptionCard() {
                               {invoice.subscription ? ` · ${invoice.subscription}` : ''}
                             </p>
                             <p className="mt-0.5 text-xl font-extrabold text-slate-900 dark:text-slate-50">{money(invoice.amount, invoice.currency)}</p>
+                            {invoice.paid > 0 && (
+                              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">
+                                {money(invoice.paid, invoice.currency)} of {money(invoice.total, invoice.currency)} already paid. This is what is left.
+                              </p>
+                            )}
                             <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">
                               {invoice.dueDate ? `Due ${longDate(invoice.dueDate)}` : 'Awaiting payment'}
                               {invoice.periodStart && invoice.periodEnd
@@ -372,6 +378,13 @@ export function SubscriptionCard() {
                                 : ''}
                               {!invoice.subscription && invoice.description ? `. ${invoice.description}` : ''}
                             </p>
+                            {invoice.oneTime && (
+                              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                                {invoice.pausesProject
+                                  ? 'One-time payment. If it stays unpaid, new sales pause like an overdue subscription.'
+                                  : 'One-time payment. It never pauses the app.'}
+                              </p>
+                            )}
                           </div>
                           {payUrl && (
                             <a href={payUrl} target="_blank" rel="noopener noreferrer">
@@ -405,7 +418,7 @@ export function SubscriptionCard() {
                               {money(item.amount, item.currency)} {INTERVAL_TEXT[item.interval] ?? item.interval}
                               {item.mode === 'exempt' || item.mode === 'paused'
                                 ? ''
-                                : `, ${item.stage === 'active' ? 'renews' : 'was due'} ${longDate(item.dueAt)}`}
+                                : `, ${item.stage === 'active' ? (item.interval === 'once' ? 'due' : 'renews') : 'was due'} ${longDate(item.dueAt)}`}
                             </p>
                           </div>
                           <Badge tone={itemBadge.tone}>{itemBadge.label}</Badge>

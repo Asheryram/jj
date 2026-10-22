@@ -40,6 +40,10 @@ function payloadFor(stage: LicenseStage, overrides: Partial<LicensePayload> = {}
       {
         number: 'INV-0007',
         amount: 50000,
+        total: 50000,
+        paid: 0,
+        oneTime: false,
+        pausesProject: true,
         currency: 'GHS',
         dueDate: new Date(now - 3 * 86_400_000).toISOString(),
         periodStart: new Date(now - 3 * 86_400_000).toISOString(),
@@ -123,6 +127,35 @@ test('the subscriptions and the invoices come through, and a broken entry is dro
   assert.equal(parsed?.stage, 'grace', 'a licence from before these fields existed still works')
   assert.deepEqual(parsed?.invoices, [])
   assert.deepEqual(parsed?.subscriptions, [])
+})
+
+test('part payments and one-time items come through, and an invoice from an older billing app gets safe defaults', () => {
+  const partly = verifyLicenseToken(
+    tokenFor({
+      ...payloadFor('restricted'),
+      invoices: [
+        { ...payloadFor('restricted').invoices[0], number: 'INV-0009', amount: 30000, total: 50000, paid: 20000, oneTime: true, pausesProject: true, subscription: null },
+      ],
+    }),
+    PUBLIC_KEY,
+  )
+  assert.deepEqual(
+    partly?.invoices.map(({ amount, total, paid, oneTime, pausesProject }) => ({ amount, total, paid, oneTime, pausesProject })),
+    [{ amount: 30000, total: 50000, paid: 20000, oneTime: true, pausesProject: true }],
+  )
+
+  const { total, paid, oneTime, pausesProject, ...oldRenewal } = payloadFor('grace').invoices[0]
+  void [total, paid, oneTime, pausesProject]
+  const oldOneOff = { ...oldRenewal, number: 'INV-0010', subscription: null }
+  const older = verifyLicenseToken(tokenFor({ ...payloadFor('grace'), invoices: [oldRenewal, oldOneOff] }), PUBLIC_KEY)
+  assert.deepEqual(
+    older?.invoices.map(({ amount, total: t, paid: p, oneTime: o, pausesProject: b }) => [amount, t, p, o, b]),
+    [
+      [50000, 50000, 0, false, true],
+      [50000, 50000, 0, true, false],
+    ],
+    'the whole amount is owed, a renewal can limit the app, a one-off cannot',
+  )
 })
 
 test('a signed but malformed licence is refused', () => {
