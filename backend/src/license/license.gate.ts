@@ -43,9 +43,12 @@ export class LicenseGuard implements CanActivate {
     if (!gate) return true
 
     const request = context.switchToHttp().getRequest<{ body?: { payWith?: unknown }; method?: string; url?: string }>()
-    if (gate.kind === 'unless-wallet' && request.body?.payWith === 'wallet') return true
-
     const status = this.license.status()
+    // A wallet order spends money the customer already paid in, so it goes through,
+    // unless the owner chose the strict setting and the app is fully suspended.
+    const strictNow = status.strictSuspend && status.stage === 'suspended'
+    if (gate.kind === 'unless-wallet' && request.body?.payWith === 'wallet' && !strictNow) return true
+
     if (status.exempt) return true
 
     if (!status.paused) {

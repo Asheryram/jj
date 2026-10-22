@@ -57,7 +57,7 @@ function useAdminLicense(enabled: boolean) {
 /** At the top of every signed-in page. Quiet unless there is something to know. */
 export function LicenseBanner() {
   const { session } = useStore()
-  const { level } = useLicense()
+  const { level, pausesSoon } = useLicense()
   const admin = Boolean(session && isAdmin(session.role))
   const { status, checkNow } = useAdminLicense(admin)
   const [checking, setChecking] = useState(false)
@@ -66,6 +66,16 @@ export function LicenseBanner() {
   if (!session) return null
 
   if (!admin) {
+    // A day's notice for agents, only when the owner chose to give it.
+    if (level === 'ok' && pausesSoon && session.role === 'agent') {
+      return (
+        <Shell>
+          <Callout tone="info" icon={<ClockIcon className="size-4" />}>
+            New orders and sign-ups may pause for a short while from tomorrow. Your earnings, withdrawals and sales history will not be affected.
+          </Callout>
+        </Shell>
+      )
+    }
     if (level === 'ok') return null
     const message =
       session.role === 'agent'
@@ -95,7 +105,7 @@ export function LicenseBanner() {
   }
 
   // Could not confirm lately. Said once, plainly, and nothing is blocked because of it.
-  if (status.stage === 'active' && (status.source === 'stale' || (status.source === 'unverified' && status.lastError))) {
+  if (status.stage === 'active' && (status.source === 'stale' || status.source === 'unreachable' || (status.source === 'unverified' && status.lastError))) {
     return (
       <Shell>
         <Callout tone="warning" title="We could not confirm your subscription" icon={<AlertIcon className="size-4" />}>
@@ -111,13 +121,14 @@ export function LicenseBanner() {
 
   const tone = status.stage === 'active' ? 'info' : status.stage === 'grace' ? 'warning' : 'danger'
   const title =
+    // Worded for any kind of bill: a renewal or a one-time payment.
     status.stage === 'active'
-      ? 'Your subscription renews soon'
+      ? 'A payment is due soon'
       : status.stage === 'grace'
-        ? 'Your subscription is overdue'
+        ? 'A payment is overdue'
         : status.paused
-          ? 'Selling is paused: your subscription is overdue'
-          : 'Your subscription is overdue'
+          ? 'Selling is paused: a payment is overdue'
+          : 'A payment is overdue'
 
   const check = async () => {
     setChecking(true)
@@ -168,6 +179,7 @@ function Shell({ children }: { children: ReactNode }) {
 /** Shown in place of a page that would take an order or a sign-up. */
 export function PausedNotice({ kind }: { kind: 'buy' | 'signup' }) {
   const shopPath = useShopPath()
+  const { notice } = useLicense()
   return (
     <div className="mx-auto max-w-lg px-4 py-14">
       <Card className="p-6 text-center">
@@ -178,7 +190,7 @@ export function PausedNotice({ kind }: { kind: 'buy' | 'signup' }) {
           {kind === 'buy' ? 'Ordering is paused for a short while' : 'Sign-ups are paused for a short while'}
         </h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-          Please try again later. If you have already paid for something, nothing is lost: you can still check on it.
+          {notice || 'Please try again later.'} If you have already paid for something, nothing is lost: you can still check on it.
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
           <Link to={shopPath('/track')}>
@@ -196,6 +208,7 @@ export function PausedNotice({ kind }: { kind: 'buy' | 'signup' }) {
 /** The whole public shop, while it is suspended. Staff can still log in. */
 export function ServiceUnavailable() {
   const shopPath = useShopPath()
+  const { notice } = useLicense()
   return (
     <div className="mx-auto max-w-lg px-4 py-20">
       <Card className="p-7 text-center">
@@ -204,7 +217,7 @@ export function ServiceUnavailable() {
         </div>
         <h1 className="mt-4 text-xl font-bold text-slate-900 dark:text-slate-50">We will be back soon</h1>
         <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-          This shop is temporarily unavailable. Please check again a little later.
+          {notice || 'This shop is temporarily unavailable. Please check again a little later.'}
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
           <Link to={shopPath('/track')}>
@@ -248,11 +261,19 @@ const SOURCE_TEXT: Record<AdminLicenseStatus['source'], string> = {
   misconfigured: 'Set up wrongly',
   unverified: 'Not heard from the billing server yet',
   live: 'Up to date',
-  cached: 'Billing server not answering, using the last answer',
+  cached: 'A check is overdue, using the last answer',
+  unreachable: 'Billing server not answering, nothing is blocked',
   stale: 'Billing server not answering for too long, ignored',
 }
 
-const INTERVAL_TEXT: Record<string, string> = { monthly: 'a month', quarterly: 'every 3 months', yearly: 'a year' }
+const INTERVAL_TEXT: Record<string, string> = {
+  monthly: 'a month',
+  every_2_months: 'every 2 months',
+  quarterly: 'every 3 months',
+  every_6_months: 'every 6 months',
+  yearly: 'a year',
+  once: 'one time',
+}
 
 /** Amounts arrive in pesewas. Falls back to plain digits for a currency the browser does not know. */
 function money(amount: number, currency: string): string {
@@ -365,6 +386,11 @@ export function SubscriptionCard() {
                               {invoice.subscription ? ` · ${invoice.subscription}` : ''}
                             </p>
                             <p className="mt-0.5 text-xl font-extrabold text-slate-900 dark:text-slate-50">{money(invoice.amount, invoice.currency)}</p>
+                            {invoice.paid > 0 && (
+                              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">
+                                {money(invoice.paid, invoice.currency)} of {money(invoice.total, invoice.currency)} already paid. This is what is left.
+                              </p>
+                            )}
                             <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-300">
                               {invoice.dueDate ? `Due ${longDate(invoice.dueDate)}` : 'Awaiting payment'}
                               {invoice.periodStart && invoice.periodEnd
@@ -372,6 +398,13 @@ export function SubscriptionCard() {
                                 : ''}
                               {!invoice.subscription && invoice.description ? `. ${invoice.description}` : ''}
                             </p>
+                            {invoice.oneTime && (
+                              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                                {invoice.pausesProject
+                                  ? 'One-time payment. If it stays unpaid, new sales pause like an overdue subscription.'
+                                  : 'One-time payment. It never pauses the app.'}
+                              </p>
+                            )}
                           </div>
                           {payUrl && (
                             <a href={payUrl} target="_blank" rel="noopener noreferrer">
@@ -403,9 +436,11 @@ export function SubscriptionCard() {
                             <p className="font-semibold text-slate-900 dark:text-slate-50">{item.name}</p>
                             <p className="text-xs text-slate-500 dark:text-slate-400">
                               {money(item.amount, item.currency)} {INTERVAL_TEXT[item.interval] ?? item.interval}
-                              {item.mode === 'exempt' || item.mode === 'paused'
+                              {item.trialUntil && new Date(item.trialUntil).getTime() > Date.now()
+                                ? `, free trial until ${longDate(item.trialUntil)}`
+                                : item.mode === 'exempt' || item.mode === 'paused'
                                 ? ''
-                                : `, ${item.stage === 'active' ? 'renews' : 'was due'} ${longDate(item.dueAt)}`}
+                                : `, ${item.stage === 'active' ? (item.interval === 'once' ? 'due' : 'renews') : 'was due'} ${longDate(item.dueAt)}`}
                             </p>
                           </div>
                           <Badge tone={itemBadge.tone}>{itemBadge.label}</Badge>

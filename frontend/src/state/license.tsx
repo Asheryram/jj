@@ -6,10 +6,14 @@ type Level = PublicLicenseStatus['level']
 interface LicenseContextValue {
   /** `ok` unless selling is paused. `restricted` pauses buying and sign-ups; `suspended` pauses the public shop. */
   level: Level
+  /** While paused: what the business wants the public told (may be empty). */
+  notice: string
+  /** Selling pauses within a day; only ever true if the owner chose to warn agents. */
+  pausesSoon: boolean
   refresh: () => void
 }
 
-const LicenseContext = createContext<LicenseContextValue>({ level: 'ok', refresh: () => undefined })
+const LicenseContext = createContext<LicenseContextValue>({ level: 'ok', notice: '', pausesSoon: false, refresh: () => undefined })
 
 /** How the front end learns, without being signed in, whether selling is paused. */
 const POLL_MS = 5 * 60_000
@@ -27,10 +31,15 @@ const POLL_MS = 5 * 60_000
  */
 export function LicenseProvider({ children }: { children: ReactNode }) {
   const [level, setLevel] = useState<Level>('ok')
+  const [notice, setNotice] = useState('')
+  const [pausesSoon, setPausesSoon] = useState(false)
 
   const load = useCallback(async () => {
     try {
-      setLevel((await api.licenseStatus()).level)
+      const status = await api.licenseStatus()
+      setLevel(status.level)
+      setNotice(status.notice ?? '')
+      setPausesSoon(status.pausesSoon === true)
     } catch {
       // Unknown means carry on.
     }
@@ -49,7 +58,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     }
   }, [load])
 
-  const value = useMemo(() => ({ level, refresh: () => void load() }), [level, load])
+  const value = useMemo(() => ({ level, notice, pausesSoon, refresh: () => void load() }), [level, notice, pausesSoon, load])
   return <LicenseContext.Provider value={value}>{children}</LicenseContext.Provider>
 }
 

@@ -15,12 +15,21 @@ export interface LicenseSubscription {
   stage: LicenseStage
   dueAt: string
   mode: string
+  /** The end of a free trial, while there is one. */
+  trialUntil: string | null
 }
 
 /** An invoice for this app that is still waiting to be paid. */
 export interface LicenseInvoice {
   number: string
+  /** What is still owed on it, after any part payments. */
   amount: number
+  /** The whole invoice, and how much of it is already paid. */
+  total: number
+  paid: number
+  /** A one-time item rather than a subscription renewal, and whether leaving it unpaid can limit the app. */
+  oneTime: boolean
+  pausesProject: boolean
   currency: string
   dueDate: string | null
   periodStart: string | null
@@ -59,6 +68,8 @@ export interface LicensePayload {
   invoices: LicenseInvoice[]
   /** The most useful single place to pay. */
   payUrl: string | null
+  /** What the client wants the public told while the app is paused, in their own words. */
+  publicNotice: string
   issuedAt: string
   expiresAt: string
 }
@@ -95,6 +106,7 @@ function parseSubscriptions(value: unknown): LicenseSubscription[] {
       stage: item.stage,
       dueAt: item.dueAt,
       mode: typeof item.mode === 'string' ? item.mode : 'auto',
+      trialUntil: isDate(item.trialUntil) ? item.trialUntil : null,
     })
   }
   return out
@@ -106,15 +118,22 @@ function parseInvoices(value: unknown): LicenseInvoice[] {
   for (const raw of value) {
     const item = raw as Partial<LicenseInvoice> | null
     if (!item || !isText(item.number) || !isAmount(item.amount) || !isText(item.currency)) continue
+    // A licence from an older billing app has none of the part-payment fields: the
+    // amount is then the whole invoice, nothing is paid yet, and only renewals count.
+    const subscription = textOrNull(item.subscription)
     out.push({
       number: item.number,
       amount: item.amount,
+      total: isAmount(item.total) ? item.total : item.amount,
+      paid: isAmount(item.paid) ? item.paid : 0,
+      oneTime: typeof item.oneTime === 'boolean' ? item.oneTime : subscription === null,
+      pausesProject: typeof item.pausesProject === 'boolean' ? item.pausesProject : subscription !== null,
       currency: item.currency,
       dueDate: dateOrNull(item.dueDate),
       periodStart: dateOrNull(item.periodStart),
       periodEnd: dateOrNull(item.periodEnd),
       description: typeof item.description === 'string' ? item.description : '',
-      subscription: textOrNull(item.subscription),
+      subscription,
       payUrl: textOrNull(item.payUrl),
     })
   }
@@ -156,6 +175,7 @@ export function verifyLicenseToken(token: string, publicKey: string): LicensePay
       subscriptions: parseSubscriptions(payload.subscriptions),
       invoices: parseInvoices(payload.invoices),
       payUrl: typeof payload.payUrl === 'string' ? payload.payUrl : null,
+      publicNotice: typeof payload.publicNotice === 'string' ? payload.publicNotice.slice(0, 300) : '',
       issuedAt: payload.issuedAt,
       expiresAt: payload.expiresAt,
     }

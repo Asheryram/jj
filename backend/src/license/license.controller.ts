@@ -7,6 +7,10 @@ import { LicenseService, type LicenseStatus } from './license.service'
 export interface PublicLicenseStatus {
   /** `ok` unless sales are paused. `restricted` pauses buying and sign-ups; `suspended` pauses the whole public shop. */
   level: 'ok' | 'restricted' | 'suspended'
+  /** While paused: what the client wants the public told, in their own words (may be empty). */
+  notice?: string
+  /** Only when the owner turned on LICENSE_WARN_AGENTS: selling pauses within a day. */
+  pausesSoon?: boolean
 }
 
 @ApiTags('license')
@@ -22,8 +26,8 @@ export class LicenseController {
   @Get('status')
   publicStatus(): PublicLicenseStatus {
     const status = this.license.status()
-    if (!status.paused) return { level: 'ok' }
-    return { level: status.stage === 'suspended' ? 'suspended' : 'restricted' }
+    if (!status.paused) return status.pausesSoon && this.license.warnAgents ? { level: 'ok', pausesSoon: true } : { level: 'ok' }
+    return { level: status.stage === 'suspended' ? 'suspended' : 'restricted', notice: status.publicNotice || undefined }
   }
 
   /** The full picture, for the admin's banner and settings card. */

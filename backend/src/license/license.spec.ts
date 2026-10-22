@@ -7,6 +7,7 @@ import { Reflector } from '@nestjs/core'
 import { LicenseService } from './license.service'
 import { LICENSE_GATE_KEY, LicenseGuard } from './license.gate'
 import { verifyLicenseToken, type LicensePayload, type LicenseStage } from './license-token'
+import { LicenseController } from './license.controller'
 
 // A real key pair, made the same way the invoicing app makes its own.
 const { privateKey, publicKey } = generateKeyPairSync('ed25519')
@@ -31,15 +32,20 @@ function payloadFor(stage: LicenseStage, overrides: Partial<LicensePayload> = {}
     suspendsAt: new Date(now + 27 * 86_400_000).toISOString(),
     message: `stage is ${stage}`,
     payUrl: 'https://billing.example.com/pay/abc',
+    publicNotice: '',
     project: 'JKBK Data Hub',
     subscriptions: [
-      { name: 'App', amount: 50000, currency: 'GHS', interval: 'monthly', stage, dueAt: new Date(now - 3 * 86_400_000).toISOString(), mode: 'auto' },
-      { name: 'Hosting', amount: 20000, currency: 'GHS', interval: 'monthly', stage: 'active', dueAt: new Date(now + 40 * 86_400_000).toISOString(), mode: 'auto' },
+      { name: 'App', amount: 50000, currency: 'GHS', interval: 'monthly', stage, dueAt: new Date(now - 3 * 86_400_000).toISOString(), mode: 'auto', trialUntil: null },
+      { name: 'Hosting', amount: 20000, currency: 'GHS', interval: 'monthly', stage: 'active', dueAt: new Date(now + 40 * 86_400_000).toISOString(), mode: 'auto', trialUntil: null },
     ],
     invoices: [
       {
         number: 'INV-0007',
         amount: 50000,
+        total: 50000,
+        paid: 0,
+        oneTime: false,
+        pausesProject: true,
         currency: 'GHS',
         dueDate: new Date(now - 3 * 86_400_000).toISOString(),
         periodStart: new Date(now - 3 * 86_400_000).toISOString(),
@@ -125,6 +131,35 @@ test('the subscriptions and the invoices come through, and a broken entry is dro
   assert.deepEqual(parsed?.subscriptions, [])
 })
 
+test('part payments and one-time items come through, and an invoice from an older billing app gets safe defaults', () => {
+  const partly = verifyLicenseToken(
+    tokenFor({
+      ...payloadFor('restricted'),
+      invoices: [
+        { ...payloadFor('restricted').invoices[0], number: 'INV-0009', amount: 30000, total: 50000, paid: 20000, oneTime: true, pausesProject: true, subscription: null },
+      ],
+    }),
+    PUBLIC_KEY,
+  )
+  assert.deepEqual(
+    partly?.invoices.map(({ amount, total, paid, oneTime, pausesProject }) => ({ amount, total, paid, oneTime, pausesProject })),
+    [{ amount: 30000, total: 50000, paid: 20000, oneTime: true, pausesProject: true }],
+  )
+
+  const { total, paid, oneTime, pausesProject, ...oldRenewal } = payloadFor('grace').invoices[0]
+  void [total, paid, oneTime, pausesProject]
+  const oldOneOff = { ...oldRenewal, number: 'INV-0010', subscription: null }
+  const older = verifyLicenseToken(tokenFor({ ...payloadFor('grace'), invoices: [oldRenewal, oldOneOff] }), PUBLIC_KEY)
+  assert.deepEqual(
+    older?.invoices.map(({ amount, total: t, paid: p, oneTime: o, pausesProject: b }) => [amount, t, p, o, b]),
+    [
+      [50000, 50000, 0, false, true],
+      [50000, 50000, 0, true, false],
+    ],
+    'the whole amount is owed, a renewal can limit the app, a one-off cannot',
+  )
+})
+
 test('a signed but malformed licence is refused', () => {
   assert.equal(verifyLicenseToken(tokenFor({ ...payloadFor('active'), stage: 'banana' }), PUBLIC_KEY), null)
   assert.equal(verifyLicenseToken(tokenFor({ ...payloadFor('active'), dueAt: 'not a date' }), PUBLIC_KEY), null)
@@ -206,27 +241,27 @@ test('a failing billing server never blocks anyone', async () => {
   }
 })
 
-test('a good answer survives later failures for a while, and is dropped when too old', async () => {
+test('the moment the billing server stops answering, the app runs as if everything is paid, and picks up again when it is back', async () => {
   let up = true
-  const s = service(
-    { LICENSE_ENFORCE: 'true', LICENSE_OFFLINE_DAYS: '7' },
-    async () => {
-      if (!up) throw new Error('billing is down')
-      return new Response(JSON.stringify({ token: tokenFor(payloadFor('restricted')) }), { status: 200 })
-    },
-  )
+  const s = service({ LICENSE_ENFORCE: 'true' }, async () => {
+    if (!up) throw new Error('billing is down')
+    return new Response(JSON.stringify({ token: tokenFor(payloadFor('suspended')) }), { status: 200 })
+  })
   await s.refresh()
-  assert.equal(s.status().paused, true)
+  assert.equal(s.status().paused, true, 'suspended while the billing server says so')
 
   up = false
   await s.refresh()
-  const during = s.status(new Date(Date.now() + 3 * 3_600_000))
-  assert.equal(during.paused, true, 'still trusted shortly after the billing server went quiet')
-  assert.equal(during.source, 'cached')
+  const down = s.status()
+  assert.equal(down.source, 'unreachable')
+  assert.equal(down.paused, false, 'not a minute of blocking because the billing server is down')
+  assert.equal(down.stage, 'active')
+  assert.deepEqual([down.subscriptions, down.invoices, down.message, down.payUrl], [[], [], '', null], 'the subscription is simply blank')
 
-  const afterTolerance = s.status(new Date(Date.now() + 8 * 86_400_000))
-  assert.equal(afterTolerance.paused, false, 'after 8 days with no answer it is ignored: carry on')
-  assert.equal(afterTolerance.source, 'stale')
+  up = true
+  await s.refresh()
+  assert.equal(s.status().source, 'live')
+  assert.equal(s.status().paused, true, 'once it answers again, its answer counts again')
 })
 
 test('payment is seen on the very next check', async () => {
@@ -302,4 +337,45 @@ test('a wallet-paid order goes through even while paused, but a mobile money one
   // A route marked "always" gives the wallet no special treatment.
   const topUp = gateContext('always', { payWith: 'wallet' })
   assert.throws(() => new LicenseGuard(topUp.reflector, lapsed).canActivate(topUp.context), ServiceUnavailableException)
+})
+
+// ---------------------------------------------------------------- key rotation, strict mode, notices
+
+test('while the signing key is being changed, a licence signed with either key is accepted', async () => {
+  const fresh = generateKeyPairSync('ed25519')
+  const newPublic = Buffer.from(fresh.publicKey.export({ type: 'spki', format: 'pem' })).toString('base64')
+  const signedWithNew = tokenFor(payloadFor('restricted'), fresh.privateKey)
+  const both = service({ LICENSE_ENFORCE: 'true', LICENSE_PUBLIC_KEY: `${PUBLIC_KEY}, ${newPublic}` }, respondWith(signedWithNew))
+  await both.refresh()
+  assert.equal(both.status().source, 'live')
+  assert.equal(both.status().stage, 'restricted')
+
+  const oldOnly = service({ LICENSE_ENFORCE: 'true' }, respondWith(signedWithNew))
+  await oldOnly.refresh()
+  assert.equal(oldOnly.status().source, 'unverified', 'a key that is not trusted yet is refused')
+})
+
+test('the strict setting refuses wallet orders once suspended, and only then', async () => {
+  const wallet = gateContext('unless-wallet', { payWith: 'wallet' })
+  const strict = { LICENSE_ENFORCE: 'true', LICENSE_STRICT_SUSPEND: 'true' }
+  const suspended = await liveService('suspended', strict)
+  assert.throws(() => new LicenseGuard(wallet.reflector, suspended).canActivate(wallet.context), ServiceUnavailableException)
+  const restricted = await liveService('restricted', strict)
+  assert.equal(new LicenseGuard(wallet.reflector, restricted).canActivate(wallet.context), true, 'restricted still lets wallets through')
+  const normal = await liveService('suspended')
+  assert.equal(new LicenseGuard(wallet.reflector, normal).canActivate(wallet.context), true, 'off by default')
+})
+
+test('the public status carries the client notice while paused, and a heads-up only when the owner asks for it', async () => {
+  const paused = service({ LICENSE_ENFORCE: 'true' }, respondWith(tokenFor(payloadFor('suspended', { publicNotice: 'Back soon.' }))))
+  await paused.refresh()
+  assert.deepEqual(new LicenseController(paused).publicStatus(), { level: 'suspended', notice: 'Back soon.' })
+
+  const lastDay = { graceEndsAt: new Date(Date.now() + 6 * 3_600_000).toISOString() }
+  const quiet = service({ LICENSE_ENFORCE: 'true' }, respondWith(tokenFor(payloadFor('grace', lastDay))))
+  await quiet.refresh()
+  assert.deepEqual(new LicenseController(quiet).publicStatus(), { level: 'ok' }, 'agents are not told unless the owner wants them to be')
+  const warned = service({ LICENSE_ENFORCE: 'true', LICENSE_WARN_AGENTS: 'true' }, respondWith(tokenFor(payloadFor('grace', lastDay))))
+  await warned.refresh()
+  assert.deepEqual(new LicenseController(warned).publicStatus(), { level: 'ok', pausesSoon: true })
 })
