@@ -261,7 +261,8 @@ const SOURCE_TEXT: Record<AdminLicenseStatus['source'], string> = {
   misconfigured: 'Set up wrongly',
   unverified: 'Not heard from the billing server yet',
   live: 'Up to date',
-  cached: 'Billing server not answering, using the last answer',
+  cached: 'A check is overdue, using the last answer',
+  unreachable: 'Billing server not answering, nothing is blocked',
   stale: 'Billing server not answering for too long, ignored',
 }
 
