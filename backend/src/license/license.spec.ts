@@ -35,8 +35,8 @@ function payloadFor(stage: LicenseStage, overrides: Partial<LicensePayload> = {}
     publicNotice: '',
     project: 'JKBK Data Hub',
     subscriptions: [
-      { name: 'App', amount: 50000, currency: 'GHS', interval: 'monthly', stage, dueAt: new Date(now - 3 * 86_400_000).toISOString(), mode: 'auto', trialUntil: null },
-      { name: 'Hosting', amount: 20000, currency: 'GHS', interval: 'monthly', stage: 'active', dueAt: new Date(now + 40 * 86_400_000).toISOString(), mode: 'auto', trialUntil: null },
+      { name: 'App', amount: 50000, currency: 'GHS', interval: 'monthly', stage, dueAt: new Date(now - 3 * 86_400_000).toISOString(), mode: 'auto', trialUntil: null, nextAmount: null, nextAmountFrom: null },
+      { name: 'Hosting', amount: 20000, currency: 'GHS', interval: 'monthly', stage: 'active', dueAt: new Date(now + 40 * 86_400_000).toISOString(), mode: 'auto', trialUntil: null, nextAmount: null, nextAmountFrom: null },
     ],
     invoices: [
       {
@@ -408,4 +408,16 @@ test('a slow or failed first request is tried once more, so a billing app waking
   await wrong.refresh()
   assert.equal(forged, 1, 'a wrong answer is not asked for again')
   assert.equal(wrong.status().paused, false)
+})
+
+test('a coming price change comes through, and a licence without one still parses', () => {
+  const base = payloadFor('active')
+  const withChange = verifyLicenseToken(
+    tokenFor({ ...base, subscriptions: [{ ...base.subscriptions[0], nextAmount: 75000, nextAmountFrom: new Date(Date.now() + 30 * 86_400_000).toISOString() }] }),
+    PUBLIC_KEY,
+  )
+  assert.equal(withChange?.subscriptions[0]?.nextAmount, 75000)
+  assert.ok(withChange?.subscriptions[0]?.nextAmountFrom)
+  const plain = verifyLicenseToken(tokenFor(base), PUBLIC_KEY)
+  assert.equal(plain?.subscriptions[0]?.nextAmount, null)
 })

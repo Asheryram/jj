@@ -17,6 +17,9 @@ export interface LicenseSubscription {
   mode: string
   /** The end of a free trial, while there is one. */
   trialUntil: string | null
+  /** A price change on the way: the new price, and the date it starts. */
+  nextAmount: number | null
+  nextAmountFrom: string | null
 }
 
 /** An invoice for this app that is still waiting to be paid. */
@@ -107,6 +110,8 @@ function parseSubscriptions(value: unknown): LicenseSubscription[] {
       dueAt: item.dueAt,
       mode: typeof item.mode === 'string' ? item.mode : 'auto',
       trialUntil: isDate(item.trialUntil) ? item.trialUntil : null,
+      nextAmount: isAmount(item.nextAmount) ? item.nextAmount : null,
+      nextAmountFrom: isDate(item.nextAmountFrom) ? item.nextAmountFrom : null,
     })
   }
   return out

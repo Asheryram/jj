@@ -121,6 +121,9 @@ export interface AdminLicenseStatus {
     mode: string
     /** The end of a free trial, while there is one. */
     trialUntil: string | null
+    /** A price change on the way. */
+    nextAmount: number | null
+    nextAmountFrom: string | null
   }[]
   /** What the public is told while paused (set in the invoicing app). */
   publicNotice: string
