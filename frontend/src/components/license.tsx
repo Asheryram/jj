@@ -436,6 +436,9 @@ export function SubscriptionCard() {
                             <p className="font-semibold text-slate-900 dark:text-slate-50">{item.name}</p>
                             <p className="text-xs text-slate-500 dark:text-slate-400">
                               {money(item.amount, item.currency)} {INTERVAL_TEXT[item.interval] ?? item.interval}
+                              {item.nextAmount !== null && item.nextAmountFrom
+                                ? `, ${money(item.nextAmount, item.currency)} from ${longDate(item.nextAmountFrom)}`
+                                : ''}
                               {item.trialUntil && new Date(item.trialUntil).getTime() > Date.now()
                                 ? `, free trial until ${longDate(item.trialUntil)}`
                                 : item.mode === 'exempt' || item.mode === 'paused'
