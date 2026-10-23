@@ -21,7 +21,14 @@
     "agent-4-money": "node build.mjs agent-4-money",
     "agent-5-help": "node build.mjs agent-5-help",
     "agent:all": "node build.mjs agent-1-start && node build.mjs agent-2-sell && node build.mjs agent-3-shop && node build.mjs agent-4-money && node build.mjs agent-5-help",
-    "agent:combine": "node combine.mjs agent"
+    "agent:combine": "node combine.mjs agent",
+    "billing-1-end-to-end": "APP_URL=http://localhost:3100 node build.mjs billing-1-end-to-end",
+    "billing-2-stages": "APP_URL=http://localhost:3100 node build.mjs billing-2-stages",
+    "billing-3-money": "APP_URL=http://localhost:3100 node build.mjs billing-3-money",
+    "billing-4-changes": "APP_URL=http://localhost:3100 node build.mjs billing-4-changes",
+    "billing-5-safety": "APP_URL=http://localhost:3100 node build.mjs billing-5-safety",
+    "billing:all": "APP_URL=http://localhost:3100 node build.mjs billing-1-end-to-end && APP_URL=http://localhost:3100 node build.mjs billing-2-stages && APP_URL=http://localhost:3100 node build.mjs billing-3-money && APP_URL=http://localhost:3100 node build.mjs billing-4-changes && APP_URL=http://localhost:3100 node build.mjs billing-5-safety",
+    "billing:combine": "node combine.mjs billing"
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",

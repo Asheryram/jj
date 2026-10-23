@@ -20,6 +20,7 @@ const SETS = {
     'admin-8-settings',
   ],
   agent: ['agent-1-start', 'agent-2-sell', 'agent-3-shop', 'agent-4-money', 'agent-5-help'],
+  billing: ['billing-1-end-to-end', 'billing-2-stages', 'billing-3-money', 'billing-4-changes', 'billing-5-safety'],
 }
 const set = process.argv[2] ?? 'admin'
 const CHAPTERS = SETS[set]
@@ -42,7 +43,7 @@ for (const name of CHAPTERS) {
 
 // Chapter markers, in milliseconds.
 let at = 0
-const lines = [';FFMETADATA1', `title=JKBK Data Hub: the complete ${set} guide`]
+const lines = [';FFMETADATA1', set === 'billing' ? 'title=The invoicing app: every scenario, for any app' : `title=JKBK Data Hub: the complete ${set} guide`]
 for (const item of items) {
   const start = Math.round(at * 1000)
   at += item.length
