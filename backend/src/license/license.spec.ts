@@ -379,3 +379,33 @@ test('the public status carries the client notice while paused, and a heads-up o
   await warned.refresh()
   assert.deepEqual(new LicenseController(warned).publicStatus(), { level: 'ok', pausesSoon: true })
 })
+
+test('a slow or failed first request is tried once more, so a billing app waking from idle still answers', async () => {
+  let calls = 0
+  const flaky = service({ LICENSE_ENFORCE: 'true' }, async () => {
+    calls += 1
+    if (calls === 1) throw new Error('The operation was aborted due to timeout')
+    return new Response(JSON.stringify({ token: tokenFor(payloadFor('restricted')) }), { status: 200 })
+  })
+  await flaky.refresh()
+  assert.equal(calls, 2)
+  assert.equal(flaky.status().source, 'live')
+  assert.equal(flaky.status().stage, 'restricted')
+
+  let serverErrors = 0
+  const busy = service({ LICENSE_ENFORCE: 'true' }, async () => {
+    serverErrors += 1
+    return serverErrors === 1 ? new Response('waking up', { status: 503 }) : new Response(JSON.stringify({ token: tokenFor(payloadFor('active')) }), { status: 200 })
+  })
+  await busy.refresh()
+  assert.equal(busy.status().source, 'live', 'a server error is retried too')
+
+  let forged = 0
+  const wrong = service({ LICENSE_ENFORCE: 'true' }, async () => {
+    forged += 1
+    return new Response(JSON.stringify({ token: 'not.a-licence' }), { status: 200 })
+  })
+  await wrong.refresh()
+  assert.equal(forged, 1, 'a wrong answer is not asked for again')
+  assert.equal(wrong.status().paused, false)
+})

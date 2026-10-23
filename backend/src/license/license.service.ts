@@ -61,6 +61,8 @@ interface Received {
 }
 
 const MS_DAY = 86_400_000
+/** How long to wait for the invoicing app on each attempt, allowing for it waking from idle. */
+const REQUEST_TIMEOUT_MS = 20_000
 
 /**
  * Where this app's subscription stands, according to the invoicing app.
@@ -188,15 +190,36 @@ export class LicenseService implements OnModuleInit, OnModuleDestroy {
     return this.inflight
   }
 
+  /**
+   * One request to the invoicing app. A billing app on a serverless host can take several
+   * seconds to wake from idle, so the wait is generous, and a timeout, a network failure or
+   * a server error is tried once more straight away (the second request finds it awake).
+   * A wrong or forged answer is never retried: asking again would not change it.
+   */
+  private async request(): Promise<Response> {
+    const version = this.config.get<string>('APP_VERSION') ?? process.env.npm_package_version ?? 'unknown'
+    const separator = this.url.includes('?') ? '&' : '?'
+    const url = `${this.url}${separator}v=${encodeURIComponent(version)}`
+    let lastError: unknown = null
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await this.fetchImpl(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
+        if (response.status >= 500 && attempt === 1) {
+          lastError = new Error(`the billing server answered ${response.status}`)
+          continue
+        }
+        return response
+      } catch (error) {
+        lastError = error
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError))
+  }
+
   private async fetchOnce(): Promise<void> {
     this.lastAttemptAt = new Date()
     try {
-      const version = this.config.get<string>('APP_VERSION') ?? process.env.npm_package_version ?? 'unknown'
-      const separator = this.url.includes('?') ? '&' : '?'
-      const response = await this.fetchImpl(`${this.url}${separator}v=${encodeURIComponent(version)}`, {
-        headers: { accept: 'application/json' },
-        signal: AbortSignal.timeout(8000),
-      })
+      const response = await this.request()
       if (!response.ok) throw new Error(`the billing server answered ${response.status}`)
 
       const body = (await response.json()) as { token?: unknown }
