@@ -180,6 +180,10 @@ export class LedgerService {
       settlements: {
         payouts: -of('payout'),
         walletTopUps: of('topup'),
+        /** The owner's own new money put into Paystack, see `TreasuryService`. */
+        ownerTopUps: of('owner_topup'),
+        /** Money the owner took out of Paystack, see `TreasuryService`. */
+        ownerDrawings: -of('owner_drawing'),
       },
       /** Profit as a share of revenue. Null rather than zero when nothing sold. */
       marginRate: revenue > 0 ? profit / revenue : null,
@@ -259,6 +263,17 @@ export class LedgerService {
       this.refundsOwedRefs(),
     ])
     return profit - (await this.bookedProfitFor([...inFlight.map((o) => o.reference), ...owedBack]))
+  }
+
+  /**
+   * Pesewas the owner has taken out of the business, all-time, positive:
+   * withdrawals from the Paystack balance page and money recorded as taken
+   * when the books were balanced. Never a cost, so it never lowers profit
+   * earned; it is what turns "profit earned" into "profit still here".
+   */
+  async ownerDrawings(): Promise<number> {
+    const sum = await this.prisma.ledgerEntry.aggregate({ where: { kind: 'owner_drawing' }, _sum: { amount: true } })
+    return -(sum._sum.amount ?? 0)
   }
 
   /** Failed orders whose refund is still to be paid (pending, or approved and not yet sent). */

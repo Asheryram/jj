@@ -793,11 +793,11 @@ model BeneficiaryRequest {
   /// vocabularies, `attempts` counted across two unrelated approval
   /// processes, `approvedAt`/`copiedAt` meaning different things depending
   /// on which provider last wrote it.
-  phone String
+  phone      String
   /// Which supplier this number needs approving with. `'datahub-gh'` or
   /// `'gmpl'`, see `SupplierProviderCode`. Defaults to DataHub for every row
   /// that predates GMPL, which matches reality.
-  provider String @default("datahub-gh")
+  provider   String @default("datahub-gh")
   /// The network key in the vocabulary of whichever `provider` owns this row:
   /// DataHub's own (YELLO or mtn_xpress) for a `'datahub-gh'` row, GMPL's own
   /// (`MTN`/`TELECEL`, from `Product.network`) for a `'gmpl'` row. Never
@@ -813,19 +813,19 @@ model BeneficiaryRequest {
   /// Pesewas of the most recent attempt, the value of the sale being lost.
   lastValue   Int?    @map("last_value")
 
-  firstSeenAt DateTime  @default(now()) @map("first_seen_at")
-  lastSeenAt  DateTime  @updatedAt @map("last_seen_at")
+  firstSeenAt   DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt    DateTime  @updatedAt @map("last_seen_at")
   /// Set once the provider confirms it accepted this number (DataHub's
   /// `/verify`, GMPL's precheck `known:true`). Kept rather than deleted so
   /// the same number is not re-submitted on a later attempt.
-  approvedAt  DateTime? @map("approved_at")
+  approvedAt    DateTime? @map("approved_at")
   /// The last time an admin copied this number to paste into the provider's
   /// own dashboard by hand (DataHub only — GMPL's own submission is an API
   /// call, see `ApprovalsService.submit`), not confirmation it was received
   /// or actioned, only that it was handed over. Null means never copied at
   /// all, which is exactly the number that's easy to lose track of once a
   /// few more have come in since the last copy, see `ApprovalsService.pending`.
-  copiedAt    DateTime? @map("copied_at")
+  copiedAt      DateTime? @map("copied_at")
   /// GMPL only, the real-API counterpart to `copiedAt`: the last time
   /// `GmplClient.precheckBeneficiary` was called for this number with
   /// `record: true` and GMPL's own reply confirmed `recorded: true`, not
@@ -833,14 +833,14 @@ model BeneficiaryRequest {
   /// actually reached GMPL's own Pending MTN Approval queue yet, the one
   /// case "pending" alone could not tell apart from "already asked, just
   /// not yet answered".
-  recordedAt  DateTime? @map("recorded_at")
+  recordedAt    DateTime? @map("recorded_at")
   /// GMPL only: why the last attempt to send this to their real queue did
   /// not succeed, so "why is this still Pending" has a real answer sitting
   /// in the data, not only an ephemeral server log that may already be
   /// gone by the time anyone asks. Cleared the moment a send actually
   /// succeeds (`recordedAt` set), so this only ever reflects the most
   /// recent attempt, never a stale failure from one that has since worked.
-  lastSendError String? @map("last_send_error")
+  lastSendError String?   @map("last_send_error")
 
   @@id([phone, provider])
   @@index([approvedAt])
@@ -994,6 +994,13 @@ enum LedgerKind {
   /// requested (`Payment.amount`), so the difference is genuinely extra,
   /// not owed to anyone. See `PaymentsService.applyPaid`.
   overpayment
+  /// The owner's own new money put into the Paystack balance with a top-up,
+  /// not money moved back from the settlement MoMo. Balance sheet only, never
+  /// profit. See `TreasuryService.classifyTopup`.
+  owner_topup
+  /// Profit or capital the owner took out of the Paystack balance by a real
+  /// Paystack transfer. Balance sheet only, never profit. See `TreasuryService`.
+  owner_drawing
 }
 
 /// Every movement of money, once.
@@ -1644,7 +1651,7 @@ model ServiceSubscription {
   /// ever advances `expiresAt` when the "Renewed" action is clicked by hand,
   /// never on its own, an unattended timer cannot know a real invoice was
   /// actually paid, only a human renewing it can.
-  recurrence String?
+  recurrence      String?
 
   /// Set once the "expiring soon" email has gone out for the *current*
   /// `expiresAt`. Cleared back to null whenever `expiresAt` itself changes,
@@ -1719,4 +1726,109 @@ model AdminAction {
   @@index([createdAt])
   @@index([actorId])
   @@map("admin_actions")
+}
+
+/// What a Paystack treasury withdrawal is for. Decides what gets booked when
+/// Paystack confirms it, see `TreasuryService.applyTransferEvent`.
+enum TreasuryPurpose {
+  /// Moving collected money to a supplier float. Booked as
+  /// `capital_in_reimbursement` for that provider.
+  provider_refill
+  /// The owner taking profit or capital out. Booked as `owner_drawing`.
+  owner_drawing
+}
+
+/// Where a top-up into the Paystack balance came from.
+enum PaystackTopupSource {
+  /// Detected, not yet decided. Treated like `settlement_momo` meanwhile,
+  /// the choice that never inflates what is free to spend.
+  unclassified
+  /// Money that Paystack had earlier settled out to the MoMo number, moved
+  /// back in. Not new money, the books already count it.
+  settlement_momo
+  /// The owner's own new money. Booked as `owner_topup`.
+  own_money
+  /// Turned out not to be a top-up at all (a customer payment we could not
+  /// match, say). Ignored.
+  not_topup
+}
+
+/// A Mobile Money number Paystack treasury withdrawals may be sent to.
+///
+/// Superadmin-controlled. Admins can only choose from this list, so a stolen
+/// admin login cannot send the balance to a number nobody approved.
+model TreasuryDestination {
+  id      String  @id @default(uuid())
+  label   String
+  phone   String
+  network Network
+
+  /// Paystack's handle for this number, created on first use and reused.
+  recipientCode String? @map("recipient_code")
+
+  active Boolean @default(true)
+
+  createdBy String   @map("created_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  transfers TreasuryTransfer[]
+
+  @@unique([phone, network])
+  @@map("treasury_destinations")
+}
+
+/// Money sent out of the Paystack balance by a person, for a stated purpose:
+/// refilling a supplier float, or the owner taking money out. Sent with
+/// reference `TRS-<id>`, settled by Paystack's transfer webhook.
+model TreasuryTransfer {
+  id       String          @id @default(uuid())
+  purpose  TreasuryPurpose
+  /// The supplier float being refilled, for `provider_refill` only.
+  provider String?
+
+  /// Pesewas sent, and Paystack's own transfer fee on top of it.
+  amount Int
+  fee    Int
+
+  destinationId String              @map("destination_id")
+  destination   TreasuryDestination @relation(fields: [destinationId], references: [id], onDelete: Restrict)
+
+  note        String?
+  requestedBy String  @map("requested_by")
+
+  /// sending, pending, success, failed, reversed, otp, unknown.
+  status       String
+  transferCode String? @map("transfer_code")
+  statusNote   String? @map("status_note")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  paidAt    DateTime? @map("paid_at")
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("treasury_transfers")
+}
+
+/// A credit to the Paystack balance that was not one of our own customer
+/// payments, found by reading Paystack's balance history. Almost always a
+/// top-up; a person says where the money came from.
+model PaystackTopup {
+  id String @id @default(uuid())
+
+  /// Paystack's balance-ledger entry id. Unique, so a re-read never doubles.
+  ledgerId      String  @unique @map("ledger_id")
+  transactionId String? @map("transaction_id")
+  reason        String?
+
+  amount     Int
+  occurredAt DateTime @map("occurred_at")
+
+  source       PaystackTopupSource @default(unclassified)
+  classifiedBy String?             @map("classified_by")
+  classifiedAt DateTime?           @map("classified_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([source])
+  @@map("paystack_topups")
 }
