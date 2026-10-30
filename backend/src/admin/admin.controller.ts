@@ -150,6 +150,14 @@ export class RejectRefundDto {
   @MinLength(5, { message: 'Give a reason for refusing this refund.' })
   @MaxLength(500)
   note!: string
+
+  /**
+   * The bundle did arrive: mark the order completed and credit the selling
+   * agent. Defaults to true, see `RefundsService.reject`.
+   */
+  @IsOptional()
+  @IsBoolean()
+  delivered?: boolean
 }
 
 export class SettleRefundManuallyDto {
@@ -712,7 +720,7 @@ export class AdminController {
     @CurrentUser() user: AuthUser,
     @Body() dto: RejectRefundDto,
   ) {
-    return this.refunds.reject(id, user.id, dto.note)
+    return this.refunds.reject(id, user.id, dto.note, dto.delivered ?? true)
   }
 
   @Post('refunds/:id/settle-manually')

@@ -360,6 +360,8 @@ export default function Refunds() {
                             </button>
                           )}
                         </div>
+                      ) : row.status === 'rejected' && row.note?.startsWith('Reordered and delivered') ? (
+                        <Badge tone="success">reordered &amp; delivered</Badge>
                       ) : row.status === 'rejected' ? (
                         <Badge tone="danger">refused</Badge>
                       ) : row.method === 'transfer' && row.transferStatus === 'manual' ? (
@@ -615,12 +617,15 @@ function RefuseModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
+  const [delivered, setDelivered] = useState(true)
+
   const key = request?.id ?? 'none'
   const [lastKey, setLastKey] = useState(key)
   if (key !== lastKey) {
     setLastKey(key)
     setNote('')
     setError('')
+    setDelivered(true)
   }
 
   if (!request) return null
@@ -632,9 +637,14 @@ function RefuseModal({
     }
     setBusy(true)
     try {
-      await api.rejectRefund(request.id, note.trim())
+      await api.rejectRefund(request.id, note.trim(), delivered)
       await onRefused()
-      pushToast({ tone: 'info', title: `Refund refused for ${request.orderRef}` })
+      pushToast({
+        tone: 'info',
+        title: delivered
+          ? `Refund refused, ${request.orderRef} marked successful`
+          : `Refund refused for ${request.orderRef}`,
+      })
       onClose()
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : 'We could not save that.')
@@ -669,8 +679,11 @@ function RefuseModal({
           onPick={(text) => {
             setNote(text)
             setError('')
+            setDelivered(!text.startsWith('Payment never'))
           }}
         />
+
+        <DeliveredCheckbox checked={delivered} onChange={setDelivered} />
 
         <Field label="Why are you refusing it?" htmlFor="refuse-note" error={error}>
           <TextInput
@@ -699,6 +712,27 @@ function RefuseModal({
 }
 
 /**
+ * Refusing usually means the bundle arrived after all, so by default the
+ * order is marked successful and the agent credited, see `RefundsService.reject`.
+ */
+function DeliveredCheckbox({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-sm text-slate-700 dark:text-slate-200">
+      <input
+        type="checkbox"
+        className="mt-0.5 size-4 shrink-0"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span>
+        The bundle was delivered. Mark the order <strong>successful</strong> and credit the agent it was
+        sold through. Untick only if nothing was delivered either.
+      </span>
+    </label>
+  )
+}
+
+/**
  * The bulk version of `RefuseModal`, one reason applied to every selected
  * request, since a batch of refusals sharing a cause ("promo expired before
  * it was used", say) is exactly the case bulk-refusing exists for. Each one
@@ -720,12 +754,15 @@ function BulkRefuseModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
+  const [delivered, setDelivered] = useState(false)
+
   const key = requests?.map((r) => r.id).join(',') ?? 'none'
   const [lastKey, setLastKey] = useState(key)
   if (key !== lastKey) {
     setLastKey(key)
     setNote('')
     setError('')
+    setDelivered(false)
   }
 
   if (!requests || requests.length === 0) return null
@@ -740,7 +777,7 @@ function BulkRefuseModal({
     let failed = 0
     for (const request of requests) {
       try {
-        await api.rejectRefund(request.id, note.trim())
+        await api.rejectRefund(request.id, note.trim(), delivered)
         succeeded++
       } catch {
         failed++
@@ -782,8 +819,11 @@ function BulkRefuseModal({
           onPick={(text) => {
             setNote(text)
             setError('')
+            setDelivered(text.startsWith('Bundle was delivered'))
           }}
         />
+
+        <DeliveredCheckbox checked={delivered} onChange={setDelivered} />
 
         <Field label="Why are you refusing them?" htmlFor="bulk-refuse-note" error={error}>
           <TextInput

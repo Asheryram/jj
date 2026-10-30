@@ -13,6 +13,7 @@ import {
   ReorderDto,
   ResolveOrderDto,
   RetryDispatchDto,
+  ReverseOrderOutcomeDto,
   TrackOrderDto,
   VerifyRecipientDto,
 } from './orders.dto'
@@ -175,5 +176,22 @@ export class OrdersController {
     @Body() dto: AcknowledgeConflictDto,
   ) {
     return this.reconciler.acknowledgeConflict(id, user.id, dto.note)
+  }
+
+  /**
+   * Superadmin-only: reverse a mistaken completed/failed outcome.
+   * Wipes the ledger entries for this order and re-settles with the
+   * opposite outcome, so agent credits, refund requests and profit
+   * figures are all corrected in one step.
+   */
+  @Post(':id/reverse-outcome')
+  @Roles('superadmin')
+  @ApiBearerAuth()
+  reverseOutcome(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ReverseOrderOutcomeDto,
+  ) {
+    return this.reconciler.reverseOrderOutcome(id, user.id, dto.note, dto.expectedStatus)
   }
 }

@@ -3,14 +3,17 @@ import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import type { Order, OrderStatus } from '../../data/types'
-import { api, type FinanceStatement } from '../../lib/api'
+import { api, ApiError, type FinanceStatement } from '../../lib/api'
 import { DispatchModal } from '../../components/DispatchModal'
 import {
   Badge,
   Button,
+  Callout,
   Card,
   CopyIconButton,
   EmptyState,
+  Field,
+  Modal,
   NetworkChip,
   PageHead,
   ProviderChip,
@@ -19,9 +22,9 @@ import {
   Spinner,
   StatusBadge,
   TableWrap,
+  TextInput,
   cn,
   Td,
-  TextInput,
   Th,
 } from '../../components/ui'
 import { AlertIcon, DownloadIcon, ReceiptIcon, SearchIcon } from '../../components/icons'
@@ -40,9 +43,11 @@ function dateStr(daysAgo: number): string {
 
 /** FR-6.3 (all orders) + FR-8.3 (export for record-keeping). */
 export default function AdminOrders() {
-  const { pushToast } = useStore()
+  const { pushToast, session } = useStore()
+  const isSuperadmin = session?.role === 'superadmin'
   const [searchParams] = useSearchParams()
   const [inspecting, setInspecting] = useState<Order | null>(null)
+  const [reversing, setReversing] = useState<Order | null>(null)
   /** `?status=` links here from the Overview page's failed-orders callout. */
   const [filter, setFilter] = useState<Filter>(() => {
     const s = searchParams.get('status')
@@ -591,7 +596,7 @@ export default function AdminOrders() {
                     </div>
 
                     <div className="mt-2">
-                      <OrderStatusDetails order={order} onWhy={() => setInspecting(order)} />
+                      <OrderStatusDetails order={order} onWhy={() => setInspecting(order)} onReverse={isSuperadmin ? () => setReversing(order) : undefined} />
                     </div>
 
                     <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-slate-100 dark:border-slate-800 pt-2.5 text-sm">
@@ -670,7 +675,7 @@ export default function AdminOrders() {
                     </Td>
                     <Td className="tabular">{order.recipient}</Td>
                     <Td>
-                      <OrderStatusDetails order={order} onWhy={() => setInspecting(order)} />
+                      <OrderStatusDetails order={order} onWhy={() => setInspecting(order)} onReverse={isSuperadmin ? () => setReversing(order) : undefined} />
                     </Td>
                     <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                       {cedis(order.salePrice)}
@@ -754,7 +759,83 @@ export default function AdminOrders() {
       )}
 
       <DispatchModal order={inspecting} onClose={() => setInspecting(null)} />
+
+      <ReverseOutcomeModal
+        order={reversing}
+        onClose={() => setReversing(null)}
+        onReversed={() => setReloadTick((t) => t + 1)}
+      />
     </div>
+  )
+}
+
+function ReverseOutcomeModal({
+  order,
+  onClose,
+  onReversed,
+}: {
+  order: Order | null
+  onClose: () => void
+  onReversed: () => void
+}) {
+  const { pushToast } = useStore()
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const key = order?.id ?? 'none'
+  const [lastKey, setLastKey] = useState(key)
+  if (key !== lastKey) { setLastKey(key); setNote(''); setError('') }
+
+  if (!order) return null
+
+  const newOutcome = order.status === 'completed' ? 'failed' : 'completed'
+
+  const submit = async () => {
+    if (note.trim().length < 5) { setError('Say why this is being reversed.'); return }
+    setBusy(true)
+    try {
+      await api.reverseOrderOutcome(order.id, note.trim(), order.status === 'completed' ? 'completed' : 'failed')
+      onReversed()
+      pushToast({ tone: 'success', title: `${order.reference} reversed to ${newOutcome}` })
+      onClose()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'We could not reverse that.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Reverse outcome · ${order.reference}`}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); void submit() }}>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
+          <p className="font-semibold text-slate-900 dark:text-slate-50">{order.productName}</p>
+          <p className="mt-0.5 text-slate-500 dark:text-slate-400">
+            Currently <strong>{order.status}</strong> → will become <strong>{newOutcome}</strong>
+          </p>
+        </div>
+        <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
+          {order.status === 'completed'
+            ? "The agent's credit for this sale is taken back and the customer's refund goes into the Refunds queue for approval."
+            : "The agent is credited for this sale and the customer's refund is closed as not owed. A refund already paid to their wallet is taken back; one already sent to Mobile Money blocks this."}{' '}
+          Only use this to fix a mistaken mark-as-sent or mark-as-failed.
+        </Callout>
+        <Field label="Why is this being reversed?" htmlFor="reverse-note" error={error}>
+          <TextInput
+            id="reverse-note"
+            placeholder="Admin mistakenly marked as completed, bundle was not delivered"
+            value={note}
+            invalid={Boolean(error)}
+            onChange={(e) => { setNote(e.target.value); setError('') }}
+          />
+        </Field>
+        <div className="flex gap-2">
+          <Button type="submit" block variant="outline" loading={busy}>Reverse outcome</Button>
+          <Button type="button" block disabled={busy} onClick={onClose}>Cancel</Button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
@@ -794,7 +875,7 @@ function FinancialFigure({
  * table's Status column and the mobile card fallback below, so the two never
  * drift out of sync with each other.
  */
-function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void }) {
+function OrderStatusDetails({ order, onWhy, onReverse }: { order: Order; onWhy: () => void; onReverse?: () => void }) {
   return (
     <>
       <StatusBadge status={order.status} />
@@ -903,6 +984,16 @@ function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void 
           className="mt-1 block text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2 hover:text-brand-800"
         >
           Why?
+        </button>
+      )}
+      {onReverse && (order.status === 'completed' || order.status === 'failed') && (
+        <button
+          type="button"
+          onClick={onReverse}
+          className="mt-1 block text-xs font-semibold text-red-600 dark:text-red-400 underline underline-offset-2"
+          title="Superadmin: reverse this outcome and re-settle with the opposite result"
+        >
+          Reverse outcome
         </button>
       )}
       {/* When it actually finished, not just when it was placed,

@@ -125,10 +125,19 @@ async function agentCreditsMatchOrders() {
     if (agentIds.size > 0) expectedByOrder.set(order.reference, agentIds)
   }
 
+  // A credit on an order later reversed to failed (`FulfilmentService.reverseOutcome`)
+  // stays on file, cancelled by its own `reversal` row, not orphaned.
+  const reversed = new Set(
+    (
+      await prisma.earning.findMany({ where: { type: 'reversal' }, select: { userId: true, reference: true } })
+    ).map((r) => `${r.userId}:${r.reference}`),
+  )
+
   const seenByOrder = new Map<string, Set<string>>()
   const orphaned: string[] = []
   for (const credit of credits) {
     const expected = expectedByOrder.get(credit.reference)
+    if (!expected && reversed.has(`${credit.userId}:${credit.reference}`)) continue
     if (!expected || !expected.has(credit.userId)) {
       orphaned.push(`${credit.reference} credited ${credit.userId}, but no completed order shares with them`)
       continue

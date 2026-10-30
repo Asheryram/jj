@@ -8,6 +8,7 @@ import { SettingsService } from '../settings/settings.service'
 import { requirePaystackChecked } from '../common/paystack-check'
 import { momoCodeFor } from '../payments/momo'
 import { resalePriceFor, type OrderSplit, type PricingAgent } from '../domain/pricing'
+import { FulfilmentService } from './fulfilment.service'
 
 /**
  * Paying back money that is owed, once a person has authorised it.
@@ -37,6 +38,7 @@ export class RefundsService {
     private readonly ledger: LedgerService,
     private readonly paystack: PaystackClient,
     private readonly settings: SettingsService,
+    private readonly fulfilment: FulfilmentService,
   ) {}
 
   /** The queue. Pending first and oldest first, the longest wait is the worst. */
@@ -722,7 +724,15 @@ export class RefundsService {
    * a customer paid, so the reason is required and stored against the person who
    * made it, the record has to survive being asked about months later.
    */
-  async reject(id: string, adminId: string, note: string) {
+  /**
+   * `delivered` (the default) is the usual reason a refund is refused: the
+   * bundle did arrive after all. The order then becomes `completed` and the
+   * selling agent is credited their margin, through the same
+   * `FulfilmentService.reverseOutcome` a superadmin uses, in one transaction
+   * with the refusal. `false` only refuses, for the rare case nothing was
+   * delivered either (the payment never actually landed, say).
+   */
+  async reject(id: string, adminId: string, note: string, delivered = true) {
     const reason = note.trim()
     if (reason.length < 5) {
       throw new ValidationError(
@@ -730,10 +740,19 @@ export class RefundsService {
       )
     }
 
-    const request = await this.prisma.refundRequest.findUnique({ where: { id } })
+    const request = await this.prisma.refundRequest.findUnique({
+      where: { id },
+      include: { order: { select: { status: true } } },
+    })
     if (!request) throw new NotFoundError('We could not find that refund request.')
     if (request.status !== 'pending') {
       throw new ConflictError('ALREADY_DECIDED', `That refund was already ${request.status}.`)
+    }
+
+    if (delivered && request.order.status === 'failed') {
+      await this.fulfilment.reverseOutcome(request.orderId, adminId, reason, { refund: { id, note: reason } })
+      this.log.warn(`refund ${request.orderRef} REFUSED by ${adminId}, order marked delivered: ${reason}`)
+      return { id, status: 'rejected' as const }
     }
 
     // Claimed on `pending`, not just checked above: an approval landing in

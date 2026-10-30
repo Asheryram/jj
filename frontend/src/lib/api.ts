@@ -1490,6 +1490,14 @@ export const api = {
   acknowledgeOrderConflict: (id: string, note: string) =>
     request<void>(`/orders/${id}/acknowledge-conflict`, { method: 'POST', body: { note } }),
 
+  /**
+   * Superadmin only: reverse a mistaken completed/failed outcome.
+   * Flips the order to the opposite terminal state and corrects all
+   * ledger entries, agent credits and refund requests in one step.
+   */
+  reverseOrderOutcome: (id: string, note: string, expectedStatus: 'completed' | 'failed') =>
+    request<void>(`/orders/${id}/reverse-outcome`, { method: 'POST', body: { note, expectedStatus } }),
+
   /** Orders nobody can resolve automatically, see ReconcilerService.needsAttention. */
   needsAttentionOrders: () => request<NeedsAttentionOrder[]>('/admin/orders/needs-attention'),
 
@@ -1800,11 +1808,14 @@ export const api = {
       body: { momoNetwork },
     }),
 
-  /** Refusing needs a reason, and it is kept on the record. */
-  rejectRefund: (id: string, note: string) =>
+  /**
+   * Refusing needs a reason, and it is kept on the record. `delivered` (the
+   * default) also marks the failed order completed and credits the agent.
+   */
+  rejectRefund: (id: string, note: string, delivered = true) =>
     request<{ id: string; status: 'rejected' }>(`/admin/refunds/${id}/reject`, {
       method: 'POST',
-      body: { note },
+      body: { note, delivered },
     }),
 
   /**

@@ -133,3 +133,22 @@ export class AcknowledgeConflictDto {
   @MaxLength(500)
   note!: string
 }
+
+export class ReverseOrderOutcomeDto {
+  /**
+   * Why this outcome is being reversed. Required: this undoes a settled
+   * order's money, and the record has to say who decided and why.
+   */
+  @IsString()
+  @MinLength(5, { message: 'Say why this outcome is being reversed.' })
+  @MaxLength(500)
+  note!: string
+
+  /**
+   * The status the admin saw when they clicked, so a retry or a second admin
+   * cannot silently flip the order back. See `FulfilmentService.reverseOutcome`.
+   */
+  @IsOptional()
+  @IsIn(['completed', 'failed'])
+  expectedStatus?: 'completed' | 'failed'
+}

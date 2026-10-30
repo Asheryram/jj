@@ -889,25 +889,6 @@ export class FulfilmentService implements OnApplicationBootstrap {
         return { applied: true, conflict: false }
       }
 
-      /**
-       * Was any money actually taken for this order?
-       *
-       * Everything below turns on it. A wallet order was paid when the wallet was
-       * topped up; a Mobile Money order was paid only if Paystack says so. An
-       * order that failed *before* payment, an abandoned checkout, a recipient
-       * the supplier refused while the customer was still on the payment page,
-       * took nothing, so there is nothing to give back.
-       *
-       * Getting this wrong is not a rounding error. It told eight customers they
-       * were owed GHS 196 they had never paid, put that on the books as a
-       * liability, and would have sent each of them a claim link for it.
-       */
-      const payment = await tx.payment.findUnique({
-        where: { orderId: order.id },
-        select: { status: true, network: true },
-      })
-      const collected = order.paidWith === 'wallet' || payment?.status === 'paid'
-
       // Same atomic claim as the delivered branch above, see that comment.
       // `refunded` says on the receipt that money has gone back. It has not
       // yet, it is owed, and a person has to authorise paying it.
@@ -928,105 +909,10 @@ export class FulfilmentService implements OnApplicationBootstrap {
         return { applied: false, conflict: actualOutcome !== outcome, actualOutcome }
       }
 
-      /**
-       * A rejection does not mean nothing was spent.
-       *
-       * DataHub deducts the float the moment it *accepts* a purchase, see
-       * `SupplierService.dispatchLive`, which records `providerCharged` and the
-       * new float balance right there, before the real outcome is known. If the
-       * final answer is still a rejection, that deduction already happened and
-       * is real money gone, not a cost avoided. Without booking it, the float
-       * genuinely drops by this amount and nothing on the ledger explains why,
-       * `FloatMonitorService.reconcile` then misdiagnoses the gap as an
-       * unlogged top-up or withdrawal instead of the order that actually caused it.
-       */
-      const dispatch = await tx.supplierDispatch.findFirst({
-        where: { orderId: order.id },
-        orderBy: { createdAt: 'desc' },
-        select: { providerCharged: true, attempt: true, supplierCode: true },
-      })
-      if (dispatch?.providerCharged) {
-        const costProvider = await resolveSupplierProvider(tx, dispatch.supplierCode ?? order.supplierCodeAtSale)
-        await this.ledger.record(
-          [
-            {
-              idempotencyKey: supplierCostKey(order.reference, dispatch.attempt),
-              kind: 'supplier_cost',
-              provider: costProvider,
-              amount: -dispatch.providerCharged,
-              description: `Bundle cost · ${order.productName} (charged before the order was rejected)`,
-              orderRef: order.reference,
-              occurredAt: new Date(),
-            },
-          ],
-          tx,
-        )
+      await this.bookRejectedCost(tx, order)
 
-        /**
-         * GMPL, unlike DataHub, puts a failed order's charge back in our
-         * wallet (their own status vocabulary has `refunded`, and a part-
-         * failed batch reads "some delivered, the rest refunded"). Left as
-         * booked, that cost overstated what GMPL had been paid and made its
-         * float look short by every failed order. Reversed here, same
-         * attempt, so a later retry's own charge is never cancelled by it.
-         * The live GMPL reading after each order (`noteOrderPlaced`) is the
-         * check on this: if they ever stop refunding, the float shows it.
-         */
-        if (costProvider === 'gmpl') {
-          await this.ledger.record(
-            [
-              {
-                idempotencyKey: `${supplierCostKey(order.reference, dispatch.attempt)}:refunded`,
-                kind: 'supplier_cost',
-                provider: costProvider,
-                amount: dispatch.providerCharged,
-                description: `Bundle cost refunded by GMPL · ${order.productName} (order failed)`,
-                orderRef: order.reference,
-                occurredAt: new Date(),
-              },
-            ],
-            tx,
-          )
-        }
-      }
-
-      /**
-       * FR-2.7, the debt is recorded here; paying it is a decision.
-       *
-       * This used to credit the wallet or issue a claim link immediately, which
-       * was faster for the customer and removed the only control that matters on
-       * money leaving: somebody deciding it is owed. That mattered in practice,
-       * a rule that refunded every failed order paid eight customers GHS 196 they
-       * had never paid, and nothing stood between the bug and the money.
-       *
-       * The obligation starts now, not at approval: `SolvencyService` counts a
-       * pending request against the balance, so the money is never treated as
-       * spendable while it is queued.
-       */
-      if (collected) {
-        await tx.refundRequest.upsert({
-          where: { orderId: order.id },
-          create: {
-            orderId: order.id,
-            orderRef: order.reference,
-            productName: order.productName,
-            buyerName: order.buyer,
-            buyerPhone: order.buyerPhone,
-            amount: order.salePrice,
-            // A guest is paid back on the rail they paid from. `claimable`
-             // is never chosen any more: nothing ever implemented claiming, so
-             // money parked there could be listed and never collected.
-            method: order.paidWith === 'wallet' && order.buyerUserId ? 'wallet' : 'transfer',
-            reason: reason ?? 'The delivery partner could not complete this order.',
-            // Known already, when Paystack reported it on the way in, see
-            // `PaystackClient.verify`. Still shown to whoever approves, and
-            // still changeable there; this only saves asking when the answer
-            // is already on file.
-            momoNetwork: payment?.network ?? null,
-          },
-          // A second failure on the same order does not owe twice.
-          update: {},
-        })
+      const owed = await this.oweRefund(tx, order, reason ?? 'The delivery partner could not complete this order.')
+      if (owed) {
         // ...but a refund `reorder()` parked while its new attempt was still
         // open is owed again now that the attempt failed after all. Without
         // this, a reorder whose attempt came back pending or unknown and then
@@ -1038,9 +924,6 @@ export class FulfilmentService implements OnApplicationBootstrap {
           where: { orderId: order.id, status: 'rejected', note: { startsWith: REORDER_HOLD_NOTE } },
           data: { status: 'pending', decidedBy: null, decidedAt: null, note: null },
         })
-        this.log.warn(
-          `${order.reference}: GHS ${(order.salePrice / 100).toFixed(2)} owed back, awaiting approval`,
-        )
       }
 
       // Nobody profits from a failed delivery.
@@ -1056,6 +939,349 @@ export class FulfilmentService implements OnApplicationBootstrap {
       this.log.warn(`failed ${order.reference}: ${reason ?? 'provider rejected'}`)
       return { applied: true, conflict: false }
     })
+  }
+
+  /**
+   * The supplier side of a rejection, shared by `settle` and `reverseOutcome`.
+   */
+  private async bookRejectedCost(tx: Prisma.TransactionClient, order: Order): Promise<void> {
+    /**
+     * A rejection does not mean nothing was spent.
+     *
+     * DataHub deducts the float the moment it *accepts* a purchase, see
+     * `SupplierService.dispatchLive`, which records `providerCharged` and the
+     * new float balance right there, before the real outcome is known. If the
+     * final answer is still a rejection, that deduction already happened and
+     * is real money gone, not a cost avoided. Without booking it, the float
+     * genuinely drops by this amount and nothing on the ledger explains why,
+     * `FloatMonitorService.reconcile` then misdiagnoses the gap as an
+     * unlogged top-up or withdrawal instead of the order that actually caused it.
+     */
+    const dispatch = await tx.supplierDispatch.findFirst({
+      where: { orderId: order.id },
+      orderBy: { createdAt: 'desc' },
+      select: { providerCharged: true, attempt: true, supplierCode: true },
+    })
+    if (!dispatch?.providerCharged) return
+
+    const costProvider = await resolveSupplierProvider(tx, dispatch.supplierCode ?? order.supplierCodeAtSale)
+    await this.ledger.record(
+      [
+        {
+          idempotencyKey: supplierCostKey(order.reference, dispatch.attempt),
+          kind: 'supplier_cost',
+          provider: costProvider,
+          amount: -dispatch.providerCharged,
+          description: `Bundle cost · ${order.productName} (charged before the order was rejected)`,
+          orderRef: order.reference,
+          occurredAt: new Date(),
+        },
+      ],
+      tx,
+    )
+
+    /**
+     * GMPL, unlike DataHub, puts a failed order's charge back in our
+     * wallet (their own status vocabulary has `refunded`, and a part-
+     * failed batch reads "some delivered, the rest refunded"). Left as
+     * booked, that cost overstated what GMPL had been paid and made its
+     * float look short by every failed order. Reversed here, same
+     * attempt, so a later retry's own charge is never cancelled by it.
+     * The live GMPL reading after each order (`noteOrderPlaced`) is the
+     * check on this: if they ever stop refunding, the float shows it.
+     */
+    if (costProvider === 'gmpl') {
+      await this.ledger.record(
+        [
+          {
+            idempotencyKey: `${supplierCostKey(order.reference, dispatch.attempt)}:refunded`,
+            kind: 'supplier_cost',
+            provider: costProvider,
+            amount: dispatch.providerCharged,
+            description: `Bundle cost refunded by GMPL · ${order.productName} (order failed)`,
+            orderRef: order.reference,
+            occurredAt: new Date(),
+          },
+        ],
+        tx,
+      )
+    }
+  }
+
+  /**
+   * Queue the refund a failed order owes, if any money was taken for it.
+   * Returns whether anything is owed. Shared by `settle` and `reverseOutcome`.
+   */
+  private async oweRefund(tx: Prisma.TransactionClient, order: Order, reason: string): Promise<boolean> {
+    /**
+     * Was any money actually taken for this order?
+     *
+     * Everything below turns on it. A wallet order was paid when the wallet was
+     * topped up; a Mobile Money order was paid only if Paystack says so. An
+     * order that failed *before* payment, an abandoned checkout, a recipient
+     * the supplier refused while the customer was still on the payment page,
+     * took nothing, so there is nothing to give back.
+     *
+     * Getting this wrong is not a rounding error. It told eight customers they
+     * were owed GHS 196 they had never paid, put that on the books as a
+     * liability, and would have sent each of them a claim link for it.
+     */
+    const payment = await tx.payment.findUnique({
+      where: { orderId: order.id },
+      select: { status: true, network: true },
+    })
+    const collected = order.paidWith === 'wallet' || payment?.status === 'paid'
+    if (!collected) return false
+
+    /**
+     * FR-2.7, the debt is recorded here; paying it is a decision.
+     *
+     * This used to credit the wallet or issue a claim link immediately, which
+     * was faster for the customer and removed the only control that matters on
+     * money leaving: somebody deciding it is owed. That mattered in practice,
+     * a rule that refunded every failed order paid eight customers GHS 196 they
+     * had never paid, and nothing stood between the bug and the money.
+     *
+     * The obligation starts now, not at approval: `SolvencyService` counts a
+     * pending request against the balance, so the money is never treated as
+     * spendable while it is queued.
+     */
+    await tx.refundRequest.upsert({
+      where: { orderId: order.id },
+      create: {
+        orderId: order.id,
+        orderRef: order.reference,
+        productName: order.productName,
+        buyerName: order.buyer,
+        buyerPhone: order.buyerPhone,
+        amount: order.salePrice,
+        // A guest is paid back on the rail they paid from. `claimable`
+        // is never chosen any more: nothing ever implemented claiming, so
+        // money parked there could be listed and never collected.
+        method: order.paidWith === 'wallet' && order.buyerUserId ? 'wallet' : 'transfer',
+        reason,
+        // Known already, when Paystack reported it on the way in, see
+        // `PaystackClient.verify`. Still shown to whoever approves, and
+        // still changeable there; this only saves asking when the answer
+        // is already on file.
+        momoNetwork: payment?.network ?? null,
+      },
+      // A second failure on the same order does not owe twice.
+      update: {},
+    })
+    this.log.warn(`${order.reference}: GHS ${(order.salePrice / 100).toFixed(2)} owed back, awaiting approval`)
+    return true
+  }
+
+  /**
+   * Flip a settled order to the opposite outcome, when the outcome it was
+   * settled with was a mistake: an admin marked a DataHub manual-queue order
+   * sent when it never arrived, or failed when it actually did.
+   *
+   * Every account the original settlement touched is put back to where a
+   * correct settlement would have left it, in one transaction:
+   *
+   *  · completed → failed: the agent's credit is clawed back (clamped at
+   *    their balance, any shortfall written off, same as `reverseAgent`),
+   *    the agent margin and a wallet sale's revenue come off the books, the
+   *    supplier cost stays only if the provider really charged it, and the
+   *    customer's refund goes into the queue for approval like any failure.
+   *  · failed → completed: the agent is credited (or a previous clawback
+   *    undone), the sale's costs and revenue are booked as on any delivery,
+   *    and the refund is closed as not owed. A refund already paid to a
+   *    wallet is taken back from it; one already sent to Mobile Money
+   *    cannot be pulled back from here, so that case is refused.
+   *
+   * Nothing is deleted that recorded real money moving: Mobile Money revenue
+   * and Paystack fees were collected regardless of the outcome, and a cost
+   * the provider actually charged stays charged.
+   *
+   * `expected` is the status the admin was looking at when they clicked. A
+   * reversal is its own inverse, so without it a retry, a double submit or
+   * a second admin acting on the same order would silently flip it back.
+   *
+   * `refund` lets `RefundsService.reject` close the pending refund in this
+   * same transaction, so refusing a refund and completing the order happen
+   * together or not at all. It implies `expected: 'failed'`.
+   */
+  async reverseOutcome(
+    orderId: string,
+    adminId: string,
+    note: string,
+    options: { expected?: 'completed' | 'failed'; refund?: { id: string; note: string } } = {},
+  ): Promise<{ from: 'completed' | 'failed'; to: 'completed' | 'failed' }> {
+    const { refund } = options
+    const expected = refund ? 'failed' : options.expected
+    const reason = note.trim()
+    if (reason.length < 5) {
+      throw new ValidationError('Say why this outcome is being reversed. It is kept on the record.')
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findUnique({ where: { id: orderId } })
+      if (!order) throw new NotFoundError('We could not find that order.')
+      if (order.status !== 'completed' && order.status !== 'failed') {
+        throw new ConflictError(
+          'NOT_REVERSIBLE',
+          `Only a completed or failed order can be reversed, this one is ${order.status}.`,
+        )
+      }
+      if (expected && order.status !== expected) {
+        throw new ConflictError(
+          'ALREADY_HANDLED',
+          `This order is already ${order.status}, someone changed it just now. Nothing was changed, refresh and check.`,
+        )
+      }
+
+      const from = order.status
+      const to = from === 'completed' ? 'failed' : 'completed'
+      const split = order.split as unknown as OrderSplit
+      const agentShares = split.shares.filter((s) => s.role === 'agent' && s.margin > 0)
+      const lastDispatch = await tx.supplierDispatch.findFirst({
+        where: { orderId },
+        orderBy: { createdAt: 'desc' },
+        select: { providerCharged: true, attempt: true },
+      })
+
+      if (to === 'completed') {
+        // The refund first: it is the one part that can still refuse.
+        await this.closeRefundForDelivery(tx, order, adminId, reason, refund)
+      }
+
+      // Compare-and-set on the status this read saw, so two admins reversing
+      // at once (or a webhook settling in between) cannot both apply.
+      const claim = await tx.order.updateMany({
+        where: { id: orderId, status: from },
+        data:
+          to === 'completed'
+            ? { status: 'completed', completedAt: new Date(), refunded: false, resolvedManually: true, conflictNote: null }
+            : { status: 'failed', completedAt: null, refunded: false, resolvedManually: true, conflictNote: null },
+      })
+      if (claim.count === 0) {
+        throw new ConflictError('ALREADY_HANDLED', 'This order changed just now, refresh and check.')
+      }
+
+      if (to === 'failed') {
+        // Undo what `recordDelivered` booked that a failure never incurs.
+        const unbook = agentShares.map((s) => LedgerService.key('order', order.reference, 'agent_margin', s.userId))
+        if (order.paidWith === 'wallet') unbook.push(LedgerService.key('order', order.reference, 'revenue'))
+        // A cost booked on delivery without the provider's own charge behind
+        // it was only ever an estimate, nothing was actually spent.
+        if (!lastDispatch?.providerCharged) unbook.push(supplierCostKey(order.reference, lastDispatch?.attempt))
+        await tx.ledgerEntry.deleteMany({ where: { idempotencyKey: { in: unbook } } })
+
+        await this.bookRejectedCost(tx, order)
+        for (const share of agentShares) {
+          await this.reverseAgent(tx, share, order.reference, order.productName)
+        }
+
+        if (await this.oweRefund(tx, order, `Reversed to failed by an admin: ${reason}`)) {
+          // A refund closed by an earlier reversal (or refusal) is owed again now.
+          await tx.refundRequest.updateMany({
+            where: { orderId, status: 'rejected' },
+            data: { status: 'pending', decidedBy: null, decidedAt: null, note: null },
+          })
+        }
+      } else {
+        // GMPL's refund of the charge only happens on a failure.
+        if (lastDispatch) {
+          await tx.ledgerEntry.deleteMany({
+            where: { idempotencyKey: `${supplierCostKey(order.reference, lastDispatch.attempt)}:refunded` },
+          })
+        }
+        for (const share of agentShares) {
+          await this.restoreAgent(tx, share, order.reference)
+          await this.creditAgent(tx, share, order.reference, order.productName, order.recipient)
+        }
+        await this.recordDelivered(tx, order, split, agentShares)
+      }
+
+      this.log.warn(`${order.reference}: outcome reversed from ${from} to ${to} by ${adminId}, ${reason}`)
+      return { from, to }
+    })
+  }
+
+  /**
+   * A failed order is being marked delivered: whatever refund it owed is not
+   * owed any more. Throws, before anything moves, when the money has already
+   * left in a way this cannot take back.
+   */
+  private async closeRefundForDelivery(
+    tx: Prisma.TransactionClient,
+    order: Order,
+    adminId: string,
+    reason: string,
+    refund?: { id: string; note: string },
+  ): Promise<void> {
+    const request = await tx.refundRequest.findUnique({ where: { orderId: order.id } })
+    if (refund && request?.id !== refund.id) {
+      throw new NotFoundError('We could not find that refund request.')
+    }
+    if (!request || request.status === 'rejected') return
+
+    const closed = { status: 'rejected' as const, decidedAt: new Date(), decidedBy: adminId }
+
+    if (request.status === 'pending') {
+      const claim = await tx.refundRequest.updateMany({
+        where: { id: request.id, status: 'pending' },
+        data: { ...closed, note: refund?.note ?? `Delivered after all, ${reason}` },
+      })
+      if (claim.count === 0) {
+        throw new ConflictError('ALREADY_DECIDED', 'That refund was just decided, refresh and check.')
+      }
+      return
+    }
+
+    // Approved. Only a wallet credit can be taken back, and only if it is still there.
+    if (request.method !== 'wallet' || !order.buyerUserId) {
+      throw new ConflictError(
+        'REFUND_ALREADY_SENT',
+        `The GHS ${(request.amount / 100).toFixed(2)} refund for this order was already approved to the customer's ` +
+          'Mobile Money, so it cannot be taken back from here. Recover it from the customer first.',
+      )
+    }
+    const debit = await tx.user.updateMany({
+      where: { id: order.buyerUserId, balance: { gte: request.amount } },
+      data: { balance: { decrement: request.amount } },
+    })
+    if (debit.count === 0) {
+      throw new ConflictError(
+        'REFUND_ALREADY_SPENT',
+        `The customer has already spent the GHS ${(request.amount / 100).toFixed(2)} refunded to their wallet, ` +
+          'so it cannot be taken back. Nothing was changed.',
+      )
+    }
+    // The wallet credit and its record go together, so the balance still
+    // equals the sum of its transactions.
+    await tx.transaction.deleteMany({
+      where: { userId: order.buyerUserId, reference: order.reference, type: 'refund' },
+    })
+    await tx.ledgerEntry.deleteMany({
+      where: { idempotencyKey: LedgerService.key('order', order.reference, 'refund') },
+    })
+    await tx.refundRequest.update({
+      where: { id: request.id },
+      data: { ...closed, note: `Taken back from wallet, delivered after all, ${reason}` },
+    })
+  }
+
+  /**
+   * Undo an earlier `reverseAgent` on this order, because it is completed
+   * again: whatever was clawed back goes back, and a shortfall written off is
+   * no loss after all (the agent keeps what they had withdrawn). The original
+   * `sale` credit is still on file, so `creditAgent` then correctly skips.
+   */
+  private async restoreAgent(tx: Prisma.TransactionClient, share: SplitShare, reference: string): Promise<void> {
+    await tx.ledgerEntry.deleteMany({
+      where: { idempotencyKey: LedgerService.key('order', reference, 'agent_margin_writeoff', share.userId) },
+    })
+    const reversal = await tx.earning.findUnique({
+      where: { userId_reference_type: { userId: share.userId, reference, type: 'reversal' } },
+      select: { id: true, amount: true },
+    })
+    if (!reversal) return
+    await tx.user.update({ where: { id: share.userId }, data: { balance: { increment: -reversal.amount } } })
+    await tx.earning.delete({ where: { id: reversal.id } })
   }
 
   /**

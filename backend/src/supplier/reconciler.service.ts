@@ -676,6 +676,15 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
+   * Superadmin-only: flip a mistaken `completed`/`failed` outcome to the other
+   * one. All the money is handled by `FulfilmentService.reverseOutcome`, the
+   * one owner of settlement, in a single transaction.
+   */
+  async reverseOrderOutcome(orderId: string, adminId: string, note: string, expected?: 'completed' | 'failed') {
+    return this.fulfilment.reverseOutcome(orderId, adminId, note, { expected })
+  }
+
+  /**
    * A human has checked a flagged conflict and is closing it out.
    *
    * Deliberately does not touch the order's money or status at all, see
