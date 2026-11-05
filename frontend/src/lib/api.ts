@@ -1664,6 +1664,10 @@ export const api = {
     }>('/admin/orders/sweep', { method: 'POST' }),
 
   stuckTransfers: () => request<StuckTransfer[]>('/admin/finance/stuck-transfers'),
+  /** Count one visit to an admin page (the path only). */
+  recordUsage: (path: string) => request<{ ok: true }>('/admin/usage', { method: 'POST', body: { path } }),
+  /** This month's admin page visits, most used first. */
+  adminUsage: () => request<{ path: string; visits: number }[]>('/admin/usage'),
   /** Everything waiting on a person, most urgent first. */
   today: () => request<{ items: InboxItem[]; at: string }>('/admin/today'),
   /** One order's whole history. */

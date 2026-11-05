@@ -350,7 +350,9 @@ export default function AdminWithdrawals() {
                         request.status === 'paid'
                           ? 'success'
                           : request.status === 'approved'
-                            ? 'success'
+                            ? request.transferStatus === 'otp' || request.transferStatus === 'unknown'
+                              ? 'warning'
+                              : 'info'
                             : request.status === 'rejected' || request.status === 'failed'
                               ? 'danger'
                               : 'warning'
@@ -359,12 +361,18 @@ export default function AdminWithdrawals() {
                       {request.status === 'paid'
                         ? 'Paid'
                         : request.status === 'approved'
-                          ? 'Approved'
+                          ? request.transferStatus === 'otp'
+                            ? 'Needs OTP in Paystack'
+                            : request.transferStatus === 'unknown'
+                              ? 'No answer from Paystack'
+                              : request.transferStatus === 'manual'
+                                ? 'To send by hand'
+                                : 'Sending'
                           : request.status === 'rejected'
                             ? 'Rejected'
                             : request.status === 'failed'
-                              ? 'Failed'
-                              : 'Pending'}
+                              ? 'Failed, money returned'
+                              : 'Waiting for you'}
                     </Badge>
                     {/* A transfer that hasn't gone says so here, rather than
                         looking like an approval that quietly achieved nothing. */}

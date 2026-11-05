@@ -162,6 +162,12 @@ export class RejectRefundDto {
   delivered?: boolean
 }
 
+export class UsageDto {
+  @IsString()
+  @MaxLength(200)
+  path!: string
+}
+
 export class ReopenRefundDto {
   @IsString()
   @MinLength(5, { message: 'Say why this refund is being reopened.' })
@@ -346,6 +352,21 @@ export class AdminController {
     private readonly inbox: AdminInboxService,
     private readonly timeline: OrderTimelineService,
   ) {}
+
+  /**
+   * Count one visit to an admin page, by month, so changes can follow what
+   * admins actually use. Only the path, never who or what was on it.
+   */
+  @Post('usage')
+  recordUsage(@Body() dto: UsageDto) {
+    return this.inbox.recordUsage(dto.path)
+  }
+
+  /** This month's admin page visits, most used first. */
+  @Get('usage')
+  usage() {
+    return this.inbox.usage()
+  }
 
   /** Everything waiting on a person, most urgent first, see `AdminInboxService`. */
   @Get('today')

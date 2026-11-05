@@ -229,6 +229,7 @@ export default function Team() {
       </Callout>
 
       <AdminActionsCard />
+      <UsageCard />
 
       <AddAdminModal
         open={adding}
@@ -303,6 +304,37 @@ function describe(action: AdminAction): string {
  * (see `AdminAuditInterceptor`). The one place to check, after the fact,
  * who approved a payout, logged a capital entry or changed a setting.
  */
+/** Which admin pages get used this month, to decide what to improve next. */
+function UsageCard() {
+  const [rows, setRows] = useState<{ path: string; visits: number }[] | null>(null)
+  useEffect(() => {
+    let live = true
+    api
+      .adminUsage()
+      .then((result) => live && setRows(result))
+      .catch(() => live && setRows([]))
+    return () => {
+      live = false
+    }
+  }, [])
+  if (!rows || rows.length === 0) return null
+  const top = rows[0].visits
+  return (
+    <Card className="mt-3">
+      <CardHead title="Most used admin pages" subtitle="Visits this month, all admins together. Only the page is counted." />
+      <ul className="space-y-2 px-4 pb-4">
+        {rows.slice(0, 12).map((row) => (
+          <li key={row.path} className="flex items-center gap-3 text-sm">
+            <span className="w-48 shrink-0 truncate font-mono text-xs text-slate-600 dark:text-slate-300">{row.path}</span>
+            <span className="h-2 rounded-full bg-brand-500" style={{ width: `${Math.max(4, (row.visits / top) * 100)}%`, maxWidth: '60%' }} />
+            <span className="tabular text-slate-700 dark:text-slate-200">{row.visits}</span>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
 function AdminActionsCard() {
   const [rows, setRows] = useState<AdminAction[] | null>(null)
   const [failed, setFailed] = useState(false)

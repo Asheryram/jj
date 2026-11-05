@@ -333,8 +333,39 @@ export default function Treasury() {
 
       {isSuperadmin && <BalanceBooksCard onDone={load} />}
 
+      <Glossary />
+
       <MarkNotSentModal transfer={notSent} onClose={() => setNotSent(null)} onDone={load} />
     </div>
+  )
+}
+
+/** Plain meanings for the money words used across the admin pages. */
+function Glossary() {
+  const terms: [string, string][] = [
+    ['Cash in Paystack', 'Money sitting in the Paystack balance right now, live from Paystack.'],
+    ['In the floats', 'Money already paid to DataHub and GMPL, used to buy bundles. It cannot be sent back out.'],
+    ['Owed to others', "Agents' earnings, customer refunds and wallets, and the price of orders still being delivered. Never yours to take."],
+    ['Yours to take', 'What could be taken out today without touching what is owed. Can be zero even when profit is not.'],
+    ['Profit now', 'Profit from finished sales, less what has already been taken out. Profit is not cash: some of it may still be sitting in orders being delivered.'],
+    ['Refill', 'Sending money to a provider float so orders can keep going. It does not change profit.'],
+    ['Still on its way', 'Customers paid, but Paystack has not moved it into the balance yet. It arrives with the next settlement.'],
+    ['Needs OTP', 'Paystack created the transfer but waits for a one-time code. Nothing has left the balance until it is entered.'],
+  ]
+  return (
+    <Card className="mt-3">
+      <details className="p-4 sm:p-5">
+        <summary className="cursor-pointer font-semibold text-slate-900 dark:text-slate-50">What these words mean</summary>
+        <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+          {terms.map(([term, meaning]) => (
+            <div key={term}>
+              <dt className="text-sm font-semibold text-slate-900 dark:text-slate-50">{term}</dt>
+              <dd className="text-sm text-slate-600 dark:text-slate-300">{meaning}</dd>
+            </div>
+          ))}
+        </dl>
+      </details>
+    </Card>
   )
 }
 
@@ -368,6 +399,7 @@ function ReconcileCard({ data, gap }: { data: TreasuryOverview; gap: number | nu
     <Card className="mt-3">
       <CardHead
         title="Does Paystack hold everything?"
+        tooltip="Compares what our records say should be in Paystack with what Paystack actually holds. A gap means money moved that the app was not told about."
         subtitle="Everything collected and not yet spent belongs in the Paystack balance."
       />
       <div className="grid gap-5 px-4 pb-4 sm:px-5 lg:grid-cols-2">
@@ -519,7 +551,11 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
 
   return (
     <Card>
-      <CardHead title="Send money out" subtitle={`Paystack charges ${cedis(data.fee)} per transfer.`} />
+      <CardHead
+        title="Send money out"
+        subtitle={`Paystack charges ${cedis(data.fee)} per transfer.`}
+        tooltip="Refill a provider float to keep orders going, or take money out for yourself. Only approved numbers can receive, and money owed to agents and customers is always kept back."
+      />
       <form
         className="space-y-3 px-4 pb-4 sm:px-5"
         onSubmit={(e) => {
@@ -777,6 +813,7 @@ function BalanceBooksCard({ onDone }: { onDone: () => void }) {
     <Card className="mt-3">
       <CardHead
         title="Balance the books"
+        tooltip="Use only when money moved without being logged. Sets the records to the real balances once, and keeps the adjustment on the record."
         subtitle="Superadmin only. When movements were not logged, set the records to the real balances once, openly. What agents and customers are owed is never touched."
       />
       <div className="grid gap-4 px-4 pb-4 sm:px-5 lg:grid-cols-2">

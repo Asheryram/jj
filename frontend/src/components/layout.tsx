@@ -537,6 +537,13 @@ export function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
 
+  // Which admin pages are actually used, path only, see the Team page.
+  useEffect(() => {
+    if (session && isAdmin(session.role) && location.pathname.startsWith('/admin')) {
+      api.recordUsage(location.pathname).catch(() => undefined)
+    }
+  }, [location.pathname, session])
+
   /**
    * A route change driven by `history.push` (what every in-app `<Link>` does)
    * does not get the browser's native jump-to-anchor behaviour that a real

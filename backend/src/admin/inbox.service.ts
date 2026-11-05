@@ -134,6 +134,29 @@ export class AdminInboxService implements OnApplicationBootstrap, OnModuleDestro
     }
   }
 
+  /**
+   * Count one visit to an admin page, by month, so changes can follow what
+   * admins actually use. Only the page, never who or what was on it; ids in
+   * the path are folded together so each page is one line.
+   */
+  async recordUsage(path: string): Promise<{ ok: true }> {
+    const page = path.replace(/\/[0-9a-f-]{8,}/gi, '/:id').slice(0, 80)
+    const key = `adminUsage:${new Date().toISOString().slice(0, 7)}`
+    const row = await this.prisma.setting.findUnique({ where: { key } })
+    const counts = { ...((row?.value ?? {}) as Record<string, number>) }
+    counts[page] = (counts[page] ?? 0) + 1
+    await this.prisma.setting.upsert({ where: { key }, create: { key, value: counts }, update: { value: counts } })
+    return { ok: true }
+  }
+
+  /** This month's admin page visits, most used first. */
+  async usage(): Promise<{ path: string; visits: number }[]> {
+    const row = await this.prisma.setting.findUnique({ where: { key: `adminUsage:${new Date().toISOString().slice(0, 7)}` } })
+    return Object.entries((row?.value ?? {}) as Record<string, number>)
+      .map(([path, visits]) => ({ path, visits }))
+      .sort((a, b) => b.visits - a.visits)
+  }
+
   /** Payouts and refunds stuck at Paystack, and possible double payments. */
   private async transfers(): Promise<InboxItem[]> {
     const rows = await this.solvency.stuckTransfers()
