@@ -229,6 +229,8 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       transfers: transfers.map((t) => ({
         id: t.id,
         reference: `TRS-${t.id.slice(0, 8).toUpperCase()}`,
+        /** Paystack's own code for it, what their dashboard search finds. */
+        transferCode: t.transferCode,
         purpose: t.purpose,
         provider: t.provider,
         amount: t.amount,

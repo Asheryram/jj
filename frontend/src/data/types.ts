@@ -355,6 +355,8 @@ export interface WithdrawalRequest {
   requestedAt: string
   /** Paystack's word on the transfer: pending, success, failed, otp, manual, unknown. */
   transferStatus: string | null
+  /** Paystack's own code for the transfer (`TRF_…`), what their dashboard search finds. */
+  transferCode?: string | null
   /** Why it hasn't gone, or how it was sent by hand, when either is known. */
   transferNote: string | null
   paidAt: string | null

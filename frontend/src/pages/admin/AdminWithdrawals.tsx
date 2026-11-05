@@ -8,6 +8,7 @@ import {
   Button,
   Callout,
   Card,
+  CopyIconButton,
   CardHead,
   EmptyState,
   Field,
@@ -292,6 +293,12 @@ export default function AdminWithdrawals() {
                       {isSuspended(request.userId) && <Badge tone="danger">Suspended</Badge>}
                     </span>
                     <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">{request.id}</p>
+                    {request.transferCode && (
+                      <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                        Paystack <span className="font-mono">{request.transferCode}</span>
+                        <CopyIconButton value={request.transferCode} />
+                      </span>
+                    )}
                   </Td>
                   <Td className="text-slate-600 dark:text-slate-300">{dateTime(request.requestedAt)}</Td>
                   <Td>

@@ -191,6 +191,8 @@ export function toWithdrawal(row: Withdrawal) {
     requestedAt: row.requestedAt.toISOString(),
     /** Paystack's word on the transfer, or 'manual'/'unknown', same shape as a refund's. */
     transferStatus: row.transferStatus,
+    /** Paystack's own code for the transfer, what their dashboard search finds. */
+    transferCode: row.transferCode,
     /** Why it hasn't gone, or how it was sent by hand, when either is known. */
     transferNote: row.transferNote,
     paidAt: row.paidAt?.toISOString() ?? null,

@@ -535,6 +535,8 @@ export interface TreasuryOverview {
   transfers: {
     id: string
     reference: string
+    /** Paystack's own code (`TRF_…`), what their dashboard search finds. */
+    transferCode: string | null
     purpose: TreasuryPurpose
     provider: 'datahub-gh' | 'gmpl' | null
     amount: number

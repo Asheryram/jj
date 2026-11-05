@@ -7,6 +7,7 @@ import {
   Button,
   Callout,
   Card,
+  CopyIconButton,
   CardHead,
   EmptyState,
   Field,
@@ -279,6 +280,7 @@ export default function Treasury() {
                   <Td>
                     <p className="text-sm">{dateTime(t.createdAt)}</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">{t.reference}</p>
+                    {t.transferCode && <PaystackCode code={t.transferCode} />}
                   </Td>
                   <Td>
                     {t.purpose === 'provider_refill'
@@ -445,6 +447,16 @@ function ReconcileCard({ data, gap }: { data: TreasuryOverview; gap: number | nu
         </div>
       </div>
     </Card>
+  )
+}
+
+/** Paystack's own transfer code, copyable, to find it in their dashboard. */
+function PaystackCode({ code }: { code: string }) {
+  return (
+    <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+      Paystack <span className="font-mono">{code}</span>
+      <CopyIconButton value={code} />
+    </span>
   )
 }
 
