@@ -33,6 +33,8 @@ import {
 import { AlertIcon, CashIcon, CheckIcon } from '../../components/icons'
 import { OrderTimeline } from '../../components/OrderTimeline'
 import { withUndo } from '../../lib/undo'
+import { useRemembered } from '../../lib/remember'
+import { downloadCsv } from '../../lib/csv'
 
 type Filter = 'pending' | 'approved' | 'rejected'
 
@@ -53,7 +55,7 @@ export default function Refunds() {
   const { pushToast, session } = useStore()
   const [reopening, setReopening] = useState<RefundRequest | null>(null)
   const [rows, setRows] = useState<RefundRequest[] | null>(null)
-  const [filter, setFilter] = useState<Filter>('pending')
+  const [filter, setFilter] = useRemembered<Filter>('refunds-filter', 'pending', ['pending', 'approved', 'rejected'])
   const [busyId, setBusyId] = useState<string | null>(null)
   const [rejecting, setRejecting] = useState<RefundRequest | null>(null)
   const [sending, setSending] = useState<RefundRequest | null>(null)
@@ -171,6 +173,26 @@ export default function Refunds() {
       <PageHead
         title="Refunds"
         subtitle="Money owed back to customers whose orders failed. Nothing is returned until you approve it."
+        action={
+          rows && rows.length > 0 ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                downloadCsv(
+                  `refunds-${filter}-${new Date().toISOString().slice(0, 10)}.csv`,
+                  ['Created', 'Order', 'Customer', 'Phone', 'Amount (GHS)', 'Method', 'Network', 'Status', 'Transfer', 'Paid at', 'Reason', 'Note'],
+                  rows.map((r) => [
+                    r.createdAt, r.orderRef, r.buyerName, r.buyerPhone, (r.amount / 100).toFixed(2), r.method,
+                    r.momoNetwork ?? '', r.status, r.transferStatus ?? '', r.paidAt ?? '', r.reason, r.note ?? '',
+                  ]),
+                )
+              }
+            >
+              Export CSV
+            </Button>
+          ) : undefined
+        }
       />
 
       <div data-tour="refunds-tiles" className="grid gap-3 sm:grid-cols-2">

@@ -502,6 +502,34 @@ function SiteNoticeModal() {
   )
 }
 
+/**
+ * One box to find an order from anywhere in the admin: a phone number,
+ * reference, agent or product. Opens All orders searched for it.
+ */
+function AdminSearch({ onSearch }: { onSearch: (q: string) => void }) {
+  const [q, setQ] = useState('')
+  return (
+    <form
+      role="search"
+      className="relative hidden md:block"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (q.trim()) onSearch(q.trim())
+      }}
+    >
+      <SearchIcon className="pointer-events-none absolute inset-y-0 left-2.5 my-auto size-4 text-slate-400" />
+      <input
+        type="search"
+        aria-label="Find an order by phone, reference or agent"
+        placeholder="Phone, reference or agent"
+        value={q}
+        onChange={(event) => setQ(event.target.value)}
+        className="h-9 w-56 rounded-xl border border-slate-200 bg-white pl-8 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-50"
+      />
+    </form>
+  )
+}
+
 export function AppShell() {
   const branding = useBranding()
   const { session, balance, logout, profiles, switchProfile, unreadAnnouncementsCount } = useStore()
@@ -641,6 +669,7 @@ export function AppShell() {
           </span>
 
           <div className="ml-auto flex items-center gap-2 sm:gap-3">
+            {isAdmin(session.role) && <AdminSearch onSearch={(q) => navigate(`/admin/orders?ref=${encodeURIComponent(q)}`)} />}
             {!isAdmin(session.role) && (
               <Link
                 /* Always earnings. The wallet route was withdrawn with customer

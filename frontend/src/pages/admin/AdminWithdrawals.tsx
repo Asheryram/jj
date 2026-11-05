@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useStore } from '../../state/store'
 import { api, ApiError, type ManualPayoutAdvance } from '../../lib/api'
 import { withUndo } from '../../lib/undo'
+import { useRemembered } from '../../lib/remember'
+import { downloadCsv } from '../../lib/csv'
 import { cedis, dateTime } from '../../lib/format'
 import type { WithdrawalRequest } from '../../data/types'
 import {
@@ -44,7 +46,7 @@ type Filter = 'pending' | 'all'
  */
 export default function AdminWithdrawals() {
   const { withdrawals, decideWithdrawal, checkWithdrawal, users, pushToast } = useStore()
-  const [filter, setFilter] = useState<Filter>('pending')
+  const [filter, setFilter] = useRemembered<Filter>('withdrawals-filter', 'pending', ['pending', 'all'])
   const [settling, setSettling] = useState<WithdrawalRequest | null>(null)
   const [cancelling, setCancelling] = useState<WithdrawalRequest | null>(null)
   const [decidingId, setDecidingId] = useState<string | null>(null)
@@ -170,6 +172,26 @@ export default function AdminWithdrawals() {
       <PageHead
         title="Withdrawal requests"
         subtitle="Agents asking to move their wallet balance to Mobile Money."
+        action={
+          withdrawals.length > 0 ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                downloadCsv(
+                  `withdrawals-${new Date().toISOString().slice(0, 10)}.csv`,
+                  ['Requested', 'Agent', 'Phone', 'Network', 'Amount (GHS)', 'Fee (GHS)', 'Status', 'Transfer', 'Paystack code', 'Paid at'],
+                  withdrawals.map((w) => [
+                    w.requestedAt, w.agentName, w.agentPhone, w.momoNetwork, (w.amount / 100).toFixed(2),
+                    (w.transferFee / 100).toFixed(2), w.status, w.transferStatus ?? '', w.transferCode ?? '', w.paidAt ?? '',
+                  ]),
+                )
+              }
+            >
+              Export CSV
+            </Button>
+          ) : undefined
+        }
       />
 
       <div data-tour="withdrawals-tiles" className="grid gap-3 sm:grid-cols-3">
