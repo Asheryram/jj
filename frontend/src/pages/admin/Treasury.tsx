@@ -287,7 +287,9 @@ export default function Treasury() {
                   <Td>
                     {t.purpose === 'provider_refill'
                       ? `Refill ${t.provider === 'gmpl' ? 'GMPL' : 'DataHub GH'}`
-                      : 'Taken out'}
+                      : t.purpose === 'advance_repayment'
+                        ? 'Repaid hand-paid refunds'
+                        : 'Taken out'}
                     {t.note && <p className="text-xs text-slate-500 dark:text-slate-400">{t.note}</p>}
                   </Td>
                   <Td>
@@ -505,11 +507,20 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
   const [error, setError] = useState('')
 
   const destinations = data.destinations.filter((d) => d.active)
-  const max = purpose === 'owner_drawing' ? data.ownerDrawingMax : data.refillMax[provider]
+  const repaying = purpose === 'advance_repayment'
+  const owedBack = data.advancesToRepay
+  const max = repaying ? owedBack.total : purpose === 'owner_drawing' ? data.ownerDrawingMax : data.refillMax[provider]
 
   const submit = async () => {
-    const pesewas = parseCedis(amount)
+    // A repayment is always exactly what is owed back, never typed in.
+    const pesewas = repaying ? owedBack.total : parseCedis(amount)
+    if (repaying && owedBack.count === 0) return setError('Nothing is owed back for refunds paid by hand.')
     if (!pesewas) return setError('Enter an amount like 50.00.')
+    if (repaying && pesewas < data.minTransfer) {
+      return setError(
+        `${cedis(pesewas)} is owed back so far, below Paystack's smallest transfer of ${cedis(data.minTransfer)}. It can be repaid once a few more add up.`,
+      )
+    }
     if (pesewas < data.minTransfer) return setError(`Paystack's smallest transfer is ${cedis(data.minTransfer)}.`)
     if (pesewas > max) {
       return setError(
@@ -567,6 +578,7 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
           options={[
             { value: 'provider_refill', label: 'Refill a provider float' },
             { value: 'owner_drawing', label: 'Take money out' },
+            { value: 'advance_repayment', label: 'Repay my hand-paid refunds' },
           ]}
           value={purpose}
           onChange={(v) => {
@@ -591,6 +603,15 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
           </Field>
         )}
 
+        {repaying ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-sm dark:border-slate-700 dark:bg-slate-800">
+            <p className="text-slate-600 dark:text-slate-300">
+              Owed back for {owedBack.count} refund{owedBack.count === 1 ? '' : 's'} you sent from your own Mobile Money
+            </p>
+            <p className="tabular mt-1 text-2xl font-bold text-slate-900 dark:text-slate-50">{cedis(owedBack.total)}</p>
+            {error && <p className="mt-1 text-xs text-red-700 dark:text-red-400">{error}</p>}
+          </div>
+        ) : (
         <Field label="Amount (GHS)" htmlFor="treasury-amount" hint={
             max < data.minTransfer
               ? `Only ${cedis(Math.max(max, 0))} available, below Paystack's ${cedis(data.minTransfer)} minimum`
@@ -608,6 +629,7 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
             }}
           />
         </Field>
+        )}
 
         <Field label="Send to" htmlFor="treasury-destination">
           <Select id="treasury-destination" value={destinationId} onChange={(e) => setDestinationId(e.target.value)}>

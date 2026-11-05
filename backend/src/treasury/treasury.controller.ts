@@ -5,8 +5,8 @@ import { CurrentUser, RequireActive, Roles, type AuthUser } from '../common/auth
 import { TreasuryService } from './treasury.service'
 
 export class TreasuryWithdrawDto {
-  @IsIn(['provider_refill', 'owner_drawing'], { message: 'Choose what this withdrawal is for.' })
-  purpose!: 'provider_refill' | 'owner_drawing'
+  @IsIn(['provider_refill', 'owner_drawing', 'advance_repayment'], { message: 'Choose what this withdrawal is for.' })
+  purpose!: 'provider_refill' | 'owner_drawing' | 'advance_repayment'
 
   @ValidateIf((dto: TreasuryWithdrawDto) => dto.purpose === 'provider_refill')
   @IsIn(['datahub-gh', 'gmpl'], { message: 'Choose which provider float this refills.' })

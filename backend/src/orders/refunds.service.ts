@@ -9,6 +9,7 @@ import { requirePaystackChecked } from '../common/paystack-check'
 import { momoCodeFor } from '../payments/momo'
 import { resalePriceFor, type OrderSplit, type PricingAgent } from '../domain/pricing'
 import { FulfilmentService } from './fulfilment.service'
+import { MIN_TRANSFER } from '../payments/transfer-limits'
 
 /**
  * Paying back money that is owed, once a person has authorised it.
@@ -712,6 +713,30 @@ export class RefundsService {
 
     // The network Paystack charged on, over anything chosen by hand.
     const network = payer.network ?? row.momoNetwork
+
+    /**
+     * Below Paystack's smallest transfer: it would only be refused. Parked
+     * for the admin to send from their own Mobile Money, with the paying
+     * number and network spelled out. "Paid another way" then records it as
+     * owed back to them, repaid from the Paystack balance page.
+     */
+    if (row.amount < MIN_TRANSFER) {
+      await this.prisma.refundRequest.update({
+        where: { id: refundId },
+        data: {
+          payToPhone: payer.phone,
+          momoNetwork: network,
+          transferStatus: 'manual',
+          transferNote:
+            `Under GHS ${(MIN_TRANSFER / 100).toFixed(2)}, Paystack's smallest transfer. Send ` +
+            `GHS ${(row.amount / 100).toFixed(2)} from your own Mobile Money to ${payer.phone}` +
+            `${network ? ` (${network})` : ''}, the number that paid, then confirm it with "Paid another way". ` +
+            'It is then owed back to you, and repaid from the Paystack balance page.',
+        },
+      })
+      this.log.log(`refund ${row.orderRef} under the transfer minimum, left for sending by hand to ${payer.phone}`)
+      return
+    }
     const networkCode = momoCodeFor(network)
     if (!networkCode) {
       await this.holdRefund(refundId, 'Paystack did not say which network paid, choose it and approve again.')

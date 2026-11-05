@@ -1742,6 +1742,10 @@ enum TreasuryPurpose {
   provider_refill
   /// The owner taking profit or capital out. Booked as `owner_drawing`.
   owner_drawing
+  /// Paying back whoever sent refunds from their own Mobile Money
+  /// ("Paid another way"). Booked as `capital_out` on each refund's order,
+  /// which closes it on "Paid out of pocket".
+  advance_repayment
 }
 
 /// Where a top-up into the Paystack balance came from.
@@ -1791,6 +1795,9 @@ model TreasuryTransfer {
   purpose  TreasuryPurpose
   /// The supplier float being refilled, for `provider_refill` only.
   provider String?
+
+  /// For `advance_repayment`: the orders whose hand-paid refunds this repays.
+  covers String[] @default([])
 
   /// Pesewas sent, and Paystack's own transfer fee on top of it.
   amount Int

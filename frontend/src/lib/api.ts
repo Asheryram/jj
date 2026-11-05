@@ -518,7 +518,7 @@ export interface BalanceBooksPlan {
   saved: boolean
 }
 
-export type TreasuryPurpose = 'provider_refill' | 'owner_drawing'
+export type TreasuryPurpose = 'provider_refill' | 'owner_drawing' | 'advance_repayment'
 export type TopupSource = 'unclassified' | 'settlement_momo' | 'own_money' | 'not_topup'
 
 export interface TreasuryDestination {
@@ -552,6 +552,8 @@ export interface TreasuryOverview {
   inFlight: number
   liabilities: number
   ownerDrawingMax: number
+  /** Refunds paid by hand and not repaid yet, repaid in one transfer of exactly `total`. */
+  advancesToRepay: { total: number; count: number }
   refillMax: Record<'datahub-gh' | 'gmpl', number>
   owedToProvider: Record<'datahub-gh' | 'gmpl', number>
   destinations: TreasuryDestination[]

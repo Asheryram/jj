@@ -3,6 +3,7 @@ import type { Network, PaystackTopupSource, TreasuryPurpose } from '@prisma/clie
 import { PrismaService } from '../prisma/prisma.service'
 import { PaystackClient, transferEventFor } from '../payments/paystack.client'
 import { momoCodeFor } from '../payments/momo'
+import { MAX_TRANSFER, MIN_TRANSFER } from '../payments/transfer-limits'
 import { LedgerService } from '../finance/ledger.service'
 import { SolvencyService } from '../finance/solvency.service'
 import { SettingsService, KNOWN_PROVIDERS, type SupplierProviderCode } from '../settings/settings.service'
@@ -13,8 +14,7 @@ import type { LedgerDraft } from '../finance/ledger.service'
 import { bundleCostByProvider } from '../supplier/provider-resolution'
 
 /** Paystack Ghana's own floor and ceiling on a single transfer. */
-export const MIN_TRANSFER = 1000
-export const MAX_TRANSFER = 5_000_000
+export { MIN_TRANSFER, MAX_TRANSFER }
 
 /** A transfer that may still move money: counted against what is free to take. */
 const IN_FLIGHT = ['sending', 'pending', 'otp', 'unknown'] as const
@@ -142,17 +142,39 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
   // ── The page ────────────────────────────────────────────────────────────
 
   /**
+   * Refunds someone sent from their own Mobile Money and has not been repaid
+   * for, less any already covered by a repayment still on its way.
+   */
+  async advancesToRepay(): Promise<{ total: number; count: number; orderRefs: string[] }> {
+    const [outstanding, inFlight] = await Promise.all([
+      this.floatMonitor.outstandingManualRefunds(),
+      this.prisma.treasuryTransfer.findMany({
+        where: { purpose: 'advance_repayment', status: { in: [...IN_FLIGHT] } },
+        select: { covers: true },
+      }),
+    ])
+    const covered = new Set(inFlight.flatMap((t) => t.covers))
+    const open = outstanding.filter((a) => !covered.has(a.orderRef))
+    return {
+      total: open.reduce((sum, a) => sum + a.amount, 0),
+      count: open.length,
+      orderRefs: open.map((a) => a.orderRef),
+    }
+  }
+
+  /**
    * How much can be moved right now, for each purpose. Never past what is
    * free after every obligation, and never past what Paystack actually holds.
    */
   async limits() {
     this.solvency.invalidate()
-    const [position, inFlight, fee, live, summaries] = await Promise.all([
+    const [position, inFlight, fee, live, summaries, advances] = await Promise.all([
       this.solvency.position(),
       this.inFlightTotal(),
       this.settings.get('payoutTransferFee'),
       this.paystack.configured ? this.paystack.balance() : Promise.resolve(null),
       Promise.all(KNOWN_PROVIDERS.map(async (p) => [p, await this.floatMonitor.capitalSummary(p)] as const)),
+      this.advancesToRepay(),
     ])
 
     const free = position.freeToSpend - inFlight
@@ -175,6 +197,11 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       inFlight,
       liabilities: position.liabilities.total,
       ownerDrawingMax: capped(free - fee),
+      /**
+       * Hand-paid refunds owed back, repaid in one transfer of exactly this
+       * much. Not held back by `free`: it is already set aside as owed.
+       */
+      advancesToRepay: { total: advances.total, count: advances.count },
       refillMax: Object.fromEntries(
         summaries.map(([provider, summary]) => [
           provider,
@@ -280,8 +307,18 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
   ) {
     await this.requireEnabled()
 
-    const amount = input.amount
+    const repaying = input.purpose === 'advance_repayment' ? await this.advancesToRepay() : null
+    if (repaying && repaying.count === 0) {
+      throw new ValidationError('Nothing is owed back for refunds paid by hand.')
+    }
+    const amount = repaying ? repaying.total : input.amount
     if (!Number.isInteger(amount) || amount < MIN_TRANSFER) {
+      if (repaying) {
+        throw new ValidationError(
+          `${ghs(amount)} is owed back so far, below Paystack's smallest transfer of ${ghs(MIN_TRANSFER)}. ` +
+            'It can be repaid once a few more add up.',
+        )
+      }
       throw new ValidationError(`Paystack's smallest transfer is ${ghs(MIN_TRANSFER)}.`)
     }
     if (amount > MAX_TRANSFER) throw new ValidationError(`Paystack's largest single transfer is ${ghs(MAX_TRANSFER)}.`)
@@ -319,7 +356,17 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       // withdrawal claimed a moment ago is always counted.
       const extra = (inFlightNow.amount ?? 0) + (inFlightNow.fee ?? 0) - limits.inFlight
       const max =
-        (input.purpose === 'owner_drawing' ? limits.ownerDrawingMax : limits.refillMax[provider!]) - Math.max(extra, 0)
+        input.purpose === 'advance_repayment'
+          ? amount
+          : (input.purpose === 'owner_drawing' ? limits.ownerDrawingMax : limits.refillMax[provider!]) - Math.max(extra, 0)
+
+      // One repayment at a time, so the same refunds are never repaid twice.
+      if (
+        input.purpose === 'advance_repayment' &&
+        (await tx.treasuryTransfer.count({ where: { purpose: 'advance_repayment', status: { in: [...IN_FLIGHT] } } })) > 0
+      ) {
+        throw new ConflictError('REPAYMENT_IN_FLIGHT', 'A repayment is already on its way. Wait for it to land first.')
+      }
 
       if (limits.liveBalance !== null && limits.liveBalance < amount + limits.fee) {
         throw new ConflictError(
@@ -343,6 +390,7 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
         data: {
           purpose: input.purpose,
           provider: provider ?? null,
+          covers: repaying?.orderRefs ?? [],
           amount,
           fee: limits.fee,
           destinationId: destination.id,
@@ -388,7 +436,9 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       reason:
         row.purpose === 'provider_refill'
           ? `Float refill, ${providerLabel(row.provider as SupplierProviderCode)}`
-          : 'Owner withdrawal',
+          : row.purpose === 'advance_repayment'
+            ? 'Repaying refunds sent by hand'
+            : 'Owner withdrawal',
     })
 
     if (result.kind === 'sent') {
@@ -450,6 +500,10 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       // It landed, then came back. Un-book it; the money is in Paystack again.
       await this.prisma.$transaction([
         this.prisma.ledgerEntry.deleteMany({ where: { idempotencyKey: { startsWith: `treasury:${id}:` } } }),
+        // A repayment closed each refund's advance; reopen them.
+        this.prisma.ledgerEntry.deleteMany({
+          where: { idempotencyKey: { in: row.covers.map((ref) => LedgerService.key('order', ref, 'capital_out')) } },
+        }),
         this.prisma.treasuryTransfer.update({
           where: { id },
           data: { status: 'reversed', statusNote: 'Paystack reversed this transfer after it landed.' },
@@ -538,6 +592,14 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
         note: `Paystack → ${to} to refill ${providerLabel(row.provider as SupplierProviderCode)}: ${ghs(row.amount)}`,
         alreadyMoved: true,
       })
+    } else if (row.purpose === 'advance_repayment') {
+      // Each refund's advance closed, exactly as "Mark reimbursed" does, and
+      // keyed the same, so one already marked by hand is not counted twice.
+      for (const ref of row.covers) {
+        await this.floatMonitor
+          .reimburseManualRefund(ref, row.requestedBy)
+          .catch((error) => this.log.error(`treasury ${id}: could not close the advance on ${ref}: ${String(error)}`))
+      }
     } else {
       await this.ledger.record([
         {

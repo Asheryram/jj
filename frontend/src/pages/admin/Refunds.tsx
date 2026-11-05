@@ -555,7 +555,7 @@ function ManualAdvancesCard() {
     <Card className="mt-3">
       <CardHead
         title="Paid out of pocket, not yet reimbursed"
-        subtitle="Money owed back to whoever personally covered one of these when Paystack couldn't send it"
+        subtitle="Refunds sent from your own Mobile Money. Repay them all in one transfer from the Paystack balance page."
       />
       <div className="p-4 sm:p-5">
         <Callout tone="warning" icon={<CashIcon className="size-4" />}>
@@ -1436,7 +1436,7 @@ function SettleManuallyModal({
       pushToast({
         tone: 'success',
         title: `${cedis(request.amount)} marked as sent`,
-        detail: `Recorded against ${prettyPhone(request.buyerPhone)} on ${network}.`,
+        detail: `Recorded against ${prettyPhone(request.payToPhone ?? request.buyerPhone)} on ${network}. It is now owed back to you.`,
       })
       onClose()
     } catch (caught) {
@@ -1451,9 +1451,19 @@ function SettleManuallyModal({
       <div className="space-y-4">
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
           <p className="font-semibold text-slate-900 dark:text-slate-50">{request.buyerName}</p>
-          <p className="tabular mt-0.5 text-slate-600 dark:text-slate-300">
-            {prettyPhone(request.buyerPhone)}
-          </p>
+          {request.payToPhone ? (
+            <>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Send it to the number that paid</p>
+              <p className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">
+                {prettyPhone(request.payToPhone)}
+                {request.momoNetwork ? ` (${request.momoNetwork})` : ''}
+              </p>
+            </>
+          ) : (
+            <p className="tabular mt-0.5 text-slate-600 dark:text-slate-300">
+              {prettyPhone(request.buyerPhone)}
+            </p>
+          )}
         </div>
 
         <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
