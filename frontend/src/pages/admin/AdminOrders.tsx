@@ -192,6 +192,8 @@ export default function AdminOrders() {
    */
   const [projectedProfit, setProjectedProfit] = useState<number | null>(null)
   const [earnedProfit, setEarnedProfit] = useState<number | null>(null)
+  /** What the owner has taken out, so the cards show profit still here, not all-time. */
+  const [ownerDrawings, setOwnerDrawings] = useState<number | null>(null)
   useEffect(() => {
     let live = true
     api
@@ -200,6 +202,7 @@ export default function AdminOrders() {
         if (!live) return
         setProjectedProfit(result.projectedProfit)
         setEarnedProfit(result.earnedProfit)
+        setOwnerDrawings(result.ownerDrawings)
       })
       .catch(() => undefined)
     return () => {
@@ -441,15 +444,20 @@ export default function AdminOrders() {
           hint="All-time. Their commission, never counted as your profit"
         />
         <StatTile
-          label="Profit earned"
-          value={earnedProfit === null ? '-' : cedis(earnedProfit)}
-          hint="All-time, from finished sales: delivered orders, and failed ones whose refund was paid or refused. An order still being delivered, or a refund still owed, counts once it settles. The same figure Analytics shows for all time"
+          label="Profit now"
+          value={earnedProfit === null || ownerDrawings === null ? '-' : cedis(earnedProfit - ownerDrawings)}
+          hint={
+            earnedProfit === null || ownerDrawings === null
+              ? 'Profit from finished sales, less what has already been taken out'
+              : `Profit from finished sales still in the business: ${cedis(earnedProfit)} earned all-time, ` +
+                `${cedis(ownerDrawings)} already taken out. An order still being delivered counts once it settles`
+          }
           tone="success"
         />
         <StatTile
-          label="Profit once open orders finish"
-          value={projectedProfit === null ? '-' : cedis(projectedProfit)}
-          hint="Profit earned, plus what the orders still being delivered will add if they all succeed, using each order's expected cost. Refunds still owed are left out, that money goes back"
+          label="Profit now, once open orders finish"
+          value={projectedProfit === null || ownerDrawings === null ? '-' : cedis(projectedProfit - ownerDrawings)}
+          hint="Profit now, plus what the orders still being delivered will add if they all succeed, using each order's expected cost. Refunds still owed are left out, that money goes back"
         />
         <StatTile
           label="Free to spend now"

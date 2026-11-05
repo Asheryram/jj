@@ -7,6 +7,7 @@ import { ValidationError } from '../common/domain-errors'
 import { PaystackClient } from './paystack.client'
 import { LedgerService } from '../finance/ledger.service'
 import { DomainsService } from '../domains/domains.service'
+import { TreasuryService } from '../treasury/treasury.service'
 import { SettingsService } from '../settings/settings.service'
 
 /**
@@ -73,6 +74,7 @@ export class PaymentsService implements OnModuleDestroy {
     private readonly ledger: LedgerService,
     private readonly domains: DomainsService,
     private readonly settings: SettingsService,
+    private readonly treasury: TreasuryService,
   ) {}
 
   onModuleDestroy(): void {
@@ -925,6 +927,12 @@ export class PaymentsService implements OnModuleDestroy {
       // `RFD-<refund id>_<approval>`, see `RefundsService.sendRefund`; older
       // transfers carry no suffix. A uuid has no underscore, so this is exact.
       return this.applyRefundTransfer(event, reference.slice(4).split('_')[0])
+    }
+
+    // A third kind: the owner moving money out on purpose, a float refill or
+    // a withdrawal, see `TreasuryService`.
+    if (reference.startsWith('TRS-')) {
+      return this.treasury.applyTransferEvent(event, reference.slice(4))
     }
 
     const id = reference.startsWith('WDR-') ? reference.slice(4) : null

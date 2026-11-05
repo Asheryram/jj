@@ -402,6 +402,12 @@ export class FloatMonitorService {
     note?: string
     idempotencyKey: string
     source?: 'external' | 'reimbursement'
+    /**
+     * The money has already moved and was checked against the limit before
+     * it did (`TreasuryService.withdraw`). Recording it must not be refused
+     * after the fact, that would leave real money out of the books.
+     */
+    alreadyMoved?: boolean
   }): Promise<void> {
     const { provider } = input
     if (!Number.isInteger(input.amount) || input.amount <= 0) {
@@ -417,7 +423,7 @@ export class FloatMonitorService {
      * move, so unlike the overpay case, this is a hard stop, not a warning
      * that can be clicked through.
      */
-    if (input.direction === 'in' && input.source === 'reimbursement') {
+    if (input.direction === 'in' && input.source === 'reimbursement' && !input.alreadyMoved) {
       // A hard money limit must not be checked against a memo up to two
       // minutes old (a reimbursement logged moments ago is not in it yet).
       this.solvency.invalidate()

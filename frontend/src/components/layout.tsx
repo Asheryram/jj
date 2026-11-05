@@ -193,6 +193,7 @@ function navFor(
       { to: '/admin/refunds', label: 'Refunds', icon: ReceiptIcon, section: 'Money', primary: true },
       { to: '/admin/withdrawals', label: 'Withdrawals', icon: CashIcon, section: 'Money', primary: true },
       { to: '/admin/finance', label: 'Finance', icon: CashIcon, section: 'Money' },
+      { to: '/admin/treasury', label: 'Paystack balance', icon: CashIcon, section: 'Money' },
       // Superadmin only, matches the route guard: correcting a logged
       // capital movement is one step more sensitive than logging a fresh
       // one, and this is easy to miss entirely if it's never in the nav.

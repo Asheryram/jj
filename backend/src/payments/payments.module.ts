@@ -4,6 +4,7 @@ import { PaymentsService } from './payments.service'
 import { PaystackClient } from './paystack.client'
 import { FulfilmentModule } from '../orders/fulfilment.module'
 import { DomainsModule } from '../domains/domains.module'
+import { TreasuryModule } from '../treasury/treasury.module'
 
 /**
  * Taking money.
@@ -18,7 +19,7 @@ import { DomainsModule } from '../domains/domains.module'
  * sending Paystack there.
  */
 @Module({
-  imports: [FulfilmentModule, DomainsModule],
+  imports: [FulfilmentModule, DomainsModule, TreasuryModule],
   controllers: [PaymentsController],
   providers: [PaymentsService, PaystackClient],
   exports: [PaymentsService, PaystackClient],

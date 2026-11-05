@@ -703,10 +703,14 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     return { ok: true, reason: null }
   }
 
-  /** All-time, net of Paystack's own fee, every Mobile Money payment ever confirmed paid. */
-  private async collectedSince(): Promise<number> {
+  /**
+   * Net of Paystack's own fee, every Mobile Money payment confirmed paid,
+   * all-time, or only those paid after `after` (still on their way to the
+   * balance, see `expectedLiveBalance`).
+   */
+  private async collectedSince(after?: Date): Promise<number> {
     const paid = await this.prisma.payment.aggregate({
-      where: { status: 'paid' },
+      where: { status: 'paid', ...(after ? { paidAt: { gt: after } } : {}) },
       _sum: { amount: true, fee: true },
     })
     return (paid._sum.amount ?? 0) - (paid._sum.fee ?? 0)
@@ -769,12 +773,12 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     const watching = await this.settings.get('paystackBusinessAccount')
     if (!watching) return null
 
-    const [balanceResult, expected] = await Promise.all([
-      this.paystack.balance(),
-      this.expectedBalance(),
-    ])
-    if (!balanceResult.ok) return null
+    // Against everything the business should hold in Paystack, less what is
+    // still on its way from today's payments, see `expectedLiveBalance`.
+    const [balanceResult, live] = await Promise.all([this.paystack.balance(), this.expectedLiveBalance()])
+    if (!balanceResult.ok || !live) return null
 
+    const expected = live.expected
     const shortfall = expected - balanceResult.balance
     return {
       expected,
@@ -808,15 +812,38 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       return this.expectedBalanceCache.value
     }
 
-    const [collected, transferred, reimbursedAcrossProviders, advancesRepaid] = await Promise.all([
+    const value = (await this.heldFlows()).held
+    this.expectedBalanceCache = { value, computedAt: Date.now() }
+    return value
+  }
+
+  /**
+   * `expectedBalance`, flow by flow, so whoever is reconciling Paystack can
+   * see what was counted: what came in, and each way money has left since.
+   * A float refill or manual refund paid from the settlement MoMo but never
+   * logged is missing from these, and inflates `held` by exactly its amount.
+   */
+  async heldFlows() {
+    const [collected, transferred, reimbursed, advancesRepaid, ownerMoney] = await Promise.all([
       this.collectedSince(),
       this.transfersSince(),
       this.reimbursedAcrossProviders(),
       this.manualAdvancesRepaid(),
+      this.ownerMovements(),
     ])
-    const value = collected - transferred - reimbursedAcrossProviders - advancesRepaid
-    this.expectedBalanceCache = { value, computedAt: Date.now() }
-    return value
+    return {
+      /** Paid in by customers through Paystack, net of Paystack's fees. */
+      collected,
+      /** Agent payouts and refunds Paystack itself sent, with fees. */
+      transferred,
+      /** Moved to supplier floats, logged as reimbursements. */
+      reimbursed,
+      /** Manual refunds and payouts repaid to whoever covered them. */
+      advancesRepaid,
+      /** Owner's own top-ups in, less owner withdrawals and treasury fees. */
+      ownerMoney,
+      held: collected - transferred - reimbursed - advancesRepaid + ownerMoney,
+    }
   }
 
   /**
@@ -838,6 +865,63 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       _sum: { amount: true },
     })
     return -(repaid._sum.amount ?? 0)
+  }
+
+  /**
+   * Signed pesewas the owner has moved in and out of Paystack through the
+   * treasury: his own new money topped up (`owner_topup`, positive), money he
+   * took out (`owner_drawing`, negative), and Paystack's fee on every treasury
+   * transfer (`payout_fee` keyed `treasury:`, negative). A provider refill is
+   * not here, it is a `capital_in_reimbursement`, already subtracted above.
+   */
+  private async ownerMovements(): Promise<number> {
+    const sum = await this.prisma.ledgerEntry.aggregate({
+      where: {
+        OR: [
+          { kind: { in: ['owner_topup', 'owner_drawing'] } },
+          { kind: 'payout_fee', idempotencyKey: { startsWith: 'treasury:' } },
+        ],
+      },
+      _sum: { amount: true },
+    })
+    return sum._sum.amount ?? 0
+  }
+
+  /**
+   * What Paystack's live balance should hold right now, by our own records.
+   *
+   * With a business account and Manual Payouts, Paystack is where all of the
+   * business's collected money is meant to sit: everything collected and not
+   * yet spent (`expectedBalance`), less only what customers paid since the
+   * last settlement, which Paystack has not moved into the balance yet.
+   *
+   * The live balance reading below this is the point. Before Manual Payouts,
+   * collections were settled out to the MoMo number; whatever of that has not
+   * been spent (on floats, refunds, payouts, all logged) still belongs in
+   * Paystack, and the gap is exactly what has to be topped up from the MoMo
+   * for the two to agree. A gap that will not close that way is money spent
+   * from the MoMo without being logged.
+   *
+   * Null when Paystack cannot say when it last settled: an unknown is never
+   * guessed at.
+   */
+  async expectedLiveBalance(): Promise<{
+    expected: number
+    heldByRecords: number
+    inTransit: number
+    lastSettlementAt: Date | null
+  } | null> {
+    const last = await this.paystack.lastSettlementAt()
+    if (!last.ok) {
+      this.log.warn(`could not read the last Paystack settlement: ${last.reason}`)
+      return null
+    }
+    const [heldByRecords, inTransit] = await Promise.all([
+      this.expectedBalance(),
+      // Never settled at all: nothing has reached the balance yet.
+      this.collectedSince(last.at ?? new Date(0)),
+    ])
+    return { expected: heldByRecords - inTransit, heldByRecords, inTransit, lastSettlementAt: last.at }
   }
 
   /**

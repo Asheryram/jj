@@ -471,6 +471,72 @@ export interface StuckTransfer {
 }
 
 /** Where the provider float sits against the thresholds. */
+export interface BalanceBooksPlan {
+  paystack: { expected: number; inTransit: number; actual: number; capitalRepaid: number; adjustment: number }
+  floats: { provider: 'datahub-gh' | 'gmpl'; label: string; expected: number; actual: number; capitalRepaid: number; adjustment: number }[]
+  at: string
+  saved: boolean
+}
+
+export type TreasuryPurpose = 'provider_refill' | 'owner_drawing'
+export type TopupSource = 'unclassified' | 'settlement_momo' | 'own_money' | 'not_topup'
+
+export interface TreasuryDestination {
+  id: string
+  label: string
+  phone: string
+  network: 'MTN' | 'Telecel' | 'AirtelTigo'
+  active: boolean
+  createdAt: string
+}
+
+export interface TreasuryOverview {
+  /** Business account on and a Paystack key present, transfers can actually go. */
+  enabled: boolean
+  minTransfer: number
+  fee: number
+  /** Paystack's own live figure, null when it could not be read. */
+  liveBalance: number | null
+  /** What the live balance should hold: `heldByRecords` less `inTransit`. */
+  expectedLiveBalance: number | null
+  /** Everything the business should hold in Paystack, by its own records. */
+  heldByRecords: number | null
+  /** Paid by customers since the last settlement, not in the balance yet. */
+  inTransit: number | null
+  lastSettlementAt: string | null
+  flows: { collected: number; transferred: number; reimbursed: number; advancesRepaid: number; ownerMoney: number; held: number }
+  heldFor: { owedToOthers: number; owedToFloats: number; free: number; unrepaidAdvances: number }
+  freeToSpend: number
+  inFlight: number
+  liabilities: number
+  ownerDrawingMax: number
+  refillMax: Record<'datahub-gh' | 'gmpl', number>
+  owedToProvider: Record<'datahub-gh' | 'gmpl', number>
+  destinations: TreasuryDestination[]
+  transfers: {
+    id: string
+    reference: string
+    purpose: TreasuryPurpose
+    provider: 'datahub-gh' | 'gmpl' | null
+    amount: number
+    fee: number
+    destination: { label: string; phone: string; network: string }
+    note: string | null
+    status: 'sending' | 'pending' | 'success' | 'failed' | 'reversed' | 'otp' | 'unknown'
+    statusNote: string | null
+    createdAt: string
+    paidAt: string | null
+  }[]
+  topups: {
+    id: string
+    amount: number
+    reason: string | null
+    source: TopupSource
+    occurredAt: string
+    classifiedAt: string | null
+  }[]
+}
+
 export type FloatLevel = 'ok' | 'watch' | 'risk'
 
 /**
@@ -1498,6 +1564,34 @@ export const api = {
   reverseOrderOutcome: (id: string, note: string, expectedStatus: 'completed' | 'failed') =>
     request<void>(`/orders/${id}/reverse-outcome`, { method: 'POST', body: { note, expectedStatus } }),
 
+  /** The Paystack balance as a treasury, see backend `TreasuryService`. */
+  treasury: () => request<TreasuryOverview>('/admin/treasury'),
+  treasuryWithdraw: (body: {
+    purpose: TreasuryPurpose
+    provider?: 'datahub-gh' | 'gmpl'
+    amount: number
+    destinationId: string
+    note?: string
+  }) => request<{ id: string; status: string; statusNote: string | null }>('/admin/treasury/withdrawals', { method: 'POST', body }),
+  treasuryMarkNotSent: (id: string, note: string) =>
+    request<void>(`/admin/treasury/withdrawals/${id}/mark-not-sent`, { method: 'POST', body: { note } }),
+  treasurySyncTopups: () => request<{ found: number }>('/admin/treasury/topups/sync', { method: 'POST' }),
+  treasuryClassifyTopup: (id: string, source: Exclude<TopupSource, 'unclassified'>) =>
+    request<void>(`/admin/treasury/topups/${id}/classify`, { method: 'POST', body: { source } }),
+  /** Superadmin only: set the records to the real balances. `preview` saves nothing. */
+  treasuryBalanceBooks: (body: {
+    paystackAndMomo: number
+    datahub: number
+    gmpl: number
+    capitalRepaid: boolean
+    note: string
+    preview: boolean
+  }) => request<BalanceBooksPlan>('/admin/treasury/balance-books', { method: 'POST', body }),
+  treasuryAddDestination:(body: { label: string; phone: string; network: 'MTN' | 'Telecel' | 'AirtelTigo' }) =>
+    request<TreasuryDestination>('/admin/treasury/destinations', { method: 'POST', body }),
+  treasurySetDestinationActive: (id: string, active: boolean) =>
+    request<TreasuryDestination>(`/admin/treasury/destinations/${id}`, { method: 'PATCH', body: { active } }),
+
   /** Orders nobody can resolve automatically, see ReconcilerService.needsAttention. */
   needsAttentionOrders: () => request<NeedsAttentionOrder[]>('/admin/orders/needs-attention'),
 
@@ -1840,7 +1934,10 @@ export const api = {
     request<FinanceStatement>(`/admin/finance/statement?days=${days}`),
 
   /** All-time profit, adjusted for every order still open, see LedgerService.projectedProfit. */
-  projectedProfit: () => request<{ projectedProfit: number; earnedProfit: number }>('/admin/finance/projected-profit'),
+  projectedProfit: () =>
+    request<{ projectedProfit: number; earnedProfit: number; ownerDrawings: number; profitNow: number; projectedProfitNow: number }>(
+      '/admin/finance/projected-profit',
+    ),
 
   /**
    * Whether the catalogue's believed cost still matches what the supplier

@@ -637,8 +637,20 @@ export class AdminController {
    */
   @Get('finance/projected-profit')
   async projectedProfit() {
-    const [projectedProfit, earnedProfit] = await Promise.all([this.ledger.projectedProfit(), this.ledger.earnedProfit()])
-    return { projectedProfit, earnedProfit }
+    const [projectedProfit, earnedProfit, ownerDrawings] = await Promise.all([
+      this.ledger.projectedProfit(),
+      this.ledger.earnedProfit(),
+      this.ledger.ownerDrawings(),
+    ])
+    return {
+      projectedProfit,
+      earnedProfit,
+      /** What the owner has taken out, all-time, see `LedgerService.ownerDrawings`. */
+      ownerDrawings,
+      /** Profit as of now: earned, less what has already been taken out. */
+      profitNow: earnedProfit - ownerDrawings,
+      projectedProfitNow: projectedProfit - ownerDrawings,
+    }
   }
 
   /**
@@ -801,6 +813,8 @@ export class AdminController {
       'capital_in_reimbursement',
       'capital_out',
       'agent_margin_writeoff',
+      'owner_topup',
+      'owner_drawing',
     ]
     const parsedKind = validKinds.find((k) => k === kind)
     return this.ledger.entries({

@@ -225,6 +225,73 @@ export class PaystackClient {
   }
 
   /**
+   * One page of the balance history: every movement in and out of the
+   * Paystack balance, newest first. A top-up made on the dashboard shows here
+   * as a `Transaction`, the same as a customer payment, which is why
+   * `TreasuryService.syncTopups` tells them apart by matching our own payments.
+   */
+  async balanceLedger(input: { from: Date; page: number }): Promise<
+    | {
+        ok: true
+        entries: {
+          id: string
+          difference: number
+          reason: string | null
+          model: string | null
+          transactionId: string | null
+          createdAt: Date
+        }[]
+      }
+    | { ok: false; reason: string }
+  > {
+    const key = this.secretKey
+    if (!key) return { ok: false, reason: 'No Paystack secret key configured.' }
+
+    try {
+      const query = `from=${encodeURIComponent(input.from.toISOString())}&perPage=100&page=${input.page}`
+      const response = await fetch(`${this.baseUrl}/balance/ledger?${query}`, {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(20_000),
+      })
+      const body = (await response.json().catch(() => ({}))) as PaystackEnvelope<
+        {
+          id?: number | string
+          currency?: string
+          difference?: number
+          reason?: string
+          model_responsible?: string
+          model_row?: number | string | { id?: number | string } | null
+          createdAt?: string
+          created_at?: string
+        }[]
+      >
+      if (!response.ok || body.status !== true || !Array.isArray(body.data)) {
+        return { ok: false, reason: body.message ?? `HTTP ${response.status}` }
+      }
+
+      const entries = body.data
+        .filter((row) => row.id != null && (row.currency ?? 'GHS') === 'GHS')
+        .map((row) => {
+          // Seen both as a bare id and as the embedded row; take the id either way.
+          const raw = row.model_row
+          const transactionId =
+            raw == null ? null : typeof raw === 'object' ? (raw.id != null ? String(raw.id) : null) : String(raw)
+          return {
+            id: String(row.id),
+            difference: Number(row.difference ?? 0),
+            reason: row.reason ?? null,
+            model: row.model_responsible ?? null,
+            transactionId,
+            createdAt: new Date(row.createdAt ?? row.created_at ?? Date.now()),
+          }
+        })
+      return { ok: true, entries }
+    } catch (error) {
+      return { ok: false, reason: `Could not reach Paystack: ${String(error)}` }
+    }
+  }
+
+  /**
    * A Mobile Money recipient, created once per agent number and reused.
    *
    * Ghana pays out to Mobile Money rather than a bank account, so `type` is
@@ -302,6 +369,17 @@ export class PaystackClient {
   }): Promise<TransferOutcome> {
     const key = this.secretKey
     if (!key) return { kind: 'failed', reason: 'No Paystack secret key configured.' }
+
+    /**
+     * A local copy of the live database run against the live key: only the
+     * treasury's own transfers may go. An agent payout or a customer refund
+     * approved on the copy would pay real money production never hears about,
+     * and production would pay the same person again. Never set in production.
+     */
+    if (this.config.get<string>('PAYSTACK_TREASURY_ONLY') === '1' && !input.reference.startsWith('TRS-')) {
+      this.log.warn(`transfer ${input.reference} blocked, PAYSTACK_TREASURY_ONLY is set`)
+      return { kind: 'failed', reason: 'Blocked on this local test copy (PAYSTACK_TREASURY_ONLY), nothing was sent.' }
+    }
 
     let response: Response
     try {

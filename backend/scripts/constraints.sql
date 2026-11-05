@@ -125,3 +125,12 @@ DROP TRIGGER IF EXISTS payments_amount_matches_order_sale_price ON payments;
 CREATE TRIGGER payments_amount_matches_order_sale_price
   BEFORE INSERT OR UPDATE OF amount, order_id ON payments
   FOR EACH ROW EXECUTE FUNCTION payments_amount_matches_order_sale_price();
+
+-- Paystack treasury. A withdrawal is at least Paystack Ghana's GHS 10 transfer
+-- minimum, its fee is never negative, and a detected top-up is real money in.
+ALTER TABLE treasury_transfers DROP CONSTRAINT IF EXISTS treasury_transfers_amount_sane;
+ALTER TABLE treasury_transfers ADD CONSTRAINT treasury_transfers_amount_sane
+  CHECK (amount >= 1000 AND fee >= 0);
+
+ALTER TABLE paystack_topups DROP CONSTRAINT IF EXISTS paystack_topups_amount_positive;
+ALTER TABLE paystack_topups ADD CONSTRAINT paystack_topups_amount_positive CHECK (amount > 0);
