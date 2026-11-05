@@ -864,13 +864,16 @@ export function EmptyState({
 export function TableWrap({
   children,
   caption,
+  stackOnPhone,
 }: {
   children: ReactNode
   caption?: string
+  /** On a phone, show each row as a labelled card (give each `Td` a `label`), see index.css. */
+  stackOnPhone?: boolean
 }) {
   return (
     <div
-      className="-mx-px overflow-x-auto"
+      className={cn('-mx-px overflow-x-auto', stackOnPhone && 'stack-on-phone')}
       tabIndex={0}
       role="region"
       aria-label={caption ? `${caption} (scrollable)` : 'Table (scrollable)'}
@@ -912,13 +915,17 @@ export function Td({
   children,
   className,
   align = 'left',
+  label,
 }: {
   children?: ReactNode
   className?: string
   align?: 'left' | 'right' | 'center'
+  /** Shown beside the value when the table is stacked on a phone. */
+  label?: string
 }) {
   return (
     <td
+      data-label={label}
       className={cn(
         'border-b border-slate-100 dark:border-slate-800 px-4 py-3 text-slate-700 dark:text-slate-200',
         align === 'right' && 'text-right',

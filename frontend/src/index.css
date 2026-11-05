@@ -734,3 +734,47 @@
     );
   box-shadow: 0 2px 6px rgb(0 0 0 / 0.18);
 }
+
+/*
+ * Tables marked `stackOnPhone` (see `TableWrap`): on a phone each row becomes
+ * a card, one labelled line per cell, instead of a table scrolled sideways.
+ * Same markup, so every button in a row keeps working.
+ */
+@media (max-width: 639px) {
+  .stack-on-phone table {
+    min-width: 0;
+  }
+  .stack-on-phone thead {
+    display: none;
+  }
+  .stack-on-phone tbody tr {
+    display: block;
+    padding-block: 0.5rem;
+    border-bottom: 1px solid var(--color-slate-200);
+  }
+  .stack-on-phone tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.75rem;
+    border: 0;
+    padding: 0.375rem 1rem;
+    text-align: right;
+  }
+  .stack-on-phone tbody td > * {
+    min-width: 0;
+  }
+  .stack-on-phone tbody td[data-label]::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-slate-500);
+  }
+  .stack-on-phone tbody td:empty {
+    display: none;
+  }
+}

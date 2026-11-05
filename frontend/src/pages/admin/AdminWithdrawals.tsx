@@ -251,7 +251,7 @@ export default function AdminWithdrawals() {
             }
           />
         ) : (
-          <TableWrap caption="Agent withdrawal requests">
+          <TableWrap stackOnPhone caption="Agent withdrawal requests">
             <thead>
               <tr>
                 <Th>
@@ -276,7 +276,7 @@ export default function AdminWithdrawals() {
             <tbody>
               {visible.map((request) => (
                 <tr key={request.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
-                  <Td>
+                  <Td label="Select">
                     {request.status === 'pending' && (
                       <input
                         type="checkbox"
@@ -287,7 +287,7 @@ export default function AdminWithdrawals() {
                       />
                     )}
                   </Td>
-                  <Td>
+                  <Td label="Agent">
                     <span className="flex items-center gap-1.5">
                       <p className="font-medium text-slate-900 dark:text-slate-50">{request.agentName}</p>
                       {isSuspended(request.userId) && <Badge tone="danger">Suspended</Badge>}
@@ -300,12 +300,12 @@ export default function AdminWithdrawals() {
                       </span>
                     )}
                   </Td>
-                  <Td className="text-slate-600 dark:text-slate-300">{dateTime(request.requestedAt)}</Td>
-                  <Td>
+                  <Td label="Requested" className="text-slate-600 dark:text-slate-300">{dateTime(request.requestedAt)}</Td>
+                  <Td label="Pay to">
                     <p className="tabular text-slate-800 dark:text-slate-100">{request.agentPhone}</p>
                     <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{request.momoNetwork}</p>
                   </Td>
-                  <Td align="right" className="tabular font-bold text-slate-900 dark:text-slate-50">
+                  <Td label="Amount" align="right" className="tabular font-bold text-slate-900 dark:text-slate-50">
                     {cedis(request.amount)}
                     {request.transferFee > 0 && (
                       <p className="mt-0.5 text-xs font-normal text-slate-500 dark:text-slate-400">
@@ -313,7 +313,7 @@ export default function AdminWithdrawals() {
                       </p>
                     )}
                   </Td>
-                  <Td>
+                  <Td label="Status">
                     <Badge
                       tone={
                         request.status === 'paid'

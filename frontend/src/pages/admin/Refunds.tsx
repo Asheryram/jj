@@ -244,7 +244,7 @@ export default function Refunds() {
               }
             />
           ) : (
-            <TableWrap caption="Refund requests">
+            <TableWrap stackOnPhone caption="Refund requests">
               <thead>
                 <tr>
                   <Th>
@@ -268,7 +268,7 @@ export default function Refunds() {
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-800">
-                    <Td>
+                    <Td label="Select">
                       {row.status === 'pending' && (
                         <input
                           type="checkbox"
@@ -279,17 +279,17 @@ export default function Refunds() {
                         />
                       )}
                     </Td>
-                    <Td>
+                    <Td label="Customer">
                       <p className="font-medium text-slate-900 dark:text-slate-50">{row.buyerName}</p>
                       <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                         {prettyPhone(row.buyerPhone)}
                       </p>
                     </Td>
-                    <Td>
+                    <Td label="Order">
                       <p className="tabular text-sm text-slate-800 dark:text-slate-100">{row.orderRef}</p>
                       <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{row.productName}</p>
                     </Td>
-                    <Td>
+                    <Td label="Why it failed">
                       <p className="max-w-xs text-sm text-slate-700 dark:text-slate-200">{row.reason}</p>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <Badge tone="neutral">
@@ -320,7 +320,7 @@ export default function Refunds() {
                         </p>
                       )}
                     </Td>
-                    <Td align="right" className="tabular font-bold text-slate-900 dark:text-slate-50">
+                    <Td label="Amount" align="right" className="tabular font-bold text-slate-900 dark:text-slate-50">
                       {cedis(row.amount)}
                     </Td>
                     <Td align="right">
