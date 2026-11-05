@@ -465,7 +465,13 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
     const pesewas = parseCedis(amount)
     if (!pesewas) return setError('Enter an amount like 50.00.')
     if (pesewas < data.minTransfer) return setError(`Paystack's smallest transfer is ${cedis(data.minTransfer)}.`)
-    if (pesewas > max) return setError(`At most ${cedis(Math.max(max, 0))} right now.`)
+    if (pesewas > max) {
+      return setError(
+        max < data.minTransfer
+          ? `Nothing can be sent yet: Paystack's smallest transfer is ${cedis(data.minTransfer)} and only ${cedis(Math.max(max, 0))} is available after what is owed to agents and customers.`
+          : `At most ${cedis(Math.max(max, 0))} right now. The rest is owed to agents and customers.`,
+      )
+    }
     if (!destinationId) return setError('Choose where to send it.')
     setBusy(true)
     setError('')
@@ -533,7 +539,11 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
           </Field>
         )}
 
-        <Field label="Amount (GHS)" htmlFor="treasury-amount" hint={`Up to ${cedis(Math.max(max, 0))} right now`} error={error}>
+        <Field label="Amount (GHS)" htmlFor="treasury-amount" hint={
+            max < data.minTransfer
+              ? `Only ${cedis(Math.max(max, 0))} available, below Paystack's ${cedis(data.minTransfer)} minimum`
+              : `Up to ${cedis(Math.max(max, 0))} right now`
+          } error={error}>
           <TextInput
             id="treasury-amount"
             inputMode="decimal"

@@ -156,6 +156,13 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
     ])
 
     const free = position.freeToSpend - inFlight
+    /**
+     * A refill is held back only by money owed out in cash: agents, customer
+     * wallets and refunds, payouts. Orders still being delivered are not held
+     * against it, the float is what delivers them, and holding their price
+     * back left a float that could not be refilled while orders waited on it.
+     */
+    const freeForRefill = free + position.liabilities.undeliveredOrders
     const liveBalance = live?.ok ? live.balance : null
     // What Paystack itself can actually send, after its own fee.
     const sendable = liveBalance === null ? null : Math.max(liveBalance - fee, 0)
@@ -171,9 +178,9 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       refillMax: Object.fromEntries(
         summaries.map(([provider, summary]) => [
           provider,
-          // Same rule as logging a reimbursement by hand: what this float is
-          // owed, plus whatever is genuinely free, never past either.
-          capped(summary.owedToProvider + Math.max(free - fee, 0)),
+          // What this float is owed, plus what is free once orders still being
+          // delivered stop counting against it, see `freeForRefill`.
+          capped(summary.owedToProvider + Math.max(freeForRefill - fee, 0)),
         ]),
       ) as Record<SupplierProviderCode, number>,
       owedToProvider: Object.fromEntries(summaries.map(([p, s]) => [p, s.owedToProvider])) as Record<
