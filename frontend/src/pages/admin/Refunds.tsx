@@ -48,7 +48,8 @@ type Filter = 'pending' | 'approved' | 'rejected'
  * on the screen, not the largest amount.
  */
 export default function Refunds() {
-  const { pushToast } = useStore()
+  const { pushToast, session } = useStore()
+  const [reopening, setReopening] = useState<RefundRequest | null>(null)
   const [rows, setRows] = useState<RefundRequest[] | null>(null)
   const [filter, setFilter] = useState<Filter>('pending')
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -302,6 +303,11 @@ export default function Refunds() {
                       {row.note && (
                         <p className="mt-1 text-xs text-red-700 dark:text-red-400">Refused: {row.note}</p>
                       )}
+                      {row.status === 'pending' && row.markedFailedByHand && (
+                        <p className="mt-1 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                          Marked failed by hand. Check the customer has not already been refunded.
+                        </p>
+                      )}
                       {/* A transfer that did not go says so here, rather than
                           looking like an approval that quietly achieved nothing. */}
                       {row.transferNote && (
@@ -350,7 +356,7 @@ export default function Refunds() {
                               a Starter Business Paystack account refuses every third-party
                               payout outright, and this is the way through that wall. Hidden
                               otherwise so the normal path stays the obvious one. */}
-                          {row.method === 'transfer' && row.transferStatus === 'failed' && (
+                          {row.method === 'transfer' && (row.transferStatus === 'failed' || row.markedFailedByHand) && (
                             <button
                               type="button"
                               onClick={() => setSettling(row)}
@@ -363,7 +369,18 @@ export default function Refunds() {
                       ) : row.status === 'rejected' && row.note?.startsWith('Reordered and delivered') ? (
                         <Badge tone="success">reordered &amp; delivered</Badge>
                       ) : row.status === 'rejected' ? (
-                        <Badge tone="danger">refused</Badge>
+                        <div className="flex flex-col items-end gap-1">
+                          <Badge tone="danger">refused</Badge>
+                          {session?.role === 'superadmin' && row.orderFailed && (
+                            <button
+                              type="button"
+                              onClick={() => setReopening(row)}
+                              className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
+                            >
+                              Reopen
+                            </button>
+                          )}
+                        </div>
                       ) : row.method === 'transfer' && row.transferStatus === 'manual' ? (
                         /* Approved, but this Paystack account can't send it, so it
                            has to go out by hand and then be confirmed here. Green
@@ -418,6 +435,8 @@ export default function Refunds() {
           setSending(null)
         }}
       />
+
+      <ReopenModal request={reopening} onClose={() => setReopening(null)} onDone={load} />
 
       <RefuseModal
         request={rejecting}
@@ -711,6 +730,69 @@ function RefuseModal({
   )
 }
 
+/** Undo a mistaken refusal, the refund goes back to waiting. */
+function ReopenModal({
+  request,
+  onClose,
+  onDone,
+}: {
+  request: RefundRequest | null
+  onClose: () => void
+  onDone: () => Promise<void> | void
+}) {
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  if (!request) return null
+
+  const submit = async () => {
+    if (note.trim().length < 5) return setError('Say why. This is kept on the record.')
+    setBusy(true)
+    try {
+      await api.reopenRefund(request.id, note.trim())
+      await onDone()
+      setNote('')
+      onClose()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'We could not reopen that.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Reopen refund, ${request.orderRef}`}>
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void submit()
+        }}
+      >
+        <Callout tone="info">
+          {cedis(request.amount)} goes back to the waiting refunds. If the customer was already paid by hand, record it
+          there with Paid another way.
+        </Callout>
+        <Field label="Why is this being reopened?" htmlFor="reopen-note" error={error}>
+          <TextInput
+            id="reopen-note"
+            value={note}
+            invalid={Boolean(error)}
+            onChange={(event) => {
+              setNote(event.target.value)
+              setError('')
+            }}
+          />
+        </Field>
+        <Button type="submit" block loading={busy}>
+          Reopen
+        </Button>
+      </form>
+    </Modal>
+  )
+}
+
 /**
  * Refusing usually means the bundle arrived after all, so by default the
  * order is marked successful and the agent credited, see `RefundsService.reject`.
@@ -895,6 +977,7 @@ function ReorderModal({
   const { pushToast } = useStore()
   const [note, setNote] = useState('')
   const [supplierCode, setSupplierCode] = useState('')
+  const [notRefunded, setNotRefunded] = useState(false)
   const [options, setOptions] = useState<SupplierSku[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -964,9 +1047,13 @@ function ReorderModal({
       setError('Say why this is being reordered. It is kept on the record.')
       return
     }
+    if (request.markedFailedByHand && !notRefunded) {
+      setError('Confirm the customer has not already been refunded.')
+      return
+    }
     setBusy(true)
     try {
-      const result = await api.reorderOrder(request.orderId, note.trim(), supplierCode)
+      const result = await api.reorderOrder(request.orderId, note.trim(), supplierCode, notRefunded)
       await onReordered()
       pushToast(toastFor(request.orderRef, result))
       onClose()
@@ -1097,6 +1184,24 @@ function ReorderModal({
               </p>
             </div>
           </div>
+        )}
+
+        {request.markedFailedByHand && (
+          <label className="flex items-start gap-2.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-900 dark:text-amber-200">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 shrink-0"
+              checked={notRefunded}
+              onChange={(event) => {
+                setNotRefunded(event.target.checked)
+                setError('')
+              }}
+            />
+            <span>
+              This order was marked failed by hand. I have checked and the customer has <strong>not</strong> already
+              been refunded.
+            </span>
+          </label>
         )}
 
         <Field label="Why is this being reordered?" htmlFor="reorder-note" error={error}>

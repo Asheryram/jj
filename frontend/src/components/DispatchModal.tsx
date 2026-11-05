@@ -149,6 +149,7 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
   const [attempts, setAttempts] = useState<DispatchAttempt[] | null>(null)
   const [error, setError] = useState('')
   const [resolving, setResolving] = useState<'delivered' | 'rejected' | null>(null)
+  const [alreadyRefunded, setAlreadyRefunded] = useState(false)
   const [note, setNote] = useState('')
   const [noteError, setNoteError] = useState('')
   const [retrying, setRetrying] = useState(false)
@@ -252,7 +253,7 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
     }
     setBusy(true)
     try {
-      await api.resolveOrder(order.id, resolving, note.trim())
+      await api.resolveOrder(order.id, resolving, note.trim(), resolving === 'rejected' && alreadyRefunded)
       pushToast({
         tone: 'success',
         title: `${order.reference} marked ${resolving === 'delivered' ? 'delivered' : 'failed'}`,
@@ -515,8 +516,24 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                   {resolving === 'delivered'
                     ? 'Mark this as delivered'
-                    : 'Mark this as failed, a refund will be queued'}
+                    : alreadyRefunded
+                      ? 'Mark this as failed, recorded as already refunded'
+                      : 'Mark this as failed, a refund will be queued'}
                 </p>
+                {resolving === 'rejected' && order.paidWith !== 'wallet' && (
+                  <label className="mt-2 flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-sm text-slate-700 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 size-4 shrink-0"
+                      checked={alreadyRefunded}
+                      onChange={(event) => setAlreadyRefunded(event.target.checked)}
+                    />
+                    <span>
+                      The customer already has this money back. Tick only if you sent it to them yourself. DataHub
+                      showing Refunded means the money went back to the float, not to the customer.
+                    </span>
+                  </label>
+                )}
                 <Field
                   label="How do you know?"
                   htmlFor="resolve-note"
@@ -544,6 +561,7 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
                     disabled={busy}
                     onClick={() => {
                       setResolving(null)
+                      setAlreadyRefunded(false)
                       setNote('')
                       setNoteError('')
                     }}

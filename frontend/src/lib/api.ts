@@ -872,6 +872,10 @@ export interface RefundRequest {
   id: string
   /** For the "Reorder" action, see `api.reorderOrder`. */
   orderId: string
+  /** Whether the order this refund is for still stands as failed. */
+  orderFailed: boolean
+  /** A person failed this order, so the customer may already be sorted out. */
+  markedFailedByHand: boolean
   /** The failed order's own network and category, so the Reorder picker can
    * filter the catalogue to bundles that could actually fulfil it. */
   network: Network | null
@@ -1542,8 +1546,8 @@ export const api = {
    * own status never reaches a word the reconciler recognises as final, even
    * though the real outcome (delivered or not) is already known.
    */
-  resolveOrder: (id: string, outcome: 'delivered' | 'rejected', note: string) =>
-    request<void>(`/orders/${id}/resolve`, { method: 'POST', body: { outcome, note } }),
+  resolveOrder: (id: string, outcome: 'delivered' | 'rejected', note: string, alreadyRefunded = false) =>
+    request<void>(`/orders/${id}/resolve`, { method: 'POST', body: { outcome, note, alreadyRefunded } }),
 
   /**
    * Ask DataHub about a stuck order right now, see
@@ -1571,8 +1575,8 @@ export const api = {
    * Returns what actually happened, not a preview, DataHub's real charge is
    * only ever known after the purchase is placed, never before.
    */
-  reorderOrder: (id: string, note: string, supplierCode: string) =>
-    request<ReorderOutcome>(`/orders/${id}/reorder`, { method: 'POST', body: { note, supplierCode } }),
+  reorderOrder: (id: string, note: string, supplierCode: string, confirmMarkedFailed = false) =>
+    request<ReorderOutcome>(`/orders/${id}/reorder`, { method: 'POST', body: { note, supplierCode, confirmMarkedFailed } }),
 
   /**
    * Clear a flagged conflict once a human has actually checked what happened,
@@ -1612,6 +1616,7 @@ export const api = {
     capitalRepaid: boolean
     note: string
     preview: boolean
+    readJustNow?: boolean
   }) => request<BalanceBooksPlan>('/admin/treasury/balance-books', { method: 'POST', body }),
   treasuryAddDestination:(body: { label: string; phone: string; network: 'MTN' | 'Telecel' | 'AirtelTigo' }) =>
     request<TreasuryDestination>('/admin/treasury/destinations', { method: 'POST', body }),
@@ -1932,6 +1937,10 @@ export const api = {
       method: 'POST',
       body: { momoNetwork },
     }),
+
+  /** Superadmin only: put a mistakenly refused refund back in the queue. */
+  reopenRefund: (id: string, note: string) =>
+    request<{ id: string; status: 'pending' }>(`/admin/refunds/${id}/reopen`, { method: 'POST', body: { note } }),
 
   /**
    * Refusing needs a reason, and it is kept on the record. `delivered` (the

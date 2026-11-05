@@ -7,6 +7,7 @@ import { LicenseGate } from '../license/license.gate'
 import { OrdersService } from './orders.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
 import { FulfilmentService } from './fulfilment.service'
+import { RefundsService } from './refunds.service'
 import {
   AcknowledgeConflictDto,
   PlaceOrderDto,
@@ -25,6 +26,7 @@ export class OrdersController {
     private readonly orders: OrdersService,
     private readonly reconciler: ReconcilerService,
     private readonly fulfilment: FulfilmentService,
+    private readonly refunds: RefundsService,
   ) {}
 
   /**
@@ -132,8 +134,12 @@ export class OrdersController {
   @Post(':id/resolve')
   @Roles('admin')
   @ApiBearerAuth()
-  resolve(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ResolveOrderDto) {
-    return this.reconciler.resolveManually(id, dto.outcome, user.id, dto.note)
+  async resolve(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ResolveOrderDto) {
+    const handRefund = dto.outcome === 'rejected' && dto.alreadyRefunded === true
+    // Checked first, so a refusal here leaves the order exactly as it was.
+    if (handRefund) await this.refunds.assertHandRefundPossible(id, dto.momoNetwork)
+    await this.reconciler.resolveManually(id, dto.outcome, user.id, dto.note)
+    if (handRefund) await this.refunds.recordHandRefund(id, user.id, dto.note, dto.momoNetwork)
   }
 
   /**
@@ -172,8 +178,9 @@ export class OrdersController {
   @Post(':id/reorder')
   @Roles('admin')
   @ApiBearerAuth()
-  reorder(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ReorderDto) {
-    return this.fulfilment.reorder(id, user.id, dto.note, dto.supplierCode)
+  async reorder(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ReorderDto) {
+    await this.reconciler.noteProviderRefunds(id).catch(() => undefined)
+    return this.fulfilment.reorder(id, user.id, dto.note, dto.supplierCode, dto.confirmMarkedFailed)
   }
 
   /**

@@ -587,6 +587,9 @@ export function mapProviderStatus(status: string): 'completed' | 'failed' | null
       return 'completed'
     case 'FAILED':
     case 'CANCELLED':
+    // Not delivered, and the charge went back to the float, see
+    // `FulfilmentService.bookProviderRefund`.
+    case 'REFUNDED':
       return 'failed'
     case 'INITIATED':
     case 'PENDING':

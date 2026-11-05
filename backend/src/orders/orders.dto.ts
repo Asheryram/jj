@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsIn,
   IsOptional,
   IsString,
@@ -80,6 +81,19 @@ export class ResolveOrderDto {
   @MinLength(5, { message: 'Say why you are resolving this by hand.' })
   @MaxLength(500)
   note!: string
+
+  /**
+   * Marking it failed because the customer already has their money back by
+   * hand. Records the refund as paid rather than queueing it to be paid again.
+   */
+  @IsOptional()
+  @IsBoolean()
+  alreadyRefunded?: boolean
+
+  /** The network it was sent on, when the payment did not report one. */
+  @IsOptional()
+  @IsIn(['MTN', 'Telecel', 'AirtelTigo'])
+  momoNetwork?: 'MTN' | 'Telecel' | 'AirtelTigo'
 }
 
 export class RetryDispatchDto {
@@ -108,6 +122,11 @@ export class ReorderDto {
   @MinLength(5, { message: 'Say why this is being reordered.' })
   @MaxLength(500)
   note!: string
+
+  /** Required for an order marked failed by hand, see `FulfilmentService.reorder`. */
+  @IsOptional()
+  @IsBoolean()
+  confirmMarkedFailed?: boolean
 
   /**
    * Which supplier SKU to fulfil this against, chosen by the admin from the

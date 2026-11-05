@@ -50,7 +50,19 @@ export class RefundsService {
       // Just enough of the order to let the "Reorder" picker filter the
       // catalogue to bundles that could actually fulfil this one, and to show
       // what reordering would actually net after the agent's frozen share.
-      include: { order: { select: { network: true, category: true, split: true, productId: true, soldByCode: true } } },
+      include: {
+        order: {
+          select: {
+            network: true,
+            category: true,
+            split: true,
+            productId: true,
+            soldByCode: true,
+            status: true,
+            resolvedManually: true,
+          },
+        },
+      },
     })
 
     /**
@@ -122,6 +134,10 @@ export class RefundsService {
         id: row.id,
         /** For the "Reorder" action, see `FulfilmentService.reorder`. */
         orderId: row.orderId,
+        /** Whether the order this refund is for still stands as failed. */
+        orderFailed: row.order.status === 'failed',
+        /** A person failed this order, so the customer may already be sorted out. */
+        markedFailedByHand: row.order.status === 'failed' && row.order.resolvedManually,
         network: row.order.network,
         category: row.order.category,
         /** Owed to an agent from this exact sale, unchanged by a reorder. */
@@ -189,6 +205,57 @@ export class RefundsService {
         paidAt: row.paidAt?.toISOString() ?? null,
       }
     })
+  }
+
+  /** Why a hand refund cannot be recorded for this order, thrown before the order is touched. */
+  async assertHandRefundPossible(orderId: string, momoNetwork?: Network): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { paidWith: true, payment: { select: { network: true } } },
+    })
+    if (order?.paidWith === 'wallet') {
+      throw new ValidationError('This was paid from a wallet. Mark it failed, then approve the refund back to the wallet.')
+    }
+    if (order && !momoNetwork && !order.payment?.network) {
+      throw new ValidationError('We do not know which network this was paid on. Choose the network it was refunded on.')
+    }
+  }
+
+  /**
+   * The order was just failed because the customer already has their money
+   * back: pay off the refund that queued, the same as "Paid another way", so
+   * nobody pays it again. Nothing queued means no money was taken at all.
+   */
+  async recordHandRefund(orderId: string, adminId: string, note: string, momoNetwork?: Network): Promise<void> {
+    const request = await this.prisma.refundRequest.findUnique({ where: { orderId } })
+    if (request?.status !== 'pending') return
+    await this.settleManually(request.id, adminId, `Refunded by hand before marking failed, ${note.trim()}`, momoNetwork)
+  }
+
+  /**
+   * Put a refused refund back in the queue, for a refusal that was a mistake.
+   * Only while the order still stands as failed: a delivered order owes nothing.
+   */
+  async reopen(id: string, adminId: string, note: string) {
+    const reason = note.trim()
+    if (reason.length < 5) throw new ValidationError('Say why this refund is being reopened. It is kept on the record.')
+
+    const request = await this.prisma.refundRequest.findUnique({
+      where: { id },
+      include: { order: { select: { status: true } } },
+    })
+    if (!request) throw new NotFoundError('We could not find that refund request.')
+    if (request.status !== 'rejected' || request.order.status !== 'failed') {
+      throw new ConflictError('NOT_REOPENABLE', 'Only a refused refund on an order that still stands as failed can be reopened.')
+    }
+
+    const claim = await this.prisma.refundRequest.updateMany({
+      where: { id, status: 'rejected' },
+      data: { status: 'pending', decidedAt: null, decidedBy: null, note: null },
+    })
+    if (claim.count === 0) throw new ConflictError('ALREADY_DECIDED', 'That refund just changed, refresh and check.')
+    this.log.warn(`refund ${request.orderRef} reopened by ${adminId}, was refused with "${request.note ?? ''}": ${reason}`)
+    return { id, status: 'pending' as const }
   }
 
   /** What is queued, for the dashboard. */

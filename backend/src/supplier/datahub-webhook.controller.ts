@@ -121,6 +121,7 @@ export class DatahubWebhookController {
       mapped === 'completed' ? 'delivered' : 'rejected',
       `DataHub GH reported ${status}`,
     )
+    if (status.toUpperCase() === 'REFUNDED') await this.fulfilment.bookProviderRefund(order.id, order.providerReference)
 
     if (!result.applied) {
       return {

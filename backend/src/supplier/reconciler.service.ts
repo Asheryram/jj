@@ -407,6 +407,9 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       mapped === 'completed' ? 'delivered' : 'rejected',
       `Reconciled: ${providerLabel} reported ${result.providerStatus}`,
     )
+    if (result.providerStatus.toUpperCase() === 'REFUNDED') {
+      await this.fulfilment.bookProviderRefund(order.id, order.providerReference)
+    }
     this.log.log(
       `reconciled ${order.reference} → ${mapped} (webhook never arrived; ${providerLabel} said ${result.providerStatus})`,
     )
@@ -473,9 +476,8 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     if (!order.providerReference) {
       throw new ValidationError('The provider never gave this order a reference, there is nothing to ask them about.')
     }
-    if (order.providerReference.startsWith('manual_')) {
-      throw new ValidationError("Routed to DataHub's manual queue, only their own staff can clear it.")
-    }
+    // A `manual_` reference is worth asking about here, unlike in `sweep`:
+    // DataHub does answer for many of them, and a person is asking once.
     const provider = await this.resolveProvider(order.supplierCodeAtSale)
     if (!this.supplier.isLiveFor(provider)) {
       throw new ValidationError('The supplier integration is simulated right now, there is nothing real to check.')
@@ -713,6 +715,29 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
+   * Book any charge DataHub has since put back in the float for this order.
+   *
+   * Asked when a person is about to fail or reorder an order, because neither
+   * path hears about it otherwise: a `manual_` order is not swept, and a
+   * reorder moves on from the attempt that was refunded. Never blocks them:
+   * if DataHub cannot answer, the cost just stays booked.
+   */
+  async noteProviderRefunds(orderId: string): Promise<void> {
+    if (!this.supplier.isLiveFor('datahub-gh')) return
+    const attempts = await this.prisma.supplierDispatch.findMany({
+      where: { orderId, providerCharged: { not: null }, providerReference: { not: null } },
+      select: { providerReference: true, supplierCode: true },
+    })
+    for (const attempt of attempts) {
+      if ((await this.resolveProvider(attempt.supplierCode)) !== 'datahub-gh') continue
+      const result = await this.datahub.orderStatus(attempt.providerReference as string)
+      if (result.kind === 'found' && result.providerStatus.toUpperCase() === 'REFUNDED') {
+        await this.fulfilment.bookProviderRefund(orderId, attempt.providerReference)
+      }
+    }
+  }
+
+  /**
    * Settle an order by hand, when nothing automatic ever will.
    *
    * `sweep()` only resolves an order once DataHub's own status reaches a
@@ -755,6 +780,12 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       undefined,
       true,
     )
+
+    if (result.applied && outcome === 'rejected') {
+      await this.noteProviderRefunds(orderId).catch((error) =>
+        this.log.warn(`${order.reference}: could not check for a provider refund: ${String(error)}`),
+      )
+    }
 
     /**
      * This pre-check and the atomic claim inside `settle` are not the same

@@ -81,6 +81,11 @@ export class BalanceBooksDto {
   /** Work out the adjustments without saving anything. */
   @IsBoolean()
   preview!: boolean
+
+  /** Required to save: the balances were read at this moment, not earlier. */
+  @IsOptional()
+  @IsBoolean()
+  readJustNow?: boolean
 }
 
 /**

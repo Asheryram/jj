@@ -589,12 +589,18 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       capitalRepaid: boolean
       note: string
       preview: boolean
+      readJustNow?: boolean
     },
     user: AuthUser,
   ) {
     const note = input.note.trim()
     if (!input.preview && note.length < 10) {
       throw new ValidationError('Say what was agreed and with whom. It is kept on the record.')
+    }
+    // The records move with every order, so balances read days ago set them
+    // to a moment that has passed, which is how this first went wrong.
+    if (!input.preview && !input.readJustNow) {
+      throw new ValidationError('Confirm these balances were read just now. Older figures would put the books out again.')
     }
     for (const v of [input.paystackAndMomo, input.datahub, input.gmpl]) {
       if (!Number.isInteger(v) || v < 0) throw new ValidationError('Enter each real balance as an amount like 250.00.')

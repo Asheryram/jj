@@ -345,6 +345,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
     adminId: string,
     note: string,
     supplierCode: string,
+    confirmMarkedFailed = false,
   ): Promise<ReorderOutcome> {
     const reason = note.trim()
     if (reason.length < 5) {
@@ -360,6 +361,17 @@ export class FulfilmentService implements OnApplicationBootstrap {
     if (!order) throw new NotFoundError('We could not find that order.')
     if (order.status !== 'failed') {
       throw new ConflictError('NOT_RETRYABLE', 'Only a failed order can be reordered.')
+    }
+    /**
+     * Failed by a person, not by the provider: whoever did it may already have
+     * sorted the customer out by hand. A reorder on top of a hand refund
+     * delivered a bundle to a customer who already had their money back.
+     */
+    if (order.resolvedManually && !confirmMarkedFailed) {
+      throw new ConflictError(
+        'MARKED_FAILED_BY_HAND',
+        'This order was marked failed by hand. Confirm the customer has not already been refunded before reordering.',
+      )
     }
 
     /**
@@ -1006,6 +1018,37 @@ export class FulfilmentService implements OnApplicationBootstrap {
         tx,
       )
     }
+  }
+
+  /**
+   * The provider put a charge back in the float, so it was never a cost.
+   *
+   * GMPL does this on every failure and `bookRejectedCost` already accounts
+   * for it. DataHub usually keeps the charge, so this is only booked when
+   * DataHub reports `REFUNDED`. `providerReference` picks the attempt, since
+   * a reorder leaves earlier charged attempts behind. Same key as GMPL's, so
+   * booking it twice is harmless.
+   */
+  async bookProviderRefund(orderId: string, providerReference?: string | null): Promise<void> {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } })
+    const dispatch = await this.prisma.supplierDispatch.findFirst({
+      where: { orderId, providerCharged: { not: null }, ...(providerReference ? { providerReference } : {}) },
+      orderBy: { createdAt: 'desc' },
+      select: { providerCharged: true, attempt: true, supplierCode: true },
+    })
+    if (!order || !dispatch?.providerCharged) return
+
+    await this.ledger.record([
+      {
+        idempotencyKey: `${supplierCostKey(order.reference, dispatch.attempt)}:refunded`,
+        kind: 'supplier_cost',
+        provider: await resolveSupplierProvider(this.prisma, dispatch.supplierCode),
+        amount: dispatch.providerCharged,
+        description: `Bundle cost refunded by the provider · ${order.productName}`,
+        orderRef: order.reference,
+        occurredAt: new Date(),
+      },
+    ])
   }
 
   /**

@@ -698,7 +698,8 @@ function BalanceBooksCard({ onDone }: { onDone: () => void }) {
   const [paystack, setPaystack] = useState('')
   const [datahub, setDatahub] = useState('')
   const [gmpl, setGmpl] = useState('')
-  const [capitalRepaid, setCapitalRepaid] = useState(true)
+  const [capitalRepaid, setCapitalRepaid] = useState(false)
+  const [readJustNow, setReadJustNow] = useState(false)
   const [note, setNote] = useState('')
   const [plan, setPlan] = useState<BalanceBooksPlan | null>(null)
   const [busy, setBusy] = useState(false)
@@ -713,6 +714,7 @@ function BalanceBooksCard({ onDone }: { onDone: () => void }) {
     const values = amounts()
     if (!values) return setError('Enter all three real balances, like 802.00 (0.00 if empty).')
     if (!preview && note.trim().length < 10) return setError('Say what was agreed and with whom. It is kept on the record.')
+    if (!preview && !readJustNow) return setError('Confirm these balances were read just now.')
     setBusy(true)
     setError('')
     try {
@@ -723,6 +725,7 @@ function BalanceBooksCard({ onDone }: { onDone: () => void }) {
         capitalRepaid,
         note: note.trim(),
         preview,
+        readJustNow,
       })
       if (preview) setPlan(result)
       else {
@@ -775,8 +778,20 @@ function BalanceBooksCard({ onDone }: { onDone: () => void }) {
               onChange={(e) => { setCapitalRepaid(e.target.checked); edited() }}
             />
             <span>
-              James's own capital that paid for bundles has already been paid back to him. Untick if the business
-              still owes him that capital.
+              James's own capital that paid for bundles has already been paid back to him. Only tick this if it has
+              not been settled in an earlier balancing: after that, what shows here is ordinary bundle cost.
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-900 dark:text-amber-200">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 shrink-0"
+              checked={readJustNow}
+              onChange={(e) => setReadJustNow(e.target.checked)}
+            />
+            <span>
+              I read these balances <strong>just now</strong>. The records move with every order, so older figures would
+              put the books out again.
             </span>
           </label>
           <Field label="What was agreed, and with whom" htmlFor="bb-note" error={error}>

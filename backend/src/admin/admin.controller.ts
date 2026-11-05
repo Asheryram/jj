@@ -160,6 +160,13 @@ export class RejectRefundDto {
   delivered?: boolean
 }
 
+export class ReopenRefundDto {
+  @IsString()
+  @MinLength(5, { message: 'Say why this refund is being reopened.' })
+  @MaxLength(500)
+  note!: string
+}
+
 export class SettleRefundManuallyDto {
   /**
    * How and where it was actually sent. Required: unlike an automatic
@@ -733,6 +740,13 @@ export class AdminController {
     @Body() dto: RejectRefundDto,
   ) {
     return this.refunds.reject(id, user.id, dto.note, dto.delivered ?? true)
+  }
+
+  /** Superadmin only: undo a mistaken refusal, see `RefundsService.reopen`. */
+  @Post('refunds/:id/reopen')
+  @Roles('superadmin')
+  reopenRefund(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ReopenRefundDto) {
+    return this.refunds.reopen(id, user.id, dto.note)
   }
 
   @Post('refunds/:id/settle-manually')
