@@ -41,13 +41,14 @@ type Filter = 'pending' | 'all'
  * only settles a fee already reserved, see `WithdrawalsService.request`.
  */
 export default function AdminWithdrawals() {
-  const { withdrawals, decideWithdrawal, users, pushToast } = useStore()
+  const { withdrawals, decideWithdrawal, checkWithdrawal, users, pushToast } = useStore()
   const [filter, setFilter] = useState<Filter>('pending')
   const [settling, setSettling] = useState<WithdrawalRequest | null>(null)
   const [cancelling, setCancelling] = useState<WithdrawalRequest | null>(null)
   const [decidingId, setDecidingId] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
+  const [checkingId, setCheckingId] = useState<string | null>(null)
   const [payoutTransferFee, setPayoutTransferFee] = useState(0)
   // Null until known. On a Starter account approving only queues the payout
   // for sending by hand, so the explainer must not promise Paystack sends it.
@@ -376,6 +377,21 @@ export default function AdminWithdrawals() {
                          it never has no way forward at all. */
                       <div className="flex flex-col items-end gap-1">
                         <span className="text-xs text-slate-500 dark:text-slate-400">Decided</span>
+                        {/* Not for one marked to send by hand: Paystack has no
+                            transfer to ask about. */}
+                        {request.transferStatus !== 'manual' && (
+                          <button
+                            type="button"
+                            disabled={checkingId === request.id}
+                            onClick={() => {
+                              setCheckingId(request.id)
+                              void checkWithdrawal(request.id).finally(() => setCheckingId(null))
+                            }}
+                            className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2 disabled:opacity-50"
+                          >
+                            {checkingId === request.id ? 'Checking…' : 'Check status'}
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setSettling(request)}

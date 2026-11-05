@@ -90,7 +90,8 @@ export class PaymentsController {
   @Roles('admin')
   @ApiBearerAuth()
   checkTransfer(@Param('type') type: string, @Param('id') id: string) {
-    return this.payments.checkTransfer(transferType(type), id)
+    const kind = transferType(type)
+    return kind === 'withdrawal' ? this.payments.checkWithdrawal(id) : this.payments.checkTransfer(kind, id)
   }
 
   /** Close a possible double payment once someone has dealt with it. */

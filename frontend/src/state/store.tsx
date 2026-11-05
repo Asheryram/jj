@@ -183,6 +183,8 @@ interface Store {
   cancelWithdrawal: (id: string) => Promise<void>
   updatePhone: (phone: string) => Promise<void>
   decideWithdrawal: (id: string, status: WithdrawalStatus) => Promise<void>
+  /** Ask Paystack about one payout and update just that row. */
+  checkWithdrawal: (id: string) => Promise<void>
   settleWithdrawalManually: (id: string, note: string, confirmCheckedPaystack?: boolean) => Promise<void>
   cancelApprovedWithdrawal: (id: string, note: string, confirmCheckedPaystack?: boolean) => Promise<void>
 
@@ -1101,6 +1103,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [pushToast, reportError],
   )
 
+  const checkWithdrawal = useCallback(
+    async (id: string) => {
+      try {
+        const result = await api.checkTransfer('withdrawal', id)
+        const updated = result.withdrawal
+        if (updated) setWithdrawals((current) => current.map((w) => (w.id === id ? updated : w)))
+        if (result.outcome === 'unreachable') {
+          pushToast({ tone: 'error', title: 'Could not reach Paystack', detail: 'Nothing changed. Try again in a moment.' })
+        } else if (result.outcome === 'not_found') {
+          pushToast({ tone: 'info', title: 'Paystack has no such transfer, so it did not go out.' })
+        } else if (updated?.status === 'paid') {
+          pushToast({ tone: 'success', title: 'Paid. Paystack confirms it was sent.' })
+        } else if (updated?.status === 'failed') {
+          pushToast({ tone: 'info', title: 'It failed at Paystack. The amount is back in the agent\'s balance.' })
+        } else {
+          pushToast({ tone: 'info', title: `Paystack says ${result.status ?? 'it is still in progress'}.` })
+        }
+      } catch (error) {
+        reportError(error, 'We could not check that payout.')
+      }
+    },
+    [pushToast, reportError],
+  )
+
   const cancelWithdrawal = useCallback(
     async (id: string) => {
       try {
@@ -1209,6 +1235,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cancelWithdrawal,
       updatePhone,
       decideWithdrawal,
+      checkWithdrawal,
       settleWithdrawalManually,
       cancelApprovedWithdrawal,
       users,
@@ -1235,6 +1262,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       claimableCredits,
       customerBalance,
       decideWithdrawal,
+      checkWithdrawal,
       settleWithdrawalManually,
       cancelApprovedWithdrawal,
       dismissToast,

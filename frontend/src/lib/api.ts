@@ -476,6 +476,8 @@ export interface TransferCheck {
   outcome: 'settled' | 'in_progress' | 'not_found' | 'unreachable'
   status?: string
   message?: string
+  /** The row as it now stands, for a payout. */
+  withdrawal?: WithdrawalRequest
 }
 
 /** Where the provider float sits against the thresholds. */

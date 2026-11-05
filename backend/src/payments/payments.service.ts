@@ -7,6 +7,7 @@ import { ValidationError } from '../common/domain-errors'
 import { PaystackClient, refundTransferReference, transferEventFor } from './paystack.client'
 import { MailerService } from '../mail/mailer.service'
 import { escape } from '../mail/templates'
+import { toWithdrawal } from '../common/mappers'
 import { ConflictError, NotFoundError } from '../common/domain-errors'
 import { LedgerService } from '../finance/ledger.service'
 import { DomainsService } from '../domains/domains.service'
@@ -849,6 +850,13 @@ export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy 
       ...(result.transferCode ? { transferCode: result.transferCode } : {}),
     })
     return { outcome: 'in_progress', status: result.status }
+  }
+
+  /** `checkTransfer` for one payout, with the row as it now stands, so a screen can update just that row. */
+  async checkWithdrawal(id: string) {
+    const result = await this.checkTransfer('withdrawal', id)
+    const row = await this.prisma.withdrawal.findUniqueOrThrow({ where: { id } })
+    return { ...result, withdrawal: toWithdrawal(row) }
   }
 
   /**
