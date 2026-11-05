@@ -23,6 +23,8 @@ import { AdminService, type Tier } from './admin.service'
 import { ApprovalsService } from '../orders/approvals.service'
 import { LedgerService } from '../finance/ledger.service'
 import { RefundsService } from '../orders/refunds.service'
+import { AdminInboxService } from './inbox.service'
+import { OrderTimelineService } from '../orders/order-timeline.service'
 import { ApplicationsService } from './applications.service'
 import { FloatMonitorService } from '../supplier/float-monitor.service'
 import { SettingsService, KNOWN_PROVIDERS, type NetworkProviderRouting, type SupplierProviderCode } from '../settings/settings.service'
@@ -341,7 +343,21 @@ export class AdminController {
     private readonly agents: AgentsService,
     private readonly reconciler: ReconcilerService,
     private readonly orders: OrdersService,
+    private readonly inbox: AdminInboxService,
+    private readonly timeline: OrderTimelineService,
   ) {}
+
+  /** Everything waiting on a person, most urgent first, see `AdminInboxService`. */
+  @Get('today')
+  today() {
+    return this.inbox.today()
+  }
+
+  /** One order's whole history, see `OrderTimelineService`. */
+  @Get('orders/:id/timeline')
+  orderTimeline(@Param('id') id: string) {
+    return this.timeline.forOrder(id)
+  }
 
   @Get('overview')
   overview() {

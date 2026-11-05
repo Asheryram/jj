@@ -6,10 +6,12 @@ import { SettingsModule } from '../settings/settings.module'
 import { SupplierModule } from '../supplier/supplier.module'
 import { OrdersModule } from '../orders/orders.module'
 import { AgentsModule } from '../agents/agents.module'
+import { AdminInboxService } from './inbox.service'
+import { OrderTimelineService } from '../orders/order-timeline.service'
 @Module({
   imports: [SupplierModule, OrdersModule, SettingsModule, AgentsModule],
   controllers: [AdminController, ReportsController],
-  providers: [AdminService, ApplicationsService],
+  providers: [AdminService, ApplicationsService, AdminInboxService, OrderTimelineService],
   exports: [AdminService, ApplicationsService],
 })
 export class AdminModule {}

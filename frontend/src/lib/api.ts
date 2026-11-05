@@ -481,6 +481,27 @@ export interface TransferCheck {
 }
 
 /** Where the provider float sits against the thresholds. */
+/** One thing waiting on a person, see backend `AdminInboxService`. */
+export interface InboxItem {
+  id: string
+  /** 1 now, 2 today, 3 when you can. */
+  urgency: 1 | 2 | 3
+  title: string
+  detail: string
+  amount: number | null
+  link: string
+  action: string
+}
+
+/** One step in an order's history, see backend `OrderTimelineService`. */
+export interface TimelineEvent {
+  at: string
+  kind: 'money' | 'provider' | 'person' | 'system'
+  title: string
+  detail: string | null
+  who: string | null
+}
+
 export interface MyOrdersPage {
   rows: Order[]
   total: number
@@ -1641,6 +1662,10 @@ export const api = {
     }>('/admin/orders/sweep', { method: 'POST' }),
 
   stuckTransfers: () => request<StuckTransfer[]>('/admin/finance/stuck-transfers'),
+  /** Everything waiting on a person, most urgent first. */
+  today: () => request<{ items: InboxItem[]; at: string }>('/admin/today'),
+  /** One order's whole history. */
+  orderTimeline: (id: string) => request<TimelineEvent[]>(`/admin/orders/${id}/timeline`),
   checkTransfer: (type: StuckTransfer['type'], id: string) =>
     request<TransferCheck>(`/payments/transfers/${type}/${id}/check`, { method: 'POST' }),
   reviewTransfer: (type: StuckTransfer['type'], id: string, note: string) =>

@@ -5,6 +5,7 @@ import { useStore } from '../state/store'
 import { cedis, dateTime } from '../lib/format'
 import { Button, Callout, Field, Modal, Spinner, TextInput, cn } from './ui'
 import { AlertIcon, CheckIcon, ClockIcon } from './icons'
+import { OrderTimeline } from './OrderTimeline'
 
 /**
  * Turn a supplier's reply into something James can act on.
@@ -467,6 +468,12 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
             )}
           </div>
         )}
+
+        {/* The whole story in one place: who decided what, and where the money went. */}
+        <details className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5" open>
+          <summary className="cursor-pointer text-sm font-semibold text-slate-800 dark:text-slate-100">Full history</summary>
+          <OrderTimeline orderId={order.id} className="mt-3" />
+        </details>
 
         {/* The automatic sweep still covers this order eventually, but only
             once every ten minutes, this asks the delivery partner directly,

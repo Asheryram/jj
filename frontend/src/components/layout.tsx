@@ -169,6 +169,7 @@ function navFor(
 ): NavItem[] {
   if (isAdmin(role)) {
     return [
+      { to: '/admin/today', label: 'Today', icon: AlertIcon, primary: true },
       { to: '/admin', label: 'Overview', icon: HomeIcon, end: true, primary: true },
       // Not /admin/analytics on purpose, it reads a separate warehouse
       // database, computed on a schedule, not a live query like everything

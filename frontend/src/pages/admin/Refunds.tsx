@@ -31,6 +31,7 @@ import {
   Th,
 } from '../../components/ui'
 import { AlertIcon, CashIcon, CheckIcon } from '../../components/icons'
+import { OrderTimeline } from '../../components/OrderTimeline'
 
 type Filter = 'pending' | 'approved' | 'rejected'
 
@@ -1185,6 +1186,14 @@ function ReorderModal({
             </div>
           </div>
         )}
+
+        {/* What already happened to this order, the deciding context for a reorder. */}
+        <details className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5" open={request.markedFailedByHand}>
+          <summary className="cursor-pointer text-sm font-semibold text-slate-800 dark:text-slate-100">
+            What happened to this order
+          </summary>
+          <OrderTimeline orderId={request.orderId} className="mt-3" />
+        </details>
 
         {request.markedFailedByHand && (
           <label className="flex items-start gap-2.5 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-900 dark:text-amber-200">
