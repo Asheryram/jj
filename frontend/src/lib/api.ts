@@ -539,6 +539,8 @@ export interface TreasuryOverview {
   liveBalance: number | null
   /** What the live balance should hold: `heldByRecords` less `inTransit`. */
   expectedLiveBalance: number | null
+  /** Each provider's last reported float, summed. */
+  floatsHeld: number
   /** Everything the business should hold in Paystack, by its own records. */
   heldByRecords: number | null
   /** Paid by customers since the last settlement, not in the balance yet. */

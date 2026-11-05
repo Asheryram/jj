@@ -17,6 +17,7 @@ import {
   Td,
   TextInput,
   Th,
+  Select,
 } from '../../components/ui'
 import { AlertIcon, CheckIcon, ShieldIcon, UsersIcon } from '../../components/icons'
 
@@ -305,6 +306,9 @@ function describe(action: AdminAction): string {
 function AdminActionsCard() {
   const [rows, setRows] = useState<AdminAction[] | null>(null)
   const [failed, setFailed] = useState(false)
+  const [person, setPerson] = useState('')
+  const people = [...new Set((rows ?? []).map((r) => r.actorName))].sort()
+  const shown = (rows ?? []).filter((r) => !person || r.actorName === person)
 
   useEffect(() => {
     let live = true
@@ -319,7 +323,22 @@ function AdminActionsCard() {
 
   return (
     <Card className="mt-3">
-      <CardHead title="Recent admin actions" subtitle="Every change an admin or superadmin made, newest first" />
+      <CardHead
+        title="Recent admin actions"
+        subtitle="Every change an admin or superadmin made, newest first"
+        action={
+          people.length > 1 ? (
+            <Select aria-label="Show actions by" value={person} onChange={(e) => setPerson(e.target.value)} className="h-9 w-44">
+              <option value="">Everyone</option>
+              {people.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </Select>
+          ) : undefined
+        }
+      />
       <div className="px-4 pb-4">
         {failed ? (
           <p className="text-sm text-slate-500 dark:text-slate-400">We could not load the action history.</p>
@@ -340,7 +359,7 @@ function AdminActionsCard() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {shown.map((row) => (
                 <tr key={row.id}>
                   <Td className="text-xs whitespace-nowrap text-slate-500 dark:text-slate-400">{dateTime(row.at)}</Td>
                   <Td>

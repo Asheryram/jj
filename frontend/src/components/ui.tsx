@@ -348,7 +348,7 @@ export function StatusBadge({ status }: { status: OrderStatus }) {
   if (status === 'processing') {
     return (
       <Badge tone="info">
-        <Spinner className="size-3.5" /> Processing
+        <Spinner className="size-3.5" /> Being delivered
       </Badge>
     )
   }

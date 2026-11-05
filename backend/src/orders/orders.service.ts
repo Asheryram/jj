@@ -973,6 +973,8 @@ export class OrdersService {
       provider: providerFor(row.supplierCodeAtSale),
       /** See `refundCreatedAtByOrderId` above, null for anything that isn't `failed`. */
       failedAt: row.status === 'failed' ? (refundCreatedAtByOrderId.get(row.id)?.toISOString() ?? null) : null,
+      /** A failed order only queues a refund when money was taken, so no refund means it was never paid. */
+      paymentCollected: row.status === 'failed' ? refundStatusByOrderId.has(row.id) : undefined,
       /**
        * How the order's own reference reads, not something either side chose
        * on this platform. A `manual_`-prefixed reference only ever comes from

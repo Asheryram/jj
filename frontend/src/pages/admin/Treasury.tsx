@@ -167,9 +167,9 @@ export default function Treasury() {
         </Callout>
       )}
 
-      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatTile
-          label="In Paystack now"
+          label="Cash in Paystack"
           value={data.liveBalance === null ? '—' : cedis(data.liveBalance)}
           hint={
             gap !== null && gap > 100
@@ -180,13 +180,14 @@ export default function Treasury() {
           }
           tone={gap !== null && gap > 100 ? 'warning' : 'brand'}
         />
+        <StatTile label="In the floats" value={cedis(data.floatsHeld)} hint="DataHub and GMPL, last readings" />
+        <StatTile label="Owed to others" value={cedis(data.liabilities)} hint="Agents, customers, pending orders" />
         <StatTile
-          label="Free to take out"
+          label="Yours to take"
           value={cedis(Math.max(data.ownerDrawingMax, 0))}
-          hint="After everything owed and Paystack's fee"
+          hint={data.ownerDrawingMax > 0 ? "After everything owed and Paystack's fee" : 'Nothing spare after what is owed'}
           tone="success"
         />
-        <StatTile label="Owed to others" value={cedis(data.liabilities)} hint="Agents, customers, pending orders" />
         <StatTile
           label="On its way"
           value={cedis(data.inFlight)}

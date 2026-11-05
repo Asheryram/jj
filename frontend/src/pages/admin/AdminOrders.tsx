@@ -886,7 +886,11 @@ function FinancialFigure({
 function OrderStatusDetails({ order, onWhy, onReverse }: { order: Order; onWhy: () => void; onReverse?: () => void }) {
   return (
     <>
-      <StatusBadge status={order.status} />
+      {order.status === 'failed' && order.paymentCollected === false ? (
+        <Badge tone="neutral">Not paid</Badge>
+      ) : (
+        <StatusBadge status={order.status} />
+      )}
       {order.dispatchUnresolved && (
         <span
           className="ml-1.5 inline-block"

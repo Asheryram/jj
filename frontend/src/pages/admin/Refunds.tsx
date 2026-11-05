@@ -695,7 +695,9 @@ function RefuseModal({
         </Callout>
 
         <QuickReasons
-          options={['Bundle was delivered, confirmed with the customer', 'Payment never actually went through']}
+          // A refund is only ever queued when the payment arrived, so "it was
+          // never paid" is not a reason that can apply here.
+          options={['Bundle was delivered, confirmed with the customer', 'Customer said the bundle arrived']}
           onPick={(text) => {
             setNote(text)
             setError('')

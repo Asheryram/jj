@@ -210,6 +210,11 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       minTransfer: MIN_TRANSFER,
       ...limits,
       expectedLiveBalance: live?.expected ?? null,
+      /** Each provider's last reported float, summed: money already sitting at the providers. */
+      floatsHeld: (await Promise.all(KNOWN_PROVIDERS.map((p) => this.floatMonitor.latest(p)))).reduce(
+        (sum, reading) => sum + (reading?.balance ?? 0),
+        0,
+      ),
       /** Everything the business should hold, by its own records, see `SolvencyService.expectedLiveBalance`. */
       heldByRecords: live?.heldByRecords ?? null,
       /** Paid by customers since the last settlement, not in the balance yet. */
