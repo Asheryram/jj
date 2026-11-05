@@ -1,3 +1,4 @@
+import { UndoBar } from '../lib/undo'
 import { TourButton } from '../tours/LearnCard'
 import { LicenseBanner } from './license'
 import { BUSINESS } from '../lib/business'
@@ -811,6 +812,7 @@ export function AppShell() {
       </Modal>
 
       <ToastHost />
+      <UndoBar />
     </div>
   )
 }
@@ -868,6 +870,7 @@ export function AnalyticsShell() {
       </main>
 
       <ToastHost />
+      <UndoBar />
     </div>
   )
 }
@@ -974,6 +977,7 @@ export function PublicShell() {
       <PublicFooter />
       <StorageNotice />
       <ToastHost />
+      <UndoBar />
       <SeasonalEffects />
     </div>
   )

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useStore } from '../../state/store'
 import { api, ApiError, type ManualPayoutAdvance } from '../../lib/api'
+import { withUndo } from '../../lib/undo'
 import { cedis, dateTime } from '../../lib/format'
 import type { WithdrawalRequest } from '../../data/types'
 import {
@@ -84,6 +85,10 @@ export default function AdminWithdrawals() {
   const decide = async (id: string, status: 'approved' | 'rejected') => {
     setDecidingId(id)
     try {
+      if (status === 'approved') {
+        const row = withdrawals.find((w) => w.id === id)
+        if (row && !(await withUndo(`Paying ${cedis(row.amount)} to ${row.agentName}`))) return
+      }
       await decideWithdrawal(id, status)
     } catch (caught) {
       pushToast({
@@ -147,6 +152,10 @@ export default function AdminWithdrawals() {
 
     setBulkBusy(true)
     try {
+      if (status === 'approved') {
+        const total = pending.filter((w) => ids.includes(w.id)).reduce((sum, w) => sum + w.amount, 0)
+        if (!(await withUndo(`Paying ${ids.length} withdrawal${ids.length === 1 ? '' : 's'}, ${cedis(total)} in total`))) return
+      }
       for (const id of ids) {
         await decideWithdrawal(id, status)
       }

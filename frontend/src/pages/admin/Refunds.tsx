@@ -32,6 +32,7 @@ import {
 } from '../../components/ui'
 import { AlertIcon, CashIcon, CheckIcon } from '../../components/icons'
 import { OrderTimeline } from '../../components/OrderTimeline'
+import { withUndo } from '../../lib/undo'
 
 type Filter = 'pending' | 'approved' | 'rejected'
 
@@ -81,6 +82,7 @@ export default function Refunds() {
   const approve = async (row: RefundRequest, momoNetwork?: Network) => {
     setBusyId(row.id)
     try {
+      if (!(await withUndo(`Refunding ${cedis(row.amount)} to ${row.buyerName}`))) return
       await api.approveRefund(row.id, momoNetwork)
       await load()
       pushToast({
@@ -138,6 +140,11 @@ export default function Refunds() {
     }
 
     setBulkBusy(true)
+    const total = actionable.reduce((sum, row) => sum + row.amount, 0)
+    if (!(await withUndo(`Refunding ${actionable.length} customer${actionable.length === 1 ? '' : 's'}, ${cedis(total)} in total`))) {
+      setBulkBusy(false)
+      return
+    }
     let succeeded = 0
     let failed = 0
     for (const row of actionable) {

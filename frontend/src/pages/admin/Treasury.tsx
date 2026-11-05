@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../../state/store'
+import { withUndo } from '../../lib/undo'
 import { api, ApiError, type BalanceBooksPlan, type TopupSource, type TreasuryOverview, type TreasuryPurpose } from '../../lib/api'
 import { cedis, dateTime, parseCedis } from '../../lib/format'
 import {
@@ -489,6 +490,8 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
     setBusy(true)
     setError('')
     try {
+      const target = destinations.find((d) => d.id === destinationId)
+      if (!(await withUndo(`Sending ${cedis(pesewas)} to ${target?.label ?? 'the chosen number'}`))) return
       const result = await api.treasuryWithdraw({
         purpose,
         provider: purpose === 'provider_refill' ? provider : undefined,
