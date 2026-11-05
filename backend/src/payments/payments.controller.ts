@@ -3,16 +3,19 @@ import {
   Controller,
   Headers,
   HttpCode,
+  Param,
   Post,
   Req,
   UseGuards,
 } from '@nestjs/common'
-import { ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger'
-import { IsString, MinLength } from 'class-validator'
+import { ApiBearerAuth, ApiExcludeEndpoint, ApiTags } from '@nestjs/swagger'
+import { IsString, MaxLength, MinLength } from 'class-validator'
 import type { Request } from 'express'
 import { PaymentsService } from './payments.service'
 import { PaystackClient } from './paystack.client'
 import { LoginThrottleGuard } from '../auth/login-throttle.guard'
+import { CurrentUser, Roles, type AuthUser } from '../common/auth'
+import { ValidationError } from '../common/domain-errors'
 
 export class ConfirmPaymentDto {
   @IsString()
@@ -20,9 +23,21 @@ export class ConfirmPaymentDto {
   reference!: string
 }
 
+export class ReviewTransferDto {
+  @IsString()
+  @MinLength(5, { message: 'Say what you found. It is kept on the record.' })
+  @MaxLength(500)
+  note!: string
+}
+
 interface PaystackWebhookBody {
   event?: string
-  data?: { reference?: string; status?: string }
+  data?: { reference?: string; status?: string; transfer_code?: string }
+}
+
+function transferType(type: string): 'withdrawal' | 'refund' {
+  if (type !== 'withdrawal' && type !== 'refund') throw new ValidationError('Unknown transfer type.')
+  return type
 }
 
 @ApiTags('payments')
@@ -65,8 +80,30 @@ export class PaymentsController {
     const result = await this.payments.applyWebhook(
       body.event ?? '',
       body.data?.reference ?? '',
+      body.data?.transfer_code,
     )
     return { received: true, ...result }
+  }
+
+  /** Ask Paystack what became of a payout or refund, see `PaymentsService.checkTransfer`. */
+  @Post('transfers/:type/:id/check')
+  @Roles('admin')
+  @ApiBearerAuth()
+  checkTransfer(@Param('type') type: string, @Param('id') id: string) {
+    return this.payments.checkTransfer(transferType(type), id)
+  }
+
+  /** Close a possible double payment once someone has dealt with it. */
+  @Post('transfers/:type/:id/review')
+  @Roles('admin')
+  @ApiBearerAuth()
+  reviewTransfer(
+    @Param('type') type: string,
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ReviewTransferDto,
+  ) {
+    return this.payments.reviewSentAfterReturn(transferType(type), id, user.id, dto.note)
   }
 
   /**

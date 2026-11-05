@@ -3,7 +3,7 @@ import type { Network } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { LedgerService } from '../finance/ledger.service'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
-import { PaystackClient } from '../payments/paystack.client'
+import { PaystackClient, refundTransferReference } from '../payments/paystack.client'
 import { SettingsService } from '../settings/settings.service'
 import { requirePaystackChecked } from '../common/paystack-check'
 import { momoCodeFor } from '../payments/momo'
@@ -227,6 +227,16 @@ export class RefundsService {
     }
   }
 
+  /** Paystack reported this one sent after it went back in the queue, see `PaymentsService.flagSentAfterReturn`. */
+  private refuseIfAlreadySent(transferStatus: string | null): void {
+    if (transferStatus === 'sent_after_return') {
+      throw new ConflictError(
+        'ALREADY_SENT',
+        'Paystack reported this refund as sent after it came back to the queue. Check it on Needs attention before paying it again.',
+      )
+    }
+  }
+
   async approve(id: string, adminId: string, momoNetwork?: Network) {
     const request = await this.prisma.refundRequest.findUnique({ where: { id } })
     if (!request) throw new NotFoundError('We could not find that refund request.')
@@ -250,6 +260,7 @@ export class RefundsService {
     }
 
     await this.refuseIfFlagged(request.orderId)
+    this.refuseIfAlreadySent(request.transferStatus)
 
     const settled = await this.prisma.$transaction(async (tx) => {
       /**
@@ -409,6 +420,7 @@ export class RefundsService {
       throw new ValidationError('Choose which Mobile Money network this was sent on.')
     }
     await this.refuseIfFlagged(existing.orderId)
+    this.refuseIfAlreadySent(existing.transferStatus)
     requirePaystackChecked(existing.transferStatus, confirmCheckedPaystack)
 
     return this.prisma.$transaction(async (tx) => {
@@ -595,11 +607,10 @@ export class RefundsService {
     // approval after a failed transfer gets a fresh one instead of being
     // refused as a duplicate forever. `PaymentsService.applyTransfer` strips
     // the suffix to find the refund.
-    const attempt = (row.decidedAt ?? row.createdAt).getTime().toString(36)
     const result = await this.paystack.transfer({
       recipientCode,
       amount: row.amount,
-      reference: `RFD-${row.id}_${attempt}`,
+      reference: refundTransferReference(row),
       reason: `Refund, ${row.productName} (${row.orderRef})`,
     })
 

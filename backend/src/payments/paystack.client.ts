@@ -225,6 +225,37 @@ export class PaystackClient {
   }
 
   /**
+   * Ask Paystack what became of a transfer, by the reference we sent it with.
+   *
+   * The answer to a timeout, and to a confirmation that never arrived. Only
+   * an explicit "not found" means Paystack has no such transfer; anything else
+   * unreadable is `error`, and an unknown is never taken for a no.
+   */
+  async verifyTransfer(reference: string): Promise<TransferLookup> {
+    const key = this.secretKey
+    if (!key) return { kind: 'error', reason: 'No Paystack secret key configured.' }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/transfer/verify/${encodeURIComponent(reference)}`, {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(15_000),
+      })
+      const body = (await response.json().catch(() => ({}))) as PaystackEnvelope<{
+        status?: string
+        transfer_code?: string
+      }>
+
+      if (response.ok && body.status === true && body.data?.status) {
+        return { kind: 'found', status: body.data.status, transferCode: body.data.transfer_code ?? null }
+      }
+      if (response.status === 404 || /not found/i.test(body.message ?? '')) return { kind: 'not_found' }
+      return { kind: 'error', reason: body.message ?? `Paystack returned ${response.status}.` }
+    } catch (error) {
+      return { kind: 'error', reason: `Could not reach Paystack: ${String(error)}` }
+    }
+  }
+
+  /**
    * One page of the balance history: every movement in and out of the
    * Paystack balance, newest first. A top-up made on the dashboard shows here
    * as a `Transaction`, the same as a customer payment, which is why
@@ -488,6 +519,28 @@ export type TransferOutcome =
   | { kind: 'failed'; reason: string; insufficientBalance?: boolean }
   /** No usable answer. May or may not exist at Paystack; ask before retrying. */
   | { kind: 'unknown'; reason: string }
+
+export type TransferLookup =
+  | { kind: 'found'; status: string; transferCode: string | null }
+  /** Paystack has no transfer with this reference: it never went out. */
+  | { kind: 'not_found' }
+  /** No usable answer. Says nothing about the transfer either way. */
+  | { kind: 'error'; reason: string }
+
+/**
+ * The webhook event a looked-up status amounts to, so a lookup settles through
+ * the same code as a delivered webhook. Null while it is still undecided.
+ */
+export function transferEventFor(status: string): 'transfer.success' | 'transfer.failed' | 'transfer.reversed' | null {
+  if (status === 'success') return 'transfer.success'
+  if (status === 'reversed') return 'transfer.reversed'
+  return ['failed', 'abandoned', 'blocked', 'rejected'].includes(status) ? 'transfer.failed' : null
+}
+
+/** One reference per approval of a refund, see `RefundsService.sendRefund`. */
+export function refundTransferReference(row: { id: string; decidedAt: Date | null; createdAt: Date }): string {
+  return `RFD-${row.id}_${(row.decidedAt ?? row.createdAt).getTime().toString(36)}`
+}
 
 export type VerifyOutcome =
   | {

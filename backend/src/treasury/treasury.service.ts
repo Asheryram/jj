@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common'
 import type { Network, PaystackTopupSource, TreasuryPurpose } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
-import { PaystackClient } from '../payments/paystack.client'
+import { PaystackClient, transferEventFor } from '../payments/paystack.client'
 import { momoCodeFor } from '../payments/momo'
 import { LedgerService } from '../finance/ledger.service'
 import { SolvencyService } from '../finance/solvency.service'
@@ -423,13 +423,13 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
    * Paystack's webhook for a `TRS-` reference. Success books the money;
    * a failure releases it; a reversal after success un-books it.
    */
-  async applyTransferEvent(event: string, id: string): Promise<{ applied: boolean }> {
+  async applyTransferEvent(event: string, id: string, transferCode?: string | null): Promise<{ applied: boolean }> {
     const row = await this.prisma.treasuryTransfer.findUnique({ where: { id } })
     if (!row) {
       this.log.warn(`transfer webhook for unknown treasury transfer ${id}`)
       return { applied: false }
     }
-    if (event === 'transfer.success') return { applied: await this.applySuccess(id) }
+    if (event === 'transfer.success') return { applied: await this.applySuccess(id, transferCode) }
 
     if (row.status === 'success') {
       if (event !== 'transfer.reversed') return { applied: false }
@@ -457,12 +457,57 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   /** Book a confirmed transfer, once. */
-  private async applySuccess(id: string): Promise<boolean> {
+  /** Ask Paystack what became of one transfer, same rules as `PaymentsService.checkTransfer`. */
+  async check(id: string): Promise<{ outcome: 'settled' | 'in_progress' | 'not_found' | 'unreachable'; status?: string; message?: string }> {
+    const row = await this.prisma.treasuryTransfer.findUnique({ where: { id } })
+    if (!row) throw new NotFoundError('We could not find that transfer.')
+
+    const result = await this.paystack.verifyTransfer(`TRS-${id}`)
+    if (result.kind === 'error') return { outcome: 'unreachable', message: result.reason }
+
+    if (result.kind === 'not_found') {
+      if (row.status === 'unknown') {
+        await this.prisma.treasuryTransfer.updateMany({
+          where: { id, status: 'unknown' },
+          data: { statusNote: 'Checked with Paystack: it has no such transfer, so this did not go out.' },
+        })
+      }
+      return { outcome: 'not_found' }
+    }
+
+    const event = transferEventFor(result.status)
+    if (event) {
+      await this.applyTransferEvent(event, id, result.transferCode)
+      return { outcome: 'settled', status: result.status }
+    }
+
+    await this.prisma.treasuryTransfer.updateMany({
+      where: { id, status: { in: [...IN_FLIGHT] } },
+      data: {
+        status: result.status === 'otp' ? 'otp' : 'pending',
+        ...(result.status === 'otp' ? {} : { statusNote: null }),
+        ...(result.transferCode ? { transferCode: result.transferCode } : {}),
+      },
+    })
+    return { outcome: 'in_progress', status: result.status }
+  }
+
+  /** Everything still in flight from before `before`, see `PaymentsService.checkOpenTransfers`. */
+  async checkOpen(before: Date): Promise<void> {
+    const rows = await this.prisma.treasuryTransfer.findMany({
+      where: { status: { in: [...IN_FLIGHT] }, createdAt: { lt: before } },
+      select: { id: true },
+      take: 50,
+    })
+    for (const { id } of rows) await this.check(id)
+  }
+
+  private async applySuccess(id: string, transferCode?: string | null): Promise<boolean> {
     const claim = await this.prisma.treasuryTransfer.updateMany({
       // `failed` included: a person may have marked it not sent, and Paystack
       // is now saying otherwise. Paystack's word on real money wins.
       where: { id, status: { in: [...IN_FLIGHT, 'failed'] } },
-      data: { status: 'success', paidAt: new Date(), statusNote: null },
+      data: { status: 'success', paidAt: new Date(), statusNote: null, ...(transferCode ? { transferCode } : {}) },
     })
     if (claim.count === 0) return false
 

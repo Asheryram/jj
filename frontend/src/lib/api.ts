@@ -465,9 +465,17 @@ export interface StuckTransfer {
   phone: string
   /** Pesewas. */
   amount: number
-  transferStatus: 'otp' | 'unknown'
+  /** `sent_after_return`: Paystack says it went out after it was closed, a possible double payment. */
+  transferStatus: 'otp' | 'unknown' | 'sent_after_return'
   note: string | null
   decidedAt: string | null
+}
+
+/** What asking Paystack about a transfer found. */
+export interface TransferCheck {
+  outcome: 'settled' | 'in_progress' | 'not_found' | 'unreachable'
+  status?: string
+  message?: string
 }
 
 /** Where the provider float sits against the thresholds. */
@@ -1624,6 +1632,11 @@ export const api = {
     }>('/admin/orders/sweep', { method: 'POST' }),
 
   stuckTransfers: () => request<StuckTransfer[]>('/admin/finance/stuck-transfers'),
+  checkTransfer: (type: StuckTransfer['type'], id: string) =>
+    request<TransferCheck>(`/payments/transfers/${type}/${id}/check`, { method: 'POST' }),
+  reviewTransfer: (type: StuckTransfer['type'], id: string, note: string) =>
+    request<void>(`/payments/transfers/${type}/${id}/review`, { method: 'POST', body: { note } }),
+  treasuryCheck: (id: string) => request<TransferCheck>(`/admin/treasury/withdrawals/${id}/check`, { method: 'POST' }),
 
   trackOrder: (reference: string, phone: string) =>
     request<Order>('/orders/track', { method: 'POST', body: { reference, phone }, auth: false }),

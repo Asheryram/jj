@@ -1,14 +1,24 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common'
+import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import type { Network, Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { FulfilmentService } from '../orders/fulfilment.service'
 import { ValidationError } from '../common/domain-errors'
-import { PaystackClient } from './paystack.client'
+import { PaystackClient, refundTransferReference, transferEventFor } from './paystack.client'
+import { MailerService } from '../mail/mailer.service'
+import { escape } from '../mail/templates'
+import { ConflictError, NotFoundError } from '../common/domain-errors'
 import { LedgerService } from '../finance/ledger.service'
 import { DomainsService } from '../domains/domains.service'
 import { TreasuryService } from '../treasury/treasury.service'
 import { SettingsService } from '../settings/settings.service'
+
+/** How often open transfers are looked up with Paystack. */
+const TRANSFER_CHECK_MS = 5 * 60_000
+/** How long a transfer gets to settle by webhook before it is looked up. */
+const TRANSFER_SETTLE_MS = 5 * 60_000
+/** Transfer states nothing more can be learned about by asking Paystack. */
+const CLOSED_TRANSFER_STATUSES = ['manual', 'success', 'failed', 'reversed', 'sent_after_return', 'reviewed']
 
 /**
  * Collecting money, and what happens once it arrives.
@@ -30,7 +40,9 @@ import { SettingsService } from '../settings/settings.service'
  * customer refreshing the return page is normal.
  */
 @Injectable()
-export class PaymentsService implements OnModuleDestroy {
+export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy {
+  private transferTimer: NodeJS.Timeout | null = null
+  private checkingTransfers = false
   private readonly log = new Logger(PaymentsService.name)
 
   /**
@@ -75,10 +87,19 @@ export class PaymentsService implements OnModuleDestroy {
     private readonly domains: DomainsService,
     private readonly settings: SettingsService,
     private readonly treasury: TreasuryService,
+    private readonly mailer: MailerService,
   ) {}
+
+  onApplicationBootstrap(): void {
+    this.transferTimer = setInterval(() => {
+      void this.checkOpenTransfers().catch((error) => this.log.error(`transfer check failed: ${String(error)}`))
+    }, TRANSFER_CHECK_MS)
+    this.transferTimer.unref?.()
+  }
 
   onModuleDestroy(): void {
     if (this.watchTimer) clearInterval(this.watchTimer)
+    if (this.transferTimer) clearInterval(this.transferTimer)
   }
 
   /** Start chasing one checkout, see `openCheckouts`. */
@@ -747,7 +768,7 @@ export class PaymentsService implements OnModuleDestroy {
    * proves who sent the message, not that its contents are current, and this is
    * the moment money moves.
    */
-  async applyWebhook(event: string, reference: string): Promise<{ applied: boolean }> {
+  async applyWebhook(event: string, reference: string, transferCode?: string | null): Promise<{ applied: boolean }> {
     if (!reference) return { applied: false }
 
     if (event === 'charge.success') {
@@ -770,10 +791,146 @@ export class PaymentsService implements OnModuleDestroy {
      * agent's balance stayed debited for money they never received.
      */
     if (event === 'transfer.success' || event === 'transfer.failed' || event === 'transfer.reversed') {
-      return this.applyTransfer(event, reference)
+      return this.applyTransfer(event, reference, transferCode)
     }
 
     return { applied: false }
+  }
+
+  /**
+   * Ask Paystack what became of one payout or refund, and settle it if it has
+   * an answer, through the same code a webhook would have run.
+   *
+   * This is what a timeout or a lost webhook leaves behind: a transfer nobody
+   * here knows the fate of. "Not found" is reported, not acted on: returning
+   * the money is a decision that stays with a person.
+   */
+  async checkTransfer(
+    type: 'withdrawal' | 'refund',
+    id: string,
+  ): Promise<{ outcome: 'settled' | 'in_progress' | 'not_found' | 'unreachable'; status?: string; message?: string }> {
+    const row =
+      type === 'withdrawal'
+        ? await this.prisma.withdrawal.findUnique({ where: { id } })
+        : await this.prisma.refundRequest.findUnique({ where: { id } })
+    if (!row) throw new NotFoundError('We could not find that transfer.')
+
+    const reference = type === 'withdrawal' ? `WDR-${id}` : refundTransferReference(row as { id: string; decidedAt: Date | null; createdAt: Date })
+    const result = await this.paystack.verifyTransfer(reference)
+    const save = (data: { transferStatus?: string; transferNote?: string | null; transferCode?: string }) =>
+      type === 'withdrawal'
+        ? this.prisma.withdrawal.updateMany({ where: { id, status: 'approved' }, data })
+        : this.prisma.refundRequest.updateMany({ where: { id, status: 'approved' }, data })
+
+    if (result.kind === 'error') return { outcome: 'unreachable', message: result.reason }
+
+    if (result.kind === 'not_found') {
+      if (row.transferStatus === 'unknown') {
+        await save({
+          transferNote:
+            'Checked with Paystack: it has no transfer with this reference, so this did not go out. ' +
+            'It is safe to cancel it or pay it by hand.',
+        })
+      }
+      return { outcome: 'not_found' }
+    }
+
+    const event = transferEventFor(result.status)
+    if (event) {
+      await this.applyTransfer(event, reference, result.transferCode)
+      return { outcome: 'settled', status: result.status }
+    }
+
+    // Accepted and still moving, or waiting on an OTP. Recording the code
+    // stops it being paid by hand on top of a real transfer.
+    await save({
+      transferStatus: result.status === 'otp' ? 'otp' : 'pending',
+      transferNote: result.status === 'otp' ? row.transferNote : null,
+      ...(result.transferCode ? { transferCode: result.transferCode } : {}),
+    })
+    return { outcome: 'in_progress', status: result.status }
+  }
+
+  /**
+   * The automatic version of `checkTransfer`, for everything still open past
+   * the time a webhook should have arrived. Paystack has no duty to deliver
+   * one, so without this a lost webhook left a transfer open until somebody
+   * happened to look it up by hand.
+   */
+  async checkOpenTransfers(): Promise<void> {
+    if (this.checkingTransfers || !this.paystack.configured) return
+    if (!(await this.settings.get('paystackBusinessAccount'))) return
+    this.checkingTransfers = true
+    try {
+      const before = new Date(Date.now() - TRANSFER_SETTLE_MS)
+      const open = { OR: [{ transferStatus: null }, { transferStatus: { notIn: CLOSED_TRANSFER_STATUSES } }] }
+      const [withdrawals, refunds] = await Promise.all([
+        this.prisma.withdrawal.findMany({
+          where: { status: 'approved', decidedAt: { lt: before }, ...open },
+          select: { id: true },
+          take: 50,
+        }),
+        this.prisma.refundRequest.findMany({
+          where: { status: 'approved', method: 'transfer', paidAt: null, decidedAt: { lt: before }, ...open },
+          select: { id: true },
+          take: 50,
+        }),
+      ])
+      for (const { id } of withdrawals) await this.checkTransfer('withdrawal', id)
+      for (const { id } of refunds) await this.checkTransfer('refund', id)
+      await this.treasury.checkOpen(before)
+    } finally {
+      this.checkingTransfers = false
+    }
+  }
+
+  /**
+   * Paystack reports money sent on something already closed another way: it
+   * went back to the agent or the refund queue, or somebody paid it by hand.
+   * The person may have been paid twice, which nothing here can undo, so it
+   * is put in front of a person: flagged on Needs attention, and emailed.
+   */
+  private async flagSentAfterReturn(
+    type: 'withdrawal' | 'refund',
+    row: { id: string; amount: number },
+    label: string,
+    transferCode?: string | null,
+  ): Promise<void> {
+    const note =
+      `Paystack reports this ${type === 'withdrawal' ? 'payout' : 'refund'} as SENT, after it was already closed. ` +
+      'They may have been paid twice. Check it on the Paystack dashboard and recover it if so.'
+    const data = { transferStatus: 'sent_after_return', transferNote: note, ...(transferCode ? { transferCode } : {}) }
+    const where = { id: row.id, transferStatus: { notIn: ['sent_after_return', 'reviewed'] } }
+    const flagged =
+      type === 'withdrawal'
+        ? await this.prisma.withdrawal.updateMany({ where, data })
+        : await this.prisma.refundRequest.updateMany({ where, data })
+    if (flagged.count === 0) return
+
+    const amount = `GHS ${(row.amount / 100).toFixed(2)}`
+    this.log.error(`${label}: ${amount} sent by Paystack after being closed, flagged`)
+    const admins = await this.prisma.user.findMany({
+      where: { role: { in: ['admin', 'superadmin'] }, status: 'active' },
+      select: { email: true },
+    })
+    const text = `${label} (${amount}): ${note}`
+    for (const { email } of admins) {
+      await this.mailer
+        .send({ to: email, subject: `Possible double payment: ${label}`, html: `<p>${escape(text)}</p>`, text })
+        .catch((error) => this.log.error(`could not tell ${email} about ${label}: ${String(error)}`))
+    }
+  }
+
+  /** A person has dealt with a `flagSentAfterReturn`, closing it with what they found. */
+  async reviewSentAfterReturn(type: 'withdrawal' | 'refund', id: string, adminId: string, note: string): Promise<void> {
+    const where = { id, transferStatus: 'sent_after_return' }
+    const data = { transferStatus: 'reviewed', transferNote: `Reviewed: ${note.trim()}` }
+    const done =
+      type === 'withdrawal'
+        ? await this.prisma.withdrawal.updateMany({ where, data })
+        : await this.prisma.refundRequest.updateMany({ where, data })
+    if (done.count === 0) throw new ConflictError('NOT_FLAGGED', 'This transfer is not flagged any more, refresh and check.')
+    this.log.warn(`${type} ${id}: possible double payment reviewed by ${adminId}: ${note.trim()}`)
   }
 
   /**
@@ -800,6 +957,7 @@ export class PaymentsService implements OnModuleDestroy {
   private async applyRefundTransfer(
     event: string,
     refundId: string,
+    transferCode?: string | null,
   ): Promise<{ applied: boolean }> {
     const row = await this.prisma.refundRequest.findUnique({ where: { id: refundId } })
     if (!row) {
@@ -828,7 +986,12 @@ export class PaymentsService implements OnModuleDestroy {
      * its ledger cost, and leave it sitting in the queue to be paid a real
      * second time, on top of what already went out by hand.
      */
-    if (row.resolvedManually) return { applied: false }
+    if (row.resolvedManually) {
+      if (event === 'transfer.success') {
+        await this.flagSentAfterReturn('refund', row, `Refund ${row.orderRef}`, transferCode)
+      }
+      return { applied: false }
+    }
 
     const alreadyApplied =
       (event === 'transfer.success' && row.transferStatus === 'success') ||
@@ -847,7 +1010,15 @@ export class PaymentsService implements OnModuleDestroy {
             resolvedManually: false,
             OR: [{ transferStatus: null }, { transferStatus: { notIn: ['reversed', 'failed', 'success'] } }],
           },
-          data: { transferStatus: 'success', paidAt: new Date(), transferNote: null },
+          data: {
+            transferStatus: 'success',
+            paidAt: new Date(),
+            transferNote: null,
+            // Saved here too: this may be the first the row hears of the code
+            // (a timeout, or a webhook beating `sendRefund`'s own write), and
+            // the code is what counts it as having left Paystack.
+            ...(transferCode ? { transferCode } : {}),
+          },
         })
         if (claim.count === 0) return false
         // Now, and only now, the receipt may say the money has gone back.
@@ -858,6 +1029,7 @@ export class PaymentsService implements OnModuleDestroy {
         this.log.error(
           `refund ${row.orderRef}: Paystack says SENT, but it is ${row.status}/${row.transferStatus ?? 'none'}. Check Paystack before doing anything.`,
         )
+        await this.flagSentAfterReturn('refund', row, `Refund ${row.orderRef}`, transferCode)
         return { applied: false }
       }
       this.log.log(`refund ${row.orderRef} confirmed paid to ${row.buyerPhone}`)
@@ -919,6 +1091,7 @@ export class PaymentsService implements OnModuleDestroy {
   private async applyTransfer(
     event: string,
     reference: string,
+    transferCode?: string | null,
   ): Promise<{ applied: boolean }> {
     // Two kinds of money leave this platform, and both are transfers: an agent
     // payout (WDR-) and a customer refund (RFD-). The prefix says which, so one
@@ -926,13 +1099,13 @@ export class PaymentsService implements OnModuleDestroy {
     if (reference.startsWith('RFD-')) {
       // `RFD-<refund id>_<approval>`, see `RefundsService.sendRefund`; older
       // transfers carry no suffix. A uuid has no underscore, so this is exact.
-      return this.applyRefundTransfer(event, reference.slice(4).split('_')[0])
+      return this.applyRefundTransfer(event, reference.slice(4).split('_')[0], transferCode)
     }
 
     // A third kind: the owner moving money out on purpose, a float refill or
     // a withdrawal, see `TreasuryService`.
     if (reference.startsWith('TRS-')) {
-      return this.treasury.applyTransferEvent(event, reference.slice(4))
+      return this.treasury.applyTransferEvent(event, reference.slice(4), transferCode)
     }
 
     const id = reference.startsWith('WDR-') ? reference.slice(4) : null
@@ -967,7 +1140,12 @@ export class PaymentsService implements OnModuleDestroy {
      * to flip the withdrawal to `failed` and re-credit the agent's balance,
      * on top of whatever was already paid out by hand.
      */
-    if (row.resolvedManually) return { applied: false }
+    if (row.resolvedManually) {
+      if (event === 'transfer.success') {
+        await this.flagSentAfterReturn('withdrawal', row, `Payout to ${row.agentName}`, transferCode)
+      }
+      return { applied: false }
+    }
 
     const alreadyApplied =
       (event === 'transfer.success' && row.status === 'paid') ||
@@ -982,13 +1160,24 @@ export class PaymentsService implements OnModuleDestroy {
       // back to the agent must not flip the row to `paid` on top of that.
       const claim = await this.prisma.withdrawal.updateMany({
         where: { id, status: 'approved', resolvedManually: false },
-        data: { status: 'paid', transferStatus: 'success', paidAt: new Date() },
+        data: {
+          status: 'paid',
+          transferStatus: 'success',
+          paidAt: new Date(),
+          // Saved here too: this may be the first the row hears of the code
+          // (a timeout, or a webhook beating `sendPayout`'s own write), and
+          // the code is what counts it as having left Paystack.
+          ...(transferCode ? { transferCode } : {}),
+        },
       })
       if (claim.count === 0) {
         this.log.error(
           `payout ${id}: Paystack says SENT, but it is already ${row.status}` +
             (row.status === 'failed' ? ' and the money was returned to the agent. Check Paystack before doing anything.' : '.'),
         )
+        if (row.status === 'failed') {
+          await this.flagSentAfterReturn('withdrawal', row, `Payout to ${row.agentName}`, transferCode)
+        }
         return { applied: false }
       }
       this.log.log(`payout ${id} confirmed paid to ${row.agentPhone}`)

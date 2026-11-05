@@ -604,7 +604,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
   async stuckTransfers() {
     const [withdrawals, refunds] = await Promise.all([
       this.prisma.withdrawal.findMany({
-        where: { status: 'approved', transferStatus: { in: ['otp', 'unknown'] } },
+        where: { OR: [{ status: 'approved', transferStatus: { in: ['otp', 'unknown'] } }, { transferStatus: 'sent_after_return' }] },
         orderBy: { decidedAt: 'asc' },
         select: {
           id: true,
@@ -617,7 +617,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         },
       }),
       this.prisma.refundRequest.findMany({
-        where: { status: 'approved', transferStatus: { in: ['otp', 'unknown'] } },
+        where: { OR: [{ status: 'approved', transferStatus: { in: ['otp', 'unknown'] } }, { transferStatus: 'sent_after_return' }] },
         orderBy: { decidedAt: 'asc' },
         select: {
           id: true,
@@ -640,7 +640,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         who: w.agentName,
         phone: w.agentPhone,
         amount: w.amount,
-        transferStatus: w.transferStatus as 'otp' | 'unknown',
+        transferStatus: w.transferStatus as 'otp' | 'unknown' | 'sent_after_return',
         note: w.transferNote,
         decidedAt: w.decidedAt?.toISOString() ?? null,
       })),
@@ -651,7 +651,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         who: r.buyerName,
         phone: r.buyerPhone,
         amount: r.amount,
-        transferStatus: r.transferStatus as 'otp' | 'unknown',
+        transferStatus: r.transferStatus as 'otp' | 'unknown' | 'sent_after_return',
         note: r.transferNote,
         decidedAt: r.decidedAt?.toISOString() ?? null,
       })),

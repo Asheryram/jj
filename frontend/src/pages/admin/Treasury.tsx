@@ -94,6 +94,22 @@ export default function Treasury() {
     }
   }
 
+  const checkTransfer = async (id: string) => {
+    try {
+      const result = await api.treasuryCheck(id)
+      pushToast({
+        tone: result.outcome === 'unreachable' ? 'error' : 'info',
+        title:
+          result.outcome === 'not_found'
+            ? 'Paystack has no such transfer, so it did not go out.'
+            : (result.message ?? `Paystack says ${result.status}.`),
+      })
+      load()
+    } catch (caught) {
+      pushToast({ tone: 'error', title: caught instanceof ApiError ? caught.message : 'Could not check that.' })
+    }
+  }
+
   const classify = async (id: string, source: Exclude<TopupSource, 'unclassified'>) => {
     setClassifying(id)
     try {
@@ -282,6 +298,15 @@ export default function Treasury() {
                     <Badge tone={STATUS_TONE[t.status]}>{STATUS_LABEL[t.status]}</Badge>
                     {t.statusNote && (
                       <p className="mt-1 max-w-xs text-xs text-slate-500 dark:text-slate-400">{t.statusNote}</p>
+                    )}
+                    {(t.status === 'pending' || t.status === 'otp' || t.status === 'unknown') && (
+                      <button
+                        type="button"
+                        onClick={() => void checkTransfer(t.id)}
+                        className="mt-1 block text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
+                      >
+                        Check with Paystack
+                      </button>
                     )}
                     {isSuperadmin && (t.status === 'otp' || t.status === 'unknown') && (
                       <button

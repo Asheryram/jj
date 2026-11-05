@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, ApiError, type NeedsAttentionOrder, type StuckTransfer } from '../../lib/api'
+import { api, ApiError, type NeedsAttentionOrder, type StuckTransfer, type TransferCheck } from '../../lib/api'
 import type { Order } from '../../data/types'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
@@ -62,6 +62,14 @@ const URGENCY_STYLE: Record<
   },
 }
 
+/** Plain words for what asking Paystack found. */
+function transferCheckToast(result: TransferCheck): { tone: 'success' | 'info' | 'error'; title: string } {
+  if (result.outcome === 'settled') return { tone: 'success', title: `Paystack says ${result.status}. This one is settled.` }
+  if (result.outcome === 'in_progress') return { tone: 'info', title: `Paystack says ${result.status}. Still in progress.` }
+  if (result.outcome === 'not_found') return { tone: 'info', title: 'Paystack has no such transfer, so it did not go out.' }
+  return { tone: 'error', title: result.message ?? 'Could not reach Paystack. Try again.' }
+}
+
 /**
  * Orders nobody can resolve automatically, see `ReconcilerService.needsAttention`.
  *
@@ -87,6 +95,43 @@ export default function NeedsAttention() {
   const { pushToast } = useStore()
   const [rows, setRows] = useState<NeedsAttentionOrder[] | null>(null)
   const [transfers, setTransfers] = useState<StuckTransfer[] | null>(null)
+  const [checkingTransfer, setCheckingTransfer] = useState<string | null>(null)
+  const [reviewing, setReviewing] = useState<StuckTransfer | null>(null)
+  const [reviewNote, setReviewNote] = useState('')
+  const [reviewError, setReviewError] = useState('')
+  const [reviewBusy, setReviewBusy] = useState(false)
+
+  const checkWithPaystack = async (row: StuckTransfer) => {
+    setCheckingTransfer(row.id)
+    try {
+      const result = await api.checkTransfer(row.type, row.id)
+      pushToast(transferCheckToast(result))
+      await load()
+    } catch (caught) {
+      pushToast({ tone: 'error', title: caught instanceof ApiError ? caught.message : 'Could not check that.' })
+    } finally {
+      setCheckingTransfer(null)
+    }
+  }
+
+  const submitReview = async () => {
+    if (!reviewing) return
+    if (reviewNote.trim().length < 5) {
+      setReviewError('Say what you found. It is kept on the record.')
+      return
+    }
+    setReviewBusy(true)
+    try {
+      await api.reviewTransfer(reviewing.type, reviewing.id, reviewNote.trim())
+      setReviewing(null)
+      setReviewNote('')
+      await load()
+    } catch (caught) {
+      setReviewError(caught instanceof ApiError ? caught.message : 'Could not save that.')
+    } finally {
+      setReviewBusy(false)
+    }
+  }
   const [busyId, setBusyId] = useState<string | null>(null)
   /**
    * The full order behind a stuck row, fetched on demand: `NeedsAttentionOrder`
@@ -345,7 +390,7 @@ export default function NeedsAttention() {
         <Card className="mt-3">
           <CardHead
             title="Stuck transfers"
-            subtitle="Sitting on an OTP challenge or an unresolved reply from Paystack, check their dashboard before doing anything from here."
+            subtitle="Waiting on an OTP, no clear reply from Paystack, or a possible double payment. These are checked with Paystack every 5 minutes, or use Check with Paystack now."
           />
           <div className="space-y-2 p-4 sm:p-5">
             {transfers.map((row) => (
@@ -356,8 +401,8 @@ export default function NeedsAttention() {
                 <div>
                   <p className="font-semibold text-slate-900 dark:text-slate-50">
                     {row.reference} · {row.who} · {cedis(row.amount)}
-                    <Badge tone="warning" className="ml-2">
-                      {row.transferStatus}
+                    <Badge tone={row.transferStatus === 'sent_after_return' ? 'danger' : 'warning'} className="ml-2">
+                      {row.transferStatus === 'sent_after_return' ? 'possible double payment' : row.transferStatus}
                     </Badge>
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
@@ -365,12 +410,28 @@ export default function NeedsAttention() {
                     {row.decidedAt ? ` · approved ${dateTime(row.decidedAt)}` : ''}
                   </p>
                 </div>
-                <Link
-                  to={row.type === 'withdrawal' ? '/admin/withdrawals' : '/admin/refunds'}
-                  className="shrink-0 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
-                >
-                  {row.type === 'withdrawal' ? 'Go to Withdrawals' : 'Go to Refunds'}
-                </Link>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  {row.transferStatus === 'sent_after_return' ? (
+                    <Button size="sm" variant="outline" onClick={() => setReviewing(row)}>
+                      Mark dealt with
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      loading={checkingTransfer === row.id}
+                      onClick={() => void checkWithPaystack(row)}
+                    >
+                      Check with Paystack
+                    </Button>
+                  )}
+                  <Link
+                    to={row.type === 'withdrawal' ? '/admin/withdrawals' : '/admin/refunds'}
+                    className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  >
+                    {row.type === 'withdrawal' ? 'Go to Withdrawals' : 'Go to Refunds'}
+                  </Link>
+                </div>
               </div>
             ))}
           </div>
@@ -384,6 +445,37 @@ export default function NeedsAttention() {
           void load()
         }}
       />
+
+      {reviewing && (
+        <Modal open onClose={() => setReviewing(null)} title={`Possible double payment · ${reviewing.reference}`}>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submitReview()
+            }}
+          >
+            <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
+              {reviewing.note}
+            </Callout>
+            <Field label="What did you find, and what was done?" htmlFor="review-note" error={reviewError}>
+              <TextInput
+                id="review-note"
+                placeholder="Checked Paystack: paid once, nothing to recover"
+                value={reviewNote}
+                invalid={Boolean(reviewError)}
+                onChange={(event) => {
+                  setReviewNote(event.target.value)
+                  setReviewError('')
+                }}
+              />
+            </Field>
+            <Button type="submit" block loading={reviewBusy}>
+              Mark dealt with
+            </Button>
+          </form>
+        </Modal>
+      )}
 
       {acknowledging && (
         <Modal open onClose={() => setAcknowledging(null)} title={`Acknowledge ${acknowledging.reference}`}>

@@ -111,6 +111,12 @@ export class TreasuryController {
     return this.treasury.markNotSent(id, user, dto.note)
   }
 
+  /** Ask Paystack what became of a transfer, see `TreasuryService.check`. */
+  @Post('withdrawals/:id/check')
+  check(@Param('id') id: string) {
+    return this.treasury.check(id)
+  }
+
   @Post('topups/sync')
   syncTopups() {
     return this.treasury.syncTopups()
