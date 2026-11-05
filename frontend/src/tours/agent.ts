@@ -259,7 +259,7 @@ export const agentTours: Tour[] = [
       {
         target: 'agent-sales-list',
         title: 'Open an order',
-        body: 'Tap any row for the full details, including how the money was split. From there, **Buy again** or **Order again** starts the same bundle for the same number.',
+        body: 'Tap any row for the full details, including how the money was split.',
       },
       {
         title: 'When an order fails',

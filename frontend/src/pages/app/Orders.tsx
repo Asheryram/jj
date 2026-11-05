@@ -308,10 +308,10 @@ function OrderDetail({
 
           <div className="flex gap-2">
             {/* Not just a failed order's own retry, a completed one gets this
-                too, so an agent re-selling the same bundle to the same
-                walk-up customer next week is one tap, not re-typing a
-                number they already sold to. */}
-            {(order.status === 'failed' || order.status === 'completed') && (
+                too, so a customer buying the same bundle for the same number
+                is one tap. Customers only: an agent's list is their sales,
+                and a failed one is for an admin to reorder, not the agent. */}
+            {!isAgent && (order.status === 'failed' || order.status === 'completed') && (
               <Link
                 to={`/buy/${order.productId}?recipient=${encodeURIComponent(order.recipient)}`}
                 className="flex-1"
