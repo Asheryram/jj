@@ -86,13 +86,14 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * agreed to. Six hours is long enough for a same-day approval to land and
    * short enough that nobody is left wondering overnight.
    *
-   * Set APPROVAL_HOLD_HOURS to change it; 0 disables the hold entirely and
-   * refunds immediately, which is the conservative setting if approvals turn out
-   * to be slow.
+   * Set APPROVAL_HOLD_HOURS to hold instead. The default is now 0: the order
+   * fails on the next sweep and its refund is queued, because a customer told
+   * "setting up number" for hours was worse than a prompt refund (decided
+   * 5 Nov 2026, after JDC-517761712).
    */
   private get approvalHoldMs(): number {
-    const hours = Number(process.env.APPROVAL_HOLD_HOURS ?? 6)
-    return (Number.isFinite(hours) ? Math.max(0, hours) : 6) * 3_600_000
+    const hours = Number(process.env.APPROVAL_HOLD_HOURS ?? 0)
+    return (Number.isFinite(hours) ? Math.max(0, hours) : 0) * 3_600_000
   }
 
   constructor(

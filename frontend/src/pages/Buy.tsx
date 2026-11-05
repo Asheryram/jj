@@ -673,20 +673,18 @@ function OrderReceipt({
               <ClockIcon className="size-7" />
             </span>
             <p className="mt-4 font-semibold text-slate-900 dark:text-slate-50">
-              Setting up {prettyPhone(placed.recipient)}
+              We cannot send to {prettyPhone(placed.recipient)} yet
             </p>
             <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-300">
-              This is the first bundle sent to this number, so it needs a one-time setup with our
-              delivery partner. It usually finishes within a few hours, and your bundle is sent
-              the moment it does.
+              This number has not been set up with our delivery partner, so this bundle cannot be
+              sent to it. The order will be cancelled.
             </p>
             <p className="mt-3 text-sm font-medium text-slate-800 dark:text-slate-100">
-              Your {cedis(placed.salePrice)} is safe. If the setup does not complete, it comes
-              back to you automatically, you do not need to ask.
+              Your {cedis(placed.salePrice)} is safe and will be refunded to the number you paid
+              from. You do not need to ask.
             </p>
             <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
-              You can close this page. We will text {prettyPhone(placed.buyerPhone)} when it is
-              delivered.
+              You can close this page.
             </p>
           </div>
 
