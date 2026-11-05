@@ -1040,7 +1040,7 @@ export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy 
         await this.flagSentAfterReturn('refund', row, `Refund ${row.orderRef}`, transferCode)
         return { applied: false }
       }
-      this.log.log(`refund ${row.orderRef} confirmed paid to ${row.buyerPhone}`)
+      this.log.log(`refund ${row.orderRef} confirmed paid to ${row.payToPhone ?? row.buyerPhone}`)
       return { applied: true }
     }
 

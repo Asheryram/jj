@@ -85,7 +85,7 @@ export default function Refunds() {
     setBusyId(row.id)
     try {
       if (!(await withUndo(`Refunding ${cedis(row.amount)} to ${row.buyerName}`))) return
-      await api.approveRefund(row.id, momoNetwork)
+      await api.approveRefund(row.id, momoNetwork ?? row.momoNetwork ?? undefined)
       await load()
       pushToast({
         tone: 'success',
@@ -93,9 +93,14 @@ export default function Refunds() {
         detail:
           row.method === 'wallet'
             ? `Back in ${row.buyerName}'s wallet.`
-            : `Sent to ${prettyPhone(row.buyerPhone)} on ${momoNetwork}. We will confirm when it lands.`,
+            : 'Sending to the Mobile Money number that paid, as Paystack recorded it. We will confirm when it lands.',
       })
     } catch (caught) {
+      if (caught instanceof ApiError && /network/i.test(caught.message) && row.method === 'transfer') {
+        // No Paystack payment to read the paying number from: paid by hand, so the network is needed.
+        setSending(row)
+        return
+      }
       pushToast({
         tone: 'error',
         title: caught instanceof ApiError ? caught.message : 'We could not approve that refund.',
@@ -128,8 +133,9 @@ export default function Refunds() {
    */
   const bulkApprove = async () => {
     const candidates = (rows ?? []).filter((r) => selected.has(r.id))
-    const skipped = candidates.filter((r) => r.method === 'transfer' && !r.momoNetwork)
-    const actionable = candidates.filter((r) => !(r.method === 'transfer' && !r.momoNetwork))
+    // The paying number and network come from Paystack, so nothing needs choosing first.
+    const skipped: RefundRequest[] = []
+    const actionable = candidates
     if (actionable.length === 0) {
       if (skipped.length > 0) {
         pushToast({
@@ -325,7 +331,9 @@ export default function Refunds() {
                           {row.method === 'wallet'
                             ? 'to wallet'
                             : row.method === 'transfer'
-                              ? `to ${row.momoNetwork ?? 'Mobile Money'}`
+                              ? row.payToPhone
+                                ? `to ${prettyPhone(row.payToPhone)}${row.momoNetwork ? ` (${row.momoNetwork})` : ''}`
+                                : 'to the number that paid'
                               : 'claim link'}
                         </Badge>
                         <span className="text-xs text-slate-500 dark:text-slate-400">{dateTime(row.createdAt)}</span>
@@ -359,11 +367,7 @@ export default function Refunds() {
                             <Button
                               size="sm"
                               loading={busyId === row.id}
-                              onClick={() =>
-                                row.method === 'transfer'
-                                  ? setSending(row)
-                                  : void approve(row)
-                              }
+                              onClick={() => void approve(row)}
                             >
                               Refund
                             </Button>
@@ -1321,10 +1325,15 @@ function SendRefundModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Send ${cedis(request.amount)} back`}>
+    <Modal open onClose={onClose} title={`Send ${cedis(request.amount)} back by hand`}>
       <div className="space-y-4">
+        <Callout tone="warning" icon={<AlertIcon className="size-4" />}>
+          There is no Paystack payment on this order to read the paying number from, so this one is
+          sent by hand. Check the number with the customer first: it is the receipt number, not
+          always the one that paid.
+        </Callout>
         <div className="rounded-xl border-2 border-brand-200 dark:border-brand-800 bg-brand-50 dark:bg-brand-900/40 p-4 text-center">
-          <p className="text-sm text-brand-900 dark:text-brand-200">Sending to</p>
+          <p className="text-sm text-brand-900 dark:text-brand-200">Receipt number</p>
           <p className="tabular mt-1 text-2xl font-bold tracking-wide text-brand-900 dark:text-brand-200">
             {prettyPhone(request.buyerPhone)}
           </p>

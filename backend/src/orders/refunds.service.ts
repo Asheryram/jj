@@ -189,6 +189,8 @@ export class RefundsService {
         productName: row.productName,
         buyerName: row.buyerName,
         buyerPhone: row.buyerPhone,
+        /** Where the refund was sent: the number that paid, once known. */
+        payToPhone: row.payToPhone,
         amount: row.amount,
         method: row.method,
         reason: row.reason,
@@ -320,7 +322,7 @@ export class RefundsService {
      * customers away for it, so an unknown case falls to whoever has the
      * order in front of them.
      */
-    if (request.method === 'transfer' && !momoNetwork && !request.momoNetwork) {
+    if (request.method === 'transfer' && !momoNetwork && !request.momoNetwork && !(await this.paidThroughPaystack(request.orderId))) {
       throw new ValidationError(
         'Choose which Mobile Money network to send this back on.',
       )
@@ -589,8 +591,52 @@ export class RefundsService {
     })
   }
 
+  /** The order's Paystack payment reference, when it was paid through Paystack. */
+  private async paidThroughPaystack(orderId: string): Promise<string | null> {
+    const payment = await this.prisma.payment.findUnique({ where: { orderId }, select: { reference: true, status: true } })
+    return payment?.status === 'paid' ? payment.reference : null
+  }
+
+  /**
+   * The Mobile Money number and network that paid for this order, read
+   * fresh from Paystack's own record of the payment.
+   */
+  private async payingNumber(
+    orderId: string,
+  ): Promise<
+    | { kind: 'found'; phone: string; network: Network | null }
+    | { kind: 'none'; reason: string }
+    | { kind: 'unreachable'; reason: string }
+  > {
+    const reference = await this.paidThroughPaystack(orderId)
+    if (!reference) {
+      return { kind: 'none', reason: 'There is no Paystack payment on this order, so there is no paying number to send it to.' }
+    }
+    const result = await this.paystack.verify(reference)
+    if (result.kind === 'unavailable') {
+      return { kind: 'unreachable', reason: `We could not ask Paystack who paid: ${result.reason} Approve it again in a moment.` }
+    }
+    if (result.kind === 'not_found' || result.status !== 'success') {
+      return { kind: 'none', reason: 'Paystack has no successful payment for this order, so there is no paying number to send it to.' }
+    }
+    if (!result.payerNumber) {
+      return {
+        kind: 'none',
+        reason:
+          result.channel === 'card'
+            ? 'This was paid by card, so it cannot be sent back to a Mobile Money number automatically.'
+            : 'Paystack did not say which Mobile Money number paid.',
+      }
+    }
+    return { kind: 'found', phone: result.payerNumber, network: result.network }
+  }
+
   /**
    * Pay a refund back to the number that paid.
+   *
+   * That is the Mobile Money number Paystack charged, read from Paystack's
+   * own record of the payment, not the order's phone number: that one is
+   * only where the receipt went, and is often the bundle recipient's.
    *
    * The mirror of an agent payout, and deliberately the same shape: one
    * recipient per number, an idempotent reference so a retry cannot pay twice,
@@ -647,26 +693,50 @@ export class RefundsService {
       return
     }
 
-    const networkCode = momoCodeFor(row.momoNetwork)
-    if (!networkCode) {
-      await this.holdRefund(refundId, 'No Mobile Money network was chosen for this refund.')
+    const payer = await this.payingNumber(row.orderId)
+    if (payer.kind === 'unreachable') {
+      await this.holdRefund(refundId, payer.reason)
+      return
+    }
+    if (payer.kind === 'none') {
+      await this.prisma.refundRequest.update({
+        where: { id: refundId },
+        data: {
+          transferStatus: 'manual',
+          transferNote: `${payer.reason} Send it by hand, then confirm it with "Paid another way".`,
+        },
+      })
+      this.log.warn(`refund ${refundId} left for manual sending: ${payer.reason}`)
       return
     }
 
-    let recipientCode = row.recipientCode
-    if (!recipientCode) {
-      const created = await this.paystack.createRecipient({
-        name: row.buyerName,
-        phone: row.buyerPhone,
-        networkCode,
-      })
-      if (!created.ok) {
-        await this.holdRefund(refundId, `Paystack would not accept the number: ${created.reason}`)
-        return
-      }
-      recipientCode = created.recipientCode
-      await this.prisma.refundRequest.update({ where: { id: refundId }, data: { recipientCode } })
+    // The network Paystack charged on, over anything chosen by hand.
+    const network = payer.network ?? row.momoNetwork
+    const networkCode = momoCodeFor(network)
+    if (!networkCode) {
+      await this.holdRefund(refundId, 'Paystack did not say which network paid, choose it and approve again.')
+      return
     }
+
+    /**
+     * A fresh recipient every time, never a saved one: an older attempt may
+     * have saved one for the receipt number. Paystack hands back the same
+     * recipient for the same number anyway.
+     */
+    const created = await this.paystack.createRecipient({
+      name: row.buyerName,
+      phone: payer.phone,
+      networkCode,
+    })
+    if (!created.ok) {
+      await this.holdRefund(refundId, `Paystack would not accept the paying number ${payer.phone}: ${created.reason}`)
+      return
+    }
+    const recipientCode = created.recipientCode
+    await this.prisma.refundRequest.update({
+      where: { id: refundId },
+      data: { recipientCode, payToPhone: payer.phone, momoNetwork: network },
+    })
 
     // One reference per approval, not per refund: derived from this
     // approval's own `decidedAt`, so any retry of the *same* approval reuses
@@ -706,7 +776,7 @@ export class RefundsService {
         data: { transferCode: result.transferCode, transferStatus: result.status },
       })
       this.log.log(
-        `refund ${row.orderRef}: GHS ${(row.amount / 100).toFixed(2)} sent to ${row.buyerPhone}`,
+        `refund ${row.orderRef}: GHS ${(row.amount / 100).toFixed(2)} sent to ${payer.phone}, the number that paid`,
       )
       return
     }

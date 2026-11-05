@@ -150,6 +150,7 @@ export class PaystackClient {
       // know, since they are the one who charged it. Null for a card payment,
       // or a bank name this platform does not recognise; see `momo.ts`.
       network: networkFromPaystackBank(body.data.authorization?.bank),
+      payerNumber: localNumber(body.data.authorization?.mobile_money_number),
       fee: body.data.fees ?? null,
       providerId: body.data.id != null ? String(body.data.id) : null,
       raw: `HTTP ${response.status} ${raw}`.slice(0, 2000),
@@ -506,8 +507,11 @@ interface PaystackTransaction {
   channel?: string | null
   /** What Paystack keeps, in pesewas. Their figure, not our arithmetic. */
   fees?: number | null
-  /** Present on a mobile money charge; `bank` carries the network. */
-  authorization?: { bank?: string | null } | null
+  /**
+   * Present on a mobile money charge: `bank` carries the network and
+   * `mobile_money_number` the full number that paid.
+   */
+  authorization?: { bank?: string | null; mobile_money_number?: string | null } | null
 }
 
 export type TransferOutcome =
@@ -537,6 +541,13 @@ export function transferEventFor(status: string): 'transfer.success' | 'transfer
   return ['failed', 'abandoned', 'blocked', 'rejected'].includes(status) ? 'transfer.failed' : null
 }
 
+/** A Ghana number in local form, 0XXXXXXXXX, or null if it is not one. */
+function localNumber(raw: string | null | undefined): string | null {
+  const digits = (raw ?? '').replace(/\D/g, '')
+  const local = digits.startsWith('233') && digits.length === 12 ? `0${digits.slice(3)}` : digits
+  return /^0\d{9}$/.test(local) ? local : null
+}
+
 /** One reference per approval of a refund, see `RefundsService.sendRefund`. */
 export function refundTransferReference(row: { id: string; decidedAt: Date | null; createdAt: Date }): string {
   return `RFD-${row.id}_${(row.decidedAt ?? row.createdAt).getTime().toString(36)}`
@@ -552,6 +563,12 @@ export type VerifyOutcome =
       channel: string | null
       /** The Mobile Money network that carried this, when it can be told. */
       network: Network | null
+      /**
+       * The Mobile Money number that actually paid, as Paystack charged it,
+       * in local form (0XXXXXXXXX). Null for a card, or when Paystack did
+       * not say. Not the order's phone number, which is only for the receipt.
+       */
+      payerNumber: string | null
       /** Pesewas Paystack kept. Null when they did not say. */
       fee: number | null
       providerId: string | null

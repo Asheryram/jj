@@ -895,6 +895,8 @@ export interface AnnouncementHistoryRow {
 
 export interface RefundRequest {
   id: string
+  /** Where the refund was sent: the Mobile Money number that paid, read from Paystack. */
+  payToPhone?: string | null
   /** For the "Reorder" action, see `api.reorderOrder`. */
   orderId: string
   /** Whether the order this refund is for still stands as failed. */

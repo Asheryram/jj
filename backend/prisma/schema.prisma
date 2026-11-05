@@ -1183,6 +1183,12 @@ model RefundRequest {
   /// When Paystack confirmed the money reached them.
   paidAt         DateTime? @map("paid_at")
 
+  /// The number the refund was sent to: the Mobile Money number that paid,
+  /// read from Paystack's own record of the payment at the moment of
+  /// sending. Never `buyerPhone`, which is only the receipt number and is
+  /// often someone else's.
+  payToPhone String? @map("pay_to_phone")
+
   /// Set when an admin paid this back by hand (`RefundsService.settleManually`)
   /// rather than Paystack ever confirming a transfer. `transferCode` staying
   /// null doesn't say this, a transfer whose outcome came back `unknown` also
