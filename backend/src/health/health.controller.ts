@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs'
 import { Controller, Get } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { PrismaService } from '../prisma/prisma.service'
@@ -23,6 +24,28 @@ export class KeepAliveController {
  * threshold.
  */
 const DATABASE_CHECK_CACHE_MS = 10 * 60_000
+
+/**
+ * When this server's code was built: the compiled file's own time, written by
+ * `npm run build` inside the image. The image has no git history, so this,
+ * not a commit id, is what says which push is running. A commit id is added
+ * when the host provides one.
+ */
+const BUILT_AT = (() => {
+  try {
+    return statSync(__filename).mtime.toISOString()
+  } catch {
+    return null
+  }
+})()
+const STARTED_AT = new Date().toISOString()
+const COMMIT =
+  process.env.GIT_COMMIT ??
+  process.env.SOURCE_COMMIT ??
+  process.env.RENDER_GIT_COMMIT ??
+  process.env.RAILWAY_GIT_COMMIT_SHA ??
+  process.env.GITHUB_SHA ??
+  null
 
 @ApiTags('health')
 @Controller('health')
@@ -73,6 +96,31 @@ export class HealthController {
         paystack: process.env.PAYSTACK_SECRET_KEY ? 'live' : 'simulated',
       },
       uptimeSeconds: Math.round(process.uptime()),
+    }
+  }
+
+  /**
+   * Which version of the server is live, and the last database update it
+   * applied, so anyone can tell whether a push has landed. Public, like the
+   * rest of /health: nothing here is secret.
+   */
+  @Get('version')
+  async version() {
+    let latestMigration: { name: string; appliedAt: string } | null = null
+    try {
+      const rows = await this.prisma.$queryRaw<{ migration_name: string; finished_at: Date }[]>`
+        SELECT migration_name, finished_at FROM _prisma_migrations
+        WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL
+        ORDER BY migration_name DESC LIMIT 1`
+      if (rows[0]) latestMigration = { name: rows[0].migration_name, appliedAt: rows[0].finished_at.toISOString() }
+    } catch {
+      latestMigration = null
+    }
+    return {
+      builtAt: BUILT_AT,
+      startedAt: STARTED_AT,
+      commit: COMMIT ? COMMIT.slice(0, 7) : null,
+      latestMigration,
     }
   }
 

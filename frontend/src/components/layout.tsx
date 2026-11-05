@@ -776,6 +776,7 @@ export function AppShell() {
             {session.role === 'agent' && (
               <p className="mt-2 font-mono text-xs text-brand-700 dark:text-brand-300">{session.referralCode}</p>
             )}
+            {isAdmin(session.role) && <VersionInfo />}
           </div>
         </aside>
 
@@ -845,11 +846,66 @@ export function AppShell() {
             </div>
           ))}
         </nav>
+        {isAdmin(session.role) && (
+          <div className="mt-4 border-t border-slate-200 pt-3 dark:border-slate-700">
+            <VersionInfo />
+          </div>
+        )}
       </Modal>
 
       <ToastHost />
       <UndoBar />
     </div>
+  )
+}
+
+/** "5 Nov, 15:21" in the viewer's own time. */
+function shortWhen(iso: string | null | undefined): string {
+  if (!iso) return 'unknown'
+  return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+}
+
+/**
+ * Which version of the site and of the server is live, and the last database
+ * update, so an admin can see a push land. Built times, not commit ids: the
+ * images are built without git history.
+ */
+function VersionInfo() {
+  const [server, setServer] = useState<Awaited<ReturnType<typeof api.serverVersion>> | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    api.serverVersion().then(setServer).catch(() => setFailed(true))
+  }, [])
+
+  const appCommit = String(import.meta.env.VITE_BUILD_COMMIT ?? '')
+  const migration = server?.latestMigration
+  // "20261105120000_refund_pay_to_phone" → "refund pay to phone"
+  const migrationLabel = migration ? migration.name.replace(/^\d+_/, '').replace(/_/g, ' ') : null
+
+  return (
+    <dl className="mt-3 space-y-1 border-t border-slate-100 pt-2.5 text-[11px] leading-snug text-slate-500 dark:border-slate-800 dark:text-slate-400">
+      <div>
+        <dt className="inline font-semibold text-slate-600 dark:text-slate-300">Site </dt>
+        <dd className="inline tabular">
+          built {shortWhen(String(import.meta.env.VITE_BUILT_AT ?? ''))}
+          {appCommit ? ` · ${appCommit}` : ''}
+        </dd>
+      </div>
+      <div>
+        <dt className="inline font-semibold text-slate-600 dark:text-slate-300">Server </dt>
+        <dd className="inline tabular">
+          {failed ? 'not answering' : server ? `built ${shortWhen(server.builtAt)}${server.commit ? ` · ${server.commit}` : ''}` : '…'}
+        </dd>
+      </div>
+      {migrationLabel && (
+        <div>
+          <dt className="inline font-semibold text-slate-600 dark:text-slate-300">Database </dt>
+          <dd className="inline">
+            {migrationLabel}, {shortWhen(migration?.appliedAt)}
+          </dd>
+        </div>
+      )}
+    </dl>
   )
 }
 

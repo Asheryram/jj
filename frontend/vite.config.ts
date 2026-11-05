@@ -47,9 +47,21 @@ const apiProxy = {
   },
 }
 
+/**
+ * Which build this is, shown to admins so a push can be seen landing. The
+ * image is built without git history, so the build time is the reliable
+ * part; a commit id is added when the host provides one.
+ */
+const buildCommit =
+  process.env.GIT_COMMIT ?? process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.SOURCE_COMMIT ?? process.env.GITHUB_SHA ?? ''
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: {
+    'import.meta.env.VITE_BUILT_AT': JSON.stringify(new Date().toISOString()),
+    'import.meta.env.VITE_BUILD_COMMIT': JSON.stringify(buildCommit.slice(0, 7)),
+  },
   server: {
     // Bind on all interfaces so a tunnel (or a phone on the same wifi) can reach it.
     host: true,

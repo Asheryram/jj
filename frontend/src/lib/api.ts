@@ -1360,6 +1360,15 @@ export const api = {
       providers: { datahub: string; gmpl: string; paystack: string }
     }>('/health', { auth: false }),
 
+  /** Which server build is live and the last database update applied, see `HealthController.version`. */
+  serverVersion: () =>
+    request<{
+      builtAt: string | null
+      startedAt: string
+      commit: string | null
+      latestMigration: { name: string; appliedAt: string } | null
+    }>('/health/version', { auth: false }),
+
   // Auth
   login: (email: string, password: string) =>
     request<AuthResult>('/auth/login', { method: 'POST', body: { email, password }, auth: false }),
