@@ -471,6 +471,15 @@ export interface StuckTransfer {
 }
 
 /** Where the provider float sits against the thresholds. */
+export interface MyOrdersPage {
+  rows: Order[]
+  total: number
+  page: number
+  pageSize: number
+  /** Across everything this user can see, not just this page or search. */
+  summary: { all: number; completed: number; processing: number; failed: number; unpaid: number; earned: number }
+}
+
 export interface BalanceBooksPlan {
   paystack: { expected: number; inTransit: number; actual: number; capitalRepaid: number; adjustment: number }
   floats: { provider: 'datahub-gh' | 'gmpl'; label: string; expected: number; actual: number; capitalRepaid: number; adjustment: number }[]
@@ -1470,6 +1479,13 @@ export const api = {
     }),
 
   orders: () => request<Order[]>('/orders'),
+  /** The signed-in user's own orders, one page at a time. */
+  myOrders: (params: { view?: string; q?: string; page: number; pageSize: number }) => {
+    const search = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) })
+    if (params.view) search.set('view', params.view)
+    if (params.q) search.set('q', params.q)
+    return request<MyOrdersPage>(`/orders/mine?${search.toString()}`)
+  },
 
   order: (id: string) => request<Order>(`/orders/${id}`),
 

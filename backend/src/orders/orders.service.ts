@@ -648,6 +648,86 @@ export class OrdersService {
   }
 
   /**
+   * The signed-in user's own orders, one page at a time (`GET /orders/mine`):
+   * an agent's sales, or a customer's purchases.
+   *
+   * `list()` stops at its limit and leaves the rest to the browser, so an
+   * agent past 100 orders silently lost the older ones, and with them the
+   * counts and the earned total built from what was loaded. Here the filter,
+   * the search and the totals all run in the database.
+   *
+   * "Failed" is split in two, because a sale the customer never paid for is
+   * not a failed delivery. Same test as `paymentCollectedFlag`: `settle` only
+   * queues a refund when money was actually taken.
+   */
+  async mine(
+    user: AuthUser,
+    filter: { view?: string; q?: string; page?: number; pageSize?: number },
+  ) {
+    const page = Math.max(1, Math.floor(filter.page || 1))
+    const pageSize = Math.min(Math.max(1, Math.floor(filter.pageSize || 25)), 100)
+
+    const scope: Prisma.OrderWhereInput =
+      user.role === 'agent'
+        ? { AND: [await this.scopeFor(user), { split: { path: ['shares'], array_contains: [{ userId: user.id }] } }] }
+        : { buyerUserId: user.id }
+
+    const views: Record<string, Prisma.OrderWhereInput> = {
+      completed: { status: 'completed' },
+      processing: { status: { in: ['pending', 'processing', 'awaiting_approval'] } },
+      failed: { status: 'failed', refundRequest: { isNot: null } },
+      unpaid: { OR: [{ status: 'awaiting_payment' }, { status: 'failed', refundRequest: { is: null } }] },
+    }
+    const view = filter.view ? views[filter.view] : undefined
+
+    const q = filter.q?.trim()
+    const search: Prisma.OrderWhereInput | undefined = q
+      ? {
+          OR: [
+            { recipient: { contains: q } },
+            { reference: { contains: q, mode: 'insensitive' } },
+            { productName: { contains: q, mode: 'insensitive' } },
+          ],
+        }
+      : undefined
+
+    const where: Prisma.OrderWhereInput = { AND: [scope, ...(view ? [view] : []), ...(search ? [search] : [])] }
+    const count = (extra: Prisma.OrderWhereInput) => this.prisma.order.count({ where: { AND: [scope, extra] } })
+
+    const [total, rows, all, completed, processing, failed, unpaid, earned] = await Promise.all([
+      this.prisma.order.count({ where }),
+      this.prisma.order.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { refundRequest: { select: { id: true } } },
+      }),
+      count({}),
+      count(views.completed),
+      count(views.processing),
+      count(views.failed),
+      count(views.unpaid),
+      this.prisma.earning.aggregate({
+        where: { userId: user.id, type: { in: ['sale', 'downline', 'reversal'] } },
+        _sum: { amount: true },
+      }),
+    ])
+
+    return {
+      rows: rows.map((row) => ({
+        ...toOrder(row),
+        paymentCollected: row.status === 'failed' ? row.refundRequest !== null : undefined,
+      })),
+      total,
+      page,
+      pageSize,
+      /** Across everything this user can see, not just this page or search. */
+      summary: { all, completed, processing, failed, unpaid, earned: earned._sum.amount ?? 0 },
+    }
+  }
+
+  /**
    * Admin's paginated, filterable order list (`GET /admin/orders`).
    *
    * `list()` above is capped at 500 rows and filtered client-side, fine for

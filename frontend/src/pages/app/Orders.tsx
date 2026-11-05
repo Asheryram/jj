@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { useShopPath } from '../../lib/shopPath'
 import { useSearchParamState } from '../../lib/useSearchParamState'
 import { cedis, dateTime } from '../../lib/format'
-import type { Order, OrderStatus } from '../../data/types'
+import { api, ApiError, type MyOrdersPage } from '../../lib/api'
+import type { Order } from '../../data/types'
 import {
   Badge,
   Button,
@@ -16,6 +17,7 @@ import {
   NetworkChip,
   PageHead,
   Segmented,
+  Spinner,
   StatusBadge,
   TableWrap,
   Td,
@@ -24,56 +26,71 @@ import {
 } from '../../components/ui'
 import { CertificateIcon, ReceiptIcon, SearchIcon } from '../../components/icons'
 
-type Filter = 'all' | OrderStatus
+type Filter = 'all' | 'completed' | 'processing' | 'failed' | 'unpaid'
 
-/** FR-6.1, the signed-in user's own orders. */
+const PAGE_SIZE = 25
+
+/**
+ * The customer never paid: a checkout still open, or one that failed before
+ * any money was taken. Not a failed delivery, nothing is owed either way.
+ */
+function isUnpaid(order: Order): boolean {
+  return order.status === 'awaiting_payment' || (order.status === 'failed' && order.paymentCollected === false)
+}
+
+/** `StatusBadge`, except an order that failed unpaid says so instead of "Failed". */
+function OrderStatus({ order }: { order: Order }) {
+  if (order.status === 'failed' && order.paymentCollected === false) return <Badge tone="neutral">Not paid</Badge>
+  return <StatusBadge status={order.status} />
+}
+
+/** FR-6.1, the signed-in user's own orders, a page at a time. */
 export default function Orders() {
   const { orders, session, myShareOf } = useStore()
   const shopPath = useShopPath()
   const [filter, setFilter] = useSearchParamState('filter', 'all') as [Filter, (v: Filter) => void]
   const [query, setQuery] = useSearchParamState('q')
   const [selected, setSelected] = useState<Order | null>(null)
+  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState(query.trim())
+  const [data, setData] = useState<MyOrdersPage | null>(null)
+  const [error, setError] = useState('')
+  const [retry, setRetry] = useState(0)
 
   const isAgent = session?.role === 'agent'
 
-  // NFR-2.5, an agent sees orders they earned from, a customer sees orders
-  // they bought. Nobody sees somebody else's book.
-  const mine = useMemo(() => {
-    if (!session) return []
-    if (isAgent) {
-      return orders.filter((order) =>
-        order.split.shares.some((share) => share.userId === session.id),
-      )
+  // Wait for a pause in typing, one request per search, not one per letter.
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(query.trim()), 300)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  useEffect(() => setPage(1), [filter, search])
+
+  // The store tracks orders settling in the background, so a status changing
+  // there is the cue to read this page again.
+  const statuses = useMemo(() => orders.map((o) => `${o.id}:${o.status}`).join(), [orders])
+
+  useEffect(() => {
+    let live = true
+    api
+      .myOrders({ view: filter === 'all' ? undefined : filter, q: search || undefined, page, pageSize: PAGE_SIZE })
+      .then((result) => {
+        if (!live) return
+        setData(result)
+        setError('')
+      })
+      .catch((caught) => {
+        if (live) setError(caught instanceof ApiError ? caught.message : 'We could not load your orders.')
+      })
+    return () => {
+      live = false
     }
-    return orders.filter((order) => order.buyer === session.name)
-  }, [isAgent, orders, session])
+  }, [filter, search, page, statuses, retry])
 
-  const visible = useMemo(() => {
-    const needle = query.trim().toLowerCase()
-    return mine.filter((order) => {
-      if (filter !== 'all' && order.status !== filter) return false
-      if (!needle) return true
-      return (
-        order.recipient.includes(needle) ||
-        order.reference.toLowerCase().includes(needle) ||
-        order.productName.toLowerCase().includes(needle)
-      )
-    })
-  }, [filter, mine, query])
-
-  const counts = useMemo(
-    () => ({
-      all: mine.length,
-      completed: mine.filter((o) => o.status === 'completed').length,
-      processing: mine.filter((o) => o.status === 'processing' || o.status === 'pending').length,
-      failed: mine.filter((o) => o.status === 'failed').length,
-    }),
-    [mine],
-  )
-
-  const earned = mine
-    .filter((o) => o.status === 'completed')
-    .reduce((sum, o) => sum + (myShareOf(o)?.margin ?? 0), 0)
+  const visible = data?.rows ?? []
+  const summary = data?.summary
+  const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
 
   return (
     <div>
@@ -82,8 +99,12 @@ export default function Orders() {
         title={isAgent ? 'Sales' : 'My orders'}
         subtitle={
           isAgent
-            ? `${counts.all} orders in your chain · ${cedis(earned)} earned · ${counts.failed} failed and reversed`
-            : `${counts.all} orders · ${counts.completed} completed`
+            ? summary
+              ? `${summary.all} orders · ${cedis(summary.earned)} earned · ${summary.failed} failed · ${summary.unpaid} not paid`
+              : undefined
+            : summary
+              ? `${summary.all} orders · ${summary.completed} completed`
+              : undefined
         }
       />
       </div>
@@ -91,10 +112,11 @@ export default function Orders() {
       <div data-tour="agent-sales-filters" className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Segmented<Filter>
           options={[
-            { value: 'all', label: `All ${counts.all}` },
-            { value: 'completed', label: 'Completed' },
-            { value: 'processing', label: `In progress ${counts.processing}` },
-            { value: 'failed', label: 'Failed' },
+            { value: 'all', label: `All ${summary?.all ?? ''}` },
+            { value: 'completed', label: `Completed ${summary?.completed ?? ''}` },
+            { value: 'processing', label: `In progress ${summary?.processing ?? ''}` },
+            { value: 'failed', label: `Failed ${summary?.failed ?? ''}` },
+            { value: 'unpaid', label: `Not paid ${summary?.unpaid ?? ''}` },
           ]}
           value={filter}
           onChange={setFilter}
@@ -112,8 +134,20 @@ export default function Orders() {
       </div>
 
       <div data-tour="agent-sales-list">
+      {error && (
+        <Callout tone="danger" className="mb-3">
+          {error}{' '}
+          <button type="button" className="font-semibold underline" onClick={() => setRetry((n) => n + 1)}>
+            Try again
+          </button>
+        </Callout>
+      )}
       <Card>
-        {visible.length === 0 ? (
+        {!data && !error ? (
+          <div className="py-10 text-center">
+            <Spinner className="mx-auto size-6 text-brand-600 dark:text-brand-300" />
+          </div>
+        ) : visible.length === 0 ? (
           <EmptyState
             icon={<ReceiptIcon className="size-6" />}
             title={query ? 'Nothing matched that search' : 'No orders in this view'}
@@ -166,7 +200,7 @@ export default function Orders() {
                     </Td>
                     <Td className="tabular">{order.recipient}</Td>
                     <Td>
-                      <StatusBadge status={order.status} />
+                      <OrderStatus order={order} />
                       {order.refunded && (
                         <Badge tone="info" className="ml-1.5">
                           Refunded
@@ -174,7 +208,11 @@ export default function Orders() {
                       )}
                     </Td>
                     <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
-                      {cedis(order.salePrice)}
+                      {isUnpaid(order) ? (
+                        <span className="font-normal text-slate-500 dark:text-slate-400">Nothing paid</span>
+                      ) : (
+                        cedis(order.salePrice)
+                      )}
                     </Td>
                     {isAgent && (
                       <Td align="right">
@@ -200,6 +238,26 @@ export default function Orders() {
           </TableWrap>
         )}
       </Card>
+      {data && totalPages > 1 && (
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Page {data.page} of {totalPages} · {data.total.toLocaleString()} order{data.total === 1 ? '' : 's'}
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              Previous
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
       </div>
 
       <OrderDetail order={selected} onClose={() => setSelected(null)} isAgent={isAgent} />
@@ -228,18 +286,30 @@ function OrderDetail({
               <p className="text-lg font-bold text-slate-900 dark:text-slate-50">{order.productName}</p>
               <div className="mt-1.5 flex items-center gap-2">
                 <NetworkChip network={order.network} />
-                <StatusBadge status={order.status} />
+                <OrderStatus order={order} />
               </div>
             </div>
             <p className="tabular text-xl font-bold text-brand-800 dark:text-brand-300">{cedis(order.salePrice)}</p>
           </div>
 
-          {order.status === 'failed' && (
-            <Callout tone="info" title="Failed, buyer is refunded">
-              This order failed at the provider, so the {cedis(order.salePrice)} the buyer paid is
-              being refunded to them. You earn nothing on it, any earnings were reversed.
+          {order.status === 'awaiting_payment' && (
+            <Callout tone="info" title="Waiting for payment">
+              The {cedis(order.salePrice)} has not been paid yet, so nothing has been sent.
             </Callout>
           )}
+
+          {order.status === 'failed' &&
+            (isUnpaid(order) ? (
+              <Callout tone="info" title="Not paid">
+                The payment never went through, so no money was taken, nothing was sent and there is
+                nothing to refund.{isAgent ? ' You earn nothing on it.' : ''}
+              </Callout>
+            ) : (
+              <Callout tone="info" title="Failed, buyer is refunded">
+                This order failed at the provider, so the {cedis(order.salePrice)} the buyer paid is
+                being refunded to them. You earn nothing on it, any earnings were reversed.
+              </Callout>
+            ))}
 
           {order.voucher && (
             <div className="space-y-3">
@@ -258,13 +328,16 @@ function OrderDetail({
           <dl className="space-y-2.5 border-t border-slate-100 dark:border-slate-800 pt-4 text-sm">
             <Row label="Recipient" value={order.recipient} />
             <Row label="Buyer" value={order.buyer} />
-            <Row label="Paid with" value={order.paidWith === 'wallet' ? 'Wallet' : 'Mobile Money'} />
+            <Row
+              label={isUnpaid(order) ? 'Tried to pay with' : 'Paid with'}
+              value={order.paidWith === 'wallet' ? 'Wallet' : 'Mobile Money'}
+            />
             <Row label="Reference" value={order.reference} />
             <Row label="Placed" value={dateTime(order.createdAt)} />
           </dl>
 
           {/* FR-5.8, an agent can see exactly where the money went. */}
-          {isAgent && (
+          {isAgent && !isUnpaid(order) && (
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5">
               <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
                 How this {cedis(order.salePrice)} split

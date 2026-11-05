@@ -83,6 +83,20 @@ export class OrdersController {
     return this.orders.list(user, limit ? Number(limit) : undefined)
   }
 
+  /** The caller's own orders, paginated, see `OrdersService.mine`. */
+  @Get('mine')
+  @Roles()
+  @ApiBearerAuth()
+  mine(
+    @CurrentUser() user: AuthUser,
+    @Query('view') view?: string,
+    @Query('q') q?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.orders.mine(user, { view, q, page: Number(page), pageSize: Number(pageSize) })
+  }
+
   /** Money held for a failed Mobile Money order (NFR-3.3). */
   @Get('credits')
   @UseGuards(LoginThrottleGuard)

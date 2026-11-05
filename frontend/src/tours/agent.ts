@@ -244,12 +244,12 @@ export const agentTours: Tour[] = [
       {
         target: 'agent-sales-summary',
         title: 'Your sales in one line',
-        body: 'How many orders you have, what you earned on the completed ones, and how many failed and were reversed. You only ever see your own sales.',
+        body: 'How many orders you have, what you earned on the completed ones, and how many failed or were never paid for. You only ever see your own sales.',
       },
       {
         target: 'agent-sales-filters',
         title: 'Filter and search',
-        body: 'Use **All**, **Completed**, **In progress** and **Failed** to narrow the list, or search by phone number, reference or product.',
+        body: 'Use **All**, **Completed**, **In progress**, **Failed** and **Not paid** to narrow the list, or search by phone number, reference or product. **Failed** means the customer paid but delivery failed. **Not paid** means the payment never went through.',
       },
       {
         target: 'agent-sales-list',
