@@ -96,6 +96,8 @@ export default function Buy() {
    */
   const [checking, setChecking] = useState(false)
   const [needsSetup, setNeedsSetup] = useState(false)
+  /** The provider could not be asked, and the number is new to us: try again shortly. */
+  const [needsRetry, setNeedsRetry] = useState(false)
 
   const placed = useMemo(
     () => (orderId ? orders.find((o) => o.id === orderId) : undefined),
@@ -371,9 +373,14 @@ export default function Buy() {
               // refuse a sale we can hold and complete later.
               setChecking(true)
               setNeedsSetup(false)
+              setNeedsRetry(false)
               void api
                 .verifyRecipient(product.id, check.phone)
-                .then((result) => setNeedsSetup(result.checked && !result.verified))
+                .then((result) => {
+                  const refused = result.checked && !result.verified
+                  setNeedsSetup(refused && !result.retry)
+                  setNeedsRetry(refused && Boolean(result.retry))
+                })
                 .catch(() => undefined)
                 .finally(() => {
                   setChecking(false)
@@ -420,6 +427,12 @@ export default function Buy() {
               out from a receipt, but it is also not a reason to stop them, so
               it sits here as something to know, with the refund promise
               attached. */}
+          {needsRetry && (
+            <Callout tone="warning" className="mt-3" title="We could not check this number just now" icon={<ClockIcon className="size-4" />}>
+              Our delivery partner did not answer when we asked about {prettyPhone(check.phone)}. Nothing has been
+              charged. Go back and try again in a minute.
+            </Callout>
+          )}
           {needsSetup && (
             <Callout
               tone="warning"
@@ -564,7 +577,7 @@ export default function Buy() {
                  customer to a Mobile Money prompt and then a refusal, the worst
                  possible order of events. Better to stop here, where nothing has
                  been asked of them yet. */
-              disabled={placing || needsSetup || (!ownNumber && !receiptCheck?.ok)}
+              disabled={placing || needsSetup || needsRetry || (!ownNumber && !receiptCheck?.ok)}
               onClick={() => void confirm()}
             >
               Confirm and pay {cedis(total)}

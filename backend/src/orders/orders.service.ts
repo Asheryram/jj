@@ -32,6 +32,22 @@ import { isAdminRole } from '../common/auth'
  */
 const VERIFIABLE_NETWORK_KEYS = ['YELLO', 'mtn_xpress']
 
+/**
+ * The provider could not be asked and the number is new to us. Refused before
+ * any money moves, with `retry` so the checkout can say "try again", not "not
+ * approved", which would be untrue.
+ */
+function unconfirmedRecipient(recipient: string) {
+  return {
+    checked: true,
+    verified: false,
+    retry: true,
+    message:
+      `We could not confirm ${prettyGhanaPhone(recipient)} with our delivery partner just now. ` +
+      'Nothing has been charged. Please try again in a minute.',
+  }
+}
+
 @Injectable()
 export class OrdersService {
   private readonly log = new Logger(OrdersService.name)
@@ -1158,6 +1174,11 @@ export class OrdersService {
         return { checked: false, verified: true, message: '' }
       }
       const entry = result.kind === 'ok' ? result.results[0] : null
+      // No usable answer: same rule as DataHub's, a new number waits for one.
+      if (!entry && !(await this.knownGoodRecipient(recipient, 'gmpl'))) {
+        this.log.warn(`could not precheck ${recipient} with GMPL, new number, asking them to retry`)
+        return unconfirmedRecipient(recipient)
+      }
       if (entry && entry.valid && !entry.known) {
         // Same reasoning as the DataHub refusal below: this is the only
         // point in the flow that sees a refused number, so it is recorded
@@ -1221,10 +1242,28 @@ export class OrdersService {
     }
 
     if (result.kind === 'unknown') {
-      this.log.warn(`could not verify ${recipient}: ${result.reason}, allowing the sale`)
+      if (!(await this.knownGoodRecipient(recipient, 'datahub-gh'))) {
+        this.log.warn(`could not verify ${recipient}: ${result.reason}, new number, asking them to retry`)
+        return unconfirmedRecipient(recipient)
+      }
+      this.log.warn(`could not verify ${recipient}: ${result.reason}, allowing the sale, it has received before`)
     }
 
     return { checked: true, verified: true, message: '' }
+  }
+
+  /**
+   * Whether a number is safe to sell to when the provider cannot be asked:
+   * it has received a bundle before, or the provider has approved it. A new
+   * number is the one most likely to need approval, and selling to it blind
+   * took a customer's money for a bundle that could not be sent (JDC-517761712).
+   */
+  private async knownGoodRecipient(recipient: string, provider: string): Promise<boolean> {
+    const [delivered, approved] = await Promise.all([
+      this.prisma.order.count({ where: { recipient, status: 'completed' } }),
+      this.prisma.beneficiaryRequest.count({ where: { phone: recipient, provider, approvedAt: { not: null } } }),
+    ])
+    return delivered > 0 || approved > 0
   }
 
   /** NFR-3.3, money held for a Mobile Money payer whose order failed. */

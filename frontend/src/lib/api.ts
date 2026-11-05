@@ -1486,7 +1486,7 @@ export const api = {
    * a network their check does not cover.
    */
   verifyRecipient: (productId: string, recipient: string) =>
-    request<{ checked: boolean; verified: boolean; message: string }>('/orders/verify-recipient', {
+    request<{ checked: boolean; verified: boolean; message: string; retry?: boolean }>('/orders/verify-recipient', {
       method: 'POST',
       body: { productId, recipient },
       auth: false,
