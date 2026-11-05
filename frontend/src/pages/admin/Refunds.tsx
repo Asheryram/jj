@@ -317,8 +317,17 @@ export default function Refunds() {
                     <Td label="Customer">
                       <p className="font-medium text-slate-900 dark:text-slate-50">{row.buyerName}</p>
                       <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                        {prettyPhone(row.buyerPhone)}
+                        Receipt {prettyPhone(row.buyerPhone)}
                       </p>
+                      {row.method === 'transfer' &&
+                        (row.payerPhone ? (
+                          <p className="tabular mt-0.5 text-xs font-semibold text-slate-800 dark:text-slate-100">
+                            Paid from {prettyPhone(row.payerPhone)}
+                            {row.payerNetwork ? ` (${row.payerNetwork})` : ''}
+                          </p>
+                        ) : (
+                          <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">Paying number not known</p>
+                        ))}
                     </Td>
                     <Td label="Order">
                       <p className="tabular text-sm text-slate-800 dark:text-slate-100">{row.orderRef}</p>
@@ -331,9 +340,7 @@ export default function Refunds() {
                           {row.method === 'wallet'
                             ? 'to wallet'
                             : row.method === 'transfer'
-                              ? row.payToPhone
-                                ? `to ${prettyPhone(row.payToPhone)}${row.momoNetwork ? ` (${row.momoNetwork})` : ''}`
-                                : 'to the number that paid'
+                              ? 'to the number that paid'
                               : 'claim link'}
                         </Badge>
                         <span className="text-xs text-slate-500 dark:text-slate-400">{dateTime(row.createdAt)}</span>
@@ -1436,7 +1443,7 @@ function SettleManuallyModal({
       pushToast({
         tone: 'success',
         title: `${cedis(request.amount)} marked as sent`,
-        detail: `Recorded against ${prettyPhone(request.payToPhone ?? request.buyerPhone)} on ${network}. It is now owed back to you.`,
+        detail: `Recorded against ${prettyPhone(request.payerPhone ?? request.buyerPhone)} on ${network}. It is now owed back to you.`,
       })
       onClose()
     } catch (caught) {
@@ -1451,12 +1458,12 @@ function SettleManuallyModal({
       <div className="space-y-4">
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
           <p className="font-semibold text-slate-900 dark:text-slate-50">{request.buyerName}</p>
-          {request.payToPhone ? (
+          {request.payerPhone ? (
             <>
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Send it to the number that paid</p>
               <p className="tabular text-lg font-bold text-slate-900 dark:text-slate-50">
-                {prettyPhone(request.payToPhone)}
-                {request.momoNetwork ? ` (${request.momoNetwork})` : ''}
+                {prettyPhone(request.payerPhone)}
+                {request.payerNetwork ? ` (${request.payerNetwork})` : ''}
               </p>
             </>
           ) : (

@@ -548,6 +548,17 @@ function localNumber(raw: string | null | undefined): string | null {
   return /^0\d{9}$/.test(local) ? local : null
 }
 
+/**
+ * The paying Mobile Money number from a stored Paystack reply
+ * (`Payment.providerResponse`), without calling Paystack. Read by pattern,
+ * not parsed: a stored reply is cut at 2,000 characters, which can leave the
+ * JSON unfinished. Null for a card, or when it is not there.
+ */
+export function payerNumberFromReply(raw: string | null | undefined): string | null {
+  const match = /"mobile_money_number"\s*:\s*"([^"]+)"/.exec(raw ?? '')
+  return localNumber(match?.[1])
+}
+
 /** One reference per approval of a refund, see `RefundsService.sendRefund`. */
 export function refundTransferReference(row: { id: string; decidedAt: Date | null; createdAt: Date }): string {
   return `RFD-${row.id}_${(row.decidedAt ?? row.createdAt).getTime().toString(36)}`

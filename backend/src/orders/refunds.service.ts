@@ -3,7 +3,7 @@ import type { Network } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { LedgerService } from '../finance/ledger.service'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
-import { PaystackClient, refundTransferReference } from '../payments/paystack.client'
+import { PaystackClient, payerNumberFromReply, refundTransferReference } from '../payments/paystack.client'
 import { SettingsService } from '../settings/settings.service'
 import { requirePaystackChecked } from '../common/paystack-check'
 import { momoCodeFor } from '../payments/momo'
@@ -74,9 +74,15 @@ export class RefundsService {
      */
     const payments = await this.prisma.payment.findMany({
       where: { orderId: { in: rows.map((row) => row.orderId) } },
-      select: { orderId: true, fee: true },
+      select: { orderId: true, fee: true, providerResponse: true, network: true },
     })
     const feeByOrderId = new Map(payments.filter((p) => p.orderId).map((p) => [p.orderId as string, p.fee]))
+    // Who actually paid, from Paystack's own reply already stored on the payment.
+    const payerByOrderId = new Map(
+      payments
+        .filter((p) => p.orderId)
+        .map((p) => [p.orderId as string, { phone: payerNumberFromReply(p.providerResponse), network: p.network }]),
+    )
 
     /**
      * Today's selling price for the same product, for the "Reorder" preview
@@ -192,6 +198,13 @@ export class RefundsService {
         buyerPhone: row.buyerPhone,
         /** Where the refund was sent: the number that paid, once known. */
         payToPhone: row.payToPhone,
+        /**
+         * The Mobile Money number that paid for the order, and its network,
+         * from Paystack's stored reply. Where the refund goes. Null for a
+         * card, a wallet, or a payment Paystack did not name a number for.
+         */
+        payerPhone: row.payToPhone ?? payerByOrderId.get(row.orderId)?.phone ?? null,
+        payerNetwork: payerByOrderId.get(row.orderId)?.network ?? row.momoNetwork,
         amount: row.amount,
         method: row.method,
         reason: row.reason,

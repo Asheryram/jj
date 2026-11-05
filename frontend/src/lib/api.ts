@@ -899,6 +899,9 @@ export interface RefundRequest {
   id: string
   /** Where the refund was sent: the Mobile Money number that paid, read from Paystack. */
   payToPhone?: string | null
+  /** The Mobile Money number that paid for the order, from Paystack. Where the refund goes. */
+  payerPhone?: string | null
+  payerNetwork?: Network | null
   /** For the "Reorder" action, see `api.reorderOrder`. */
   orderId: string
   /** Whether the order this refund is for still stands as failed. */
