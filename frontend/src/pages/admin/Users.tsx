@@ -78,7 +78,7 @@ export default function Users() {
           the person who should notice that three of them cannot trade yet. */}
       <AgentApplications />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" data-tour="users-stats">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-5" data-tour="users-stats">
         <StatTile label="Total users" value={String(users.length)} icon={<UsersIcon className="size-5" />} />
         <StatTile label="Agents" value={String(agents.length)} tone="brand" />
         <StatTile

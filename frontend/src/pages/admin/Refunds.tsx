@@ -201,7 +201,7 @@ export default function Refunds() {
         }
       />
 
-      <div data-tour="refunds-tiles" className="grid gap-3 sm:grid-cols-2">
+      <div data-tour="refunds-tiles" className="grid grid-cols-2 gap-3 sm:grid-cols-2">
         <StatTile
           label={filter === 'pending' ? 'Owed to customers' : 'In this view'}
           value={cedis(owed)}

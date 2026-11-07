@@ -5,11 +5,13 @@ import type { Tour } from './types'
 
 const COLLAPSED_KEY = 'jdc.learn.collapsed'
 
-function readCollapsed(): boolean {
+/** The person's own choice once they have made one, otherwise the page's default. */
+function readCollapsed(fallback: boolean): boolean {
   try {
-    return localStorage.getItem(COLLAPSED_KEY) === '1'
+    const stored = localStorage.getItem(COLLAPSED_KEY)
+    return stored === null ? fallback : stored === '1'
   } catch {
-    return false
+    return fallback
   }
 }
 
@@ -19,9 +21,9 @@ function readCollapsed(): boolean {
  * screen works can walk it again. Shown on the admin Overview and the agent
  * Dashboard. Collapses to one line once someone no longer needs it open.
  */
-export function LearnCard({ title }: { title: string }) {
+export function LearnCard({ title, defaultCollapsed = false }: { title: string; defaultCollapsed?: boolean }) {
   const { tours, isDone, start } = useTour()
-  const [collapsed, setCollapsed] = useState(readCollapsed)
+  const [collapsed, setCollapsed] = useState(() => readCollapsed(defaultCollapsed))
   if (tours.length === 0) return null
 
   const doneCount = tours.filter((t) => isDone(t.id)).length

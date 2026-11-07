@@ -194,7 +194,7 @@ export default function AdminWithdrawals() {
         }
       />
 
-      <div data-tour="withdrawals-tiles" className="grid gap-3 sm:grid-cols-3">
+      <div data-tour="withdrawals-tiles" className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatTile
           label="Awaiting your decision"
           value={String(pending.length)}

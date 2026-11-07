@@ -416,7 +416,7 @@ export default function AdminOrders() {
         }
       />
 
-      <div data-tour="orders-money-tiles" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div data-tour="orders-money-tiles" className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <StatTile
           label="Orders matching"
           value={String(total)}

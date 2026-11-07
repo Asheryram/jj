@@ -93,7 +93,7 @@ export default function Pricing() {
         }
       />
 
-      <div data-tour="agent-prices-stats" className="grid gap-3 sm:grid-cols-3">
+      <div data-tour="agent-prices-stats" className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatTile
           label="Products you have priced"
           value={`${priced.length} of ${products.length}`}

@@ -79,7 +79,7 @@ export default function Wallet() {
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card tone="brand" className="p-4 sm:col-span-2 lg:col-span-1">
           <p className="text-sm text-brand-100">Available balance</p>
           <p className="tabular mt-2 text-3xl font-bold tracking-tight">{cedis(balance)}</p>

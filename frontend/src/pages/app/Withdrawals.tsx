@@ -74,7 +74,7 @@ export default function Withdrawals() {
         }
       />
 
-      <div data-tour="agent-withdraw-stats" className="grid gap-3 sm:grid-cols-3">
+      <div data-tour="agent-withdraw-stats" className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatTile label="Available to withdraw" value={cedis(balance)} tone="brand" />
         <StatTile
           label="Awaiting approval"

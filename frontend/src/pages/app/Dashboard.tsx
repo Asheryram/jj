@@ -173,7 +173,7 @@ export default function Dashboard() {
 
       {/* ── Stat tiles, right after the balance so the headline numbers don't
           sit below every notice card on every single visit ── */}
-      <div data-tour="agent-dash-stats" className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div data-tour="agent-dash-stats" className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {isAgent ? (
           <>
             <StatTile

@@ -819,13 +819,15 @@ export function StatTile({
     warning: 'text-amber-700 dark:text-amber-400',
   }
   return (
-    <Card className="p-4">
+    // Tighter on a phone, where tiles sit two to a row: smaller type, no
+    // decorative icon squeezing the label onto a second line.
+    <Card className="min-w-0 p-3 sm:p-4">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
-        {icon && <span className="text-slate-300 dark:text-slate-600">{icon}</span>}
+        <p className="text-xs font-medium text-slate-500 sm:text-sm dark:text-slate-400">{label}</p>
+        {icon && <span className="hidden text-slate-300 sm:inline dark:text-slate-600">{icon}</span>}
       </div>
-      <p className={cn('tabular mt-2 text-2xl font-bold tracking-tight', tones[tone])}>{value}</p>
-      {hint && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</p>}
+      <p className={cn('tabular mt-1.5 break-words text-xl font-bold tracking-tight sm:mt-2 sm:text-2xl', tones[tone])}>{value}</p>
+      {hint && <p className="mt-1 text-[11px] leading-snug text-slate-500 sm:text-xs dark:text-slate-400">{hint}</p>}
     </Card>
   )
 }

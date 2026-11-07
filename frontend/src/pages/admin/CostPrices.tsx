@@ -327,7 +327,7 @@ export default function CostPrices() {
         subtitle="What agents pay and what walk-up customers pay. What you pay comes from the provider catalogue; agents set their own retail price."
       />
 
-      <div className="grid gap-3 sm:grid-cols-3" data-tour="prices-margins">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" data-tour="prices-margins">
         <StatTile
           label="Products in catalogue"
           value={String(products.length)}
