@@ -397,10 +397,18 @@ function money(amount: number, currency: string): string {
 
 function stageBadge(status: AdminLicenseStatus): { label: string; tone: 'success' | 'warning' | 'danger' | 'neutral' } {
   if (!status.configured) return { label: 'Not managed', tone: 'neutral' }
+  if (status.stage === 'restricted' || status.stage === 'suspended') {
+    return { label: status.stage === 'restricted' ? 'Overdue, restricted' : 'Overdue, suspended', tone: 'danger' }
+  }
+  // An unpaid invoice is never "paid up", even while every subscription is.
+  const waiting = status.invoices
+  if (waiting.length > 0) {
+    const overdue = waiting.filter(isOverdue).length
+    if (overdue > 0) return { label: overdue > 1 ? `${overdue} invoices overdue` : 'Invoice overdue', tone: 'danger' }
+    return { label: waiting.length > 1 ? `${waiting.length} invoices to pay` : 'Invoice to pay', tone: 'warning' }
+  }
   if (status.exempt) return { label: 'Exempt', tone: 'neutral' }
   if (status.stage === 'grace') return { label: 'Overdue, in grace', tone: 'warning' }
-  if (status.stage === 'restricted') return { label: 'Overdue, restricted', tone: 'danger' }
-  if (status.stage === 'suspended') return { label: 'Overdue, suspended', tone: 'danger' }
   if (status.daysUntilDue !== null && status.daysUntilDue <= 14) return { label: 'Renews soon', tone: 'warning' }
   return { label: 'Paid up', tone: 'success' }
 }
@@ -447,7 +455,14 @@ export function SubscriptionCard() {
 
   const rows: [string, string][] = []
   if (status.configured) {
-    if (status.dueAt && !status.exempt) rows.push([status.stage === 'active' ? 'Next payment due' : 'Overdue since', longDate(status.dueAt)])
+    if (invoices.length > 0 && currencies.size === 1) {
+      const oldestDue = invoices.map((invoice) => invoice.dueDate).filter((d): d is string => Boolean(d)).sort()[0]
+      rows.push([
+        'Waiting to be paid',
+        `${money(total, invoices[0].currency)}${oldestDue ? `${new Date(oldestDue).getTime() < Date.now() ? ', overdue since ' : ', first due '}${longDate(oldestDue)}` : ''}`,
+      ])
+    }
+    if (status.dueAt && !status.exempt) rows.push([status.stage === 'active' ? 'Next renewal due' : 'Overdue since', longDate(status.dueAt)])
     if (status.stage !== 'active' && status.graceEndsAt) rows.push(['Everything works until', longDate(status.graceEndsAt)])
     if (status.stage !== 'active' && status.suspendsAt) rows.push(['Public shop pauses from', longDate(status.suspendsAt)])
     rows.push(['What happens when it lapses', status.enforced ? 'New sales pause' : 'Nothing yet (report only)'])
