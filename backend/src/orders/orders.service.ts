@@ -13,7 +13,7 @@ import { datahubNetworkKeyFor } from './approvals.service'
 import type { SupplierProviderCode } from '../settings/settings.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
-import { toOrder, toTrackedOrder } from '../common/mappers'
+import { toOrder, toOrderFor, toTrackedOrder } from '../common/mappers'
 import {
   ConflictError,
   InsufficientBalanceError,
@@ -95,7 +95,7 @@ export class OrdersService {
     // retried cannot tell whether the first attempt was lost in the request or
     // the response, and a 409 would leave a real order stranded.
     if (dto.idempotencyKey) {
-      const existing = await this.existingOrderFor(dto.idempotencyKey)
+      const existing = await this.existingOrderFor(dto.idempotencyKey, user)
       if (existing) return existing
     }
 
@@ -220,7 +220,7 @@ export class OrdersService {
         }
 
         if (conflict === 'idempotency' && dto.idempotencyKey) {
-          const existing = await this.existingOrderFor(dto.idempotencyKey)
+          const existing = await this.existingOrderFor(dto.idempotencyKey, user)
           if (existing) return existing
         }
 
@@ -242,14 +242,19 @@ export class OrdersService {
         sellerCode: order.soldByCode,
         origin,
       })
-      return { ...toOrder(order), paymentUrl }
+      return { ...this.forViewer(order, user), paymentUrl }
     }
 
     // Committed and paid for. Now ask the provider, and let the result land
     // asynchronously, the shape a real DataHub GH callback arrives in (FR-4.4).
     this.fulfilment.scheduleFor(order.id)
 
-    return toOrder(order)
+    return this.forViewer(order, user)
+  }
+
+  /** Admins see the whole split; anyone else only their own share, see `toOrderFor`. */
+  private forViewer(order: Order, user: AuthUser | undefined) {
+    return user && isAdminRole(user.role) ? toOrder(order) : toOrderFor(order, user?.id)
   }
 
   /**
@@ -260,15 +265,15 @@ export class OrdersService {
    * not just a receipt, or a customer who reloaded checkout is looking at an
    * order with no way to pay for it.
    */
-  private async existingOrderFor(idempotencyKey: string) {
+  private async existingOrderFor(idempotencyKey: string, user: AuthUser | undefined) {
     const existing = await this.prisma.order.findUnique({ where: { idempotencyKey } })
     if (!existing) return undefined
 
     if (existing.status === 'awaiting_payment') {
       const paymentUrl = await this.payments.paymentUrlForOrder(existing.id)
-      if (paymentUrl) return { ...toOrder(existing), paymentUrl }
+      if (paymentUrl) return { ...this.forViewer(existing, user), paymentUrl }
     }
-    return toOrder(existing)
+    return this.forViewer(existing, user)
   }
 
   /**
@@ -659,7 +664,7 @@ export class OrdersService {
       take: Math.min(limit, 500),
     })
 
-    if (!isAdminRole(user.role)) return rows.map(toOrder)
+    if (!isAdminRole(user.role)) return rows.map((row) => toOrderFor(row, user.id))
     return this.enrichForAdmin(rows)
   }
 
@@ -732,7 +737,7 @@ export class OrdersService {
 
     return {
       rows: rows.map((row) => ({
-        ...toOrder(row),
+        ...toOrderFor(row, user.id),
         paymentCollected: row.status === 'failed' ? row.refundRequest !== null : undefined,
       })),
       total,
@@ -1082,7 +1087,7 @@ export class OrdersService {
     // to see its buyer or its margin).
     const mine = row.buyerUserId === user.id || (row.soldByCode !== null && row.soldByCode === user.referralCode)
 
-    return mine ? { ...toOrder(row), paymentCollected } : { ...toTrackedOrder(row), paymentCollected }
+    return mine ? { ...toOrderFor(row, user?.id), paymentCollected } : { ...toTrackedOrder(row), paymentCollected }
   }
 
   /**

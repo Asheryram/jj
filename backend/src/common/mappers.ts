@@ -139,6 +139,28 @@ export function toOrder(row: Order) {
 }
 
 /**
+ * An order as a non-admin may see it.
+ *
+ * The stored split is the whole sale: the supplier's cost, James's margin and
+ * every agent's cut. None of that is anyone's business but the business's.
+ * An agent sees only their own line (what they paid for the bundle and what
+ * they kept); a customer or guest sees no shares at all. The processing fee
+ * stays, since the buyer paid it. Admins use `toOrder` itself.
+ */
+export function toOrderFor(row: Order, viewerId: string | null | undefined) {
+  const order = toOrder(row)
+  const split = order.split
+  return {
+    ...order,
+    split: {
+      supplierCost: 0,
+      processingFee: split?.processingFee ?? 0,
+      shares: viewerId ? (split?.shares ?? []).filter((share) => share.userId === viewerId) : [],
+    } satisfies OrderSplit,
+  }
+}
+
+/**
  * What a guest may see about an order they can quote the reference for (FR-4.9
  * order tracking). The split is who-earned-what across the whole chain and is
  * nobody's business but the participants'.

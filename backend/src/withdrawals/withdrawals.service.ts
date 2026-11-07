@@ -39,7 +39,14 @@ export class WithdrawalsService {
       orderBy: { requestedAt: 'desc' },
       take: Math.min(Math.max(limit, 1), 2000),
     })
-    return rows.map(toWithdrawal)
+    if (isAdminRole(user.role)) return rows.map(toWithdrawal)
+    /**
+     * An agent sees where their money stands, never how it is being sent:
+     * Paystack's notes are instructions for the admin (an OTP to enter, a
+     * balance to top up, a dashboard to check), and the status already says
+     * "On its way", "Paid" or "returned to you".
+     */
+    return rows.map((row) => ({ ...toWithdrawal(row), transferNote: null, transferStatus: null, transferCode: null }))
   }
 
   /**

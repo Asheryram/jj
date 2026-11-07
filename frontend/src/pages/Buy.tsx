@@ -8,6 +8,7 @@ import { cedis, dateTime } from '../lib/format'
 import { checkPhone, prettyPhone } from '../lib/networks'
 import type { Order, OrderSplit } from '../data/types'
 import { CATEGORY_META } from '../components/categories'
+import { isAdmin } from '../lib/roles'
 import { SeasonalCelebration } from '../components/SeasonalMoments'
 import {
   Badge,
@@ -602,9 +603,9 @@ export default function Buy() {
             </p>
           </div>
 
-          {/* Transparency for people inside the chain; customers never see this. */}
+          {/* The whole split for an admin; an agent sees only their own price and profit. */}
           {session && session.role !== 'customer' && (
-            <SplitBreakdown split={split} salePrice={total} youId={session.id} />
+            <SplitBreakdown split={split} salePrice={total} youId={session.id} everything={isAdmin(session.role)} />
           )}
         </Card>
       )}
@@ -971,16 +972,47 @@ function PayOption({
   )
 }
 
-/** Shows where every pesewa of the sale goes. FR-5.8. */
+/**
+ * Where the sale's money goes. FR-5.8.
+ *
+ * An admin sees every line. An agent sees only their own: what they pay for
+ * the bundle and what they keep, never the supplier's cost, the platform's
+ * margin or another agent's cut.
+ */
 function SplitBreakdown({
   split,
   salePrice,
   youId,
+  everything,
 }: {
   split: OrderSplit
   salePrice: number
   youId: string
+  everything: boolean
 }) {
+  if (!everything) {
+    const own = split.shares.find((share) => share.userId === youId)
+    if (!own) return null
+    return (
+      <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5">
+        <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
+          <TrendUpIcon className="size-3.5" /> Your part of this {cedis(salePrice)}
+        </p>
+        <ul className="mt-2.5 space-y-1.5 text-sm">
+          {own.paid > 0 && (
+            <li className="flex items-baseline justify-between gap-3">
+              <span className="text-slate-600 dark:text-slate-300">Your price for this bundle</span>
+              <span className="tabular font-medium text-slate-700 dark:text-slate-200">{cedis(own.paid)}</span>
+            </li>
+          )}
+          <li className="flex items-baseline justify-between gap-3">
+            <span className="text-slate-600 dark:text-slate-300">{own.paid > 0 ? 'Your profit' : 'Your referral earning'}</span>
+            <span className="tabular font-semibold text-brand-700 dark:text-brand-300">{cedis(own.margin, { sign: true })}</span>
+          </li>
+        </ul>
+      </div>
+    )
+  }
   return (
     <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5">
       <p className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">

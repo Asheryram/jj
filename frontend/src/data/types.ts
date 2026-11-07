@@ -319,7 +319,7 @@ export interface SubAgent {
   /** Last completed order, or null if they have never sold anything. */
   lastSaleAt: string | null
   /** Markup this agent adds over their own cost, as a percentage. */
-  markupPercent: number
+  markupPercent?: number
   status: UserStatus
 }
 

@@ -128,7 +128,6 @@ export class AgentsService {
         earnedForUpline:
           totalDownlineVolume > 0 ? Math.round((volume / totalDownlineVolume) * totalEarned) : 0,
         lastSaleAt: stats?._max.createdAt?.toISOString() ?? null,
-        markupPercent: agent.markupPercent,
         status: agent.status,
       }
     })

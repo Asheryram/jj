@@ -861,18 +861,61 @@ export function EmptyState({
  * can actually reach the overflowing content, and `caption` gives screen-reader
  * users the table's purpose before they start reading cells.
  */
+/**
+ * Gives every body cell without its own `label` the text of its column's
+ * heading, so a table stacked into cards on a phone labels each value without
+ * every page having to repeat its headings cell by cell. Re-run as rows load.
+ */
+function labelCellsFromHeadings(root: HTMLElement) {
+  const headings: string[] = []
+  root.querySelectorAll('thead tr:last-child th').forEach((th) => {
+    const cell = th as HTMLTableCellElement
+    const text = (cell.textContent ?? '').trim()
+    for (let i = 0; i < Math.max(1, cell.colSpan); i++) headings.push(text)
+  })
+  if (headings.length === 0) return
+  root.querySelectorAll('tbody tr').forEach((tr) => {
+    let column = 0
+    Array.from(tr.children).forEach((child) => {
+      const cell = child as HTMLTableCellElement
+      const heading = headings[column]
+      // A cell spanning the whole row (an empty state, a group heading) needs no label.
+      if (cell.colSpan < headings.length && !cell.hasAttribute('data-label') && heading) {
+        cell.setAttribute('data-label', heading)
+      }
+      column += Math.max(1, cell.colSpan)
+    })
+  })
+}
+
 export function TableWrap({
   children,
   caption,
-  stackOnPhone,
+  stackOnPhone = true,
 }: {
   children: ReactNode
   caption?: string
-  /** On a phone, show each row as a labelled card (give each `Td` a `label`), see index.css. */
+  /**
+   * On a phone, show each row as a labelled card instead of a table wider than
+   * the screen (see index.css). On by default; labels come from the headings
+   * unless a `Td` gives its own. Pass `false` for a table that reads better
+   * scrolled sideways.
+   */
   stackOnPhone?: boolean
 }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const root = ref.current
+    if (!root || !stackOnPhone) return
+    labelCellsFromHeadings(root)
+    const observer = new MutationObserver(() => labelCellsFromHeadings(root))
+    observer.observe(root, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [stackOnPhone])
+
   return (
     <div
+      ref={ref}
       className={cn('-mx-px overflow-x-auto', stackOnPhone && 'stack-on-phone')}
       tabIndex={0}
       role="region"

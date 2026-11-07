@@ -274,7 +274,7 @@ function OrderDetail({
   onClose: () => void
   isAgent: boolean
 }) {
-  const { myShareOf, session } = useStore()
+  const { myShareOf } = useStore()
   const share = order ? myShareOf(order) : undefined
 
   return (
@@ -336,38 +336,26 @@ function OrderDetail({
             <Row label="Placed" value={dateTime(order.createdAt)} />
           </dl>
 
-          {/* FR-5.8, an agent can see exactly where the money went. */}
-          {isAgent && !isUnpaid(order) && (
+          {/* FR-5.8, an agent sees their own part of the sale: their price and their
+              profit. Never the supplier's cost, the platform's margin or anyone else's. */}
+          {isAgent && !isUnpaid(order) && share && (
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5">
               <p className="text-xs font-semibold tracking-wide text-slate-500 dark:text-slate-400 uppercase">
-                How this {cedis(order.salePrice)} split
+                Your part of this {cedis(order.salePrice)}
               </p>
               <ul className="mt-2.5 space-y-1.5 text-sm">
+                {share.paid > 0 && (
+                  <li className="flex items-baseline justify-between gap-3">
+                    <span className="text-slate-600 dark:text-slate-300">Your price for this bundle</span>
+                    <span className="tabular font-medium text-slate-700 dark:text-slate-200">{cedis(share.paid)}</span>
+                  </li>
+                )}
                 <li className="flex items-baseline justify-between gap-3">
-                  <span className="text-slate-600 dark:text-slate-300">DataHub GH (supplier)</span>
-                  <span className="tabular font-medium text-slate-700 dark:text-slate-200">
-                    {cedis(order.split.supplierCost)}
+                  <span className="text-slate-600 dark:text-slate-300">{share.paid > 0 ? 'Your profit' : 'Your referral earning'}</span>
+                  <span className="tabular font-semibold text-brand-700 dark:text-brand-300">
+                    {cedis(share.margin, { sign: true })}
                   </span>
                 </li>
-                {[...order.split.shares]
-                  .sort((a, b) => a.depth - b.depth)
-                  .map((entry) => (
-                    <li key={entry.userId} className="flex items-baseline justify-between gap-3">
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <span className="truncate text-slate-600 dark:text-slate-300">{entry.name}</span>
-                        {entry.userId === session?.id && <Badge tone="brand">you</Badge>}
-                      </span>
-                      <span
-                        className={
-                          entry.userId === session?.id
-                            ? 'tabular font-semibold text-brand-700 dark:text-brand-300'
-                            : 'tabular font-medium text-slate-700 dark:text-slate-200'
-                        }
-                      >
-                        {cedis(entry.margin, { sign: true })}
-                      </span>
-                    </li>
-                  ))}
               </ul>
               {share && (
                 <p className="mt-2.5 border-t border-slate-200 dark:border-slate-700 pt-2.5 text-xs text-slate-500 dark:text-slate-400">
