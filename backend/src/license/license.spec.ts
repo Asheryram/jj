@@ -32,6 +32,7 @@ function payloadFor(stage: LicenseStage, overrides: Partial<LicensePayload> = {}
     suspendsAt: new Date(now + 27 * 86_400_000).toISOString(),
     message: `stage is ${stage}`,
     payUrl: 'https://billing.example.com/pay/abc',
+    payAllUrl: null,
     publicNotice: '',
     project: 'JKBK Data Hub',
     subscriptions: [

@@ -7,7 +7,7 @@ import { useShopPath } from '../lib/shopPath'
 import { useStore } from '../state/store'
 import { useLicense } from '../state/license'
 import { AlertIcon, ClockIcon } from './icons'
-import { Badge, Button, Callout, Card, CardHead } from './ui'
+import { Badge, Button, Callout, Card, CardHead, Modal } from './ui'
 
 /**
  * Everything the screens show about the subscription.
@@ -50,6 +50,106 @@ function useAdminLicense(enabled: boolean) {
   }, [])
 
   return { status, checkNow }
+}
+
+// ------------------------------------------------------------------ invoices waiting
+
+type Invoice = AdminLicenseStatus['invoices'][number]
+
+const DAY_MS = 86_400_000
+const isOverdue = (invoice: Invoice) => Boolean(invoice.dueDate && new Date(invoice.dueDate).getTime() < Date.now())
+const dueWithin = (invoice: Invoice, days: number) =>
+  !invoice.dueDate || new Date(invoice.dueDate).getTime() - Date.now() <= days * DAY_MS
+
+/** Where to pay everything waiting: one link for all of them when there is one. */
+function payLinkFor(status: AdminLicenseStatus): { url: string | null; label: string } {
+  const invoices = status.invoices
+  const sameCurrency = invoices.length > 0 && invoices.every((invoice) => invoice.currency === invoices[0].currency)
+  const total = invoices.reduce((sum, invoice) => sum + invoice.amount, 0)
+  if (invoices.length > 1 && status.payAllUrl && sameCurrency) {
+    return { url: status.payAllUrl, label: `Pay all ${invoices.length} (${money(total, invoices[0].currency)})` }
+  }
+  if (invoices.length === 1) {
+    return { url: invoices[0].payUrl ?? status.payUrl, label: `Pay ${money(invoices[0].amount, invoices[0].currency)}` }
+  }
+  return { url: status.payUrl, label: 'Pay now' }
+}
+
+function InvoiceLines({ invoices }: { invoices: Invoice[] }) {
+  return (
+    <ul className="mt-1.5 space-y-1 text-sm">
+      {invoices.map((invoice) => (
+        <li key={invoice.number} className="flex flex-wrap justify-between gap-x-4">
+          <span>
+            {invoice.subscription ?? invoice.description ?? invoice.number}
+            <span className="opacity-75">
+              {' '}
+              · {invoice.dueDate ? `${isOverdue(invoice) ? 'was due' : 'due'} ${longDate(invoice.dueDate)}` : 'awaiting payment'}
+            </span>
+          </span>
+          <strong className="font-semibold tabular-nums">{money(invoice.amount, invoice.currency)}</strong>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * Shown once each time an admin signs in, when something is overdue or due within a
+ * week, so a waiting invoice is never only on a page nobody opens. "Later" closes it
+ * until the next sign-in (or until a new invoice arrives).
+ */
+function InvoicesDueModal({ status }: { status: AdminLicenseStatus }) {
+  const due = status.invoices.filter((invoice) => isOverdue(invoice) || dueWithin(invoice, 7))
+  const key = `jdc.invoicesSeen:${due.map((invoice) => invoice.number).sort().join(',')}`
+  const [open, setOpen] = useState(() => {
+    try {
+      return window.sessionStorage.getItem(key) !== '1'
+    } catch {
+      return true
+    }
+  })
+  if (due.length === 0 || !open) return null
+
+  const close = () => {
+    try {
+      window.sessionStorage.setItem(key, '1')
+    } catch {
+      // Shown again next time; harmless.
+    }
+    setOpen(false)
+  }
+  const overdue = due.some(isOverdue)
+  const pay = payLinkFor(status)
+
+  return (
+    <Modal open onClose={close} title={overdue ? 'You have overdue invoices' : 'You have invoices due soon'}>
+      <div className="space-y-4">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          {overdue
+            ? 'These are past their due date. Pay them to keep everything running.'
+            : 'These are due within a week.'}
+          {!status.enforced ? ' Nothing is being blocked yet.' : ''}
+        </p>
+        <InvoiceLines invoices={status.invoices} />
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {pay.url && (
+            <a href={pay.url} target="_blank" rel="noopener noreferrer" className="sm:flex-1" onClick={close}>
+              <Button block>{pay.label}</Button>
+            </a>
+          )}
+          <Link to="/admin/subscriptions" className="sm:flex-1" onClick={close}>
+            <Button block variant="outline">
+              See the invoices
+            </Button>
+          </Link>
+          <Button variant="ghost" onClick={close}>
+            Later
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  )
 }
 
 // ------------------------------------------------------------------ banner
@@ -115,20 +215,29 @@ export function LicenseBanner() {
     )
   }
 
+  const waiting = status.invoices
+  const overdueWaiting = waiting.some(isOverdue)
   const renewsSoon = status.stage === 'active' && !status.exempt && status.daysUntilDue !== null && status.daysUntilDue <= 14
-  if (status.stage === 'active' && !renewsSoon) return null
-  if (status.exempt) return null
+  if (status.stage === 'active' && !renewsSoon && waiting.length === 0) return null
+  if (status.exempt && waiting.length === 0) return null
 
-  const tone = status.stage === 'active' ? 'info' : status.stage === 'grace' ? 'warning' : 'danger'
+  const tone = status.stage === 'active' ? (overdueWaiting ? 'warning' : 'info') : status.stage === 'grace' ? 'warning' : 'danger'
   const title =
     // Worded for any kind of bill: a renewal or a one-time payment.
     status.stage === 'active'
-      ? 'A payment is due soon'
+      ? overdueWaiting
+        ? waiting.length > 1
+          ? `${waiting.length} invoices are overdue`
+          : 'An invoice is overdue'
+        : waiting.length > 1
+          ? `${waiting.length} invoices are waiting`
+          : 'A payment is due soon'
       : status.stage === 'grace'
         ? 'A payment is overdue'
         : status.paused
           ? 'Selling is paused: a payment is overdue'
           : 'A payment is overdue'
+  const pay = payLinkFor(status)
 
   const check = async () => {
     setChecking(true)
@@ -143,15 +252,17 @@ export function LicenseBanner() {
 
   return (
     <Shell>
+      <InvoicesDueModal status={status} />
       <Callout tone={tone} title={title} icon={<AlertIcon className="size-4" />}>
-        <p>{status.message}</p>
+        {status.message && <p>{status.message}</p>}
+        {waiting.length > 0 && <InvoiceLines invoices={waiting} />}
         {status.stage !== 'active' && !status.enforced && (
           <p className="mt-1.5 text-xs opacity-90">Report only for now: nothing is being blocked yet.</p>
         )}
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          {status.payUrl && (
-            <a href={status.payUrl} target="_blank" rel="noopener noreferrer">
-              <Button size="sm">Pay now</Button>
+          {pay.url && (
+            <a href={pay.url} target="_blank" rel="noopener noreferrer">
+              <Button size="sm">{pay.label}</Button>
             </a>
           )}
           <Button size="sm" variant="outline" loading={checking} onClick={() => void check()}>
@@ -415,9 +526,16 @@ export function SubscriptionCard() {
                       )
                     })}
                     {invoices.length > 1 && currencies.size === 1 && (
-                      <p className="px-1 text-sm text-slate-600 dark:text-slate-300">
-                        Total waiting: <strong className="font-semibold text-slate-900 dark:text-slate-50">{money(total, invoices[0].currency)}</strong>
-                      </p>
+                      <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+                        <p className="text-sm text-slate-600 dark:text-slate-300">
+                          Total waiting: <strong className="font-semibold text-slate-900 dark:text-slate-50">{money(total, invoices[0].currency)}</strong>
+                        </p>
+                        {status.payAllUrl && (
+                          <a href={status.payAllUrl} target="_blank" rel="noopener noreferrer">
+                            <Button size="lg">Pay all {invoices.length} at once</Button>
+                          </a>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

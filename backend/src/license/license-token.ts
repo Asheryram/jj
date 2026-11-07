@@ -71,6 +71,8 @@ export interface LicensePayload {
   invoices: LicenseInvoice[]
   /** The most useful single place to pay. */
   payUrl: string | null
+  /** One payment for every invoice waiting, when there are two or more in one currency. */
+  payAllUrl: string | null
   /** What the client wants the public told while the app is paused, in their own words. */
   publicNotice: string
   issuedAt: string
@@ -180,6 +182,7 @@ export function verifyLicenseToken(token: string, publicKey: string): LicensePay
       subscriptions: parseSubscriptions(payload.subscriptions),
       invoices: parseInvoices(payload.invoices),
       payUrl: typeof payload.payUrl === 'string' ? payload.payUrl : null,
+      payAllUrl: typeof payload.payAllUrl === 'string' ? payload.payAllUrl : null,
       publicNotice: typeof payload.publicNotice === 'string' ? payload.publicNotice.slice(0, 300) : '',
       issuedAt: payload.issuedAt,
       expiresAt: payload.expiresAt,

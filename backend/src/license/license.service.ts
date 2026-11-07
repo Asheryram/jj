@@ -34,6 +34,8 @@ export interface LicenseStatus {
   exempt: boolean
   message: string
   payUrl: string | null
+  /** One payment for every invoice waiting, see `LicensePayload.payAllUrl`. */
+  payAllUrl: string | null
   /** What the client wants the public told while paused (may be empty). */
   publicNotice: string
   /** Selling pauses within a day (the last day of grace). */
@@ -273,6 +275,7 @@ export class LicenseService implements OnModuleInit, OnModuleDestroy {
       exempt,
       message: payload?.message ?? '',
       payUrl: payload?.payUrl ?? null,
+      payAllUrl: payload?.payAllUrl ?? null,
       publicNotice: payload?.publicNotice ?? '',
       pausesSoon:
         enforced &&

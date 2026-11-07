@@ -108,6 +108,8 @@ export interface AdminLicenseStatus {
   exempt: boolean
   message: string
   payUrl: string | null
+  /** One payment for every invoice waiting, when there are two or more. */
+  payAllUrl?: string | null
   /** The app, as the invoicing application knows it. */
   project: string
   /** Everything this app has to keep paying for. Amounts in pesewas. */
