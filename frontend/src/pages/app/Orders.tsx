@@ -44,12 +44,32 @@ function OrderStatus({ order }: { order: Order }) {
   return <StatusBadge status={order.status} />
 }
 
-/** FR-6.1, the signed-in user's own orders, a page at a time. */
+type Range = 'all' | 'today' | '7d' | '30d' | 'custom'
+
+/** `YYYY-MM-DD` for a day `daysAgo` before today, in UTC (Ghana's own time). */
+function isoDay(daysAgo = 0): string {
+  return new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10)
+}
+
+/** The from/to a preset stands for; a custom range is typed in. */
+function rangeDates(range: Range, from: string, to: string): { from?: string; to?: string } {
+  if (range === 'today') return { from: isoDay(), to: isoDay() }
+  if (range === '7d') return { from: isoDay(6), to: isoDay() }
+  if (range === '30d') return { from: isoDay(29), to: isoDay() }
+  if (range === 'custom') return { from: from || undefined, to: to || undefined }
+  return {}
+}
+
+/** FR-6.1, the signed-in user's own orders, a page at a time, for any range of days. */
 export default function Orders() {
   const { orders, session, myShareOf } = useStore()
   const shopPath = useShopPath()
   const [filter, setFilter] = useSearchParamState('filter', 'all') as [Filter, (v: Filter) => void]
   const [query, setQuery] = useSearchParamState('q')
+  const [range, setRange] = useSearchParamState('range', 'all') as [Range, (v: Range) => void]
+  const [customFrom, setCustomFrom] = useSearchParamState('from')
+  const [customTo, setCustomTo] = useSearchParamState('to')
+  const dates = rangeDates(range, customFrom, customTo)
   const [selected, setSelected] = useState<Order | null>(null)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState(query.trim())
@@ -65,7 +85,7 @@ export default function Orders() {
     return () => clearTimeout(timer)
   }, [query])
 
-  useEffect(() => setPage(1), [filter, search])
+  useEffect(() => setPage(1), [filter, search, dates.from, dates.to])
 
   // The store tracks orders settling in the background, so a status changing
   // there is the cue to read this page again.
@@ -74,7 +94,14 @@ export default function Orders() {
   useEffect(() => {
     let live = true
     api
-      .myOrders({ view: filter === 'all' ? undefined : filter, q: search || undefined, page, pageSize: PAGE_SIZE })
+      .myOrders({
+        view: filter === 'all' ? undefined : filter,
+        q: search || undefined,
+        page,
+        pageSize: PAGE_SIZE,
+        from: dates.from,
+        to: dates.to,
+      })
       .then((result) => {
         if (!live) return
         setData(result)
@@ -86,7 +113,7 @@ export default function Orders() {
     return () => {
       live = false
     }
-  }, [filter, search, page, statuses, retry])
+  }, [filter, search, page, statuses, retry, dates.from, dates.to])
 
   const visible = data?.rows ?? []
   const summary = data?.summary
@@ -107,6 +134,43 @@ export default function Orders() {
               : undefined
         }
       />
+      </div>
+
+      {/* Which days: the totals above and the list below both follow it. */}
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <Segmented<Range>
+          options={[
+            { value: 'all', label: 'All time' },
+            { value: 'today', label: 'Today' },
+            { value: '7d', label: '7 days' },
+            { value: '30d', label: '30 days' },
+            { value: 'custom', label: 'Pick dates' },
+          ]}
+          value={range}
+          onChange={setRange}
+        />
+        {range === 'custom' && (
+          <div className="flex items-center gap-2">
+            <TextInput
+              type="date"
+              aria-label="From"
+              value={customFrom}
+              max={customTo || isoDay()}
+              onChange={(event) => setCustomFrom(event.target.value)}
+              className="w-full sm:w-40"
+            />
+            <span className="text-sm text-slate-500 dark:text-slate-400">to</span>
+            <TextInput
+              type="date"
+              aria-label="To"
+              value={customTo}
+              min={customFrom || undefined}
+              max={isoDay()}
+              onChange={(event) => setCustomTo(event.target.value)}
+              className="w-full sm:w-40"
+            />
+          </div>
+        )}
       </div>
 
       <div data-tour="agent-sales-filters" className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

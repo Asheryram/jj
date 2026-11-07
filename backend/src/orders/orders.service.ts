@@ -683,15 +683,27 @@ export class OrdersService {
    */
   async mine(
     user: AuthUser,
-    filter: { view?: string; q?: string; page?: number; pageSize?: number },
+    filter: { view?: string; q?: string; page?: number; pageSize?: number; from?: string; to?: string },
   ) {
     const page = Math.max(1, Math.floor(filter.page || 1))
     const pageSize = Math.min(Math.max(1, Math.floor(filter.pageSize || 25)), 100)
 
-    const scope: Prisma.OrderWhereInput =
+    /**
+     * An optional date range, `YYYY-MM-DD`, `to` inclusive of its whole day
+     * (Ghana keeps UTC all year). It narrows everything below, the totals and
+     * what was earned included, so the cards describe the same days as the list.
+     */
+    const day = (value: string | undefined) => (value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00.000Z`) : null)
+    const from = day(filter.from)
+    const toDay = day(filter.to)
+    const until = toDay ? new Date(toDay.getTime() + 86_400_000) : null
+    const createdAt = from || until ? { ...(from ? { gte: from } : {}), ...(until ? { lt: until } : {}) } : undefined
+
+    const owner: Prisma.OrderWhereInput =
       user.role === 'agent'
         ? { AND: [await this.scopeFor(user), { split: { path: ['shares'], array_contains: [{ userId: user.id }] } }] }
         : { buyerUserId: user.id }
+    const scope: Prisma.OrderWhereInput = createdAt ? { AND: [owner, { createdAt }] } : owner
 
     const views: Record<string, Prisma.OrderWhereInput> = {
       completed: { status: 'completed' },
@@ -730,7 +742,7 @@ export class OrdersService {
       count(views.failed),
       count(views.unpaid),
       this.prisma.earning.aggregate({
-        where: { userId: user.id, type: { in: ['sale', 'downline', 'reversal'] } },
+        where: { userId: user.id, type: { in: ['sale', 'downline', 'reversal'] }, ...(createdAt ? { createdAt } : {}) },
         _sum: { amount: true },
       }),
     ])

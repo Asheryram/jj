@@ -1535,12 +1535,15 @@ export const api = {
       auth: false,
     }),
 
-  orders: () => request<Order[]>('/orders'),
+  /** The caller's most recent orders; `limit` defaults to the server's 100. */
+  orders: (limit?: number) => request<Order[]>(limit ? `/orders?limit=${limit}` : '/orders'),
   /** The signed-in user's own orders, one page at a time. */
-  myOrders: (params: { view?: string; q?: string; page: number; pageSize: number }) => {
+  myOrders: (params: { view?: string; q?: string; page: number; pageSize: number; from?: string; to?: string }) => {
     const search = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) })
     if (params.view) search.set('view', params.view)
     if (params.q) search.set('q', params.q)
+    if (params.from) search.set('from', params.from)
+    if (params.to) search.set('to', params.to)
     return request<MyOrdersPage>(`/orders/mine?${search.toString()}`)
   },
 

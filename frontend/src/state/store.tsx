@@ -371,8 +371,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
 
     const tasks: Promise<unknown>[] = [
+      // Only the newest few for an agent or customer: the dashboard's recent
+      // list and live status. Sales, Reports and exports page through the
+      // server instead of downloading a whole history up front.
       api
-        .orders()
+        .orders(isAdmin(current.role) ? undefined : 20)
         .then(setOrders)
         .catch(() => undefined),
     ]

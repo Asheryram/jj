@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../../state/store'
+import type { Order } from '../../data/types'
 import { api, type MyReportSummary, type TopCustomer } from '../../lib/api'
 import { cedis, shortDate } from '../../lib/format'
 import { CATEGORY_META, CATEGORY_ORDER } from '../../components/categories'
@@ -70,7 +71,7 @@ function buildRange(mode: RangeMode, recentDays: number, customRange: { from: nu
 
 /** FR-8.2, an agent's own sales summary for a chosen date range, same range picker as `Analytics.tsx`. */
 export default function Reports() {
-  const { orders, session, myShareOf } = useStore()
+  const { session, myShareOf } = useStore()
   const isAgent = session?.role === 'agent'
   const [mode, setMode] = useState<RangeMode>('recent')
   const [recentDays, setRecentDays] = useState(7)
@@ -150,19 +151,7 @@ export default function Reports() {
   }, [windowFrom, windowTo])
   const dailyRevenueChart = dailyRevenue.map((d) => ({ day: shortDate(d.date), revenue: d.revenue }))
 
-  // NFR-2.5, this report covers only the signed-in user's own book.
-  const mine = useMemo(() => {
-    if (!session) return []
-    return isAgent
-      ? orders.filter((o) => o.split.shares.some((s) => s.userId === session.id))
-      : orders.filter((o) => o.buyer === session.name)
-  }, [isAgent, orders, session])
-
-  // Only feeds the CSV export below, the on-screen figures come from `summary`.
-  const filtered = useMemo(
-    () => mine.filter((o) => o.createdAt >= windowFrom && o.createdAt <= `${windowTo}T23:59:59`),
-    [mine, windowFrom, windowTo],
-  )
+  const [exporting, setExporting] = useState(false)
 
   const revenue = summary?.revenue ?? 0
   const profit = summary?.profit ?? 0
@@ -174,7 +163,25 @@ export default function Reports() {
     return { label: CATEGORY_META[category].label, value: row?.revenue ?? 0, orders: row?.orders ?? 0 }
   }).filter((row) => row.orders > 0)
 
-  const exportCsv = () => {
+  /**
+   * Every order in the chosen days, read a page at a time from the server
+   * (NFR-2.5, only the signed-in user's own), not the few recent ones the app
+   * keeps in memory, which silently left most of a busy agent's month out.
+   */
+  const exportCsv = async () => {
+    setExporting(true)
+    const filtered: Order[] = []
+    try {
+      for (let page = 1; page <= 200; page++) {
+        const batch = await api.myOrders({ page, pageSize: 100, from: windowFrom, to: windowTo })
+        filtered.push(...batch.rows)
+        if (filtered.length >= batch.total || batch.rows.length === 0) break
+      }
+    } catch {
+      setExporting(false)
+      return
+    }
+    setExporting(false)
     const header = [
       'Reference',
       'Date',
@@ -216,7 +223,7 @@ export default function Reports() {
         title={isAgent ? 'Sales summary' : 'My spending'}
         subtitle="Pick a range to see how much you moved and what you kept."
         action={
-          <Button data-tour="agent-reports-export" variant="outline" onClick={exportCsv}>
+          <Button data-tour="agent-reports-export" variant="outline" loading={exporting} onClick={() => void exportCsv()}>
             <DownloadIcon className="size-4" /> Export CSV
           </Button>
         }

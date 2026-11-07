@@ -96,8 +96,10 @@ export class OrdersController {
     @Query('q') q?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.orders.mine(user, { view, q, page: Number(page), pageSize: Number(pageSize) })
+    return this.orders.mine(user, { view, q, page: Number(page), pageSize: Number(pageSize), from, to })
   }
 
   /** Money held for a failed Mobile Money order (NFR-3.3). */
