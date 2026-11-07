@@ -328,12 +328,31 @@ export class DatahubClient {
    * callback would strand a paid order permanently.
    */
   async orderStatus(providerReference: string): Promise<StatusOutcome> {
+    /**
+     * A manual-queue reference, `manual_<order number>_<timestamp>`, is found
+     * by its order number: `?reference=` does not know most of them, while
+     * `?orderNumber=` answered for every one checked against live DataHub
+     * (7 Nov 2026, 13 orders). A bare number typed from their dashboard is an
+     * order number too. Anything else is a plain reference.
+     */
+    const manual = /^manual_(\d+)_/.exec(providerReference)
+    const orderNumber = manual ? manual[1] : /^\d{6,}$/.test(providerReference) ? providerReference : null
+    if (orderNumber) {
+      const byNumber = await this.orderStatusBy('orderNumber', orderNumber)
+      // A manual reference DataHub still knows by reference is asked that way too.
+      if (byNumber.kind !== 'not_found' || !manual) return byNumber
+    }
+    return this.orderStatusBy('reference', providerReference)
+  }
+
+  private async orderStatusBy(param: 'reference' | 'orderNumber', value: string): Promise<StatusOutcome> {
     const key = this.apiKey
     if (!key) return { kind: 'unavailable', reason: 'No DataHub API key configured.' }
+    const providerReference = value
 
     try {
       const response = await this.fetchRepeatable(
-        this.externalUrl(`/order-status?reference=${encodeURIComponent(providerReference)}`),
+        this.externalUrl(`/order-status?${param}=${encodeURIComponent(value)}`),
         { headers: { 'X-API-Key': key }, signal: AbortSignal.timeout(15_000) },
         'order-status',
       )
