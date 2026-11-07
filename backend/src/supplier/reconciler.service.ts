@@ -28,6 +28,9 @@ import { ConflictError, NotFoundError, ValidationError } from '../common/domain-
  * A plain interval rather than a cron dependency: one job, one cadence, and the
  * timer is unref'd so it never holds the process open.
  */
+/** How often one order in DataHub's manual queue is asked about, see `sweep`. */
+const MANUAL_QUEUE_CHECK_MS = 60 * 60_000
+
 /** Marks a delivery attempt whose reference a person typed in, see `attachProviderReference`. */
 export const HAND_REFERENCE_MARK = '[reference added by hand]'
 
@@ -362,7 +365,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
          * made an every-60-seconds error log entry for something already
          * correctly waiting on the Needs Attention page, not a new problem
          * each time. These still reach that page (its own query has no such
-         * exclusion), just not this wasted round trip.
+         * exclusion), and are asked separately, hourly and quietly, below.
          */
         NOT: { providerReference: { startsWith: 'manual_' } },
         createdAt: { lt: cutoff },
@@ -377,10 +380,42 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       if (await this.checkWithProvider(order)) settled++
     }
 
-    if (waiting.length > 0) {
-      this.log.log(`sweep: checked ${waiting.length}, settled ${settled}`)
+    /**
+     * DataHub's manual queue (`manual_` references, which DataHub itself
+     * hands back when it passes an order to its own staff). Excluded above
+     * because their status check often does not know these, but it does
+     * answer for some, so they are asked too: at most once an hour each, a
+     * few per sweep, and an unknown answer is not logged as an error. One
+     * that settles here needs nobody to mark it by hand.
+     */
+    const hourAgo = Date.now() - MANUAL_QUEUE_CHECK_MS
+    const manualQueue = (
+      await this.prisma.order.findMany({
+        where: {
+          status: { in: ['pending', 'processing'] },
+          providerReference: { startsWith: 'manual_' },
+          createdAt: { lt: cutoff },
+        },
+        select: { id: true, reference: true, providerReference: true, supplierCodeAtSale: true },
+        take: 50,
+        orderBy: { createdAt: 'asc' },
+      })
+    )
+      .filter((order) => (this.lastProviderCheckAt.get(order.id) ?? 0) < hourAgo)
+      .slice(0, 5)
+    for (const order of manualQueue) {
+      this.lastProviderCheckAt.set(order.id, Date.now())
+      if (await this.checkWithProvider(order)) {
+        settled++
+        this.lastProviderCheckAt.delete(order.id)
+      }
     }
-    return { checked: waiting.length, settled }
+
+    const checked = waiting.length + manualQueue.length
+    if (checked > 0) {
+      this.log.log(`sweep: checked ${checked} (${manualQueue.length} in DataHub's manual queue), settled ${settled}`)
+    }
+    return { checked, settled }
   }
 
   /** Ask the order's own provider about it and settle it if they now have an answer. Returns whether it settled. */
@@ -405,7 +440,12 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     if (result.kind === 'not_found') {
       // They accepted a reference and now do not recognise it. Never resolved
       // automatically, refunding risks paying back a delivered bundle, and
-      // completing risks crediting a sale that never happened.
+      // completing risks crediting a sale that never happened. Expected for
+      // much of DataHub's manual queue, so only a real reference is an error.
+      if (order.providerReference?.startsWith('manual_')) {
+        this.log.log(`${order.reference}: ${order.providerReference} is in DataHub's manual queue, their status check does not know it yet`)
+        return false
+      }
       this.log.error(
         `${order.reference}: ${providerLabel} does not recognise ${order.providerReference}, needs manual checking`,
       )
@@ -585,7 +625,12 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     if (live) {
       const result = provider === 'gmpl' ? await this.gmpl.orderStatus(reference) : await this.datahub.orderStatus(reference)
       if (result.kind === 'not_found') {
-        throw new ValidationError(`${label} does not recognise ${reference}. Check it on their dashboard and try again.`)
+        throw new ValidationError(
+          reference.startsWith('manual_')
+            ? `${label}'s status check cannot see ${reference}: it is in their manual queue, cleared by their own staff. ` +
+                'If their dashboard shows it delivered or failed, use Mark as delivered or Mark as failed instead.'
+            : `${label} does not recognise ${reference}. Check it on their dashboard and try again.`,
+        )
       }
       if (result.kind === 'unavailable') {
         throw new ConflictError(
@@ -895,7 +940,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * Book any charge DataHub has since put back in the float for this order.
    *
    * Asked when a person is about to fail or reorder an order, because neither
-   * path hears about it otherwise: a `manual_` order is not swept, and a
+   * path hears about it otherwise: a `manual_` order is only swept hourly, and a
    * reorder moves on from the attempt that was refunded. Never blocks them:
    * if DataHub cannot answer, the cost just stays booked.
    */
