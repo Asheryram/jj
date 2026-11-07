@@ -12,6 +12,7 @@ import {
   AcknowledgeConflictDto,
   PlaceOrderDto,
   ReorderDto,
+  ProviderReferenceDto,
   ResolveOrderDto,
   RetryDispatchDto,
   ReverseOrderOutcomeDto,
@@ -153,6 +154,14 @@ export class OrdersController {
   @ApiBearerAuth()
   checkNow(@Param('id') id: string) {
     return this.reconciler.checkOrderByAdmin(id)
+  }
+
+  /** Type in the reference from the delivery partner's dashboard, see `ReconcilerService.attachProviderReference`. */
+  @Post(':id/provider-reference')
+  @Roles('admin')
+  @ApiBearerAuth()
+  providerReference(@Param('id') id: string, @Body() dto: ProviderReferenceDto) {
+    return this.reconciler.attachProviderReference(id, dto)
   }
 
   /**

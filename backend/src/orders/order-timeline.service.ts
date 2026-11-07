@@ -29,6 +29,12 @@ function describeAction(path: string, body: unknown): string {
   if (path.endsWith('/reopen')) return ['Refund reopened', note].filter(Boolean).join(': ')
   if (path.endsWith('/settle-manually')) return ['Refund recorded as paid another way', note].filter(Boolean).join(': ')
   if (path.endsWith('/check')) return 'Checked with the delivery partner'
+  if (path.endsWith('/provider-reference')) {
+    const r = body as { reference?: string; reorderedByHand?: boolean }
+    return [r.reorderedByHand ? `Ordered again by hand on the partner's dashboard, reference ${r.reference ?? ''}` : `Reference ${r.reference ?? ''} added from the partner's dashboard`, note]
+      .filter(Boolean)
+      .join(': ')
+  }
   if (path.endsWith('/retry-dispatch')) return ['Dispatch retried', note].filter(Boolean).join(': ')
   if (path.endsWith('/acknowledge-conflict')) return ['Conflict acknowledged', note].filter(Boolean).join(': ')
   return path

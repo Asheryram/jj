@@ -68,6 +68,23 @@ export class VerifyRecipientDto {
   recipient!: string
 }
 
+export class ProviderReferenceDto {
+  /** Exactly as the delivery partner's dashboard shows it. */
+  @IsString()
+  @MinLength(3, { message: 'Paste the reference from the delivery partner.' })
+  @MaxLength(80)
+  reference!: string
+
+  /** True when it was ordered again by hand on their dashboard, a new attempt. */
+  @IsBoolean()
+  reorderedByHand!: boolean
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  note?: string
+}
+
 export class ResolveOrderDto {
   @IsIn(['delivered', 'rejected'])
   outcome!: 'delivered' | 'rejected'

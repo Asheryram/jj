@@ -3,7 +3,7 @@ import { api, ApiError, type DispatchAttempt } from '../lib/api'
 import type { Order } from '../data/types'
 import { useStore } from '../state/store'
 import { cedis, dateTime } from '../lib/format'
-import { Button, Callout, Field, Modal, Spinner, TextInput, cn } from './ui'
+import { Button, Callout, Field, Modal, Segmented, Spinner, TextInput, cn } from './ui'
 import { AlertIcon, CheckIcon, ClockIcon } from './icons'
 import { OrderTimeline } from './OrderTimeline'
 
@@ -158,6 +158,11 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
   const [retryNoteError, setRetryNoteError] = useState('')
   const [busy, setBusy] = useState(false)
   const [checkingNow, setCheckingNow] = useState(false)
+  const [refOpen, setRefOpen] = useState(false)
+  const [refValue, setRefValue] = useState('')
+  const [refHow, setRefHow] = useState<'found' | 'reordered'>('found')
+  const [refNote, setRefNote] = useState('')
+  const [refError, setRefError] = useState('')
 
   /**
    * Keyed on `order?.id`, not `order` itself, a parent re-render can (and
@@ -176,6 +181,11 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
       setRetrying(false)
       setRetryNote('')
       setRetryNoteError('')
+      setRefOpen(false)
+      setRefValue('')
+      setRefHow('found')
+      setRefNote('')
+      setRefError('')
       return
     }
     let live = true
@@ -243,6 +253,28 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
       })
     } finally {
       setCheckingNow(false)
+    }
+  }
+
+  const submitReference = async () => {
+    if (refValue.trim().length < 3) {
+      setRefError('Paste the reference exactly as the delivery partner shows it.')
+      return
+    }
+    setBusy(true)
+    try {
+      const result = await api.addProviderReference(order.id, {
+        reference: refValue.trim(),
+        reorderedByHand: refHow === 'reordered',
+        note: refNote.trim() || undefined,
+      })
+      pushToast({ tone: result.settled ? 'success' : 'info', title: `${order.reference}: reference saved`, detail: result.message })
+      await refresh()
+      onClose()
+    } catch (caught) {
+      setRefError(caught instanceof ApiError ? caught.message : 'We could not save that.')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -474,6 +506,76 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
           <summary className="cursor-pointer text-sm font-semibold text-slate-800 dark:text-slate-100">Full history</summary>
           <OrderTimeline orderId={order.id} className="mt-3" />
         </details>
+
+        {/* The webhook never came and the order has no reference to check with,
+            or it sits in someone's manual queue: the admin finds it on the
+            partner's own dashboard (or orders it again there) and types the
+            reference in, so it settles the normal way. */}
+        {stuck && (
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
+            {!refOpen ? (
+              <>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  Have its reference from the DataHub dashboard?
+                </p>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  If it went through, or you ordered it again there by hand, add the reference and it is checked straight away.
+                </p>
+                <div className="mt-2.5">
+                  <Button size="sm" variant="outline" onClick={() => setRefOpen(true)}>
+                    Add the reference
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Reference from the delivery partner</p>
+                <Segmented<'found' | 'reordered'>
+                  className="mt-2 w-full"
+                  options={[
+                    { value: 'found', label: 'It went through' },
+                    { value: 'reordered', label: 'I ordered it again' },
+                  ]}
+                  value={refHow}
+                  onChange={setRefHow}
+                />
+                <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                  {refHow === 'found'
+                    ? 'You found this order on their dashboard: this is its reference.'
+                    : 'Nothing went through, so you placed it again on their dashboard: this is the new one.'}
+                </p>
+                <Field label="Reference" htmlFor="provider-ref" className="mt-2" error={refError}>
+                  <TextInput
+                    id="provider-ref"
+                    placeholder="As shown on the DataHub dashboard"
+                    value={refValue}
+                    invalid={Boolean(refError)}
+                    onChange={(event) => {
+                      setRefValue(event.target.value)
+                      setRefError('')
+                    }}
+                  />
+                </Field>
+                <Field label="Note (optional)" htmlFor="provider-ref-note" className="mt-2">
+                  <TextInput
+                    id="provider-ref-note"
+                    placeholder="e.g. found under today's orders"
+                    value={refNote}
+                    onChange={(event) => setRefNote(event.target.value)}
+                  />
+                </Field>
+                <div className="mt-2.5 flex gap-2">
+                  <Button size="sm" loading={busy} onClick={() => void submitReference()}>
+                    Save and check
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => setRefOpen(false)}>
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* The automatic sweep still covers this order eventually, but only
             once every ten minutes, this asks the delivery partner directly,

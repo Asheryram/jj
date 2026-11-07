@@ -1598,6 +1598,9 @@ export const api = {
    * reconciler's own ten-minute clock.
    */
   checkOrderNow: (id: string) => request<{ settled: boolean }>(`/orders/${id}/check-now`, { method: 'POST' }),
+  /** The reference from the delivery partner's own dashboard, see `ReconcilerService.attachProviderReference`. */
+  addProviderReference: (id: string, body: { reference: string; reorderedByHand: boolean; note?: string }) =>
+    request<{ settled: boolean; checked: boolean; message: string }>(`/orders/${id}/provider-reference`, { method: 'POST', body }),
 
   /**
    * Retry dispatch by hand, only valid when the last attempt timed out

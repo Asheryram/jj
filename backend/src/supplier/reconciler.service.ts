@@ -490,6 +490,103 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     return { settled }
   }
 
+  /**
+   * An admin found this order's reference on the delivery partner's own
+   * dashboard, or ordered it again there by hand, and types the reference in.
+   *
+   * For the order the webhook and the sweep cannot settle: it never got a
+   * reference back (the purchase call timed out), or it went to someone's
+   * manual queue. With a reference, the order is checked with the partner
+   * straight away, and after that by the usual ten-minute sweep, so it
+   * settles the normal way: delivered or failed, with the books and the
+   * customer told exactly as if the webhook had arrived.
+   *
+   * `reorderedByHand` records a new delivery attempt (they placed it again
+   * on the dashboard); otherwise the reference belongs to the attempt already
+   * made. A reference already on another order is refused: one bundle never
+   * settles two orders.
+   */
+  async attachProviderReference(
+    orderId: string,
+    input: { reference: string; reorderedByHand: boolean; note?: string },
+  ): Promise<{ settled: boolean; checked: boolean; message: string }> {
+    const reference = input.reference.trim()
+    if (!/^[A-Za-z0-9_\-:.#/]{3,80}$/.test(reference)) {
+      throw new ValidationError('Paste the reference exactly as the delivery partner shows it.')
+    }
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, reference: true, status: true, providerReference: true, supplierCodeAtSale: true },
+    })
+    if (!order) throw new NotFoundError('We could not find that order.')
+    if (order.status !== 'pending' && order.status !== 'processing') {
+      throw new ConflictError('ALREADY_SETTLED', `That order is already ${order.status}.`)
+    }
+    const taken = await this.prisma.order.findFirst({
+      where: { providerReference: reference, id: { not: order.id } },
+      select: { reference: true },
+    })
+    if (taken) {
+      throw new ConflictError('REFERENCE_IN_USE', `That reference already belongs to order ${taken.reference}.`)
+    }
+
+    const latest = await this.prisma.supplierDispatch.findFirst({
+      where: { orderId: order.id },
+      orderBy: [{ attempt: 'desc' }, { createdAt: 'desc' }],
+    })
+    const note = input.note?.trim()
+    await this.prisma.$transaction(async (tx) => {
+      if (input.reorderedByHand && latest) {
+        await tx.supplierDispatch.create({
+          data: {
+            orderId: order.id,
+            orderRef: order.reference,
+            supplierCode: latest.supplierCode,
+            recipient: latest.recipient,
+            costPrice: latest.costPrice,
+            outcome: 'pending',
+            reason: `Ordered again by hand on the delivery partner's dashboard${note ? `: ${note}` : ''}`,
+            simulated: false,
+            providerReference: reference,
+            attempt: latest.attempt + 1,
+          },
+        })
+      } else if (latest) {
+        await tx.supplierDispatch.update({
+          where: { id: latest.id },
+          data: {
+            providerReference: reference,
+            reason: [latest.reason, `Reference ${reference} added by hand from the partner's dashboard${note ? `: ${note}` : ''}`]
+              .filter(Boolean)
+              .join('. '),
+          },
+        })
+      }
+      await tx.order.update({
+        where: { id: order.id },
+        data: { providerReference: reference, ...(order.status === 'pending' ? { status: 'processing' } : {}) },
+      })
+    })
+    this.log.warn(
+      `${order.reference}: reference ${reference} added by hand${input.reorderedByHand ? ' (ordered again on the dashboard)' : ''}`,
+    )
+
+    const provider = await this.resolveProvider(order.supplierCodeAtSale)
+    if (!this.supplier.isLiveFor(provider)) {
+      return { settled: false, checked: false, message: 'Saved. The supplier integration is simulated, so nothing was checked.' }
+    }
+    this.lastProviderCheckAt.set(order.id, Date.now())
+    const settled = await this.checkWithProvider({ ...order, providerReference: reference })
+    if (settled) this.lastProviderCheckAt.delete(order.id)
+    return {
+      settled,
+      checked: true,
+      message: settled
+        ? 'Saved, and the delivery partner has already answered: the order is settled.'
+        : 'Saved. The delivery partner has not finished it yet; it is checked again automatically every ten minutes.',
+    }
+  }
+
   private async platformName(): Promise<string> {
     const branding = await this.prisma.branding.findFirst({ where: { userId: null } })
     return branding?.shopName ?? 'JamesDataConsult'
