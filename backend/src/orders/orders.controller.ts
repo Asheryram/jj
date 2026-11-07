@@ -160,8 +160,8 @@ export class OrdersController {
   @Post(':id/provider-reference')
   @Roles('admin')
   @ApiBearerAuth()
-  providerReference(@Param('id') id: string, @Body() dto: ProviderReferenceDto) {
-    return this.reconciler.attachProviderReference(id, dto)
+  providerReference(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ProviderReferenceDto) {
+    return this.reconciler.attachProviderReference(id, dto, user)
   }
 
   /**

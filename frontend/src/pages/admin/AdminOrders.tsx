@@ -989,13 +989,14 @@ function OrderStatusDetails({ order, onWhy, onReverse }: { order: Order; onWhy: 
           recipient and a withdrawn bundle into one word. The
           difference decides what to do about it, so it is one
           click away rather than a database query. */}
-      {(order.status === 'failed' || order.status === 'processing') && (
+      {(order.status === 'failed' || order.status === 'processing' || (onReverse && order.status === 'completed')) && (
         <button
           type="button"
           onClick={onWhy}
           className="mt-1 block text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2 hover:text-brand-800"
         >
-          Why?
+          {/* A superadmin opens a completed order too, to correct its reference. */}
+          {order.status === 'completed' ? 'Details' : 'Why?'}
         </button>
       )}
       {onReverse && (order.status === 'completed' || order.status === 'failed') && (

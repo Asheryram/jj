@@ -146,7 +146,7 @@ function explain(attempt: DispatchAttempt): {
  * offering a thinner "resolve by hand only" version of the same decision.
  */
 export function DispatchModal({ order, onClose }: { order: Order | null; onClose: () => void }) {
-  const { pushToast, refresh } = useStore()
+  const { pushToast, refresh, session } = useStore()
   const [attempts, setAttempts] = useState<DispatchAttempt[] | null>(null)
   const [error, setError] = useState('')
   const [resolving, setResolving] = useState<'delivered' | 'rejected' | null>(null)
@@ -212,6 +212,13 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
    */
   const latestAttempt = attempts && attempts.length > 0 ? attempts[attempts.length - 1] : null
   const canRetry = stuck && latestAttempt?.outcome === 'unknown' && !latestAttempt.providerReference
+  /** A reference already typed in by hand: from then on only a superadmin changes it. */
+  const handReference = Boolean(latestAttempt?.reason?.includes('[reference added by hand]'))
+  const currentReference = latestAttempt?.providerReference ?? null
+  const isSuperadmin = session?.role === 'superadmin'
+  /** Correcting, not adding: a superadmin fixing a reference, open or settled. */
+  const correcting = isSuperadmin && Boolean(currentReference) && (handReference || !stuck)
+  const canAddReference = (stuck && !handReference) || correcting
 
   const submitRetry = async () => {
     if (retryNote.trim().length < 5) {
@@ -265,10 +272,14 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
     try {
       const result = await api.addProviderReference(order.id, {
         reference: refValue.trim(),
-        reorderedByHand: refHow === 'reordered',
+        reorderedByHand: !correcting && refHow === 'reordered',
         note: refNote.trim() || undefined,
       })
-      pushToast({ tone: result.settled ? 'success' : 'info', title: `${order.reference}: reference saved`, detail: result.message })
+      pushToast({
+        tone: result.settled ? 'success' : 'info',
+        title: `${order.reference}: reference ${result.corrected ? 'corrected' : 'saved'}`,
+        detail: result.message,
+      })
       await refresh()
       onClose()
     } catch (caught) {
@@ -511,39 +522,52 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
             or it sits in someone's manual queue: the admin finds it on the
             partner's own dashboard (or orders it again there) and types the
             reference in, so it settles the normal way. */}
-        {stuck && (
+        {stuck && handReference && !isSuperadmin && (
+          <p className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-xs text-slate-500 dark:text-slate-400">
+            Reference <span className="font-mono">{currentReference}</span> was added by hand. If it is wrong, ask a superadmin to correct it.
+          </p>
+        )}
+        {canAddReference && (
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
             {!refOpen ? (
               <>
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  Have its reference from the DataHub dashboard?
+                  {correcting ? 'Wrong reference on this order?' : 'Have its reference from the DataHub dashboard?'}
                 </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  If it went through, or you ordered it again there by hand, add the reference and it is checked straight away.
+                  {correcting
+                    ? `Now ${currentReference}. Replace it with the right one; it is checked with the delivery partner first.`
+                    : 'If it went through, or you ordered it again there by hand, add the reference. It is checked with the delivery partner before it is saved.'}
                 </p>
                 <div className="mt-2.5">
                   <Button size="sm" variant="outline" onClick={() => setRefOpen(true)}>
-                    Add the reference
+                    {correcting ? 'Correct the reference' : 'Add the reference'}
                   </Button>
                 </div>
               </>
             ) : (
               <>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Reference from the delivery partner</p>
-                <Segmented<'found' | 'reordered'>
-                  className="mt-2 w-full"
-                  options={[
-                    { value: 'found', label: 'It went through' },
-                    { value: 'reordered', label: 'I ordered it again' },
-                  ]}
-                  value={refHow}
-                  onChange={setRefHow}
-                />
-                <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                  {refHow === 'found'
-                    ? 'You found this order on their dashboard: this is its reference.'
-                    : 'Nothing went through, so you placed it again on their dashboard: this is the new one.'}
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  {correcting ? 'The right reference' : 'Reference from the delivery partner'}
                 </p>
+                {!correcting && (
+                  <>
+                    <Segmented<'found' | 'reordered'>
+                      className="mt-2 w-full"
+                      options={[
+                        { value: 'found', label: 'It went through' },
+                        { value: 'reordered', label: 'I ordered it again' },
+                      ]}
+                      value={refHow}
+                      onChange={setRefHow}
+                    />
+                    <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                      {refHow === 'found'
+                        ? 'You found this order on their dashboard: this is its reference.'
+                        : 'Nothing went through, so you placed it again on their dashboard: this is the new one.'}
+                    </p>
+                  </>
+                )}
                 <Field label="Reference" htmlFor="provider-ref" className="mt-2" error={refError}>
                   <TextInput
                     id="provider-ref"
@@ -559,14 +583,14 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
                 <Field label="Note (optional)" htmlFor="provider-ref-note" className="mt-2">
                   <TextInput
                     id="provider-ref-note"
-                    placeholder="e.g. found under today's orders"
+                    placeholder={correcting ? 'e.g. typed the wrong one' : "e.g. found under today's orders"}
                     value={refNote}
                     onChange={(event) => setRefNote(event.target.value)}
                   />
                 </Field>
                 <div className="mt-2.5 flex gap-2">
                   <Button size="sm" loading={busy} onClick={() => void submitReference()}>
-                    Save and check
+                    {correcting ? 'Check and correct' : 'Check and save'}
                   </Button>
                   <Button size="sm" variant="outline" disabled={busy} onClick={() => setRefOpen(false)}>
                     Cancel

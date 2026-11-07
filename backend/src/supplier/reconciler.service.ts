@@ -28,6 +28,29 @@ import { ConflictError, NotFoundError, ValidationError } from '../common/domain-
  * A plain interval rather than a cron dependency: one job, one cadence, and the
  * timer is unref'd so it never holds the process open.
  */
+/** Marks a delivery attempt whose reference a person typed in, see `attachProviderReference`. */
+export const HAND_REFERENCE_MARK = '[reference added by hand]'
+
+/** Every Ghana phone-number-looking value in a partner's reply, wherever it sits. */
+function phoneNumbersIn(raw: unknown): string[] {
+  const found: string[] = []
+  const walk = (value: unknown) => {
+    if (typeof value === 'string' || typeof value === 'number') {
+      const digits = String(value).replace(/\D/g, '')
+      if ((digits.length === 10 && digits.startsWith('0')) || (digits.length === 12 && digits.startsWith('233'))) found.push(digits)
+    } else if (Array.isArray(value)) value.forEach(walk)
+    else if (value && typeof value === 'object') Object.values(value as Record<string, unknown>).forEach(walk)
+  }
+  walk(raw)
+  return found
+}
+
+/** The same line, whether written 0XXXXXXXXX or 233XXXXXXXXX. */
+function samePhone(a: string, b: string): boolean {
+  const tail = (n: string) => n.replace(/\D/g, '').slice(-9)
+  return tail(a).length === 9 && tail(a) === tail(b)
+}
+
 @Injectable()
 export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = new Logger(ReconcilerService.name)
@@ -496,31 +519,55 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    *
    * For the order the webhook and the sweep cannot settle: it never got a
    * reference back (the purchase call timed out), or it went to someone's
-   * manual queue. With a reference, the order is checked with the partner
-   * straight away, and after that by the usual ten-minute sweep, so it
-   * settles the normal way: delivered or failed, with the books and the
-   * customer told exactly as if the webhook had arrived.
+   * manual queue. The reference is checked with the partner BEFORE anything
+   * is saved: one they do not recognise, or one for another phone number, is
+   * refused. Saved, it settles the normal way (straight away if the partner
+   * has finished, otherwise by the ten-minute sweep), with the books and the
+   * customer handled as if the webhook had arrived.
    *
    * `reorderedByHand` records a new delivery attempt (they placed it again
    * on the dashboard); otherwise the reference belongs to the attempt already
    * made. A reference already on another order is refused: one bundle never
    * settles two orders.
+   *
+   * Once a reference has been added by hand, only a superadmin can change
+   * it, and a superadmin can correct it even after the order has settled.
+   * A correction on a settled order only records the right reference; if the
+   * real outcome differs, that is what Reverse outcome is for.
    */
   async attachProviderReference(
     orderId: string,
     input: { reference: string; reorderedByHand: boolean; note?: string },
-  ): Promise<{ settled: boolean; checked: boolean; message: string }> {
+    user: { id: string; role: string },
+  ): Promise<{ settled: boolean; checked: boolean; corrected: boolean; providerStatus: string | null; message: string }> {
     const reference = input.reference.trim()
     if (!/^[A-Za-z0-9_\-:.#/]{3,80}$/.test(reference)) {
       throw new ValidationError('Paste the reference exactly as the delivery partner shows it.')
     }
+    const superadmin = user.role === 'superadmin'
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true, reference: true, status: true, providerReference: true, supplierCodeAtSale: true },
+      select: { id: true, reference: true, status: true, recipient: true, providerReference: true, supplierCodeAtSale: true },
     })
     if (!order) throw new NotFoundError('We could not find that order.')
-    if (order.status !== 'pending' && order.status !== 'processing') {
+    const open = order.status === 'pending' || order.status === 'processing'
+
+    const latest = await this.prisma.supplierDispatch.findFirst({
+      where: { orderId: order.id },
+      orderBy: [{ attempt: 'desc' }, { createdAt: 'desc' }],
+    })
+    const handAdded = Boolean(latest?.reason?.includes(HAND_REFERENCE_MARK))
+    if (handAdded && !superadmin) {
+      throw new ConflictError(
+        'SUPERADMIN_ONLY',
+        `A reference (${order.providerReference ?? 'unknown'}) was already added by hand. Only a superadmin can change it.`,
+      )
+    }
+    if (!open && !(superadmin && order.providerReference)) {
       throw new ConflictError('ALREADY_SETTLED', `That order is already ${order.status}.`)
+    }
+    if (reference === order.providerReference) {
+      throw new ValidationError('That is already the reference on this order.')
     }
     const taken = await this.prisma.order.findFirst({
       where: { providerReference: reference, id: { not: order.id } },
@@ -530,13 +577,41 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       throw new ConflictError('REFERENCE_IN_USE', `That reference already belongs to order ${taken.reference}.`)
     }
 
-    const latest = await this.prisma.supplierDispatch.findFirst({
-      where: { orderId: order.id },
-      orderBy: [{ attempt: 'desc' }, { createdAt: 'desc' }],
-    })
+    // Checked with the partner before anything is written.
+    const provider = await this.resolveProvider(order.supplierCodeAtSale)
+    const live = this.supplier.isLiveFor(provider)
+    const label = provider === 'gmpl' ? 'GMPL' : 'DataHub'
+    let providerStatus: string | null = null
+    if (live) {
+      const result = provider === 'gmpl' ? await this.gmpl.orderStatus(reference) : await this.datahub.orderStatus(reference)
+      if (result.kind === 'not_found') {
+        throw new ValidationError(`${label} does not recognise ${reference}. Check it on their dashboard and try again.`)
+      }
+      if (result.kind === 'unavailable') {
+        throw new ConflictError(
+          'PROVIDER_UNREACHABLE',
+          `We could not check that with ${label} just now (${result.reason}). Nothing was saved; try again in a minute.`,
+        )
+      }
+      const numbers = phoneNumbersIn(result.raw)
+      if (numbers.length > 0 && !numbers.some((n) => samePhone(n, order.recipient))) {
+        throw new ValidationError(`${reference} is for a different phone number on ${label}, not ${order.recipient}. Nothing was saved.`)
+      }
+      providerStatus = result.providerStatus
+    }
+
     const note = input.note?.trim()
+    const corrected = Boolean(order.providerReference)
+    const what = corrected ? `Corrected from ${order.providerReference} to ${reference}` : `Reference ${reference} added by hand`
+    const mark = `${HAND_REFERENCE_MARK} ${what}${note ? `: ${note}` : ''}`
     await this.prisma.$transaction(async (tx) => {
-      if (input.reorderedByHand && latest) {
+      if (handAdded && latest) {
+        // Correcting the reference typed in before: the same attempt, fixed.
+        await tx.supplierDispatch.update({
+          where: { id: latest.id },
+          data: { providerReference: reference, providerStatus, reason: [latest.reason, mark].filter(Boolean).join('. ') },
+        })
+      } else if (input.reorderedByHand && latest) {
         await tx.supplierDispatch.create({
           data: {
             orderId: order.id,
@@ -545,21 +620,17 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
             recipient: latest.recipient,
             costPrice: latest.costPrice,
             outcome: 'pending',
-            reason: `Ordered again by hand on the delivery partner's dashboard${note ? `: ${note}` : ''}`,
+            reason: `Ordered again by hand on the delivery partner's dashboard. ${mark}`,
             simulated: false,
             providerReference: reference,
+            providerStatus,
             attempt: latest.attempt + 1,
           },
         })
       } else if (latest) {
         await tx.supplierDispatch.update({
           where: { id: latest.id },
-          data: {
-            providerReference: reference,
-            reason: [latest.reason, `Reference ${reference} added by hand from the partner's dashboard${note ? `: ${note}` : ''}`]
-              .filter(Boolean)
-              .join('. '),
-          },
+          data: { providerReference: reference, providerStatus, reason: [latest.reason, mark].filter(Boolean).join('. ') },
         })
       }
       await tx.order.update({
@@ -567,13 +638,19 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
         data: { providerReference: reference, ...(order.status === 'pending' ? { status: 'processing' } : {}) },
       })
     })
-    this.log.warn(
-      `${order.reference}: reference ${reference} added by hand${input.reorderedByHand ? ' (ordered again on the dashboard)' : ''}`,
-    )
+    this.log.warn(`${order.reference}: ${mark} by ${user.id}`)
 
-    const provider = await this.resolveProvider(order.supplierCodeAtSale)
-    if (!this.supplier.isLiveFor(provider)) {
-      return { settled: false, checked: false, message: 'Saved. The supplier integration is simulated, so nothing was checked.' }
+    if (!live) {
+      return { settled: false, checked: false, corrected, providerStatus, message: 'Saved. The supplier integration is simulated, so nothing was checked.' }
+    }
+    if (!open) {
+      return {
+        settled: false,
+        checked: true,
+        corrected,
+        providerStatus,
+        message: `Reference corrected. ${label} says ${providerStatus}. The order stays ${order.status}; if that is wrong, use Reverse outcome.`,
+      }
     }
     this.lastProviderCheckAt.set(order.id, Date.now())
     const settled = await this.checkWithProvider({ ...order, providerReference: reference })
@@ -581,9 +658,11 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     return {
       settled,
       checked: true,
+      corrected,
+      providerStatus,
       message: settled
-        ? 'Saved, and the delivery partner has already answered: the order is settled.'
-        : 'Saved. The delivery partner has not finished it yet; it is checked again automatically every ten minutes.',
+        ? `Saved. ${label} says ${providerStatus}, so the order is settled.`
+        : `Saved. ${label} says ${providerStatus}; it is checked again automatically every ten minutes.`,
     }
   }
 
