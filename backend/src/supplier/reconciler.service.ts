@@ -28,6 +28,11 @@ import { ConflictError, NotFoundError, ValidationError } from '../common/domain-
  * A plain interval rather than a cron dependency: one job, one cadence, and the
  * timer is unref'd so it never holds the process open.
  */
+/** How far back delivered orders are asked about again, how often each, and how many per sweep. */
+const RECHECK_WINDOW_MS = 7 * 24 * 60 * 60_000
+const RECHECK_EVERY_MS = 3 * 60 * 60_000
+const RECHECK_BATCH = 10
+
 /** Marks a delivery attempt whose reference a person typed in, see `attachProviderReference`. */
 export const HAND_REFERENCE_MARK = '[reference added by hand]'
 
@@ -96,6 +101,8 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   private lastStuckAlertAt: number | null = null
   /** Keyed by order id. See `checkOrderNow`'s own comment for why this throttles it. */
   private readonly lastProviderCheckAt = new Map<string, number>()
+  /** When each settled order was last asked about again, see `recheckRecentSettled`. */
+  private readonly lastRecheckAt = new Map<string, number>()
   private static readonly MIN_PROVIDER_CHECK_GAP_MS = 30_000
 
   /**
@@ -372,7 +379,106 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     if (waiting.length > 0) {
       this.log.log(`sweep: checked ${waiting.length}, settled ${settled}`)
     }
-    return { checked: waiting.length, settled }
+    const rechecked = await this.recheckRecentSettled()
+    return { checked: waiting.length + rechecked, settled }
+  }
+
+  /**
+   * Ask the provider again about orders already marked delivered in the last
+   * week. A provider can turn a delivered order into a failed or refunded one
+   * afterwards, and if its message about it never arrives, nothing else here
+   * would ever notice. A few per sweep, each order again every few hours.
+   *
+   * A disagreement is flagged, never undone automatically: money has moved
+   * both ways by then (the agent was credited; a refund may be owed), so a
+   * person decides, see `FulfilmentService.flagConflict`.
+   */
+  private async recheckRecentSettled(): Promise<number> {
+    const since = new Date(Date.now() - RECHECK_WINDOW_MS)
+    const due = Date.now() - RECHECK_EVERY_MS
+    const candidates = await this.prisma.order.findMany({
+      where: {
+        status: 'completed',
+        conflictNote: null,
+        providerReference: { not: null },
+        completedAt: { gte: since },
+        resolvedManually: false,
+      },
+      select: { id: true, reference: true, status: true, providerReference: true, supplierCodeAtSale: true },
+      orderBy: { completedAt: 'desc' },
+      take: 300,
+    })
+    const batch = candidates.filter((order) => (this.lastRecheckAt.get(order.id) ?? 0) < due).slice(0, RECHECK_BATCH)
+    for (const order of batch) {
+      this.lastRecheckAt.set(order.id, Date.now())
+      try {
+        await this.recheckSettled(order)
+      } catch (error) {
+        this.log.warn(`recheck ${order.reference} failed: ${String(error)}`)
+      }
+    }
+    // Forget orders that have left the window, so the map cannot grow for ever.
+    if (this.lastRecheckAt.size > 2000) {
+      const keep = new Set(candidates.map((order) => order.id))
+      for (const id of this.lastRecheckAt.keys()) if (!keep.has(id)) this.lastRecheckAt.delete(id)
+    }
+    return batch.length
+  }
+
+  /**
+   * One settled order (delivered or failed), asked about again. Records what the
+   * provider says now; if it disagrees with how the order was settled, flags the
+   * order through the same path a late webhook takes, so it shows on Needs
+   * attention and Today (and is emailed) for a person to decide.
+   */
+  private async recheckSettled(order: {
+    id: string
+    reference: string
+    status: string
+    providerReference: string | null
+    supplierCodeAtSale: string | null
+  }): Promise<{ providerStatus: string | null; conflict: boolean; message: string }> {
+    const provider = await this.resolveProvider(order.supplierCodeAtSale)
+    const label = provider === 'gmpl' ? 'GMPL' : 'DataHub'
+    if (!order.providerReference) {
+      return { providerStatus: null, conflict: false, message: `This order never got a ${label} reference, so there is nothing to ask about.` }
+    }
+    if (!this.supplier.isLiveFor(provider)) {
+      return { providerStatus: null, conflict: false, message: 'The supplier integration is simulated right now, there is nothing real to check.' }
+    }
+    const result =
+      provider === 'gmpl'
+        ? await this.gmpl.orderStatus(order.providerReference)
+        : await this.datahub.orderStatus(order.providerReference)
+    if (result.kind === 'unavailable') {
+      return { providerStatus: null, conflict: false, message: `${label} did not answer (${result.reason}). Try again in a minute.` }
+    }
+    if (result.kind === 'not_found') {
+      return { providerStatus: null, conflict: false, message: `${label} does not recognise ${order.providerReference}.` }
+    }
+    await this.prisma.supplierDispatch.updateMany({
+      where: { orderId: order.id, providerReference: order.providerReference },
+      data: { providerStatus: result.providerStatus },
+    })
+    const mapped = provider === 'gmpl' ? mapGmplOrderStatus(result.providerStatus) : mapProviderStatus(result.providerStatus)
+    if (mapped === null) {
+      return { providerStatus: result.providerStatus, conflict: false, message: `${label} says ${result.providerStatus}, not a final answer yet.` }
+    }
+    const ours = order.status === 'completed' ? 'completed' : 'failed'
+    if (mapped === ours) {
+      return { providerStatus: result.providerStatus, conflict: false, message: `${label} says ${result.providerStatus}, which matches.` }
+    }
+    const settled = await this.fulfilment.settleFromProvider(
+      order.id,
+      mapped === 'completed' ? 'delivered' : 'rejected',
+      `Rechecked: ${label} now reports ${result.providerStatus}`,
+    )
+    this.log.error(`${order.reference}: was ${ours}, ${label} now says ${result.providerStatus}, flagged`)
+    return {
+      providerStatus: result.providerStatus,
+      conflict: settled.conflict,
+      message: `${label} now says ${result.providerStatus}, but this order is ${ours}. It is flagged on Needs attention for you to decide.`,
+    }
   }
 
   /** Ask the order's own provider about it and settle it if they now have an answer. Returns whether it settled. */
@@ -481,14 +587,22 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * other two check paths, an admin who asks for this deserves to be told
    * why, not a result that looks identical whether it worked or was refused.
    */
-  async checkOrderByAdmin(orderId: string): Promise<{ settled: boolean }> {
+  async checkOrderByAdmin(
+    orderId: string,
+  ): Promise<{ settled: boolean; providerStatus?: string | null; conflict?: boolean; message?: string }> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       select: { id: true, reference: true, status: true, providerReference: true, supplierCodeAtSale: true },
     })
     if (!order) throw new NotFoundError('We could not find that order.')
+    // Already delivered or failed: ask again whether that is still true.
+    if (order.status === 'completed' || order.status === 'failed') {
+      this.lastRecheckAt.set(order.id, Date.now())
+      const result = await this.recheckSettled(order)
+      return { settled: false, ...result }
+    }
     if (order.status !== 'pending' && order.status !== 'processing') {
-      throw new ConflictError('ALREADY_SETTLED', `That order is already ${order.status}, there is nothing to check.`)
+      throw new ConflictError('ALREADY_SETTLED', `That order is ${order.status}, there is nothing to check.`)
     }
     if (!order.providerReference) {
       throw new ValidationError('The provider never gave this order a reference, there is nothing to ask them about.')

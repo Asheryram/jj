@@ -408,6 +408,15 @@ export class AdminController {
     })
   }
 
+  /** Every number that has bought, see `AdminService.buyerNumbers`. */
+  @Get('buyer-numbers')
+  buyerNumbers(@Query('by') by?: string, @Query('category') category?: string) {
+    return this.admin.buyerNumbers({
+      by: by === 'buyer' ? 'buyer' : 'recipient',
+      category: category === 'all' ? null : (category ?? 'data'),
+    })
+  }
+
   /** Orders nobody can resolve automatically, see `ReconcilerService.needsAttention`. */
   @Get('orders/needs-attention')
   needsAttention() {

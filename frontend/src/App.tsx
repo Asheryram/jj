@@ -54,6 +54,7 @@ import SetPassword from './pages/SetPassword'
 import ForgotPassword from './pages/ForgotPassword'
 import Refunds from './pages/admin/Refunds'
 import NeedsAttention from './pages/admin/NeedsAttention'
+import BuyerNumbers from './pages/admin/BuyerNumbers'
 import BrandingReview from './pages/admin/BrandingReview'
 import BrandingRequests from './pages/admin/BrandingRequests'
 import Team from './pages/admin/Team'
@@ -352,6 +353,7 @@ export default function App() {
               <Route path="/admin/approvals" element={<NumberApprovals />} />
               <Route path="/admin/refunds" element={<Refunds />} />
               <Route path="/admin/needs-attention" element={<NeedsAttention />} />
+              <Route path="/admin/numbers" element={<BuyerNumbers />} />
               <Route path="/admin/branding" element={<BrandingReview />} />
               <Route path="/admin/branding-requests" element={<BrandingRequests />} />
               <Route path="/admin/feedback" element={<AdminFeedback />} />

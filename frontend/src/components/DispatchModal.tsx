@@ -246,11 +246,15 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
         pushToast({ tone: 'success', title: `${order.reference}: resolved` })
         await refresh()
         onClose()
+      } else if (result.conflict) {
+        pushToast({ tone: 'error', title: `${order.reference}: the provider disagrees`, detail: result.message })
+        await refresh()
+        onClose()
       } else {
         pushToast({
           tone: 'info',
-          title: `${order.reference}: still processing`,
-          detail: "The delivery partner has not answered yet, nothing new to report.",
+          title: stuck ? `${order.reference}: still processing` : `${order.reference}: checked`,
+          detail: result.message ?? "The delivery partner has not answered yet, nothing new to report.",
         })
       }
     } catch (caught) {
@@ -604,17 +608,19 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
         {/* The automatic sweep still covers this order eventually, but only
             once every ten minutes, this asks the delivery partner directly,
             right now, instead of waiting on its clock. */}
-        {stuck && (
+        {(stuck || order.status === 'completed' || (order.status === 'failed' && order.paymentCollected !== false)) && (
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
             <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              Don't want to wait for the automatic check?
+              {stuck ? "Don't want to wait for the automatic check?" : 'Is this still right?'}
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Asks the delivery partner for this order's status right now.
+              {stuck
+                ? "Asks the delivery partner for this order's status right now."
+                : 'Asks the delivery partner what it says about this order now. A provider can turn a delivered order into a failed one later; if it has, the order is flagged for you to decide.'}
             </p>
             <div className="mt-2.5">
               <Button size="sm" variant="outline" loading={checkingNow} onClick={() => void submitCheckNow()}>
-                Check now
+                {stuck ? 'Check now' : 'Check with provider'}
               </Button>
             </div>
           </div>

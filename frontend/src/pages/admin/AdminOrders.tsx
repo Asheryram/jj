@@ -883,6 +883,41 @@ function FinancialFigure({
  * table's Status column and the mobile card fallback below, so the two never
  * drift out of sync with each other.
  */
+/**
+ * Asks the provider about this one order now, from its row. Delivered and failed
+ * orders are checked again too: a provider can turn a delivered order into a
+ * failed one later, and a disagreement is flagged on Needs attention.
+ */
+function CheckWithProvider({ order }: { order: Order }) {
+  const { pushToast } = useStore()
+  const [busy, setBusy] = useState(false)
+  const check = async () => {
+    setBusy(true)
+    try {
+      const result = await api.checkOrderNow(order.id)
+      pushToast({
+        tone: result.conflict ? 'error' : result.settled ? 'success' : 'info',
+        title: `${order.reference}: ${result.conflict ? 'the provider disagrees' : result.settled ? 'settled' : 'checked'}`,
+        detail: result.message ?? (result.settled ? 'The provider has answered; reload to see it.' : 'Nothing new from the provider.'),
+      })
+    } catch (caught) {
+      pushToast({ tone: 'error', title: caught instanceof ApiError ? caught.message : 'Could not check that order.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => void check()}
+      className="mt-1 block text-xs font-semibold text-slate-600 underline underline-offset-2 hover:text-slate-900 disabled:opacity-60 dark:text-slate-300"
+    >
+      {busy ? 'Checking…' : 'Check with provider'}
+    </button>
+  )
+}
+
 function OrderStatusDetails({ order, onWhy, onReverse }: { order: Order; onWhy: () => void; onReverse?: () => void }) {
   return (
     <>
@@ -999,6 +1034,10 @@ function OrderStatusDetails({ order, onWhy, onReverse }: { order: Order; onWhy: 
           {order.status === 'completed' ? 'Details' : 'Why?'}
         </button>
       )}
+      {(order.status === 'completed' ||
+        order.status === 'processing' ||
+        order.status === 'pending' ||
+        (order.status === 'failed' && order.paymentCollected !== false)) && <CheckWithProvider order={order} />}
       {onReverse && (order.status === 'completed' || order.status === 'failed') && (
         <button
           type="button"

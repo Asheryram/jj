@@ -191,6 +191,7 @@ function navFor(
       // and sharing the word "approvals" between two unrelated queues was
       // sending admins to the wrong screen.
       { to: '/admin/approvals', label: 'Number approvals', icon: ShieldIcon, section: 'Orders' },
+      { to: '/admin/numbers', label: 'Customer numbers', icon: UsersIcon, section: 'Orders' },
 
       { to: '/admin/refunds', label: 'Refunds', icon: ReceiptIcon, section: 'Money', primary: true },
       { to: '/admin/withdrawals', label: 'Withdrawals', icon: CashIcon, section: 'Money', primary: true },

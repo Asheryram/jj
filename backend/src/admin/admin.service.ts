@@ -1055,6 +1055,72 @@ export class AdminService {
     }))
   }
 
+  /**
+   * Every phone number that has bought on the platform, one row each, from
+   * delivered orders only: an abandoned or failed checkout is not a buyer.
+   *
+   * `by: 'recipient'` is the number the bundle went to; `by: 'buyer'` is the
+   * receipt number of whoever placed the order (often the same person, often
+   * not). `category` narrows it to one kind of product, data by default.
+   * Aggregated in the database, so it covers every order ever, not a capped page.
+   */
+  async buyerNumbers(input: { by: 'recipient' | 'buyer'; category: string | null }) {
+    const field = input.by === 'buyer' ? 'buyerPhone' : 'recipient'
+    const categories = ['data', 'airtime', 'voice', 'sms', 'afa', 'checker']
+    const where: Prisma.OrderWhereInput = {
+      status: 'completed',
+      ...(input.category && categories.includes(input.category) ? { category: input.category as Category } : {}),
+    }
+    const groups = await this.prisma.order.groupBy({
+      by: [field, 'network'],
+      where,
+      _count: { _all: true },
+      _sum: { salePrice: true },
+      _min: { createdAt: true },
+      _max: { createdAt: true },
+    })
+
+    // One row per number, whichever networks it was bought on.
+    const byNumber = new Map<
+      string,
+      { number: string; orders: number; spent: number; firstAt: Date; lastAt: Date; networks: Set<string>; lastNetwork: string | null }
+    >()
+    for (const group of groups) {
+      const number = (group as Record<string, unknown>)[field] as string
+      const lastAt = group._max.createdAt as Date
+      const row = byNumber.get(number) ?? {
+        number,
+        orders: 0,
+        spent: 0,
+        firstAt: group._min.createdAt as Date,
+        lastAt,
+        networks: new Set<string>(),
+        lastNetwork: null,
+      }
+      row.orders += group._count._all
+      row.spent += group._sum.salePrice ?? 0
+      if ((group._min.createdAt as Date) < row.firstAt) row.firstAt = group._min.createdAt as Date
+      if (lastAt >= row.lastAt) {
+        row.lastAt = lastAt
+        row.lastNetwork = group.network
+      }
+      if (group.network) row.networks.add(group.network)
+      byNumber.set(number, row)
+    }
+
+    return [...byNumber.values()]
+      .sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime())
+      .map((row) => ({
+        number: row.number,
+        network: row.lastNetwork,
+        networks: [...row.networks],
+        orders: row.orders,
+        spent: row.spent,
+        firstOrderAt: row.firstAt.toISOString(),
+        lastOrderAt: row.lastAt.toISOString(),
+      }))
+  }
+
   /** One agent's own earnings per day, split between their sales and downline. */
   async agentEarningsByDay(userId: string, days = 7) {
     const since = startOfDayUtc(new Date(), days - 1)

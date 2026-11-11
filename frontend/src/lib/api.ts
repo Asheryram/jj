@@ -484,6 +484,19 @@ export interface TransferCheck {
 
 /** Where the provider float sits against the thresholds. */
 /** One thing waiting on a person, see backend `AdminInboxService`. */
+/** One phone number that has bought, from delivered orders. */
+export interface BuyerNumber {
+  number: string
+  /** The network of its most recent order. */
+  network: Network | null
+  networks: Network[]
+  orders: number
+  /** Pesewas. */
+  spent: number
+  firstOrderAt: string
+  lastOrderAt: string
+}
+
 export interface InboxItem {
   id: string
   /** 1 now, 2 today, 3 when you can. */
@@ -1600,7 +1613,16 @@ export const api = {
    * `ReconcilerService.checkOrderByAdmin`, instead of waiting on the
    * reconciler's own ten-minute clock.
    */
-  checkOrderNow: (id: string) => request<{ settled: boolean }>(`/orders/${id}/check-now`, { method: 'POST' }),
+  /**
+   * Ask the provider about one order now. An open order settles if it has an
+   * answer; a delivered or failed one is checked again, and flagged if the
+   * provider now says otherwise (`conflict`). `message` says what was found.
+   */
+  checkOrderNow: (id: string) =>
+    request<{ settled: boolean; providerStatus?: string | null; conflict?: boolean; message?: string }>(
+      `/orders/${id}/check-now`,
+      { method: 'POST' },
+    ),
   /** The reference from the delivery partner's own dashboard, see `ReconcilerService.attachProviderReference`. */
   addProviderReference: (id: string, body: { reference: string; reorderedByHand: boolean; note?: string }) =>
     request<{ settled: boolean; checked: boolean; corrected: boolean; providerStatus: string | null; message: string }>(`/orders/${id}/provider-reference`, { method: 'POST', body }),
@@ -1673,6 +1695,10 @@ export const api = {
     request<TreasuryDestination>(`/admin/treasury/destinations/${id}`, { method: 'PATCH', body: { active } }),
 
   /** Orders nobody can resolve automatically, see ReconcilerService.needsAttention. */
+  /** Every number that has bought, see `AdminService.buyerNumbers`. */
+  buyerNumbers: (by: 'recipient' | 'buyer', category: 'data' | 'airtime' | 'all') =>
+    request<BuyerNumber[]>(`/admin/buyer-numbers?by=${by}&category=${category}`),
+
   needsAttentionOrders: () => request<NeedsAttentionOrder[]>('/admin/orders/needs-attention'),
 
   /**

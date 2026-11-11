@@ -1008,6 +1008,11 @@ function BulkRefuseModal({
  * original sale is a decision made with eyes open, not a surprise found later
  * in the ledger.
  */
+/** A provider code as people say it. */
+function providerName(code: string): string {
+  return code === 'gmpl' ? 'GMPL' : code === 'datahub-gh' ? 'DataHub GH' : code
+}
+
 function ReorderModal({
   request,
   onClose,
@@ -1145,15 +1150,30 @@ function ReorderModal({
               className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-50"
             >
               <option value="">Choose a bundle…</option>
-              {options.map((row) => (
-                <option key={row.code} value={row.code}>
-                  {row.name} · {row.network ?? row.provider} · {cedis(row.realCost ?? row.costPrice)}
-                  {row.realCost !== null && row.realCost !== row.costPrice ? ' (real)' : ''}
-                </option>
+              {/* Grouped by the provider that sells it, so the choice of provider (and of
+                  whose float pays) is made knowingly, not guessed from the price. */}
+              {[...new Set(options.map((row) => row.provider))].map((provider) => (
+                <optgroup key={provider} label={providerName(provider)}>
+                  {options
+                    .filter((row) => row.provider === provider)
+                    .map((row) => (
+                      <option key={row.code} value={row.code}>
+                        {row.name} · {providerName(row.provider)} · {cedis(row.realCost ?? row.costPrice)}
+                        {row.realCost !== null && row.realCost !== row.costPrice ? ' (real)' : ''}
+                      </option>
+                    ))}
+                </optgroup>
               ))}
             </select>
           )}
         </Field>
+
+        {selected && (
+          <p className="-mt-2 text-sm text-slate-600 dark:text-slate-300">
+            Sent through <strong className="font-semibold text-slate-900 dark:text-slate-50">{providerName(selected.provider)}</strong>
+            {selected.network ? `, ${selected.network}` : ''}. Its cost comes out of the {providerName(selected.provider)} float.
+          </p>
+        )}
 
         {selected && netMargin !== null && costDelta !== null && effectiveCost !== null && (
           <div className="space-y-2 rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-sm">
