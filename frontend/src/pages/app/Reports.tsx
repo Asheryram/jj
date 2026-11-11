@@ -1,3 +1,4 @@
+import { csvCell } from '../../lib/csv'
 import { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../../state/store'
 import type { Order } from '../../data/types'
@@ -207,7 +208,7 @@ export default function Reports() {
         o.status,
       ]
     })
-    const csv = [header, ...rows].map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n')
+    const csv = [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')

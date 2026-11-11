@@ -1151,7 +1151,12 @@ export class FulfilmentService implements OnApplicationBootstrap {
     orderId: string,
     adminId: string,
     note: string,
-    options: { expected?: 'completed' | 'failed'; refund?: { id: string; note: string } } = {},
+    options: {
+      expected?: 'completed' | 'failed'
+      refund?: { id: string; note: string }
+      /** The provider's own answer decided this, not a person (see `ReconcilerService.recheckSettled`). */
+      byProvider?: boolean
+    } = {},
   ): Promise<{ from: 'completed' | 'failed'; to: 'completed' | 'failed' }> {
     const { refund } = options
     const expected = refund ? 'failed' : options.expected
@@ -1218,7 +1223,8 @@ export class FulfilmentService implements OnApplicationBootstrap {
           await this.reverseAgent(tx, share, order.reference, order.productName)
         }
 
-        if (await this.oweRefund(tx, order, `Reversed to failed by an admin: ${reason}`)) {
+        const why = options.byProvider ? `The provider reported it failed after delivery: ${reason}` : `Reversed to failed by an admin: ${reason}`
+        if (await this.oweRefund(tx, order, why)) {
           // A refund closed by an earlier reversal (or refusal) is owed again now.
           await tx.refundRequest.updateMany({
             where: { orderId, status: 'rejected' },
@@ -1239,7 +1245,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
         await this.recordDelivered(tx, order, split, agentShares)
       }
 
-      this.log.warn(`${order.reference}: outcome reversed from ${from} to ${to} by ${adminId}, ${reason}`)
+      this.log.warn(`${order.reference}: outcome reversed from ${from} to ${to} by ${options.byProvider ? 'the provider' : adminId}, ${reason}`)
       return { from, to }
     })
   }

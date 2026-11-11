@@ -1,4 +1,5 @@
 import { UndoBar } from '../lib/undo'
+import { ConnectionBar, SafeOutlet } from './SafeOutlet'
 import { TourButton } from '../tours/LearnCard'
 import { LicenseBanner } from './license'
 import { BUSINESS } from '../lib/business'
@@ -782,7 +783,7 @@ export function AppShell() {
         </aside>
 
         <main id="main" className="min-w-0 flex-1 py-5 pb-28 lg:pb-10">
-          <Outlet />
+          <SafeOutlet />
         </main>
       </div>
 
@@ -856,6 +857,7 @@ export function AppShell() {
 
       <ToastHost />
       <UndoBar />
+      <ConnectionBar />
     </div>
   )
 }
@@ -959,11 +961,12 @@ export function AnalyticsShell() {
       </header>
 
       <main id="main" className="mx-auto max-w-7xl px-3 py-5 sm:px-4">
-        <Outlet />
+        <SafeOutlet />
       </main>
 
       <ToastHost />
       <UndoBar />
+      <ConnectionBar />
     </div>
   )
 }
@@ -1065,12 +1068,13 @@ export function PublicShell() {
       </header>
       <SiteNoticeModal />
       <main id="main">
-        <Outlet />
+        <SafeOutlet />
       </main>
       <PublicFooter />
       <StorageNotice />
       <ToastHost />
       <UndoBar />
+      <ConnectionBar />
       <SeasonalEffects />
     </div>
   )

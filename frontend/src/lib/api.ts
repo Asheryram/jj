@@ -188,6 +188,10 @@ interface RequestOptions {
   signal?: AbortSignal
 }
 
+/** Reads give up after 30 seconds; anything that changes something gets longer than the server's own 30-second waits on Paystack or a provider, so a payout or refund is never reported failed while it still goes through. */
+const READ_TIMEOUT_MS = 30_000
+const WRITE_TIMEOUT_MS = 120_000
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, form, auth = true, signal } = options
   const headers: Record<string, string> = {}
@@ -198,23 +202,50 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const stored = auth ? token.get() : null
   if (stored) headers.Authorization = `Bearer ${stored}`
 
+  /**
+   * One try, given up after a time limit. On weak mobile data a request could
+   * otherwise hang for ever, leaving a page spinning until someone reloaded it.
+   * The caller's own `signal` still cancels it.
+   */
+  const attempt = async (): Promise<Response> => {
+    const controller = new AbortController()
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, method === 'GET' ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS)
+    const cancel = () => controller.abort()
+    signal?.addEventListener('abort', cancel)
+    try {
+      return await fetch(`${API_URL}${path}`, {
+        method,
+        headers,
+        body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
+        signal: controller.signal,
+      })
+    } catch (error) {
+      if (signal?.aborted) throw error
+      // A dead API and no network look the same from here. Say the useful thing:
+      // on Ghana 4G this is usually the connection, and retrying is right.
+      throw timedOut
+        ? new ApiError('TIMEOUT', 'The server is taking too long to answer. Check your connection and try again.', 0)
+        : new ApiError('NETWORK', 'We could not reach the server. Check your connection and try again.', 0)
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', cancel)
+    }
+  }
+
   let response: Response
   try {
-    response = await fetch(`${API_URL}${path}`, {
-      method,
-      headers,
-      body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
-      signal,
-    })
+    response = await attempt()
   } catch (error) {
-    // A dead API and no network look the same from here. Say the useful thing:
-    // on Ghana 4G this is usually the connection, and retrying is right.
-    if ((error as Error).name === 'AbortError') throw error
-    throw new ApiError(
-      'NETWORK',
-      'We could not reach the server. Check your connection and try again.',
-      0,
-    )
+    // A read is safe to ask twice: one more try after a dropped connection or a
+    // time-out. Anything that changes something is never sent twice from here.
+    const retriable = method === 'GET' && error instanceof ApiError && (error.code === 'NETWORK' || error.code === 'TIMEOUT')
+    if (!retriable || signal?.aborted) throw error
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    response = await attempt()
   }
 
   if (response.status === 204) return undefined as T
@@ -1633,7 +1664,7 @@ export const api = {
    * provider now says otherwise (`conflict`). `message` says what was found.
    */
   checkOrderNow: (id: string) =>
-    request<{ settled: boolean; providerStatus?: string | null; conflict?: boolean; message?: string }>(
+    request<{ settled: boolean; providerStatus?: string | null; conflict?: boolean; changed?: boolean; message?: string }>(
       `/orders/${id}/check-now`,
       { method: 'POST' },
     ),

@@ -246,6 +246,10 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
         pushToast({ tone: 'success', title: `${order.reference}: resolved` })
         await refresh()
         onClose()
+      } else if (result.changed) {
+        pushToast({ tone: 'success', title: `${order.reference}: changed to match the provider`, detail: result.message })
+        await refresh()
+        onClose()
       } else if (result.conflict) {
         pushToast({ tone: 'error', title: `${order.reference}: the provider disagrees`, detail: result.message })
         await refresh()

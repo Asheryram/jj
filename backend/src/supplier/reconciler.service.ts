@@ -389,9 +389,9 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * afterwards, and if its message about it never arrives, nothing else here
    * would ever notice. A few per sweep, each order again every few hours.
    *
-   * A disagreement is flagged, never undone automatically: money has moved
-   * both ways by then (the agent was credited; a refund may be owed), so a
-   * person decides, see `FulfilmentService.flagConflict`.
+   * A disagreement is followed, see `recheckSettled`: the order changes to
+   * what the provider says, with every account put right, and only what
+   * cannot be changed safely is left flagged for a person.
    */
   private async recheckRecentSettled(): Promise<number> {
     const since = new Date(Date.now() - RECHECK_WINDOW_MS)
@@ -426,10 +426,31 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /**
+   * One settled order, asked about again by its id: for a provider's message
+   * that disagreed with how the order was settled, so the order follows the
+   * provider's own answer, asked for directly, never the message alone.
+   */
+  async recheckOrder(orderId: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, reference: true, status: true, providerReference: true, supplierCodeAtSale: true },
+    })
+    if (!order || (order.status !== 'completed' && order.status !== 'failed')) return
+    this.lastRecheckAt.set(order.id, Date.now())
+    await this.recheckSettled(order).catch((error) => this.log.error(`recheck ${order.reference} failed: ${String(error)}`))
+  }
+
+  /**
    * One settled order (delivered or failed), asked about again. Records what the
-   * provider says now; if it disagrees with how the order was settled, flags the
-   * order through the same path a late webhook takes, so it shows on Needs
-   * attention and Today (and is emailed) for a person to decide.
+   * provider says now. If it disagrees with how the order was settled, the order
+   * follows the provider's answer through `FulfilmentService.reverseOutcome`,
+   * which puts every account right: delivered to failed takes back the agent's
+   * earning and queues the customer's refund for approval (no money leaves on
+   * its own); failed to delivered credits the agent and closes the refund.
+   *
+   * When that cannot be done safely (a refund already sent to Mobile Money
+   * cannot be pulled back), the order is flagged instead, on Needs attention
+   * and Today, and emailed, for a person to decide.
    */
   private async recheckSettled(order: {
     id: string
@@ -437,7 +458,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     status: string
     providerReference: string | null
     supplierCodeAtSale: string | null
-  }): Promise<{ providerStatus: string | null; conflict: boolean; message: string }> {
+  }): Promise<{ providerStatus: string | null; conflict: boolean; changed?: boolean; message: string }> {
     const provider = await this.resolveProvider(order.supplierCodeAtSale)
     const label = provider === 'gmpl' ? 'GMPL' : 'DataHub'
     if (!order.providerReference) {
@@ -468,16 +489,39 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     if (mapped === ours) {
       return { providerStatus: result.providerStatus, conflict: false, message: `${label} says ${result.providerStatus}, which matches.` }
     }
-    const settled = await this.fulfilment.settleFromProvider(
-      order.id,
-      mapped === 'completed' ? 'delivered' : 'rejected',
-      `Rechecked: ${label} now reports ${result.providerStatus}`,
-    )
-    this.log.error(`${order.reference}: was ${ours}, ${label} now says ${result.providerStatus}, flagged`)
-    return {
-      providerStatus: result.providerStatus,
-      conflict: settled.conflict,
-      message: `${label} now says ${result.providerStatus}, but this order is ${ours}. It is flagged on Needs attention for you to decide.`,
+    try {
+      await this.fulfilment.reverseOutcome(order.id, 'provider', `${label} reported ${result.providerStatus} when asked again`, {
+        expected: ours,
+        byProvider: true,
+      })
+      // Their refund of the charge: the float got that money back.
+      if (mapped === 'failed' && result.providerStatus.toUpperCase() === 'REFUNDED') {
+        await this.fulfilment.bookProviderRefund(order.id, order.providerReference)
+      }
+      this.log.warn(`${order.reference}: was ${ours}, ${label} now says ${result.providerStatus}, changed to ${mapped}`)
+      return {
+        providerStatus: result.providerStatus,
+        conflict: false,
+        changed: true,
+        message:
+          mapped === 'failed'
+            ? `${label} now says ${result.providerStatus}, so the order is now failed. The agent's earning was taken back and the customer's refund is waiting on Refunds.`
+            : `${label} now says ${result.providerStatus}, so the order is now delivered. The agent was credited and the refund closed.`,
+      }
+    } catch (error) {
+      // Could not follow it safely: flag it for a person, the same as a late webhook.
+      const settled = await this.fulfilment.settleFromProvider(
+        order.id,
+        mapped === 'completed' ? 'delivered' : 'rejected',
+        `Rechecked: ${label} now reports ${result.providerStatus}`,
+      )
+      const why = error instanceof Error ? error.message : String(error)
+      this.log.error(`${order.reference}: was ${ours}, ${label} now says ${result.providerStatus}, could not change it (${why}), flagged`)
+      return {
+        providerStatus: result.providerStatus,
+        conflict: settled.conflict,
+        message: `${label} now says ${result.providerStatus}, but this order is ${ours} and could not be changed automatically (${why}). It is flagged on Needs attention.`,
+      }
     }
   }
 
@@ -589,7 +633,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    */
   async checkOrderByAdmin(
     orderId: string,
-  ): Promise<{ settled: boolean; providerStatus?: string | null; conflict?: boolean; message?: string }> {
+  ): Promise<{ settled: boolean; providerStatus?: string | null; conflict?: boolean; changed?: boolean; message?: string }> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       select: { id: true, reference: true, status: true, providerReference: true, supplierCodeAtSale: true },

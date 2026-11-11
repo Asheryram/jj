@@ -1,3 +1,4 @@
+import { ReconcilerService } from './reconciler.service'
 import { Body, Controller, Logger, Param, Post } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { ApiExcludeController } from '@nestjs/swagger'
@@ -58,6 +59,7 @@ export class DatahubWebhookController {
     private readonly prisma: PrismaService,
     private readonly fulfilment: FulfilmentService,
     private readonly config: ConfigService,
+    private readonly reconciler: ReconcilerService,
   ) {}
 
   @Post(':secret')
@@ -122,6 +124,8 @@ export class DatahubWebhookController {
       `DataHub GH reported ${status}`,
     )
     if (status.toUpperCase() === 'REFUNDED') await this.fulfilment.bookProviderRefund(order.id, order.providerReference)
+    // Disagrees with how the order was settled: confirm with DataHub itself, then follow its answer.
+    if (result.conflict) void this.reconciler.recheckOrder(order.id)
 
     if (!result.applied) {
       return {

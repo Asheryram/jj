@@ -1,3 +1,4 @@
+import { ReconcilerService } from './reconciler.service'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { Body, Controller, Headers, HttpCode, Logger, Post, Req } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
@@ -78,6 +79,7 @@ export class GmplWebhookController {
     private readonly prisma: PrismaService,
     private readonly fulfilment: FulfilmentService,
     private readonly config: ConfigService,
+    private readonly reconciler: ReconcilerService,
   ) {}
 
   @Post()
@@ -134,6 +136,8 @@ export class GmplWebhookController {
 
       const outcome = type === 'order.approved' ? 'delivered' : 'rejected'
       const result = await this.fulfilment.settleFromProvider(order.id, outcome, `GMPL reported ${type}`)
+      // Disagrees with how the order was settled: confirm with GMPL itself, then follow its answer.
+      if (result.conflict) void this.reconciler.recheckOrder(order.id)
       if (!result.applied) {
         return {
           received: true,
@@ -158,6 +162,7 @@ export class GmplWebhookController {
       const outcome = type === 'purchase.success' ? 'delivered' : 'rejected'
       const reason = `GMPL reported ${type}${data.error_message ? `: ${data.error_message}` : ''}`
       const result = await this.fulfilment.settleFromProvider(order.id, outcome, reason)
+      if (result.conflict) void this.reconciler.recheckOrder(order.id)
 
       if (!result.applied) {
         return {

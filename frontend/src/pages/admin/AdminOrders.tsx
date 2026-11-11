@@ -1,3 +1,4 @@
+import { csvCell } from '../../lib/csv'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../../state/store'
@@ -394,7 +395,7 @@ export default function AdminOrders() {
         o.refunded ? 'approved' : (o.refundStatus ?? ''),
       ]
     })
-    const csv = [header, ...csvRows].map((row) => row.map((cell) => `"${cell}"`).join(',')).join('\n')
+    const csv = [header, ...csvRows].map((row) => row.map(csvCell).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -896,8 +897,8 @@ function CheckWithProvider({ order }: { order: Order }) {
     try {
       const result = await api.checkOrderNow(order.id)
       pushToast({
-        tone: result.conflict ? 'error' : result.settled ? 'success' : 'info',
-        title: `${order.reference}: ${result.conflict ? 'the provider disagrees' : result.settled ? 'settled' : 'checked'}`,
+        tone: result.conflict ? 'error' : result.settled || result.changed ? 'success' : 'info',
+        title: `${order.reference}: ${result.conflict ? 'the provider disagrees' : result.changed ? 'changed to match the provider' : result.settled ? 'settled' : 'checked'}`,
         detail: result.message ?? (result.settled ? 'The provider has answered; reload to see it.' : 'Nothing new from the provider.'),
       })
     } catch (caught) {
