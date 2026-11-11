@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { api, ApiError, type PendingApproval, type ProviderApprovalStatus } from '../../lib/api'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { api, ApiError, type NumberCheckResult, type PendingApproval, type ProviderApprovalStatus } from '../../lib/api'
+import type { Network } from '../../data/types'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import { prettyPhone } from '../../lib/networks'
@@ -11,12 +12,14 @@ import {
   CardHead,
   EmptyState,
   PageHead,
+  Segmented,
   Spinner,
+  TextInput,
   TableWrap,
   Td,
   Th,
 } from '../../components/ui'
-import { AlertIcon, CheckIcon, CopyIcon, RefreshIcon } from '../../components/icons'
+import { AlertIcon, CheckIcon, CopyIcon, RefreshIcon, SearchIcon } from '../../components/icons'
 
 /**
  * Numbers at least one provider has not approved yet, and the sales they are
@@ -57,6 +60,8 @@ export default function NumberApprovals() {
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
   const [lastChecked, setLastChecked] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [checkingPhone, setCheckingPhone] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -252,12 +257,38 @@ export default function NumberApprovals() {
     }
   }
 
+  const shownRows = useMemo(() => {
+    const digits = search.replace(/\D/g, '').replace(/^233/, '0')
+    if (!rows || !digits) return rows ?? []
+    return rows.filter((row) => row.phone.includes(digits))
+  }, [rows, search])
+
+  /** Ask both providers about one listed number again, then refresh the list. */
+  const checkOne = async (row: PendingApproval) => {
+    setCheckingPhone(row.phone)
+    try {
+      const result = await api.checkNumber(row.phone, row.network)
+      pushToast({
+        tone: result.results.every((r) => r.status === 'approved') ? 'success' : 'info',
+        title: `${prettyPhone(row.phone)}: ${checkSummary(result)}`,
+        detail: result.released > 0 ? `${result.released} waiting order(s) released.` : undefined,
+      })
+      await load()
+    } catch (caught) {
+      pushToast({ tone: 'error', title: caught instanceof ApiError ? caught.message : 'Could not check that number.' })
+    } finally {
+      setCheckingPhone(null)
+    }
+  }
+
   return (
     <div>
       <PageHead
         title="Approvals"
         subtitle="MTN numbers your suppliers must approve. Until they are, a sale to them is refused rather than charged."
       />
+
+      <CheckNumberCard onChecked={() => void load()} />
 
       <div data-tour="approvals-list">
       <Card className="mt-3">
@@ -364,7 +395,32 @@ export default function NumberApprovals() {
                 is a real API call, "Try sending automatically" covers it.
               </p>
 
-              <ApprovalsTable rows={rows} copyingPhone={copyingPhone} onCopyOne={copyOne} />
+              <div className="relative sm:max-w-xs">
+                <SearchIcon className="pointer-events-none absolute inset-y-0 left-3 my-auto size-4 text-slate-400" />
+                <TextInput
+                  type="search"
+                  inputMode="numeric"
+                  placeholder="Search a number in this list"
+                  aria-label="Search a number in this list"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              {shownRows.length === 0 ? (
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  That number is not waiting on approval. Use <strong className="font-semibold">Check a number</strong> above to
+                  ask both providers about it.
+                </p>
+              ) : (
+                <ApprovalsTable
+                  rows={shownRows}
+                  copyingPhone={copyingPhone}
+                  onCopyOne={copyOne}
+                  checkingPhone={checkingPhone}
+                  onCheckOne={(row) => void checkOne(row)}
+                />
+              )}
             </>
           )}
         </div>
@@ -394,14 +450,147 @@ function StatusBadge({ status }: { status: ProviderApprovalStatus }) {
   return <Badge tone="danger">Pending</Badge>
 }
 
+/** "DataHub approved, GMPL not yet" from a check's answers. */
+function checkSummary(result: NumberCheckResult): string {
+  const name = (p: string) => (p === 'gmpl' ? 'GMPL' : 'DataHub')
+  const word = { approved: 'approved', not_approved: 'not approved yet', unknown: 'no clear answer' } as const
+  return result.results.map((r) => `${name(r.provider)} ${word[r.status]}`).join(', ')
+}
+
+/** The network a Ghana number most likely starts on. A guess only: numbers move networks. */
+function guessNetwork(phone: string): Network {
+  const prefix = phone.replace(/\D/g, '').replace(/^233/, '0').slice(0, 3)
+  if (['020', '050'].includes(prefix)) return 'Telecel'
+  if (['026', '027', '056', '057'].includes(prefix)) return 'AirtelTigo'
+  return 'MTN'
+}
+
+/**
+ * Ask both providers about any number now, before its owner buys. Not approved
+ * yet, it goes on the list below and is sent to the providers and checked again
+ * on its own; approved, any orders waiting on it are released.
+ */
+function CheckNumberCard({ onChecked }: { onChecked: () => void }) {
+  const [phone, setPhone] = useState('')
+  const [network, setNetwork] = useState<Network>('MTN')
+  const [networkTouched, setNetworkTouched] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<NumberCheckResult | null>(null)
+  const [error, setError] = useState('')
+
+  const check = async () => {
+    setBusy(true)
+    setError('')
+    setResult(null)
+    try {
+      const answer = await api.checkNumber(phone.trim(), network)
+      setResult(answer)
+      onChecked()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Could not check that number.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const allApproved = result?.results.every((r) => r.status === 'approved')
+
+  return (
+    <Card className="mt-3">
+      <CardHead
+        title="Check a number"
+        subtitle="Asks DataHub and GMPL now. Not approved yet, it goes on the list below and is followed up on its own."
+      />
+      <form
+        className="space-y-3 px-4 pb-4 sm:px-5"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void check()
+        }}
+      >
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <TextInput
+            type="tel"
+            inputMode="numeric"
+            placeholder="024 000 0000"
+            aria-label="Phone number to check"
+            value={phone}
+            onChange={(event) => {
+              setPhone(event.target.value)
+              if (!networkTouched) setNetwork(guessNetwork(event.target.value))
+            }}
+            className="tabular sm:max-w-[14rem]"
+          />
+          <Segmented<Network>
+            options={[
+              { value: 'MTN', label: 'MTN' },
+              { value: 'Telecel', label: 'Telecel' },
+              { value: 'AirtelTigo', label: 'AirtelTigo' },
+            ]}
+            value={network}
+            onChange={(next) => {
+              setNetwork(next)
+              setNetworkTouched(true)
+            }}
+          />
+          <Button type="submit" size="sm" loading={busy} disabled={phone.replace(/\D/g, '').length < 10}>
+            Check with both providers
+          </Button>
+        </div>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          The network is guessed from the first digits; change it if the number has moved networks.
+        </p>
+        {error && (
+          <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
+            {error}
+          </Callout>
+        )}
+        {result && (
+          <div className="rounded-xl border border-slate-200 p-3 dark:border-slate-700">
+            <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">
+              {prettyPhone(result.phone)} ({result.network}):{' '}
+              {allApproved ? 'can buy' : 'not ready to buy everywhere yet'}
+            </p>
+            <ul className="mt-2 space-y-1.5 text-sm">
+              {result.results.map((r) => (
+                <li key={r.provider} className="flex flex-wrap items-center gap-2">
+                  <span className="w-16 font-medium text-slate-700 dark:text-slate-200">{r.provider === 'gmpl' ? 'GMPL' : 'DataHub'}</span>
+                  <Badge tone={r.status === 'approved' ? 'success' : r.status === 'not_approved' ? 'warning' : 'neutral'}>
+                    {r.status === 'approved' ? 'Approved' : r.status === 'not_approved' ? 'Not approved yet' : 'No clear answer'}
+                  </Badge>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">{r.detail}</span>
+                </li>
+              ))}
+            </ul>
+            {result.added && (
+              <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                Added to the list below. It is sent to the providers and checked again on its own every few minutes.
+              </p>
+            )}
+            {result.released > 0 && (
+              <p className="mt-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                {result.released} waiting order{result.released === 1 ? '' : 's'} released for delivery.
+              </p>
+            )}
+          </div>
+        )}
+      </form>
+    </Card>
+  )
+}
+
 function ApprovalsTable({
   rows,
   copyingPhone,
   onCopyOne,
+  checkingPhone,
+  onCheckOne,
 }: {
   rows: PendingApproval[]
   copyingPhone: string | null
   onCopyOne: (phone: string) => void
+  checkingPhone: string | null
+  onCheckOne: (row: PendingApproval) => void
 }) {
   return (
     <TableWrap caption="Numbers waiting on approval">
@@ -427,6 +616,14 @@ function ApprovalsTable({
                     {prettyPhone(row.phone)}
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{row.network}</p>
+                  <button
+                    type="button"
+                    disabled={checkingPhone === row.phone}
+                    onClick={() => onCheckOne(row)}
+                    className="mt-1 text-xs font-semibold text-brand-700 underline underline-offset-2 disabled:opacity-60 dark:text-brand-300"
+                  >
+                    {checkingPhone === row.phone ? 'Checking…' : 'Check again'}
+                  </button>
                 </div>
                 {/* Copying just this one number, and checkpointing only
                     it, for a single fresh arrival, without re-sending

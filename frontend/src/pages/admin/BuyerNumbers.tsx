@@ -23,17 +23,21 @@ import { DownloadIcon, SearchIcon, UsersIcon } from '../../components/icons'
 
 type By = 'recipient' | 'buyer'
 type Kind = 'data' | 'airtime' | 'all'
+type Show = 'all' | 'bought' | 'tried'
+type NetworkFilter = 'all' | 'MTN' | 'Telecel' | 'AirtelTigo'
 
 const PAGE = 100
 
 /**
- * Every phone number that has bought on the platform, from delivered orders:
- * the numbers bundles went to, or the receipt numbers of whoever bought them.
- * Searchable here, and downloadable as a spreadsheet.
+ * Every phone number that has placed an order, delivered or not: the numbers
+ * bundles were for, or the receipt numbers of whoever bought them. Filter by
+ * network and by whether they bought; download the numbers as a list.
  */
 export default function BuyerNumbers() {
   const [by, setBy] = useRemembered<By>('numbers-by', 'recipient', ['recipient', 'buyer'])
   const [kind, setKind] = useRemembered<Kind>('numbers-kind', 'data', ['data', 'airtime', 'all'])
+  const [show, setShow] = useRemembered<Show>('numbers-show', 'all', ['all', 'bought', 'tried'])
+  const [network, setNetwork] = useRemembered<NetworkFilter>('numbers-network', 'all', ['all', 'MTN', 'Telecel', 'AirtelTigo'])
   const [rows, setRows] = useState<BuyerNumber[] | null>(null)
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
@@ -44,7 +48,7 @@ export default function BuyerNumbers() {
     setRows(null)
     setShown(PAGE)
     api
-      .buyerNumbers(by, kind)
+      .buyerNumbers(by, kind, show)
       .then((result) => {
         if (!live) return
         setRows(result)
@@ -54,42 +58,40 @@ export default function BuyerNumbers() {
     return () => {
       live = false
     }
-  }, [by, kind])
+  }, [by, kind, show])
 
+  // Network: a number counts under every network it has ever been bought on.
+  const inNetwork = useMemo(
+    () => (rows ?? []).filter((row) => network === 'all' || row.networks.includes(network) || row.network === network),
+    [rows, network],
+  )
   const filtered = useMemo(() => {
     const digits = query.replace(/\D/g, '')
-    if (!rows || !digits) return rows ?? []
-    return rows.filter((row) => row.number.includes(digits))
-  }, [rows, query])
+    if (!digits) return inNetwork
+    return inNetwork.filter((row) => row.number.includes(digits))
+  }, [inNetwork, query])
 
-  const totalSpent = (rows ?? []).reduce((sum, row) => sum + row.spent, 0)
-  const repeat = (rows ?? []).filter((row) => row.orders > 1).length
+  const bought = inNetwork.filter((row) => row.delivered > 0).length
+  const neverBought = inNetwork.length - bought
   const what = kind === 'all' ? 'anything' : kind
 
+  // Just the numbers, one per line, for pasting into a messaging tool or a provider's list.
   const exportCsv = () =>
     downloadCsv(
-      `${by === 'buyer' ? 'buyer' : 'recipient'}-numbers-${kind}-${new Date().toISOString().slice(0, 10)}.csv`,
-      ['Number', 'Network', 'Networks', 'Orders delivered', 'Total spent (GHS)', 'First order', 'Last order'],
-      filtered.map((row) => [
-        row.number,
-        row.network ?? '',
-        row.networks.join(' '),
-        row.orders,
-        (row.spent / 100).toFixed(2),
-        row.firstOrderAt,
-        row.lastOrderAt,
-      ]),
+      `numbers-${kind}-${network === 'all' ? 'all-networks' : network}-${show}-${new Date().toISOString().slice(0, 10)}.csv`,
+      ['Number'],
+      filtered.map((row) => [row.number]),
     )
 
   return (
     <div>
       <PageHead
         title="Customer numbers"
-        subtitle="Every number that has bought on the platform, from delivered orders."
+        subtitle="Every number that has bought, or tried to buy, on the platform."
         action={
-          rows && rows.length > 0 ? (
+          filtered.length > 0 ? (
             <Button variant="outline" size="sm" onClick={exportCsv}>
-              <DownloadIcon className="size-4" /> Download CSV
+              <DownloadIcon className="size-4" /> Download numbers ({filtered.length.toLocaleString()})
             </Button>
           ) : undefined
         }
@@ -113,6 +115,25 @@ export default function BuyerNumbers() {
           value={kind}
           onChange={setKind}
         />
+        <Segmented<NetworkFilter>
+          options={[
+            { value: 'all', label: 'All networks' },
+            { value: 'MTN', label: 'MTN' },
+            { value: 'Telecel', label: 'Telecel' },
+            { value: 'AirtelTigo', label: 'AirtelTigo' },
+          ]}
+          value={network}
+          onChange={setNetwork}
+        />
+        <Segmented<Show>
+          options={[
+            { value: 'all', label: 'Everyone' },
+            { value: 'bought', label: 'Bought' },
+            { value: 'tried', label: 'Tried, never bought' },
+          ]}
+          value={show}
+          onChange={setShow}
+        />
       </div>
 
       {error && (
@@ -128,9 +149,9 @@ export default function BuyerNumbers() {
       ) : rows ? (
         <>
           <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-3">
-            <StatTile label="Numbers" value={rows.length.toLocaleString()} hint={`That have bought ${what}`} tone="brand" />
-            <StatTile label="Came back again" value={repeat.toLocaleString()} hint="Bought more than once" />
-            <StatTile label="Spent in total" value={cedis(totalSpent)} hint="On delivered orders" />
+            <StatTile label="Numbers" value={inNetwork.length.toLocaleString()} hint={`That ordered ${what}`} tone="brand" />
+            <StatTile label="Bought" value={bought.toLocaleString()} hint="At least one order delivered" />
+            <StatTile label="Never bought" value={neverBought.toLocaleString()} hint="Tried, nothing delivered yet" />
           </div>
 
           <Card>
@@ -154,8 +175,8 @@ export default function BuyerNumbers() {
             {filtered.length === 0 ? (
               <EmptyState
                 icon={<UsersIcon className="size-6" />}
-                title={query ? 'No number matches that' : `Nobody has bought ${what} yet`}
-                detail={query ? 'Try fewer digits.' : 'Numbers show up here once an order is delivered.'}
+                title={query ? 'No number matches that' : 'No numbers here yet'}
+                detail={query ? 'Try fewer digits.' : 'Numbers show up here once someone places an order.'}
               />
             ) : (
               <>
@@ -164,7 +185,8 @@ export default function BuyerNumbers() {
                     <tr>
                       <Th>Number</Th>
                       <Th>Network</Th>
-                      <Th align="right">Orders</Th>
+                      <Th align="right">Delivered</Th>
+                      <Th align="right">Not delivered</Th>
                       <Th align="right">Spent</Th>
                       <Th>Last order</Th>
                     </tr>
@@ -174,7 +196,10 @@ export default function BuyerNumbers() {
                       <tr key={row.number} className="hover:bg-slate-50 dark:hover:bg-slate-800">
                         <Td className="tabular font-medium text-slate-900 dark:text-slate-50">{prettyPhone(row.number)}</Td>
                         <Td>{row.network ? <NetworkChip network={row.network} /> : '-'}</Td>
-                        <Td align="right" className="tabular">{row.orders}</Td>
+                        <Td align="right" className="tabular">{row.delivered}</Td>
+                        <Td align="right" className={row.tried > 0 ? 'tabular text-amber-700 dark:text-amber-400' : 'tabular'}>
+                          {row.tried}
+                        </Td>
                         <Td align="right" className="tabular font-semibold">{cedis(row.spent)}</Td>
                         <Td className="text-slate-600 dark:text-slate-300">{dateTime(row.lastOrderAt)}</Td>
                       </tr>

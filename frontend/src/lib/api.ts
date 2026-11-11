@@ -484,17 +484,31 @@ export interface TransferCheck {
 
 /** Where the provider float sits against the thresholds. */
 /** One thing waiting on a person, see backend `AdminInboxService`. */
-/** One phone number that has bought, from delivered orders. */
+/** One phone number that has placed an order, delivered or not. */
 export interface BuyerNumber {
   number: string
   /** The network of its most recent order. */
   network: Network | null
   networks: Network[]
-  orders: number
-  /** Pesewas. */
+  /** Orders delivered. */
+  delivered: number
+  /** Orders tried but not delivered: never paid, abandoned or failed. */
+  tried: number
+  /** Pesewas, on delivered orders. */
   spent: number
   firstOrderAt: string
   lastOrderAt: string
+}
+
+/** One provider's answer about one number, see `api.checkNumber`. */
+export interface NumberCheckResult {
+  phone: string
+  network: Network
+  results: { provider: 'datahub-gh' | 'gmpl'; status: 'approved' | 'not_approved' | 'unknown'; detail: string }[]
+  /** Put on the approvals list by this check. */
+  added: boolean
+  /** Orders that were waiting on this number and are now on their way. */
+  released: number
 }
 
 export interface InboxItem {
@@ -1695,9 +1709,13 @@ export const api = {
     request<TreasuryDestination>(`/admin/treasury/destinations/${id}`, { method: 'PATCH', body: { active } }),
 
   /** Orders nobody can resolve automatically, see ReconcilerService.needsAttention. */
+  /** Check one number with both providers now, see `ApprovalsService.checkNumber`. */
+  checkNumber: (phone: string, network: Network) =>
+    request<NumberCheckResult>('/admin/beneficiaries/check', { method: 'POST', body: { phone, network } }),
+
   /** Every number that has bought, see `AdminService.buyerNumbers`. */
-  buyerNumbers: (by: 'recipient' | 'buyer', category: 'data' | 'airtime' | 'all') =>
-    request<BuyerNumber[]>(`/admin/buyer-numbers?by=${by}&category=${category}`),
+  buyerNumbers: (by: 'recipient' | 'buyer', category: 'data' | 'airtime' | 'all', show: 'all' | 'bought' | 'tried') =>
+    request<BuyerNumber[]>(`/admin/buyer-numbers?by=${by}&category=${category}&show=${show}`),
 
   needsAttentionOrders: () => request<NeedsAttentionOrder[]>('/admin/orders/needs-attention'),
 

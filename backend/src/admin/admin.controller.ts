@@ -59,6 +59,16 @@ export class SetActiveDto {
   active!: boolean
 }
 
+export class CheckNumberDto {
+  @IsString()
+  @MinLength(9)
+  @MaxLength(15)
+  phone!: string
+
+  @IsIn(['MTN', 'Telecel', 'AirtelTigo'], { message: 'Choose the network.' })
+  network!: 'MTN' | 'Telecel' | 'AirtelTigo'
+}
+
 export class MarkCopiedDto {
   @IsArray()
   @ArrayNotEmpty()
@@ -410,10 +420,11 @@ export class AdminController {
 
   /** Every number that has bought, see `AdminService.buyerNumbers`. */
   @Get('buyer-numbers')
-  buyerNumbers(@Query('by') by?: string, @Query('category') category?: string) {
+  buyerNumbers(@Query('by') by?: string, @Query('category') category?: string, @Query('show') show?: string) {
     return this.admin.buyerNumbers({
       by: by === 'buyer' ? 'buyer' : 'recipient',
       category: category === 'all' ? null : (category ?? 'data'),
+      show: show === 'bought' || show === 'tried' ? show : 'all',
     })
   }
 
@@ -630,6 +641,12 @@ export class AdminController {
   @Get('beneficiaries/last-checked')
   beneficiariesLastChecked() {
     return this.approvals.lastCheckedAt()
+  }
+
+  /** Check one number with both providers now, see `ApprovalsService.checkNumber`. */
+  @Post('beneficiaries/check')
+  checkBeneficiary(@Body() dto: CheckNumberDto) {
+    return this.approvals.checkNumber(dto.phone, dto.network)
   }
 
   /** Ask DataHub which of them have been approved since we last looked. */

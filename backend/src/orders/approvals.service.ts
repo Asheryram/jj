@@ -5,6 +5,7 @@ import { DatahubClient } from '../supplier/datahub.client'
 import { GmplClient, gmplSendOutcome } from '../supplier/gmpl.client'
 import { FulfilmentService } from './fulfilment.service'
 import { claimTransition } from '../common/alert-flag'
+import { ValidationError } from '../common/domain-errors'
 import { resolveSupplierProvider } from '../supplier/supplier.service'
 import type { SupplierProviderCode } from '../settings/settings.service'
 
@@ -137,6 +138,14 @@ export interface ProviderApprovalStatus {
    * own schema comment.
    */
   lastSendError: string | null
+}
+
+/** What one provider says about one number, see `ApprovalsService.checkNumber`. */
+export interface NumberCheck {
+  provider: SupplierProviderCode
+  /** approved: can buy now; not_approved: needs approving; unknown: the provider did not give a clear answer. */
+  status: 'approved' | 'not_approved' | 'unknown'
+  detail: string
 }
 
 export interface PendingApprovalRow {
@@ -458,6 +467,89 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
     return results.sort(
       (a, b) => b.valueHeld - a.valueHeld || b.attempts - a.attempts || b.ordersHeld - a.ordersHeld,
     )
+  }
+
+  /**
+   * Check one number with both providers now, by hand: before a customer buys,
+   * or again for a number already on the list.
+   *
+   * Whatever each provider says is recorded. Approved means it can buy (and any
+   * orders waiting on it are released); not approved, or no clear answer, puts
+   * it on the list, where it is sent to the providers and checked again on its
+   * own every few minutes. So a number can be lined up before its owner ever
+   * tries to buy. AirtelTigo needs no approval with either provider.
+   */
+  async checkNumber(
+    rawPhone: string,
+    network: Network,
+  ): Promise<{ phone: string; network: Network; results: NumberCheck[]; added: boolean; released: number }> {
+    const digits = rawPhone.replace(/\D/g, '')
+    const phone = digits.startsWith('233') && digits.length === 12 ? `0${digits.slice(3)}` : digits
+    if (!/^0\d{9}$/.test(phone)) throw new ValidationError('A Ghana number needs 10 digits, like 0241234567.')
+    if (network === 'AirtelTigo') {
+      return {
+        phone,
+        network,
+        results: [{ provider: 'datahub-gh', status: 'approved', detail: 'AirtelTigo numbers do not need approval.' }],
+        added: false,
+        released: 0,
+      }
+    }
+
+    const results: NumberCheck[] = []
+    let added = false
+    let released = 0
+
+    const record = async (provider: SupplierProviderCode, networkKey: string, check: NumberCheck) => {
+      results.push(check)
+      const key = { phone_provider: { phone, provider } }
+      if (check.status === 'approved') {
+        await this.prisma.beneficiaryRequest.upsert({
+          where: key,
+          create: { phone, provider, networkKey, attempts: 0, approvedAt: new Date() },
+          update: { approvedAt: new Date() },
+        })
+        released += await this.releaseOrdersFor(phone, provider)
+        return
+      }
+      const existing = await this.prisma.beneficiaryRequest.findUnique({ where: key, select: { approvedAt: true } })
+      if (!existing) {
+        await this.prisma.beneficiaryRequest.create({ data: { phone, provider, networkKey, attempts: 0 } })
+        added = true
+      }
+    }
+
+    const dhKey = datahubNetworkKeyFor(network)
+    const dh = await this.datahub.verify(dhKey, phone).catch((error: unknown) => ({ kind: 'unknown' as const, reason: String(error) }))
+    await record('datahub-gh', dhKey, {
+      provider: 'datahub-gh',
+      status: dh.kind === 'registered' ? 'approved' : dh.kind === 'not_registered' ? 'not_approved' : 'unknown',
+      detail:
+        dh.kind === 'registered'
+          ? 'Approved, can buy.'
+          : dh.kind === 'not_registered'
+            ? 'Not on their approved list yet.'
+            : `No clear answer: ${dh.reason}`,
+    })
+
+    const gmplKey = network === 'Telecel' ? 'TELECEL' : 'MTN'
+    const gmpl = await this.gmpl.precheckBeneficiary(gmplKey, [phone]).catch((error: unknown) => ({ kind: 'unavailable' as const, reason: String(error) }))
+    let gmplCheck: NumberCheck
+    if (gmpl.kind !== 'ok') {
+      gmplCheck = { provider: 'gmpl', status: 'unknown', detail: `No clear answer: ${'reason' in gmpl ? gmpl.reason : 'no reply'}` }
+    } else if (!gmpl.enforced) {
+      gmplCheck = { provider: 'gmpl', status: 'unknown', detail: 'GMPL is not checking approvals right now, so it cannot say.' }
+    } else {
+      const known = gmpl.results.find((entry) => entry.phone === phone)?.known === true
+      gmplCheck = { provider: 'gmpl', status: known ? 'approved' : 'not_approved', detail: known ? 'Approved, can buy.' : 'Not on their approved list yet.' }
+    }
+    await record('gmpl', gmplKey, gmplCheck)
+
+    // Put a newly listed number in front of GMPL straight away rather than at the next sweep.
+    if (gmplCheck.status !== 'approved') await this.submitGmpl().catch(() => undefined)
+
+    this.log.log(`checked ${phone} (${network}) by hand: DataHub ${results[0].status}, GMPL ${gmplCheck.status}`)
+    return { phone, network, results, added, released }
   }
 
   /**
