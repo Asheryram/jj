@@ -128,7 +128,7 @@ export default function Dashboard() {
 
       {isAgent && (
         <div className="mb-5">
-          <LearnCard title="Learn how selling works" />
+          <LearnCard title="Learn how selling works" defaultCollapsed />
         </div>
       )}
 
@@ -251,6 +251,16 @@ export default function Dashboard() {
             </Link>
           </div>
           <CopyField value={sellLink} />
+          <a
+            href={`https://wa.me/?text=${encodeURIComponent(`Buy data, airtime and result checkers from me here: ${sellLink}`)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2.5 block"
+          >
+            <Button size="sm" variant="whatsapp" block>
+              <WhatsAppIcon className="size-4" /> Share my link on WhatsApp
+            </Button>
+          </a>
           <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
             Customers who buy here pay your prices, and your margin is credited automatically.
           </p>

@@ -30,12 +30,14 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ClockIcon,
+  CopyIcon,
   ReceiptIcon,
   RefreshIcon,
   SearchIcon,
   ShieldIcon,
   TrendUpIcon,
   WalletIcon,
+  WhatsAppIcon,
   XIcon,
 } from '../components/icons'
 
@@ -49,6 +51,26 @@ const STEPS = ['Bundle', 'Number', 'Confirm', 'Done']
  * sell link must be able to buy without creating an account, or the sell link
  * is worthless.
  */
+/** The last few numbers bought for on this device, newest first. Never sent anywhere. */
+const RECENT_KEY = 'jdc.recentNumbers'
+
+function readRecentNumbers(): string[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as unknown
+    return Array.isArray(parsed) ? parsed.filter((n): n is string => typeof n === 'string').slice(0, 3) : []
+  } catch {
+    return []
+  }
+}
+
+function rememberNumber(phone: string) {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify([phone, ...readRecentNumbers().filter((n) => n !== phone)].slice(0, 3)))
+  } catch {
+    // A convenience only.
+  }
+}
+
 export default function Buy() {
   const { productId } = useParams()
   const navigate = useNavigate()
@@ -220,6 +242,7 @@ export default function Buy() {
     setFailure('')
 
     try {
+      rememberNumber(check.phone)
       const order = await placeOrder({
         product,
         recipient: check.phone,
@@ -352,6 +375,30 @@ export default function Buy() {
               Use my number ({session.phone})
             </button>
           )}
+
+          {/* Numbers bought for before on this device, one tap each. */}
+          {(() => {
+            const recent = readRecentNumbers().filter((n) => n !== recipient.replace(/\s/g, '') && n !== session?.phone)
+            if (recent.length === 0) return null
+            return (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-slate-500 dark:text-slate-400">Recent:</span>
+                {recent.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => {
+                      setRecipient(n)
+                      setNeedsSetup(false)
+                    }}
+                    className="tabular rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:border-brand-400 dark:border-slate-700 dark:text-slate-200"
+                  >
+                    {prettyPhone(n)}
+                  </button>
+                ))}
+              </div>
+            )
+          })()}
 
           <Button
             block
@@ -702,6 +749,8 @@ function OrderReceipt({
           <div className="px-5 pb-5">
             <OrderFollowUp
               reference={placed.reference}
+              buyerPhone={placed.buyerPhone}
+              productName={placed.productName}
               signedIn={signedIn}
               shopTo={shopTo}
               trackTo={trackTo}
@@ -742,6 +791,8 @@ function OrderReceipt({
           <div className="px-5 pb-5">
             <OrderFollowUp
               reference={placed.reference}
+              buyerPhone={placed.buyerPhone}
+              productName={placed.productName}
               signedIn={signedIn}
               shopTo={shopTo}
               trackTo={trackTo}
@@ -795,6 +846,8 @@ function OrderReceipt({
 
             <OrderFollowUp
               reference={placed.reference}
+              buyerPhone={placed.buyerPhone}
+              productName={placed.productName}
               signedIn={signedIn}
               shopTo={shopTo}
               trackTo={trackTo}
@@ -1066,34 +1119,71 @@ function SplitBreakdown({
  */
 function OrderFollowUp({
   reference,
+  buyerPhone,
+  productName,
   signedIn,
   shopTo,
   trackTo,
   primaryLabel,
 }: {
   reference: string
+  buyerPhone: string
+  productName: string
   signedIn: boolean
   shopTo: string
   trackTo: string
   primaryLabel: string
 }) {
+  const [copied, setCopied] = useState(false)
+  // This device's own tracking link carries the phone number too, so it opens
+  // straight on the order. A shared link carries only the reference: whoever
+  // receives it still needs the number, which keeps the order private.
+  const ownTrack = `${trackTo}?ref=${encodeURIComponent(reference)}&phone=${encodeURIComponent(buyerPhone)}`
+  const sharedTrack = `${window.location.origin}${trackTo}?ref=${encodeURIComponent(reference)}`
+  const shareText = `My ${productName} order: ${reference}. Track it here: ${sharedTrack}`
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(reference)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Older browsers: the reference is on screen to copy by hand.
+    }
+  }
+
   return (
     <div className="space-y-4">
       {!signedIn && (
         <Callout tone="info" title="Keep your reference">
           Save <strong className="font-mono font-bold">{reference}</strong>. With it and your phone
-          number you can look this order up any time at{' '}
-          <Link to={trackTo} className="font-semibold underline">
-            /track
+          number you can look this order up any time on the{' '}
+          <Link to={ownTrack} className="font-semibold underline">
+            tracking page
           </Link>
           .
         </Callout>
       )}
       <div className="flex flex-col gap-2 sm:flex-row">
+        <Button variant="outline" block className="sm:flex-1" onClick={() => void copy()}>
+          {copied ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />} {copied ? 'Copied' : 'Copy reference'}
+        </Button>
+        <a
+          href={`https://wa.me/?text=${encodeURIComponent(shareText)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="sm:flex-1"
+        >
+          <Button variant="whatsapp" block>
+            <WhatsAppIcon className="size-4" /> Share on WhatsApp
+          </Button>
+        </a>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
         <Link to={shopTo} className="flex-1">
           <Button block>{primaryLabel}</Button>
         </Link>
-        <Link to={signedIn ? '/app/orders' : trackTo} className="flex-1">
+        <Link to={signedIn ? '/app/orders' : ownTrack} className="flex-1">
           <Button block variant="outline">
             <ReceiptIcon className="size-4" /> {signedIn ? 'My orders' : 'Track order'}
           </Button>

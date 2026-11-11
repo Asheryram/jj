@@ -58,7 +58,7 @@ export default function AwaitingApproval() {
                 `${branding.shopName} did not approve this application. No reason was recorded.`}
             </p>
             <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
-              If you think this is a mistake, call {branding.shopName} on 020 987 6543.
+              If you think this is a mistake, contact {branding.shopName} directly.
             </p>
           </>
         ) : (
