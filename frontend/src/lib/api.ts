@@ -1316,6 +1316,60 @@ export interface FloatState {
   daysLeft: number | null
 }
 
+/** One recommendation, see backend `analytics/decisions.ts`. */
+export interface Decision {
+  id: string
+  kind: 'provider_switch' | 'float_runway' | 'agents_slipping' | 'thin_margin' | 'failure_cost' | 'cash_available'
+  urgency: 'now' | 'this_week' | 'when_you_can'
+  title: string
+  evidence: string[]
+  /** Roughly what acting is worth over a month, pesewas. Null when it is not a money call. */
+  monthlyImpact: number | null
+  action: { label: string; to: string }
+  caveat?: string
+}
+
+export interface DecisionWeek {
+  /** Monday, YYYY-MM-DD. */
+  week: string
+  sales: number
+  profit: number
+  ownShop: number
+  agents: number
+  activeAgents: number
+  complete: boolean
+}
+
+export interface AnalyticsDecisions {
+  at: string
+  /** Last full week against the four before it. Null with under two weeks of trading. */
+  pulse: {
+    week: string
+    sales: number
+    salesChange: number | null
+    profit: number
+    profitChange: number | null
+    agentsChange: number | null
+    ownShopChange: number | null
+    activeAgents: number
+    activeAgentsBefore: number
+  } | null
+  thisWeek: DecisionWeek | null
+  weeks: DecisionWeek[]
+  decisions: Decision[]
+  /** Every bundle sold in the last 4 weeks, for the price simulator. */
+  products: {
+    productId: string
+    name: string
+    network: string | null
+    provider: string
+    sold: number
+    avgSale: number
+    avgProfit: number
+    cost: number
+  }[]
+}
+
 export interface Insights {
   meta: {
     from: number
@@ -2419,6 +2473,9 @@ export const api = {
   // Analytics: one call returns the whole page for a range, see InsightsService.
   analyticsInsights: (range: AnalyticsRange) =>
     request<Insights>(`/analytics/insights?from=${range.from}&to=${range.to}`),
+
+  /** What to do this week, ranked, from live production data, see `DecisionsService`. */
+  analyticsDecisions: () => request<AnalyticsDecisions>('/analytics/decisions'),
 
   /** Pull the latest from production now, instead of waiting for the hourly run. */
   analyticsRefresh: () => request<{ daysProcessed: number }>('/analytics/refresh', { method: 'POST' }),
