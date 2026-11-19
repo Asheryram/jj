@@ -44,8 +44,29 @@ export interface LedgerDraft {
 @Injectable()
 export class LedgerService {
   private readonly log = new Logger(LedgerService.name)
+  private readonly listeners: (() => void)[] = []
 
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Called after every write that recorded something. Used by
+   * `SolvencyService` to drop its cached position the moment money moves.
+   */
+  onRecorded(listener: () => void): void {
+    this.listeners.push(listener)
+  }
+
+  /**
+   * Told now and once more shortly after: a write inside a transaction is
+   * not visible until it commits, so a read in between could cache the old
+   * figure again. The second call clears that too.
+   */
+  private notify(): void {
+    for (const listener of this.listeners) listener()
+    setTimeout(() => {
+      for (const listener of this.listeners) listener()
+    }, 2_000).unref()
+  }
 
   /**
    * Build the key for an event. Same event, same key, for ever.
@@ -88,6 +109,7 @@ export class LedgerService {
         })),
         skipDuplicates: true,
       })
+      if (result.count > 0) this.notify()
       return result.count
     } catch (error) {
       this.log.error(

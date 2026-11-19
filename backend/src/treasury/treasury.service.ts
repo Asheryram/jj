@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common'
+import { TREASURY_IN_FLIGHT } from '../finance/free-to-spend'
 import type { Network, PaystackTopupSource, TreasuryPurpose } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { PaystackClient, transferEventFor } from '../payments/paystack.client'
@@ -17,7 +18,7 @@ import { bundleCostByProvider } from '../supplier/provider-resolution'
 export { MIN_TRANSFER, MAX_TRANSFER }
 
 /** A transfer that may still move money: counted against what is free to take. */
-const IN_FLIGHT = ['sending', 'pending', 'otp', 'unknown'] as const
+const IN_FLIGHT = TREASURY_IN_FLIGHT
 
 const SYNC_INTERVAL_MS = 15 * 60_000
 const SYNC_CURSOR_KEY = 'paystackLedgerSyncedAt'
@@ -177,14 +178,27 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       this.advancesToRepay(),
     ])
 
-    const free = position.freeToSpend - inFlight
+    /**
+     * `freeToSpend` already holds back the owner's own withdrawals and every
+     * treasury fee still in flight (see `Claims.treasuryInFlight`). What it
+     * does not hold back is a float refill or advance repayment in flight:
+     * once it lands it lowers what is held and what is owed equally, so it
+     * does not change Free to spend, but until then the money is still on
+     * its way out of the live balance, and a limit must not offer it twice.
+     * Subtracting all of `inFlight` here again counted a withdrawal twice.
+     */
+    const free =
+      position.freeToSpend -
+      (inFlight - position.treasuryInFlight.drawings - position.treasuryInFlight.fees) -
+      // Worst case for a limit, see `inFlightBookedCost`.
+      position.inFlightBookedCost
     /**
      * A refill is held back only by money owed out in cash: agents, customer
      * wallets and refunds, payouts. Orders still being delivered are not held
      * against it, the float is what delivers them, and holding their price
      * back left a float that could not be refilled while orders waited on it.
      */
-    const freeForRefill = free + position.liabilities.undeliveredOrders
+    const freeForRefill = free + position.liabilities.undeliveredOrders + position.inFlightBookedCost
     const liveBalance = live?.ok ? live.balance : null
     // What Paystack itself can actually send, after its own fee.
     const sendable = liveBalance === null ? null : Math.max(liveBalance - fee, 0)
@@ -193,7 +207,10 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
     return {
       fee,
       liveBalance,
-      freeToSpend: free,
+      /** The same figure Finance and All orders show, see `SolvencyService.position`. */
+      freeToSpend: position.freeToSpend,
+      /** `freeToSpend`, less refills and repayments still in flight and the worst case on in-flight orders: what limits are built from. */
+      spendableNow: free,
       inFlight,
       liabilities: position.liabilities.total,
       ownerDrawingMax: capped(free - fee),

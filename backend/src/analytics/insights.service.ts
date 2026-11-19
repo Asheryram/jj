@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common'
+import { cashBridge } from '../finance/free-to-spend'
 import type { FactOrder } from '@prisma-analytics/client'
 import { LedgerService } from '../finance/ledger.service'
 import { SolvencyService } from '../finance/solvency.service'
@@ -137,9 +138,10 @@ export class InsightsService {
     const firstPaidDay = new Map(firstOrders.map((r) => [r.buyerPhone, r._min.dateKey ?? 0]))
 
     const now = new Date()
-    const [position, earnedProfit, floatStates] = await Promise.all([
+    const [position, earnedProfit, ownerMoney, floatStates] = await Promise.all([
       this.solvency.position(),
       this.ledger.earnedProfit(),
+      this.solvency.ownerMoneyBreakdown(),
       Promise.all(
         KNOWN_PROVIDERS.map(async (provider) => {
           const [latest, expected, capital] = await Promise.all([
@@ -156,7 +158,7 @@ export class InsightsService {
     const sales = this.sales(cur, prev, from, to, granularity, firstPaidDay)
     const operations = this.operations(cur, prev, from, to, granularity, openOrders, blocked, now)
     const agents = this.agents(cur, prev, from, to, prevFrom, prevTo, granularity, withdrawals, applications, agentsDim, now)
-    const cash = this.cash(all, today, position, earnedProfit, floatStates, solvencyHistory, floatHistory)
+    const cash = this.cash(all, today, position, earnedProfit, ownerMoney, floatStates, solvencyHistory, floatHistory)
 
     const summary = {
       revenue: { value: money.totals.revenue, previous: money.previousTotals.revenue },
@@ -629,6 +631,7 @@ export class InsightsService {
     today: number,
     position: Awaited<ReturnType<SolvencyService['position']>>,
     earnedProfit: number,
+    ownerMoney: { topUps: number; drawings: number; treasuryFees: number },
     floatStates: {
       provider: string
       latest: { balance: number; reference: number; level: string; observedAt: string } | null
@@ -663,20 +666,21 @@ export class InsightsService {
     /**
      * Why "free to spend" is not the same number as profit earned, so an
      * admin who sees both is told the difference instead of left to guess.
-     * Profit is what sales made; free to spend is cash left in Paystack
-     * after everything owed. The one large, known difference is profit
-     * already moved into a supplier float beyond what that float was owed:
-     * still yours, but stock now, not cash. Anything else (Paystack fees on
-     * orders that later failed, payout sending fees, rounding) is shown as
-     * one remainder rather than guessed at.
+     * Each known difference has its own line, see `cashBridge`: the owner's
+     * own top-ups and withdrawals (landed or on their way out), the fees on
+     * those moves, and profit moved into a supplier float beyond what it was
+     * owed. What is left over is only fees on orders still in flight and
+     * rounding.
      */
     const inFloats = sumBy(floatStates, (f) => f.overReimbursed)
-    const bridge = {
+    const bridge = cashBridge({
       earnedProfit,
+      ownerTopUps: ownerMoney.topUps,
+      ownerDrawings: ownerMoney.drawings + position.treasuryInFlight.drawings,
+      treasuryFees: ownerMoney.treasuryFees + position.treasuryInFlight.fees,
       profitInFloats: inFloats,
-      other: position.freeToSpend - (earnedProfit - inFloats),
       freeToSpend: position.freeToSpend,
-    }
+    })
 
     return {
       bridge,

@@ -853,9 +853,8 @@ export class AdminController {
    */
   @Get('finance/position')
   async position() {
-    const [position, spentOnBundlesByProvider, floats] = await Promise.all([
+    const [position, floats] = await Promise.all([
       this.solvency.position(),
-      this.solvency.spentOnBundlesByProvider(),
       Promise.all(
         KNOWN_PROVIDERS.map(async (provider) => ({
           provider,
@@ -863,7 +862,7 @@ export class AdminController {
         })),
       ),
     ])
-    return { ...position, spentOnBundlesByProvider, floats }
+    return { ...position, floats }
   }
 
   @Get('finance/entries')

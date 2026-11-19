@@ -87,7 +87,11 @@ export default function FloatPanel() {
   const refreshFreeToSpend = () =>
     api
       .reservePosition()
-      .then((position) => setFreeToSpend(position.freeToSpend))
+      .then((position) =>
+        // The same cap the server enforces when a reimbursement is logged:
+        // Free to spend, less the worst case on orders still in flight.
+        setFreeToSpend(position.freeToSpend - position.inFlightBookedCost),
+      )
       .catch(() => undefined)
 
   useEffect(() => {

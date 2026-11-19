@@ -48,6 +48,7 @@ export default function CashTab({ data }: { data: Insights }) {
               { key: 'undelivered', label: 'Paid orders not delivered yet', value: l.undeliveredOrders },
               { key: 'payouts', label: 'Payouts approved, not sent', value: l.queuedPayouts },
               { key: 'refundAdv', label: 'Refunds paid by hand, to repay', value: l.manualRefundAdvances },
+              { key: 'treasury', label: 'Your own withdrawals on their way out', value: l.treasuryInFlight },
               { key: 'payoutAdv', label: 'Payouts paid by hand, to repay', value: l.manualPayoutAdvances },
             ].filter((r) => r.value !== 0)}
           />
@@ -57,7 +58,7 @@ export default function CashTab({ data }: { data: Insights }) {
       <Panel
         question="Why isn't free to spend the same as profit?"
         answer={
-          Math.abs(cash.bridge.earnedProfit - cash.bridge.freeToSpend) < 500
+          Math.abs(cash.bridge.other) < 500 && cash.bridge.ownerTopUps === 0 && cash.bridge.ownerDrawings === 0 && cash.bridge.profitInFloats === 0
             ? 'They match: the profit you have earned is sitting in Paystack as cash.'
             : 'Profit is what sales earned. Free to spend is the cash left after everything owed. Here is the difference.'
         }
@@ -67,6 +68,24 @@ export default function CashTab({ data }: { data: Insights }) {
             <dt className="text-slate-600 dark:text-slate-300">Profit earned, all time (finished sales)</dt>
             <dd className="font-semibold tabular-nums text-slate-900 dark:text-slate-50">{cedis(cash.bridge.earnedProfit)}</dd>
           </div>
+          {cash.bridge.ownerTopUps !== 0 && (
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-600 dark:text-slate-300">Your own money put into Paystack</dt>
+              <dd className="font-semibold tabular-nums text-slate-900 dark:text-slate-50">+{cedis(cash.bridge.ownerTopUps)}</dd>
+            </div>
+          )}
+          {cash.bridge.ownerDrawings !== 0 && (
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-600 dark:text-slate-300">Taken out by you (including any still on its way)</dt>
+              <dd className="font-semibold tabular-nums text-slate-900 dark:text-slate-50">−{cedis(cash.bridge.ownerDrawings)}</dd>
+            </div>
+          )}
+          {cash.bridge.treasuryFees !== 0 && (
+            <div className="flex justify-between gap-3">
+              <dt className="text-slate-600 dark:text-slate-300">Paystack fees on your own transfers</dt>
+              <dd className="font-semibold tabular-nums text-slate-900 dark:text-slate-50">−{cedis(cash.bridge.treasuryFees)}</dd>
+            </div>
+          )}
           {cash.bridge.profitInFloats !== 0 && (
             <div className="flex justify-between gap-3">
               <dt className="text-slate-600 dark:text-slate-300">Profit moved into supplier floats (still yours, but stock now)</dt>
@@ -75,7 +94,7 @@ export default function CashTab({ data }: { data: Insights }) {
           )}
           {Math.abs(cash.bridge.other) >= 1 && (
             <div className="flex justify-between gap-3">
-              <dt className="text-slate-600 dark:text-slate-300">Other (Paystack fees on failed orders, payout fees, rounding)</dt>
+              <dt className="text-slate-600 dark:text-slate-300">Other (Paystack fees on orders still in flight, rounding)</dt>
               <dd className="font-semibold tabular-nums text-slate-900 dark:text-slate-50">{cash.bridge.other < 0 ? '−' : '+'}{cedis(Math.abs(cash.bridge.other))}</dd>
             </div>
           )}
@@ -86,7 +105,7 @@ export default function CashTab({ data }: { data: Insights }) {
         </dl>
         {Math.abs(cash.bridge.other) >= 2000 && (
           <p className="mt-3 text-xs text-amber-600 dark:text-amber-400">
-            The "other" line is bigger than fees and rounding usually explain. Check Finance for a capital entry or a hand-sent refund or payout that may be recorded wrongly.
+            The "other" line is bigger than fees on in-flight orders and rounding explain. Check Finance for a float refill, refund or payout paid from the settlement MoMo and not logged, or a capital entry recorded wrongly.
           </p>
         )}
       </Panel>

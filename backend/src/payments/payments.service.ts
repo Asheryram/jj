@@ -19,6 +19,9 @@ const TRANSFER_CHECK_MS = 5 * 60_000
 /** How long a transfer gets to settle by webhook before it is looked up. */
 const TRANSFER_SETTLE_MS = 5 * 60_000
 /** Transfer states nothing more can be learned about by asking Paystack. */
+/** Ledger key for a refund transfer's sending fee. Also written by the 20261119 migration for past refunds. */
+const refundFeeKey = (refundId: string) => LedgerService.key('refund', refundId, 'payout_fee')
+
 const CLOSED_TRANSFER_STATUSES = ['manual', 'success', 'failed', 'reversed', 'sent_after_return', 'reviewed']
 
 /**
@@ -1031,6 +1034,26 @@ export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy 
         if (claim.count === 0) return false
         // Now, and only now, the receipt may say the money has gone back.
         await tx.order.update({ where: { id: row.orderId }, data: { refunded: true } })
+        // Paystack's fee for sending it, paid by the business, not the
+        // customer. Booked as a cost so profit drops by it the same moment
+        // the cash side does; before this, the cash side counted it and
+        // profit never did.
+        const fee = row.transferFee ?? (await this.settings.get('payoutTransferFee'))
+        if (fee > 0) {
+          await this.ledger.record(
+            [
+              {
+                idempotencyKey: refundFeeKey(row.id),
+                kind: 'payout_fee',
+                amount: -fee,
+                description: `Paystack transfer fee · refund ${row.orderRef}`,
+                orderRef: row.orderRef,
+                occurredAt: new Date(),
+              },
+            ],
+            tx,
+          )
+        }
         return true
       })
       if (!applied) {
@@ -1088,7 +1111,7 @@ export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy 
       await tx.order.update({ where: { id: row.orderId }, data: { refunded: false } })
       // Nothing left the business, so it must not sit on the books as a cost.
       await tx.ledgerEntry.deleteMany({
-        where: { idempotencyKey: LedgerService.key('order', row.orderRef, 'refund') },
+        where: { idempotencyKey: { in: [LedgerService.key('order', row.orderRef, 'refund'), refundFeeKey(row.id)] } },
       })
     })
 

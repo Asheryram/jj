@@ -7,6 +7,8 @@ import { escape, wrap } from '../mail/templates'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
 import { claimTransition } from '../common/alert-flag'
 import { bundleCostByProvider, reimbursedByProvider } from '../supplier/provider-resolution'
+import { LedgerService } from './ledger.service'
+import { TREASURY_IN_FLIGHT, freeToSpend, heldForUndelivered, inFlightBookedCost, refundTransferFees } from './free-to-spend'
 
 /**
  * What is owed, against what there is to pay it with, plus whether Paystack's
@@ -92,19 +94,37 @@ export interface BalanceReconciliation {
  */
 const EXPECTED_BALANCE_CACHE_MS = 2 * 60_000
 
+/**
+ * How long a whole `position()` snapshot is reused.
+ *
+ * Short, and cleared early whenever the ledger records a money movement
+ * (see the constructor), so a payment or payout shows up at once. It is the
+ * whole position that is cached, never one half of it: every part of a
+ * cached figure was read at the same moment, so it can be a few seconds old
+ * but never inconsistent with itself.
+ */
+const POSITION_CACHE_MS = 30_000
+
 @Injectable()
 export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly log = new Logger(SolvencyService.name)
   private timer: NodeJS.Timeout | null = null
   private expectedBalanceCache: { value: number; computedAt: number } | null = null
   private spentOnBundlesCache: { value: number; computedAt: number } | null = null
+  private positionCache: { value: Awaited<ReturnType<SolvencyService['computePosition']>>; computedAt: number } | null =
+    null
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly paystack: PaystackClient,
     private readonly settings: SettingsService,
     private readonly mailer: MailerService,
-  ) {}
+    ledger: LedgerService,
+  ) {
+    // Every money movement goes through the ledger, so a write there is the
+    // signal that any cached figure here is now out of date.
+    ledger.onRecorded(() => this.invalidate())
+  }
 
   /**
    * Watch solvency on a clock, not just when someone happens to open the
@@ -386,11 +406,30 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
   /**
    * The reserve position.
    *
-   * `available` is the honest answer to "what can I actually spend": the balance
-   * less every obligation. Negative means obligations already exceed the money
+   * `freeToSpend` is the honest answer to "what can I actually spend": what
+   * should be at Paystack, less every claim on it and everything owed to the
+   * provider floats. Negative means obligations already exceed the money
    * held, not a rounding matter, a shortfall somebody will eventually ask for.
+   * The arithmetic itself lives in `free-to-spend.ts`, shared with the
+   * Analytics history so the two cannot drift apart.
+   *
+   * Computed as one snapshot and cached as one, see `POSITION_CACHE_MS`. It
+   * used to cache the cash half for two minutes while reading the claims
+   * live, so a payment showed as owed before it showed as collected (Free to
+   * spend dipped by the sale price) and a payout stopped being owed before it
+   * showed as sent (Free to spend jumped by the payout), each for up to two
+   * minutes.
    */
   async position() {
+    if (this.positionCache && Date.now() - this.positionCache.computedAt < POSITION_CACHE_MS) {
+      return this.positionCache.value
+    }
+    const value = await this.computePosition()
+    this.positionCache = { value, computedAt: Date.now() }
+    return value
+  }
+
+  private async computePosition() {
     const [
       agents,
       customerWallets,
@@ -404,6 +443,9 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       manualRefundReimbursements,
       manualPayoutAdvances,
       manualPayoutReimbursements,
+      treasuryInFlight,
+      flows,
+      owedToFloatsByProvider,
     ] = await Promise.all([
       this.prisma.user.aggregate({ where: { role: 'agent' }, _sum: { balance: true } }),
       this.prisma.user.aggregate({ where: { role: 'customer' }, _sum: { balance: true } }),
@@ -417,55 +459,46 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       // (already decided, just not confirmed sent yet).
       this.prisma.withdrawal.aggregate({
         where: { status: 'pending' },
-        _sum: { amount: true },
+        _sum: { amount: true, transferFee: true },
         _count: { _all: true },
       }),
       /**
        * Approved, but the real Paystack transfer hasn't actually landed.
        *
        * `status` moves to `approved` the instant James decides, but Paystack
-       * settles asynchronously, the transfer can sit on `otp`, `unknown`, or
-       * `manual` for a real stretch of time, or simply be null for the moment
-       * right after approval before it has been attempted at all. Until
-       * `transferStatus` reads `success`, the agent has not been paid, so this
-       * is still owed exactly like a `pending` request is, it was just
-       * missing from here before, which let "Free to spend" briefly overstate
-       * what was actually safe to use.
+       * settles asynchronously, so until `transferStatus` reads `success` the
+       * agent has not been paid and this is still owed exactly like a
+       * `pending` request is.
        *
        * `OR: [{ transferStatus: null }, ...]` is deliberate, not redundant:
        * `NOT: { transferStatus: 'success' }` alone silently excludes a null
-       * `transferStatus` under SQL's three-valued logic, verified directly
-       * against the database, which would have reopened exactly the gap this
-       * exists to close for every withdrawal not yet attempted.
+       * `transferStatus` under SQL's three-valued logic.
        */
       this.prisma.withdrawal.aggregate({
         where: {
           status: 'approved',
           OR: [{ transferStatus: null }, { transferStatus: { not: 'success' } }],
         },
-        _sum: { amount: true },
+        _sum: { amount: true, transferFee: true },
       }),
       // Orders paid for and not yet delivered. The customer's money is in hand
       // and the bundle is not, so it is either a delivery or a refund, and
-      // either way it is not James's to spend.
-      this.prisma.order.aggregate({
+      // either way it is not James's to spend. Each with the supplier cost
+      // already booked against it, see `heldForUndelivered`.
+      this.prisma.order.findMany({
         where: { status: { in: ['awaiting_approval', 'processing'] } },
-        _sum: { salePrice: true },
-        _count: { _all: true },
+        select: { salePrice: true, ledgerEntries: { where: { kind: 'supplier_cost' }, select: { amount: true } } },
       }),
-      // Refunds are authorised by a person, not paid automatically, but the
-      // money is owed from the moment the delivery failed, not from the moment
-      // somebody clicks approve. Counting it only at approval would make the
-      // balance look spendable while a customer was still waiting for it.
+      // Refunds are owed from the moment the delivery failed, not from the
+      // moment somebody clicks approve.
       this.prisma.refundRequest.aggregate({
         where: { status: 'pending' },
         _sum: { amount: true },
         _count: { _all: true },
       }),
-      // Same "approved but not actually sent yet" gap as `stuckPayouts` above,
-      // scoped to `method: 'transfer'`, a wallet or claimable refund already
-      // moved the money the moment it was approved. Same explicit-null
-      // handling as above, for the same reason.
+      // Same "approved but not actually sent yet" gap as `stuckPayouts`,
+      // scoped to `method: 'transfer'`: a wallet or claimable refund already
+      // moved the money the moment it was approved.
       this.prisma.refundRequest.aggregate({
         where: {
           status: 'approved',
@@ -476,9 +509,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       }),
       // A `capital_in` tied to an order is `RefundsService.settleManually`
       // recording that someone personally covered a refund Paystack refused to
-      // send, see `FloatMonitorService.outstandingManualRefunds`. Owed back
-      // the same as any other debt from the moment it happened, not from
-      // whenever it gets reimbursed.
+      // send. Owed back from the moment it happened.
       this.prisma.ledgerEntry.findMany({
         where: { kind: 'capital_in', orderRef: { not: null } },
         select: { orderRef: true, amount: true },
@@ -487,12 +518,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         where: { kind: 'capital_out', orderRef: { not: null } },
         select: { orderRef: true },
       }),
-      // The identical pattern, one column over: `WithdrawalsService.settleManually`
-      // recording that someone personally covered a payout because there was
-      // nowhere automatic to send it from yet (no Paystack key configured, or
-      // an account that cannot send transfers at all), see
-      // `transfersSince()` below for why this must never also look like a
-      // real Paystack transfer.
+      // The identical pattern for payouts, `WithdrawalsService.settleManually`.
       this.prisma.ledgerEntry.findMany({
         where: { kind: 'capital_in', withdrawalId: { not: null } },
         select: { withdrawalId: true, amount: true },
@@ -501,20 +527,23 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         where: { kind: 'capital_out', withdrawalId: { not: null } },
         select: { withdrawalId: true },
       }),
+      this.treasuryInFlight(),
+      this.heldFlows(),
+      this.spentOnBundlesByProvider(),
     ])
 
-    const undelivered = heldOrders._sum.salePrice ?? 0
-    const owedToAgents = agents._sum.balance ?? 0
     /**
-     * Requesting a withdrawal debits the agent's balance immediately (see
-     * `WithdrawalsService.request`), so by the time it is sitting here as
-     * "pending" or "approved but not sent" it has already left `owedToAgents`
-     * above. Left out of the total it would vanish from both sides, same
-     * class of gap `pendingRefunds` below already exists to close, for the
-     * identical reason: a payout not yet actually sent is still owed, not yet
-     * freed up.
+     * Requesting a withdrawal debits the agent's balance by the amount AND
+     * the transfer fee (see `WithdrawalsService.request`), so both have left
+     * `agentEarnings` by the time it sits here. Counting only the amount let
+     * the fee vanish from both sides, overstating Free to spend by one fee
+     * per waiting payout until it was sent.
      */
-    const queuedPayouts = (pendingPayouts._sum.amount ?? 0) + (stuckPayouts._sum.amount ?? 0)
+    const queuedPayouts =
+      (pendingPayouts._sum.amount ?? 0) +
+      (pendingPayouts._sum.transferFee ?? 0) +
+      (stuckPayouts._sum.amount ?? 0) +
+      (stuckPayouts._sum.transferFee ?? 0)
     const owedToCustomers =
       (customerWallets._sum.balance ?? 0) +
       (credits._sum.amount ?? 0) +
@@ -528,50 +557,61 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
     const owedForManualPayouts = manualPayoutAdvances
       .filter((advance) => !reimbursedWithdrawalIds.has(advance.withdrawalId))
       .reduce((sum, advance) => sum + advance.amount, 0)
-    const liabilities =
-      owedToAgents + owedToCustomers + undelivered + queuedPayouts + owedForManualRefunds + owedForManualPayouts
-    const spentOnBundles = await this.spentOnBundles()
 
-    const expectedAtPaystack = await this.expectedBalance()
+    const inFlight = heldOrders.map((o) => ({
+      salePrice: o.salePrice,
+      bookedCost: -o.ledgerEntries.reduce((sum, e) => sum + e.amount, 0),
+    }))
+    const result = freeToSpend(
+      flows,
+      {
+        agentEarnings: agents._sum.balance ?? 0,
+        customerMoney: owedToCustomers,
+        undeliveredOrders: heldForUndelivered(inFlight),
+        queuedPayouts,
+        manualRefundAdvances: owedForManualRefunds,
+        manualPayoutAdvances: owedForManualPayouts,
+        treasuryInFlight: treasuryInFlight.drawings + treasuryInFlight.fees,
+      },
+      owedToFloatsByProvider,
+    )
 
     return {
       /**
        * What our own records say should be at Paystack right now: everything
        * ever collected, net of Paystack's fee, less every payout and refund
-       * transfer this platform has actually sent. Never Paystack's own live
-       * balance, see the file header.
+       * transfer actually sent, plus or minus the owner's own moves. Never
+       * Paystack's own live balance, see the file header.
        */
-      expectedAtPaystack,
-      /**
-       * Every bundle ever bought, all-time, see the query above for why
-       * this is subtracted from `freeToSpend` even though none of it ever
-       * physically left Paystack.
-       */
-      spentOnBundles,
-      /**
-       * What's actually free to spend: `expectedAtPaystack` less every claim
-       * already on it, and less everything already spent buying bundles,
-       * that money came out of a supplier float, not Paystack, but keeping
-       * that float funded means moving Paystack money across to replace it
-       * sooner or later, so it is not free for anything else. Safe to show
-       * now in a way the old "Free to spend" figure was not, every part of
-       * this is this platform's own tracked records, never Paystack's live
-       * balance, so it cannot read GHS 0.00 just because a Starter account
-       * happens to hold nothing at the moment.
-       */
-      freeToSpend: expectedAtPaystack - liabilities - spentOnBundles,
+      expectedAtPaystack: result.expectedAtPaystack,
+      /** Owed to the provider floats: bundle cost not yet reimbursed. */
+      spentOnBundles: result.spentOnBundles,
+      /** `spentOnBundles` by provider, from the same snapshot so the two always add up. */
+      spentOnBundlesByProvider: owedToFloatsByProvider,
+      /** See `free-to-spend.ts`. */
+      freeToSpend: result.freeToSpend,
       liabilities: {
-        agentEarnings: owedToAgents,
-        customerMoney: owedToCustomers,
-        undeliveredOrders: undelivered,
-        /** Requested, balance already debited, not yet actually sent. */
-        queuedPayouts,
+        agentEarnings: result.liabilities.agentEarnings,
+        customerMoney: result.liabilities.customerMoney,
+        undeliveredOrders: result.liabilities.undeliveredOrders,
+        /** Requested, balance already debited (amount and fee), not yet actually sent. */
+        queuedPayouts: result.liabilities.queuedPayouts,
         /** Owed to whoever personally covered a refund Paystack refused to send. */
-        manualRefundAdvances: owedForManualRefunds,
+        manualRefundAdvances: result.liabilities.manualRefundAdvances,
         /** Owed to whoever personally covered a payout with nowhere automatic to send it from. */
-        manualPayoutAdvances: owedForManualPayouts,
-        total: liabilities,
+        manualPayoutAdvances: result.liabilities.manualPayoutAdvances,
+        /** The owner's own withdrawals and treasury fees still on their way out. */
+        treasuryInFlight: result.liabilities.treasuryInFlight,
+        total: result.liabilities.total,
       },
+      /** Split of `liabilities.treasuryInFlight`, for the profit-to-cash bridge. */
+      treasuryInFlight,
+      /**
+       * Bundle cost already charged for orders still in flight, see
+       * `inFlightBookedCost`. Not part of `freeToSpend` (it is counted once,
+       * under the floats); hard limits subtract it again as a worst case.
+       */
+      inFlightBookedCost: inFlightBookedCost(inFlight),
       pendingPayouts: {
         count: pendingPayouts._count._all,
         amount: pendingPayouts._sum.amount ?? 0,
@@ -585,6 +625,23 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
         count: pendingRefunds._count._all,
         amount: pendingRefunds._sum.amount ?? 0,
       },
+    }
+  }
+
+  /**
+   * The owner's treasury transfers still on their way out, see
+   * `Claims.treasuryInFlight`: an owner withdrawal's amount, and every
+   * in-flight treasury transfer's sending fee.
+   */
+  private async treasuryInFlight(): Promise<{ drawings: number; fees: number }> {
+    const rows = await this.prisma.treasuryTransfer.groupBy({
+      by: ['purpose'],
+      where: { status: { in: [...TREASURY_IN_FLIGHT] } },
+      _sum: { amount: true, fee: true },
+    })
+    return {
+      drawings: rows.filter((r) => r.purpose === 'owner_drawing').reduce((sum, r) => sum + (r._sum.amount ?? 0), 0),
+      fees: rows.reduce((sum, r) => sum + (r._sum.fee ?? 0), 0),
     }
   }
 
@@ -744,20 +801,21 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       }),
       this.prisma.refundRequest.aggregate({
         where: { method: 'transfer', paidAt: { not: null }, transferCode: { not: null } },
-        _sum: { amount: true },
-        _count: { _all: true },
+        _sum: { amount: true, transferFee: true },
+        _count: { _all: true, transferFee: true },
       }),
       this.settings.get('payoutTransferFee'),
     ])
     // Each real transfer also costs Paystack's own fee, out of the same
-    // balance. A payout records the fee it was charged; a refund records
-    // none, so the configured transfer fee stands in for it. Without these,
-    // "Should be at Paystack" drifted up by one fee per transfer.
+    // balance. Each payout and each refund records the fee it was charged;
+    // only a refund sent before refunds recorded theirs falls back to the
+    // configured fee. That fallback used to apply to every refund ever sent,
+    // so changing the fee setting rewrote history.
     return (
       (payouts._sum.amount ?? 0) +
       (payouts._sum.transferFee ?? 0) +
       (refunds._sum.amount ?? 0) +
-      refunds._count._all * refundFee
+      refundTransferFees(refunds._sum.transferFee ?? 0, refunds._count._all - refunds._count.transferFee, refundFee)
     )
   }
 
@@ -874,6 +932,26 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
    * transfer (`payout_fee` keyed `treasury:`, negative). A provider refill is
    * not here, it is a `capital_in_reimbursement`, already subtracted above.
    */
+  /**
+   * `ownerMovements`, split into its three parts, each positive, for the
+   * Analytics profit-to-cash bridge (`cashBridge`).
+   */
+  async ownerMoneyBreakdown(): Promise<{ topUps: number; drawings: number; treasuryFees: number }> {
+    const [topUps, drawings, fees] = await Promise.all([
+      this.prisma.ledgerEntry.aggregate({ where: { kind: 'owner_topup' }, _sum: { amount: true } }),
+      this.prisma.ledgerEntry.aggregate({ where: { kind: 'owner_drawing' }, _sum: { amount: true } }),
+      this.prisma.ledgerEntry.aggregate({
+        where: { kind: 'payout_fee', idempotencyKey: { startsWith: 'treasury:' } },
+        _sum: { amount: true },
+      }),
+    ])
+    return {
+      topUps: topUps._sum.amount ?? 0,
+      drawings: -(drawings._sum.amount ?? 0),
+      treasuryFees: -(fees._sum.amount ?? 0),
+    }
+  }
+
   private async ownerMovements(): Promise<number> {
     const sum = await this.prisma.ledgerEntry.aggregate({
       where: {
@@ -934,6 +1012,7 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
   invalidate(): void {
     this.expectedBalanceCache = null
     this.spentOnBundlesCache = null
+    this.positionCache = null
   }
 
   /**

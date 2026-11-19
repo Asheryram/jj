@@ -1176,6 +1176,11 @@ model RefundRequest {
   /// Paystack's handles for the payout, mirroring Withdrawal.
   recipientCode  String?   @map("recipient_code")
   transferCode   String?   @map("transfer_code")
+  /// Paystack's sending fee for this transfer, pesewas, frozen when it is
+  /// sent, the same as `Withdrawal.transferFee`. The business pays it, so it
+  /// is booked as a `payout_fee` cost once the transfer lands. Null only for
+  /// a refund never sent through Paystack.
+  transferFee    Int?      @map("transfer_fee")
   /// Their status verbatim: pending, success, failed, reversed, otp, manual.
   transferStatus String?   @map("transfer_status")
   /// Why a transfer did not go, in words that can be shown.

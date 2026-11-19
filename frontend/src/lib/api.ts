@@ -608,7 +608,10 @@ export interface TreasuryOverview {
   lastSettlementAt: string | null
   flows: { collected: number; transferred: number; reimbursed: number; advancesRepaid: number; ownerMoney: number; held: number }
   heldFor: { owedToOthers: number; owedToFloats: number; free: number; unrepaidAdvances: number }
+  /** Same figure as Finance and All orders. */
   freeToSpend: number
+  /** `freeToSpend` less float refills and repayments still in flight, what the limits use. */
+  spendableNow: number
   inFlight: number
   liabilities: number
   ownerDrawingMax: number
@@ -1073,6 +1076,8 @@ export interface ReservePosition {
   spentOnBundles: number
   /** `expectedAtPaystack` less every claim already on it and everything spent on bundles, what's actually free to spend. */
   freeToSpend: number
+  /** Bundle cost already charged on orders still in flight; hard limits hold it back as a worst case. */
+  inFlightBookedCost: number
   liabilities: {
     agentEarnings: number
     customerMoney: number
@@ -1083,6 +1088,8 @@ export interface ReservePosition {
     manualRefundAdvances: number
     /** Owed to whoever personally covered a payout with nowhere automatic to send it from. */
     manualPayoutAdvances: number
+    /** Your own withdrawals, and fees on your treasury transfers, still on their way out. */
+    treasuryInFlight: number
     total: number
   }
   /** Same total as `spentOnBundles`, split by which supplier actually charged it. */
@@ -1387,7 +1394,17 @@ export interface Insights {
   }
   cash: {
     /** Profit earned (all time) to free to spend now, see InsightsService.cash. */
-    bridge: { earnedProfit: number; profitInFloats: number; other: number; freeToSpend: number }
+    bridge: {
+      earnedProfit: number
+      ownerTopUps: number
+      /** Landed or still on their way out. */
+      ownerDrawings: number
+      /** Paystack's fees on the owner's own treasury transfers. */
+      treasuryFees: number
+      profitInFloats: number
+      other: number
+      freeToSpend: number
+    }
     now: {
       expectedAtPaystack: number
       spentOnBundles: number
@@ -1398,6 +1415,7 @@ export interface Insights {
         undeliveredOrders: number
         queuedPayouts: number
         manualRefundAdvances: number
+        treasuryInFlight: number
         manualPayoutAdvances: number
         total: number
       }

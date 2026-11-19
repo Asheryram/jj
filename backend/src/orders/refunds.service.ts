@@ -773,7 +773,15 @@ export class RefundsService {
     const recipientCode = created.recipientCode
     await this.prisma.refundRequest.update({
       where: { id: refundId },
-      data: { recipientCode, payToPhone: payer.phone, momoNetwork: network },
+      data: {
+        recipientCode,
+        payToPhone: payer.phone,
+        momoNetwork: network,
+        // Frozen now, the same as a withdrawal's: the fee this transfer is
+        // charged, booked as a cost when it lands and counted as gone from
+        // Paystack with it. A fee changed in settings later must not re-price it.
+        transferFee: await this.settings.get('payoutTransferFee'),
+      },
     })
 
     // One reference per approval, not per refund: derived from this
