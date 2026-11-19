@@ -11,6 +11,15 @@ import { Button, Callout, Card, EmptyState, cn } from './ui'
 import { TileBuyButton, TileNetworkBadge } from './TileStylePicker'
 import { CertificateIcon, SearchIcon } from './icons'
 
+/**
+ * Whether a bundle belongs in the shop: exactly what a customer would see.
+ * An admin's catalogue carries every product (for Prices), with
+ * `onSaleToCustomers` saying which of them customers actually get.
+ */
+export function onSale(product: Product): boolean {
+  return product.onSaleToCustomers ?? product.active
+}
+
 interface AgentMargin {
   cost: number
   margin: number
@@ -39,7 +48,7 @@ export default function Catalogue() {
    * its tab comes back on its own.
    */
   const categories = CATEGORY_ORDER.filter((key) =>
-    products.some((product) => product.active && product.category === key),
+    products.some((product) => onSale(product) && product.category === key),
   )
 
   const requested = params.get('category') as Category | null
@@ -71,7 +80,7 @@ export default function Catalogue() {
   const isChecker = category === 'checker'
   const visible = products.filter(
     (product) =>
-      product.active &&
+      onSale(product) &&
       product.category === category &&
       (!network || isChecker || product.network === network),
   )

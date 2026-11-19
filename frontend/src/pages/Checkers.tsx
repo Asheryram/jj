@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { onSale } from '../components/Catalogue'
 import { useStore } from '../state/store'
 import { useShopPath } from '../lib/shopPath'
 import { cedis } from '../lib/format'
@@ -9,7 +10,7 @@ import { CertificateIcon, CheckIcon, ShieldIcon } from '../components/icons'
 export default function Checkers() {
   const { products, retailPrice } = useStore()
   const shopPath = useShopPath()
-  const checkers = products.filter((p) => p.category === 'checker' && p.active)
+  const checkers = products.filter((p) => p.category === 'checker' && onSale(p))
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 sm:py-14">

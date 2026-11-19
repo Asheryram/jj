@@ -135,6 +135,12 @@ export interface Product {
    * at all (a checker/voucher has no automated supplier to report against).
    */
   available: boolean
+  /**
+   * Admin payload only: whether customers and agents can see and buy this
+   * right now (on sale, in stock, and from the supplier its network is routed
+   * to). Absent for everyone else, whose catalogue is already filtered.
+   */
+  onSaleToCustomers?: boolean
 }
 
 /** An agent's chosen resale price for one product (FR-3.4). */
