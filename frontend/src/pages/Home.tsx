@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useStore } from '../state/store'
 import { useBranding } from '../state/branding'
-import { apiAsset } from '../lib/api'
 import { useRegisterPath, useShopPath } from '../lib/shopPath'
 import { cedis } from '../lib/format'
 import Catalogue from '../components/Catalogue'
@@ -60,24 +59,17 @@ export default function Home() {
           <div className="flex flex-wrap items-end justify-between gap-5">
             {branding.custom ? (
               // An agent's own shop: the buyer should know whose shop they are
-              // in before anything else. The name in full, never shortened,
-              // and the logo on a white tile so any colour of logo reads on
-              // the brand-coloured band.
-              <div className="flex max-w-2xl items-center gap-4">
-                {branding.logoUrl && (
-                  <span className="flex h-16 max-w-[40%] shrink-0 items-center rounded-2xl bg-white p-2 shadow-sm sm:h-20">
-                    <img src={apiAsset(branding.logoUrl) ?? undefined} alt="" className="h-full w-auto object-contain" />
-                  </span>
-                )}
-                <div className="min-w-0">
-                  <h1 className="text-2xl leading-tight font-extrabold tracking-tight break-words text-white sm:text-3xl">
-                    {branding.shopName}
-                  </h1>
-                  <p className="mt-1.5 text-sm text-brand-50/90 sm:text-base">
-                    Data and result checkers, paid by Mobile Money.{' '}
-                    <strong className="font-semibold text-white">No account needed.</strong>
-                  </p>
-                </div>
+              // in before anything else, so the name leads, in full, never
+              // shortened. The logo is not repeated here: it already sits in
+              // the header above, and a wordmark logo would say the name twice.
+              <div className="max-w-2xl">
+                <h1 className="text-2xl leading-tight font-extrabold tracking-tight break-words text-white sm:text-3xl">
+                  {branding.shopName}
+                </h1>
+                <p className="mt-1.5 text-sm text-brand-50/90 sm:text-base">
+                  Data and result checkers, paid by Mobile Money.{' '}
+                  <strong className="font-semibold text-white">No account needed.</strong>
+                </p>
               </div>
             ) : (
               <div className="max-w-xl">
