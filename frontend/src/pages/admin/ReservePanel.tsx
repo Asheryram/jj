@@ -109,7 +109,7 @@ export default function ReservePanel() {
             label="Paid for, not yet delivered"
             value={liabilities.undeliveredOrders}
             negative
-            hint="Either a bundle or a refund, not yours either way"
+            hint="Either a bundle or a refund, not yours either way. Less any bundle cost already counted under the provider floats below, so it is not held twice"
           />
           {liabilities.queuedPayouts > 0 && (
             <Row
@@ -153,7 +153,15 @@ export default function ReservePanel() {
               }
             />
           )}
-          <Row label="Total owed to other people" value={liabilities.total} negative strong />
+          {liabilities.treasuryInFlight > 0 && (
+            <Row
+              label="Your own withdrawals on their way out"
+              value={liabilities.treasuryInFlight}
+              negative
+              hint="Started on the Paystack balance page and not confirmed yet, with Paystack's fee on each of your transfers"
+            />
+          )}
+          <Row label="Total owed or on its way out" value={liabilities.total} negative strong />
         </dl>
 
         {spentOnBundles > 0 && (

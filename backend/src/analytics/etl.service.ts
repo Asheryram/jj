@@ -5,6 +5,7 @@ import { FloatMonitorService } from '../supplier/float-monitor.service'
 import { KNOWN_PROVIDERS, SettingsService } from '../settings/settings.service'
 import { AnalyticsPrismaService } from './analytics-prisma.service'
 import { addDays, dayBounds, toDateInt } from './date'
+import { TREASURY_IN_FLIGHT, freeToSpend, heldForUndelivered, owedToFloats, refundTransferFees } from '../finance/free-to-spend'
 
 function hoursBetween(from: Date, to: Date): number {
   return (to.getTime() - from.getTime()) / 3_600_000
@@ -541,14 +542,18 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   /**
-   * `SolvencyService.position()`'s arithmetic as of the end of one day,
-   * entirely from timestamped production history, so any past day can be
-   * rebuilt. Where that service reads a running balance with no date, this
-   * sums the history it is derived from instead.
+   * `SolvencyService.position()` as of the end of one day, entirely from
+   * timestamped production history, so any past day can be rebuilt. Where
+   * that service reads a running balance with no date, this sums the history
+   * it is derived from instead. The arithmetic itself is the live figure's
+   * own, `free-to-spend.ts`: only the inputs differ, so the history line and
+   * the live tile cannot disagree about what the words mean.
    *
-   * One approximation: `ClaimableCredit` has no `claimedAt`, so a credit
-   * claimed by now reads as claimed on every past day too. That slightly
-   * understates history, never overstates it, and the table is tiny.
+   * Approximations, each small and never in the overstating direction:
+   *  - `ClaimableCredit` has no `claimedAt`, so a credit claimed by now reads
+   *    as claimed on every past day too.
+   *  - A treasury transfer that failed has no failure time, so it is not
+   *    counted as in flight on any past day.
    */
   private async computeHistoricalSolvency(dateInt: number, end: Date): Promise<void> {
     const [
@@ -564,16 +569,20 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       transferredPayouts,
       transferredRefunds,
       reimbursements,
+      ownerMoney,
+      treasuryUpTo,
+      refundFee,
     ] = await Promise.all([
       this.prisma.earning.aggregate({ where: { createdAt: { lt: end } }, _sum: { amount: true } }),
       this.prisma.transaction.aggregate({ where: { createdAt: { lt: end } }, _sum: { amount: true } }),
       this.prisma.claimableCredit.aggregate({ where: { claimed: false, createdAt: { lt: end } }, _sum: { amount: true } }),
       this.prisma.withdrawal.findMany({
         where: { requestedAt: { lt: end } },
-        select: { amount: true, status: true, decidedAt: true, paidAt: true },
+        select: { amount: true, transferFee: true, status: true, decidedAt: true, paidAt: true },
       }),
-      // Paid by `end` and neither delivered nor failed (refund raised) by `end`.
-      this.prisma.order.aggregate({
+      // Paid by `end` and neither delivered nor failed (refund raised) by
+      // `end`, each with the supplier cost booked against it by then.
+      this.prisma.order.findMany({
         where: {
           OR: [
             { paidWith: 'momo', payment: { is: { status: 'paid', paidAt: { lt: end } } } },
@@ -584,7 +593,10 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
             { OR: [{ refundRequest: { is: null } }, { refundRequest: { is: { createdAt: { gte: end } } } }] },
           ],
         },
-        _sum: { salePrice: true },
+        select: {
+          salePrice: true,
+          ledgerEntries: { where: { kind: 'supplier_cost', occurredAt: { lt: end } }, select: { amount: true } },
+        },
       }),
       this.prisma.refundRequest.findMany({
         where: { createdAt: { lt: end } },
@@ -605,13 +617,31 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       }),
       this.prisma.refundRequest.aggregate({
         where: { method: 'transfer', paidAt: { lt: end }, transferCode: { not: null } },
-        _sum: { amount: true },
-        _count: { _all: true },
+        _sum: { amount: true, transferFee: true },
+        _count: { _all: true, transferFee: true },
       }),
       this.prisma.ledgerEntry.findMany({
         where: { kind: { in: ['capital_in_reimbursement', 'capital_out'] }, occurredAt: { lt: end } },
         select: { id: true, kind: true, amount: true, idempotencyKey: true, provider: true },
       }),
+      // The owner's own moves through the treasury, the same three kinds
+      // `SolvencyService.ownerMovements` sums. Missing here before, so the
+      // history line sat above the live figure by every withdrawal ever made.
+      this.prisma.ledgerEntry.aggregate({
+        where: {
+          occurredAt: { lt: end },
+          OR: [
+            { kind: { in: ['owner_topup', 'owner_drawing'] } },
+            { kind: 'payout_fee', idempotencyKey: { startsWith: 'treasury:' } },
+          ],
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.treasuryTransfer.findMany({
+        where: { createdAt: { lt: end } },
+        select: { purpose: true, status: true, amount: true, fee: true, paidAt: true },
+      }),
+      this.settings.get('payoutTransferFee'),
     ])
 
     const queuedPayouts = withdrawalsUpTo
@@ -620,7 +650,9 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
         if ((w.status === 'rejected' || w.status === 'failed') && w.decidedAt && w.decidedAt < end) return false
         return true
       })
-      .reduce((sum, w) => sum + w.amount, 0)
+      // The fee was taken off the agent's balance with the amount, see
+      // `SolvencyService.computePosition`.
+      .reduce((sum, w) => sum + w.amount + w.transferFee, 0)
 
     const owedForRefunds = refundsUpTo
       .filter((r) => {
@@ -650,7 +682,6 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
     const liveReimbursements = reimbursements.filter(
       (r) => r.kind === 'capital_in_reimbursement' && !reversedIds.has(r.id),
     )
-    const reimbursedAcrossProviders = liveReimbursements.reduce((sum, r) => sum + r.amount, 0)
 
     // Per provider, then added, as the live Reserve panel does: one float's
     // over-reimbursement must not cancel the other's real spend.
@@ -675,41 +706,63 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       const provider = r.provider ?? 'datahub-gh'
       reimbursedByProvider.set(provider, (reimbursedByProvider.get(provider) ?? 0) + r.amount)
     }
-    const providers = new Set([...costByProvider.keys(), ...reimbursedByProvider.keys()])
-    const spentOnBundles = [...providers].reduce(
-      (sum, p) => sum + Math.max(0, (costByProvider.get(p) ?? 0) - (reimbursedByProvider.get(p) ?? 0)),
+
+    // On their way out at `end`: started by then, and still going now or
+    // landed only afterwards. See `Claims.treasuryInFlight` for what counts.
+    const inFlightAtEnd = treasuryUpTo.filter(
+      (t) =>
+        (TREASURY_IN_FLIGHT as readonly string[]).includes(t.status) ||
+        (t.status === 'success' && t.paidAt !== null && t.paidAt >= end),
+    )
+    const treasuryInFlight = inFlightAtEnd.reduce(
+      (sum, t) => sum + t.fee + (t.purpose === 'owner_drawing' ? t.amount : 0),
       0,
     )
 
-    const advancesRepaid = -manualReimbursements.reduce((sum, r) => sum + r.amount, 0)
-
-    const expectedAtPaystack =
-      (collected._sum.amount ?? 0) -
-      (collected._sum.fee ?? 0) -
-      (transferredPayouts._sum.amount ?? 0) -
-      (transferredPayouts._sum.transferFee ?? 0) -
-      (transferredRefunds._sum.amount ?? 0) -
-      transferredRefunds._count._all * (await this.settings.get('payoutTransferFee')) -
-      reimbursedAcrossProviders -
-      advancesRepaid
-
-    const owedToAgents = earningsAsOf._sum.amount ?? 0
-    const owedToCustomers = (walletAsOf._sum.amount ?? 0) + (unclaimedCredits._sum.amount ?? 0) + owedForRefunds
-    const undeliveredOrders = heldOrders._sum.salePrice ?? 0
-    const liabilitiesTotal =
-      owedToAgents + owedToCustomers + undeliveredOrders + queuedPayouts + manualRefundAdvances + manualPayoutAdvances
+    const result = freeToSpend(
+      {
+        collected: (collected._sum.amount ?? 0) - (collected._sum.fee ?? 0),
+        transferred:
+          (transferredPayouts._sum.amount ?? 0) +
+          (transferredPayouts._sum.transferFee ?? 0) +
+          (transferredRefunds._sum.amount ?? 0) +
+          refundTransferFees(
+            transferredRefunds._sum.transferFee ?? 0,
+            transferredRefunds._count._all - transferredRefunds._count.transferFee,
+            refundFee,
+          ),
+        reimbursed: liveReimbursements.reduce((sum, r) => sum + r.amount, 0),
+        advancesRepaid: -manualReimbursements.reduce((sum, r) => sum + r.amount, 0),
+        ownerMoney: ownerMoney._sum.amount ?? 0,
+      },
+      {
+        agentEarnings: earningsAsOf._sum.amount ?? 0,
+        customerMoney: (walletAsOf._sum.amount ?? 0) + (unclaimedCredits._sum.amount ?? 0) + owedForRefunds,
+        undeliveredOrders: heldForUndelivered(
+          heldOrders.map((o) => ({
+            salePrice: o.salePrice,
+            bookedCost: -o.ledgerEntries.reduce((sum, e) => sum + e.amount, 0),
+          })),
+        ),
+        queuedPayouts,
+        manualRefundAdvances,
+        manualPayoutAdvances,
+        treasuryInFlight,
+      },
+      owedToFloats(costByProvider, reimbursedByProvider),
+    )
 
     const row = {
-      expectedAtPaystack,
-      spentOnBundles,
-      freeToSpend: expectedAtPaystack - liabilitiesTotal - spentOnBundles,
-      owedToAgents,
-      owedToCustomers,
-      undeliveredOrders,
-      queuedPayouts,
-      manualRefundAdvances,
-      manualPayoutAdvances,
-      liabilitiesTotal,
+      expectedAtPaystack: result.expectedAtPaystack,
+      spentOnBundles: result.spentOnBundles,
+      freeToSpend: result.freeToSpend,
+      owedToAgents: result.liabilities.agentEarnings,
+      owedToCustomers: result.liabilities.customerMoney,
+      undeliveredOrders: result.liabilities.undeliveredOrders,
+      queuedPayouts: result.liabilities.queuedPayouts,
+      manualRefundAdvances: result.liabilities.manualRefundAdvances,
+      manualPayoutAdvances: result.liabilities.manualPayoutAdvances,
+      liabilitiesTotal: result.liabilities.total,
     }
     await this.warehouse.dailySolvencySnapshot.upsert({
       where: { date: dateInt },
