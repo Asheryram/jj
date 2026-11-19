@@ -7,6 +7,7 @@ import { api, ApiError, type Insights } from '../../lib/api'
 import { useStore } from '../../state/store'
 import AgentsTab from './analytics/AgentsTab'
 import CashTab from './analytics/CashTab'
+import DecisionsTab from './analytics/DecisionsTab'
 import MoneyTab from './analytics/MoneyTab'
 import OperationsTab from './analytics/OperationsTab'
 import OverviewTab from './analytics/OverviewTab'
@@ -14,7 +15,8 @@ import SalesTab from './analytics/SalesTab'
 import { PRESET_LABELS, presetRange, rangeLabel } from './analytics/shared'
 
 const TABS = [
-  { key: 'overview', label: 'Overview', question: 'How is the business doing, and what needs a decision?' },
+  { key: 'decisions', label: 'Decisions', question: 'What should I do this week, and what is it worth?' },
+  { key: 'overview', label: 'Overview', question: 'How is the business doing over this period?' },
   { key: 'money', label: 'Money', question: 'Are we making money, and where?' },
   { key: 'sales', label: 'Sales', question: 'Who buys, when, and how many come back?' },
   { key: 'operations', label: 'Operations', question: 'Are orders getting through, and how fast?' },
@@ -46,7 +48,7 @@ export default function Analytics() {
   const { pushToast } = useStore()
   const [params, setParams] = useSearchParams()
 
-  const tab: TabKey = (TABS.find((t) => t.key === params.get('tab'))?.key ?? 'overview') as TabKey
+  const tab: TabKey = (TABS.find((t) => t.key === params.get('tab'))?.key ?? 'decisions') as TabKey
   const preset = params.get('preset')
   const range = useMemo(() => {
     const from = Number(params.get('from'))
@@ -107,7 +109,9 @@ export default function Analytics() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">Analytics</h1>
           <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
-            {data ? (
+            {tab === 'decisions' ? (
+              'Live from your orders and ledger, the last 4 weeks.'
+            ) : data ? (
               <>
                 {rangeLabel(data.meta.from, data.meta.to)}, compared with {rangeLabel(data.meta.previousFrom, data.meta.previousTo)}. Updated {asOf(data.meta.dataAsOf)}.
               </>
@@ -116,7 +120,7 @@ export default function Analytics() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2" data-tour="analytics-range">
+        <div className={cn('flex items-center gap-2', tab === 'decisions' && 'hidden')} data-tour="analytics-range">
           <DateRangePicker
             label={label}
             onPreset={(p) => update({ preset: p, from: null, to: null })}
@@ -135,7 +139,7 @@ export default function Analytics() {
             <button
               key={t.key}
               type="button"
-              onClick={() => update({ tab: t.key === 'overview' ? null : t.key })}
+              onClick={() => update({ tab: t.key === 'decisions' ? null : t.key })}
               aria-current={t.key === tab ? 'page' : undefined}
               className={cn(
                 'shrink-0 border-b-2 px-3 py-2.5 text-sm font-semibold transition-colors',
@@ -152,7 +156,10 @@ export default function Analytics() {
 
       <p className="mb-4 mt-4 text-sm font-medium text-slate-600 dark:text-slate-300">{current.question}</p>
 
-      {error ? (
+      {tab === 'decisions' ? (
+        // Its own data, live from production: still works when the warehouse below is behind or down.
+        <DecisionsTab />
+      ) : error ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
           <p className="font-semibold">{error}</p>
           <Button variant="outline" size="sm" className="mt-3" onClick={() => void load()}>Try again</Button>
