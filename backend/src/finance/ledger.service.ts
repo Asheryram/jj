@@ -159,27 +159,46 @@ export class LedgerService {
       since.getTime() <= 0
         ? {}
         : { OR: [{ orderRef: null, occurredAt: { gte: since } }, { order: { createdAt: { gte: since } } }] }
-    const rows = await this.prisma.ledgerEntry.groupBy({
-      by: ['kind', 'affectsProfit'],
-      where: window,
-      _sum: { amount: true },
-      _count: { _all: true },
-    })
+    const open = await this.openRefs()
+    const [rows, stillOpenSum] = await Promise.all([
+      this.prisma.ledgerEntry.groupBy({
+        by: ['kind', 'affectsProfit'],
+        where: window,
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      open.length === 0
+        ? Promise.resolve({ _sum: { amount: 0 } })
+        : this.prisma.ledgerEntry.aggregate({
+            where: {
+              AND: [
+                window,
+                { affectsProfit: true },
+                { OR: [{ orderRef: { in: open } }, { orderRef: null, paymentRef: { in: open } }] },
+              ],
+            },
+            _sum: { amount: true },
+          }),
+    ])
 
     const byKind = new Map<LedgerKind, number>()
     const countOf = new Map<LedgerKind, number>()
     let profit = 0
     let cashMovement = 0
+    /** `payout_fee` the business paid itself (refund and treasury transfers), not one withheld from an agent. */
+    let transferFees = 0
     for (const row of rows) {
       const amount = row._sum.amount ?? 0
       byKind.set(row.kind, (byKind.get(row.kind) ?? 0) + amount)
       countOf.set(row.kind, (countOf.get(row.kind) ?? 0) + row._count._all)
       cashMovement += amount
       if (row.affectsProfit) profit += amount
+      if (row.affectsProfit && row.kind === 'payout_fee') transferFees -= amount
     }
     const of = (kind: LedgerKind) => byKind.get(kind) ?? 0
 
     const revenue = of('revenue')
+    const stillOpen = stillOpenSum._sum.amount ?? 0
 
     return {
       since: since.toISOString(),
@@ -193,9 +212,27 @@ export class LedgerService {
         refunds: -of('refund'),
         payoutFees: -of('payout_fee'),
         agentMarginWriteoffs: -of('agent_margin_writeoff'),
+        /**
+         * The part of `payoutFees` the business paid: sending fees on refunds
+         * and on the owner's treasury transfers. The rest of `payoutFees` was
+         * withheld from agents' own payouts and is not a cost of the business.
+         */
+        transferFees,
       },
-      /** Revenue less every cost above. What the business earned. */
+      /** Revenue less every cost above. Includes orders still open, see `earned`. */
       profit,
+      /**
+       * Profit already booked on orders not finished yet: still being
+       * delivered (their revenue is in, their cost and commission are not),
+       * or failed with the refund still owed. Counts once they settle.
+       */
+      stillOpen,
+      /**
+       * `profit` less `stillOpen`: profit from finished sales only. For the
+       * all-time window this is exactly `earnedProfit()`, so the statement
+       * adds up, line by line, to the figure shown as Profit earned.
+       */
+      earned: profit - stillOpen,
       /** Everything that moved, including money that was never ours. */
       cashMovement,
       /** Settles liabilities rather than earning or spending. */
@@ -276,15 +313,23 @@ export class LedgerService {
    * had actually made.
    */
   async earnedProfit(): Promise<number> {
-    const [{ profit }, inFlight, owedBack] = await Promise.all([
-      this.statement(new Date(0)),
+    return (await this.statement(new Date(0))).earned
+  }
+
+  /**
+   * Orders whose booked profit does not count yet: still being delivered, or
+   * failed with the refund still owed. The one definition `earnedProfit`,
+   * `statement().stillOpen` and the All orders tiles share.
+   */
+  async openRefs(): Promise<string[]> {
+    const [inFlight, owedBack] = await Promise.all([
       this.prisma.order.findMany({
         where: { status: { in: ['pending', 'awaiting_approval', 'processing'] } },
         select: { reference: true },
       }),
       this.refundsOwedRefs(),
     ])
-    return profit - (await this.bookedProfitFor([...inFlight.map((o) => o.reference), ...owedBack]))
+    return [...inFlight.map((o) => o.reference), ...owedBack]
   }
 
   /**

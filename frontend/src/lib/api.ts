@@ -1108,6 +1108,25 @@ export interface ReservePosition {
   pendingRefunds: { count: number; amount: number }
 }
 
+/**
+ * The money behind exactly the orders matching the admin list's filter, dates
+ * and search, finished sales only (see `OrdersService.adminSummary`). Adds up:
+ * sales − supplier − paymentFees − agents − refunds − other = profit.
+ */
+export interface AdminOrdersSummary {
+  settledOrders: number
+  /** Matching orders still being delivered, or failed with the refund still owed. Not in the figures yet. */
+  openOrders: number
+  sales: number
+  supplier: number
+  paymentFees: number
+  agents: number
+  /** Refunds and Paystack's fee for sending them. */
+  refunds: number
+  other: number
+  profit: number
+}
+
 export interface FinanceStatement {
   since: string
   revenue: number
@@ -1119,10 +1138,17 @@ export interface FinanceStatement {
     refunds: number
     payoutFees: number
     agentMarginWriteoffs: number
+    /** Sending fees the business paid: on refunds and on your own transfers. */
+    transferFees: number
   }
+  /** Includes orders still open, see `earned`. */
   profit: number
+  /** Profit already booked on orders not finished yet. */
+  stillOpen: number
+  /** Profit from finished sales only. All-time, this is Profit earned. */
+  earned: number
   cashMovement: number
-  settlements: { payouts: number; walletTopUps: number }
+  settlements: { payouts: number; walletTopUps: number; ownerTopUps: number; ownerDrawings: number }
   marginRate: number | null
 }
 
@@ -1399,7 +1425,7 @@ export interface Insights {
       ownerTopUps: number
       /** Landed or still on their way out. */
       ownerDrawings: number
-      /** Paystack's fees on the owner's own treasury transfers. */
+      /** Paystack's fees on your own transfers still on their way out (landed ones are already in profit). */
       treasuryFees: number
       profitInFloats: number
       other: number
@@ -1649,7 +1675,7 @@ export const api = {
     if (params.unresolvedOnly) search.set('unresolvedOnly', 'true')
     if (params.page) search.set('page', String(params.page))
     if (params.pageSize) search.set('pageSize', String(params.pageSize))
-    return request<{ rows: Order[]; total: number; page: number; pageSize: number }>(
+    return request<{ rows: Order[]; total: number; page: number; pageSize: number; summary: AdminOrdersSummary }>(
       `/admin/orders?${search.toString()}`,
     )
   },

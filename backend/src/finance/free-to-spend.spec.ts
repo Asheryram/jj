@@ -118,16 +118,26 @@ test("the owner's withdrawal counts the moment it starts, not only when it lands
   assert.equal(inFlight.freeToSpend, PROFIT - 51)
   assert.equal(landed.freeToSpend, inFlight.freeToSpend)
 
-  // And the bridge explains all of it, with nothing left in "other".
-  const bridge = cashBridge({
+  // And the bridge explains all of it, with nothing left in "other". Once
+  // landed, the 0.01 fee is a booked cost, so it is inside profit already.
+  const whileInFlight = cashBridge({
     earnedProfit: PROFIT,
     ownerTopUps: 0,
     ownerDrawings: 50,
     treasuryFees: 1,
     profitInFloats: 0,
+    freeToSpend: inFlight.freeToSpend,
+  })
+  assert.equal(whileInFlight.other, 0)
+  const afterLanding = cashBridge({
+    earnedProfit: PROFIT - 1,
+    ownerTopUps: 0,
+    ownerDrawings: 50,
+    treasuryFees: 0,
+    profitInFloats: 0,
     freeToSpend: landed.freeToSpend,
   })
-  assert.equal(bridge.other, 0)
+  assert.equal(afterLanding.other, 0)
 })
 
 test("the owner's own top-up is explained by the bridge, not left in other", () => {

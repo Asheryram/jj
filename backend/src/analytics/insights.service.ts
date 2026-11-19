@@ -677,7 +677,9 @@ export class InsightsService {
       earnedProfit,
       ownerTopUps: ownerMoney.topUps,
       ownerDrawings: ownerMoney.drawings + position.treasuryInFlight.drawings,
-      treasuryFees: ownerMoney.treasuryFees + position.treasuryInFlight.fees,
+      // Only fees still on their way out: a landed treasury fee is booked as
+      // a `payout_fee` cost, so it is already inside `earnedProfit`.
+      treasuryFees: position.treasuryInFlight.fees,
       profitInFloats: inFloats,
       freeToSpend: position.freeToSpend,
     })

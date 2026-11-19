@@ -12,6 +12,7 @@ import { GmplClient, gmplSendOutcome, toGmplNetwork } from '../supplier/gmpl.cli
 import { datahubNetworkKeyFor } from './approvals.service'
 import type { SupplierProviderCode } from '../settings/settings.service'
 import { ReconcilerService } from '../supplier/reconciler.service'
+import { LedgerService } from '../finance/ledger.service'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
 import { toOrder, toOrderFor, toTrackedOrder } from '../common/mappers'
 import {
@@ -62,6 +63,7 @@ export class OrdersService {
     private readonly datahub: DatahubClient,
     private readonly gmpl: GmplClient,
     private readonly reconciler: ReconcilerService,
+    private readonly ledger: LedgerService,
   ) {}
 
   /**
@@ -800,7 +802,7 @@ export class OrdersService {
     const pageSize = Math.min(Math.max(1, Math.floor(filter.pageSize ?? 50)), 2000)
     const where = this.adminOrdersWhere(filter)
 
-    const [total, rows] = await Promise.all([
+    const [total, rows, summary] = await Promise.all([
       this.prisma.order.count({ where }),
       this.prisma.order.findMany({
         where,
@@ -808,9 +810,64 @@ export class OrdersService {
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
+      this.adminSummary(where),
     ])
 
-    return { rows: await this.enrichForAdmin(rows), total, page, pageSize }
+    return { rows: await this.enrichForAdmin(rows), total, page, pageSize, summary }
+  }
+
+  /**
+   * The money behind exactly the orders the admin is looking at: the same
+   * filter, dates and search as the table, every page of it, not just the
+   * one on screen.
+   *
+   * From the ledger, so it is what was actually charged and paid, and from
+   * finished sales only, the same rule as Profit earned
+   * (`LedgerService.openRefs`): an order still being delivered has its
+   * revenue booked but not its cost or commission, and a failed order whose
+   * refund is still owed has not given its money back yet, so counting
+   * either would overstate profit. They are counted separately instead, and
+   * join the figures once they settle. The lines always add up:
+   * sales − supplier − Paystack fees − agents − refunds − other = profit.
+   */
+  private async adminSummary(where: Prisma.OrderWhereInput) {
+    const open = await this.ledger.openRefs()
+    const settled: Prisma.OrderWhereInput = { AND: [where, { reference: { notIn: open } }] }
+    const [openOrders, settledOrders, lines] = await Promise.all([
+      open.length === 0 ? Promise.resolve(0) : this.prisma.order.count({ where: { AND: [where, { reference: { in: open } }] } }),
+      this.prisma.order.count({ where: settled }),
+      this.prisma.ledgerEntry.groupBy({
+        by: ['kind'],
+        where: {
+          affectsProfit: true,
+          // Paystack's fee line carries the payment, not the order, see
+          // `PaymentsService`; for an order the payment reference is the
+          // order reference, so it is reached through the payment.
+          OR: [{ order: { is: settled } }, { orderRef: null, payment: { is: { order: { is: settled } } } }],
+        },
+        _sum: { amount: true },
+      }),
+    ])
+    const of = (kind: string) => lines.find((l) => l.kind === kind)?._sum.amount ?? 0
+    const profit = lines.reduce((sum, l) => sum + (l._sum.amount ?? 0), 0)
+    const sales = of('revenue')
+    const supplier = -of('supplier_cost')
+    const paymentFees = -of('payment_fee')
+    const agents = -of('agent_margin')
+    // A refund, and Paystack's fee for sending it.
+    const refunds = -of('refund') - of('payout_fee')
+    return {
+      settledOrders,
+      openOrders,
+      sales,
+      supplier,
+      paymentFees,
+      agents,
+      refunds,
+      /** Anything else booked against these orders (referral bonuses, write-offs). Usually zero. */
+      other: sales - supplier - paymentFees - agents - refunds - profit,
+      profit,
+    }
   }
 
   private adminOrdersWhere(filter: {

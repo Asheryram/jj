@@ -5,31 +5,41 @@ import { api, type FinanceStatement } from '../../lib/api'
 import { cedis } from '../../lib/format'
 import { Card, CardHead, PageHead, Segmented } from '../../components/ui'
 
-function MoneyBand({
+function share(part: number, whole: number): string | undefined {
+  return whole > 0 ? `${((part / whole) * 100).toFixed(1)}% of what customers paid` : undefined
+}
+
+function Line({
   label,
   value,
   dot,
   strong,
+  hint,
 }: {
   label: string
-  value: string
+  value: number
   dot?: string
   strong?: boolean
+  hint?: string
 }) {
   return (
-    <div>
-      <dt className="flex items-center gap-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-        {dot && <span className={`size-2 rounded-full ${dot}`} />}
-        {label}
+    <div className="flex items-start justify-between gap-3 py-2">
+      <dt className="text-slate-600 dark:text-slate-300">
+        <span className={`flex items-center gap-1.5 ${strong ? 'font-semibold text-slate-900 dark:text-slate-50' : ''}`}>
+          {dot && <span className={`size-2 shrink-0 rounded-full ${dot}`} />}
+          {label}
+        </span>
+        {hint && <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{hint}</span>}
       </dt>
       <dd
         className={
           strong
-            ? 'tabular mt-1 text-lg font-bold text-brand-700 dark:text-brand-300'
-            : 'tabular mt-1 text-lg font-semibold text-slate-900 dark:text-slate-50'
+            ? 'tabular shrink-0 font-bold text-brand-700 dark:text-brand-300'
+            : 'tabular shrink-0 font-semibold text-slate-900 dark:text-slate-50'
         }
       >
-        {value}
+        {value < 0 ? '−' : ''}
+        {cedis(Math.abs(value))}
       </dd>
     </div>
   )
@@ -63,16 +73,23 @@ export default function Finance() {
   const supplierSpend = statement?.costs.supplier ?? 0
   const paystackFee = statement?.costs.paymentFees ?? 0
   const agentShare = statement?.costs.agentMargins ?? 0
-  const refunds = statement?.costs.refunds ?? 0
+  /** Refunds, plus the fees the business paid to send money: refund transfers and your own treasury transfers. */
+  const refundsAndFees = (statement?.costs.refunds ?? 0) + (statement?.costs.transferFees ?? 0)
   /**
-   * referralBonuses is historical-only; agentMarginWriteoffs is the rare
-   * uncollectable-clawback case. `payoutFees` is deliberately left out: it is
-   * the transfer fee withheld from an agent's own payout, not a cost of any
-   * sale (`affectsProfit` false, so it is not in "Your margin" either), and
-   * including it made these bands add up to more than revenue.
+   * Whatever else is booked against profit (historical referral bonuses,
+   * uncollectable agent write-offs). Derived as the remainder so the
+   * statement always adds up to `profit`, whatever new kind of cost appears.
+   * Agents' own payout fees are not here: they come out of what the agent was
+   * owed, not out of the business (`affectsProfit` false).
    */
-  const otherCosts = (statement?.costs.referralBonuses ?? 0) + (statement?.costs.agentMarginWriteoffs ?? 0)
-  const myMargin = statement?.profit ?? 0
+  const otherCosts = statement
+    ? trackedRevenue - supplierSpend - paystackFee - agentShare - refundsAndFees - statement.profit
+    : 0
+  const booked = statement?.profit ?? 0
+  const stillOpen = statement?.stillOpen ?? 0
+  const earned = statement?.earned ?? 0
+  const takenOut = statement?.settlements.ownerDrawings ?? 0
+  const rangeLabel = range === '7' ? 'Last 7 days' : range === '30' ? 'Last 30 days' : 'All time'
 
   return (
     <div>
@@ -93,7 +110,7 @@ export default function Finance() {
       <Card className="mt-3">
         <CardHead
           title="Where the money goes"
-          subtitle={`${range === '7' ? 'Last 7 days' : range === '30' ? 'Last 30 days' : 'All time'}, from the ledger`}
+          subtitle={`${rangeLabel}: from what customers paid down to the profit you keep`}
           action={
             <Segmented<'7' | '30' | 'all'>
               options={[
@@ -111,40 +128,52 @@ export default function Finance() {
             {[
               { label: 'Supplier', value: supplierSpend, className: 'bg-slate-400' },
               { label: 'Paystack fee', value: paystackFee, className: 'bg-amber-400' },
-              { label: 'You', value: myMargin, className: 'bg-brand-600' },
               { label: 'Agents', value: agentShare, className: 'bg-brand-300' },
-              ...(refunds > 0
-                ? [{ label: 'Refunds', value: refunds, className: 'bg-red-400' }]
-                : []),
-              ...(otherCosts > 0
-                ? [{ label: 'Other', value: otherCosts, className: 'bg-slate-300 dark:bg-slate-600' }]
-                : []),
-            ].map((band) => (
-              <div
-                key={band.label}
-                className={band.className}
-                style={{
-                  width: `${trackedRevenue > 0 ? (band.value / trackedRevenue) * 100 : 0}%`,
-                }}
-                role="img"
-                aria-label={`${band.label}: ${cedis(band.value)}`}
-              />
-            ))}
+              { label: 'Refunds and fees', value: refundsAndFees, className: 'bg-red-400' },
+              { label: 'Other', value: otherCosts, className: 'bg-slate-300 dark:bg-slate-600' },
+              { label: 'You', value: booked, className: 'bg-brand-600' },
+            ]
+              .filter((band) => band.value > 0)
+              .map((band) => (
+                <div
+                  key={band.label}
+                  className={band.className}
+                  style={{ width: `${trackedRevenue > 0 ? (band.value / trackedRevenue) * 100 : 0}%` }}
+                  role="img"
+                  aria-label={`${band.label}: ${cedis(band.value)}`}
+                />
+              ))}
           </div>
-          <dl className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            <MoneyBand label="Customers paid" value={cedis(trackedRevenue)} />
-            <MoneyBand label="To suppliers" value={cedis(supplierSpend)} dot="bg-slate-400" />
-            <MoneyBand label="Paystack fee" value={cedis(paystackFee)} dot="bg-amber-400" />
-            <MoneyBand label="Your margin" value={cedis(myMargin)} dot="bg-brand-600" strong />
-            <MoneyBand label="To your agents" value={cedis(agentShare)} dot="bg-brand-300" />
-            {refunds > 0 && <MoneyBand label="Refunds" value={cedis(refunds)} dot="bg-red-400" />}
-            {otherCosts > 0 && (
-              <MoneyBand label="Other" value={cedis(otherCosts)} dot="bg-slate-300 dark:bg-slate-600" />
+
+          {/* A statement, not a set of loose totals: every line below adds up to the one under it. */}
+          <dl className="mt-4 max-w-xl divide-y divide-slate-100 text-sm dark:divide-slate-800">
+            <Line label="Customers paid" value={trackedRevenue} />
+            <Line label="Paid to suppliers" value={-supplierSpend} dot="bg-slate-400" hint={share(supplierSpend, trackedRevenue)} />
+            <Line label="Paystack fees on sales" value={-paystackFee} dot="bg-amber-400" hint={share(paystackFee, trackedRevenue)} />
+            <Line label="Agents' commission" value={-agentShare} dot="bg-brand-300" hint={share(agentShare, trackedRevenue)} />
+            {refundsAndFees !== 0 && (
+              <Line label="Refunds and transfer fees" value={-refundsAndFees} dot="bg-red-400" hint="Money given back, and Paystack's fee for sending it and your own transfers" />
+            )}
+            {otherCosts !== 0 && <Line label="Other" value={-otherCosts} dot="bg-slate-300 dark:bg-slate-600" hint="Referral bonuses and write-offs" />}
+            <Line label="Your margin, as booked" value={booked} dot="bg-brand-600" strong />
+            {stillOpen !== 0 && (
+              <Line
+                label="Less orders not finished yet"
+                value={-stillOpen}
+                hint="Still being delivered (their cost and commission are not in yet), or failed with the refund still owed. Counts once they settle"
+              />
+            )}
+            <Line label={range === 'all' ? 'Profit earned' : 'Profit earned in this period'} value={earned} strong />
+            {range === 'all' && takenOut !== 0 && (
+              <>
+                <Line label="Taken out by you" value={-takenOut} hint="From the Paystack balance page. Not a cost, so it never lowers profit earned" />
+                <Line label="Profit still in the business" value={earned - takenOut} strong />
+              </>
             )}
           </dl>
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            From the ledger, not the price you were quoted at sale time, so it reflects what your
-            suppliers actually charged and what Paystack actually kept, not the catalogue estimate.
+            {rangeLabel}, from the ledger, not the price quoted at sale time, so it is what your suppliers actually
+            charged and what Paystack actually kept. All time, "Profit earned" is the same figure as on All orders.
           </p>
         </div>
       </Card>

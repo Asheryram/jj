@@ -138,7 +138,11 @@ export function cashBridge(input: {
   ownerTopUps: number
   /** Owner withdrawals, landed or still on their way out. Positive. */
   ownerDrawings: number
-  /** Sending fees on the owner's own treasury transfers, landed or in flight. Positive. */
+  /**
+   * Sending fees on the owner's treasury transfers still in flight. Positive.
+   * Only in flight: a landed one is booked as a `payout_fee` cost, so it is
+   * already inside `earnedProfit`, and counting it here too took it off twice.
+   */
   treasuryFees: number
   /** Profit already moved into a supplier float beyond what it was owed. */
   profitInFloats: number

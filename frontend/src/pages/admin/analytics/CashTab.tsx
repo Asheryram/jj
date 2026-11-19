@@ -82,7 +82,7 @@ export default function CashTab({ data }: { data: Insights }) {
           )}
           {cash.bridge.treasuryFees !== 0 && (
             <div className="flex justify-between gap-3">
-              <dt className="text-slate-600 dark:text-slate-300">Paystack fees on your own transfers</dt>
+              <dt className="text-slate-600 dark:text-slate-300">Paystack fees on your transfers still on their way</dt>
               <dd className="font-semibold tabular-nums text-slate-900 dark:text-slate-50">−{cedis(cash.bridge.treasuryFees)}</dd>
             </div>
           )}
