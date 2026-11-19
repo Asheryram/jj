@@ -127,14 +127,14 @@ export default function Catalogue() {
 
       {/* Network filter (FR-3.2) */}
       {networksInCategory.length > 1 && (
-        <div className="mb-5 flex flex-wrap items-center gap-2">
-          <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Network</span>
+        <div className="-mx-4 mb-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:mb-5 sm:flex-wrap sm:px-0">
+          <span className="shrink-0 text-sm font-medium text-slate-500 dark:text-slate-400">Network</span>
           <button
             type="button"
             onClick={() => setParam('network', null)}
             aria-pressed={!network}
             className={cn(
-              'rounded-full border px-3 py-1 text-sm font-semibold',
+              'shrink-0 rounded-full border px-3 py-1.5 text-sm font-semibold',
               !network
                 ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-600 dark:bg-slate-600'
                 : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
@@ -149,7 +149,7 @@ export default function Catalogue() {
               onClick={() => setParam('network', n)}
               aria-pressed={network === n}
               className={cn(
-                'rounded-full border px-3 py-1 text-sm font-semibold',
+                'shrink-0 rounded-full border px-3 py-1.5 text-sm font-semibold',
                 network === n
                   ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-600 dark:bg-slate-600'
                   : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300',
@@ -189,7 +189,7 @@ export default function Catalogue() {
           />
         </Card>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3 xl:grid-cols-4">
           {visible.map((product) => (
             <ProductCard
               key={product.id}
@@ -233,6 +233,31 @@ function AgentMarginLine({ agentMargin }: { agentMargin: AgentMargin }) {
  * preview so the two can never disagree), only the card's own arrangement is
  * tied to `tileStyle` itself.
  */
+/**
+ * What a customer scans for: the size. "TELECEL(10GB)", "10GB Data" and
+ * "MTN 10GB" are the same thing to a buyer, so the size leads, large, and
+ * the network sits beside it as the chip it already is. Anything else the
+ * name says (iShare, a checker's exam) is kept on the line underneath.
+ */
+export function bundleTitle(product: Product): { title: string; detail: string } {
+  const size = /(\d+(?:\.\d+)?)\s*GB/i.exec(product.name)
+  if (product.category !== 'data' || !size) return { title: product.name, detail: product.validity }
+  const extra = /ishare/i.test(product.name) ? 'iShare' : ''
+  return { title: `${size[1]}GB`, detail: [extra, product.validity].filter(Boolean).join(' · ') || 'Data bundle' }
+}
+
+/**
+ * One bundle, in whichever of the four curated layouts the shop has chosen
+ * (see `lib/tileStyles.ts`). Pricing and the buy link are identical across
+ * all four; the "Buy" treatment and the network indicator are their own
+ * axes (`TileBuyButton`/`TileNetworkBadge`, shared with the branding
+ * picker's preview).
+ *
+ * Built to sit two to a row on a phone: one per row made a 70-bundle shop
+ * an endless scroll of mostly empty cards. So the network chip sits on top,
+ * the size underneath it in large type, then price and Buy, every line short
+ * enough for half a 390px screen, and the whole tile is the tap target.
+ */
 function ProductCard({
   product,
   price,
@@ -250,107 +275,52 @@ function ProductCard({
 }) {
   const shopPath = useShopPath()
   const href = shopPath(`/buy/${product.id}`)
-  const network = <TileNetworkBadge network={product.network} indicator={tileNetworkIndicator} />
-  const buyButton = <TileBuyButton buttonStyle={tileButtonStyle} />
+  const { title, detail } = bundleTitle(product)
+  const style = {
+    classic: { card: 'transition-shadow hover:shadow-md', head: '', body: 'p-3 sm:p-4', price: 'text-brand-800 dark:text-brand-300' },
+    bold: {
+      card: 'overflow-hidden transition-shadow hover:shadow-md',
+      head: 'bg-brand-50 px-3 py-2 sm:px-4 dark:bg-brand-900/30',
+      body: 'p-3 sm:p-4',
+      price: 'text-slate-900 dark:text-slate-50',
+    },
+    minimal: { card: 'border-slate-100 shadow-none dark:border-slate-800', head: '', body: 'p-3 sm:p-5', price: 'text-slate-900 dark:text-slate-50' },
+    compact: { card: 'transition-shadow hover:shadow-md', head: '', body: 'p-2.5 sm:p-3', price: 'text-brand-800 dark:text-brand-300' },
+  }[tileStyle]
+  const big = tileStyle === 'compact' ? 'text-lg sm:text-xl' : 'text-xl sm:text-2xl'
 
-  if (tileStyle === 'bold') {
-    return (
-      <Card as="li" className="overflow-hidden transition-shadow hover:shadow-md">
-        <Link to={href} className="flex h-full flex-col">
-          <div className="flex items-center justify-between gap-3 bg-brand-50 dark:bg-brand-900/30 px-4 py-3">
-            <p className="truncate font-semibold text-brand-900 dark:text-brand-100">{product.name}</p>
-            {network}
+  return (
+    <Card as="li" className={style.card}>
+      <Link to={href} className="flex h-full flex-col" aria-label={`${product.network ?? ''} ${product.name}, ${cedis(price)}`}>
+        {style.head ? (
+          <div className={cn('flex items-center justify-between gap-2', style.head)}>
+            <TileNetworkBadge network={product.network} indicator={tileNetworkIndicator} />
           </div>
-          <div className="flex flex-1 flex-col justify-between gap-3 p-4">
-            <p className="text-sm text-slate-500 dark:text-slate-400">{product.validity}</p>
-            <div className="flex items-end justify-between gap-3">
-              <div>
-                <p className="tabular text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
-                  {cedis(price)}
-                </p>
-                {agentMargin && <AgentMarginLine agentMargin={agentMargin} />}
-              </div>
-              {buyButton}
+        ) : null}
+        <div className={cn('flex flex-1 flex-col', style.body)}>
+          {!style.head && (
+            <div className="mb-1.5">
+              <TileNetworkBadge network={product.network} indicator={tileNetworkIndicator} />
             </div>
-          </div>
-        </Link>
-      </Card>
-    )
-  }
-
-  if (tileStyle === 'minimal') {
-    return (
-      <Card as="li" className="border-slate-100 shadow-none dark:border-slate-800">
-        <Link to={href} className="flex h-full flex-col p-5">
-          <div className="flex items-start justify-between gap-3">
+          )}
+          <p className={cn('font-extrabold leading-tight tracking-tight break-words text-slate-900 dark:text-slate-50', big)}>
+            {title}
+          </p>
+          <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{detail}</p>
+          <div
+            className={cn(
+              'mt-auto flex flex-wrap items-end justify-between gap-x-2 gap-y-1.5 pt-3',
+              tileStyle !== 'minimal' && 'mt-3 border-t border-slate-100 dark:border-slate-800',
+            )}
+          >
             <div className="min-w-0">
-              <p className="truncate font-medium text-slate-900 dark:text-slate-50">{product.name}</p>
-              <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{product.validity}</p>
-            </div>
-            {network}
-          </div>
-          <div className="mt-5 flex items-end justify-between gap-3">
-            <div>
-              <p className="tabular text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
-                {cedis(price)}
-              </p>
-              {agentMargin && <AgentMarginLine agentMargin={agentMargin} />}
-            </div>
-            {buyButton}
-          </div>
-        </Link>
-      </Card>
-    )
-  }
-
-  if (tileStyle === 'compact') {
-    return (
-      <Card as="li" className="transition-shadow hover:shadow-md">
-        <Link to={href} className="flex h-full flex-col p-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-50">{product.name}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{product.validity}</p>
-            </div>
-            {network}
-          </div>
-          <div className="mt-2 flex items-end justify-between gap-2 border-t border-slate-100 dark:border-slate-800 pt-2">
-            <div>
-              <p className="tabular text-base font-bold tracking-tight text-brand-800 dark:text-brand-300">
-                {cedis(price)}
-              </p>
+              <p className={cn('tabular text-base font-bold tracking-tight sm:text-lg', style.price)}>{cedis(price)}</p>
               {agentMargin && <AgentMarginLine agentMargin={agentMargin} />}
             </div>
             <TileBuyButton buttonStyle={tileButtonStyle} small />
           </div>
-        </Link>
-      </Card>
-    )
-  }
-
-  // classic, the default and the platform's own long-standing look.
-  return (
-    <Card as="li" className="transition-shadow hover:shadow-md">
-      <Link to={href} className="flex h-full flex-col p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate font-semibold text-slate-900 dark:text-slate-50">{product.name}</p>
-            <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">{product.validity}</p>
-          </div>
-          {network}
-        </div>
-
-        <div className="mt-4 flex items-end justify-between gap-3 border-t border-slate-100 dark:border-slate-800 pt-3.5">
-          <div>
-            <p className="tabular text-xl font-bold tracking-tight text-brand-800 dark:text-brand-300">
-              {cedis(price)}
-            </p>
-            {agentMargin && <AgentMarginLine agentMargin={agentMargin} />}
-          </div>
-          {buyButton}
         </div>
       </Link>
     </Card>
   )
 }
-
