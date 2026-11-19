@@ -4,6 +4,7 @@ import {
   cashBridge,
   freeToSpend,
   heldForUndelivered,
+  inFlightBookedCost,
   owedToFloats,
   refundTransferFees,
   type CashFlows,
@@ -166,4 +167,21 @@ test('liabilities total is the sum of its parts', () => {
     treasuryInFlight: 64,
   }
   assert.equal(freeToSpend(noFlows, claims, {}).liabilities.total, 127)
+})
+
+test('hard limits stay as cautious as before the display fix', () => {
+  // An accepted order in flight: the shown figure no longer holds its cost
+  // twice, but a limit subtracts it again in case the order fails after the
+  // provider charged and never refunds.
+  const orders = [{ salePrice: SALE, bookedCost: COST }]
+  const shown = freeToSpend(
+    { ...noFlows, collected: SALE - PAYSTACK_FEE },
+    { ...noClaims, undeliveredOrders: heldForUndelivered(orders) },
+    floats(COST),
+  ).freeToSpend
+  const oldArithmetic = SALE - PAYSTACK_FEE - SALE - COST
+  assert.equal(shown - inFlightBookedCost(orders), oldArithmetic)
+  // Never more than the sale price, never negative.
+  assert.equal(inFlightBookedCost([{ salePrice: 500, bookedCost: 700 }]), 500)
+  assert.equal(inFlightBookedCost([{ salePrice: 500, bookedCost: -50 }]), 0)
 })

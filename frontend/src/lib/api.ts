@@ -1076,6 +1076,8 @@ export interface ReservePosition {
   spentOnBundles: number
   /** `expectedAtPaystack` less every claim already on it and everything spent on bundles, what's actually free to spend. */
   freeToSpend: number
+  /** Bundle cost already charged on orders still in flight; hard limits hold it back as a worst case. */
+  inFlightBookedCost: number
   liabilities: {
     agentEarnings: number
     customerMoney: number

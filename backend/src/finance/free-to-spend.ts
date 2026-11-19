@@ -66,6 +66,21 @@ export function heldForUndelivered(orders: readonly { salePrice: number; bookedC
 }
 
 /**
+ * The part of in-flight orders' sale price that `heldForUndelivered` does
+ * not hold, because their bundle cost is already counted as owed to a float.
+ *
+ * Right for the figure shown, which is the expected outcome: the order is
+ * delivered. Not safe for a hard limit on money leaving: an order can still
+ * fail after the provider charged for it and never refund the charge (two
+ * production orders, GHS 29.40, did exactly that), and then the customer is
+ * owed the full sale price on top of the cost already spent. Limits subtract
+ * this as well, so they stay exactly as cautious as before the display fix.
+ */
+export function inFlightBookedCost(orders: readonly { salePrice: number; bookedCost: number }[]): number {
+  return orders.reduce((sum, o) => sum + Math.min(o.salePrice, Math.max(0, o.bookedCost)), 0)
+}
+
+/**
  * What each provider's float is still owed: bundle cost booked, less what has
  * been reimbursed. Floored at zero per provider, so one float that was
  * over-reimbursed cannot cancel another's real spend.

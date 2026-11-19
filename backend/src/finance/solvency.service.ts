@@ -8,7 +8,7 @@ import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
 import { claimTransition } from '../common/alert-flag'
 import { bundleCostByProvider, reimbursedByProvider } from '../supplier/provider-resolution'
 import { LedgerService } from './ledger.service'
-import { TREASURY_IN_FLIGHT, freeToSpend, heldForUndelivered, refundTransferFees } from './free-to-spend'
+import { TREASURY_IN_FLIGHT, freeToSpend, heldForUndelivered, inFlightBookedCost, refundTransferFees } from './free-to-spend'
 
 /**
  * What is owed, against what there is to pay it with, plus whether Paystack's
@@ -558,17 +558,16 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       .filter((advance) => !reimbursedWithdrawalIds.has(advance.withdrawalId))
       .reduce((sum, advance) => sum + advance.amount, 0)
 
+    const inFlight = heldOrders.map((o) => ({
+      salePrice: o.salePrice,
+      bookedCost: -o.ledgerEntries.reduce((sum, e) => sum + e.amount, 0),
+    }))
     const result = freeToSpend(
       flows,
       {
         agentEarnings: agents._sum.balance ?? 0,
         customerMoney: owedToCustomers,
-        undeliveredOrders: heldForUndelivered(
-          heldOrders.map((o) => ({
-            salePrice: o.salePrice,
-            bookedCost: -o.ledgerEntries.reduce((sum, e) => sum + e.amount, 0),
-          })),
-        ),
+        undeliveredOrders: heldForUndelivered(inFlight),
         queuedPayouts,
         manualRefundAdvances: owedForManualRefunds,
         manualPayoutAdvances: owedForManualPayouts,
@@ -587,6 +586,8 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       expectedAtPaystack: result.expectedAtPaystack,
       /** Owed to the provider floats: bundle cost not yet reimbursed. */
       spentOnBundles: result.spentOnBundles,
+      /** `spentOnBundles` by provider, from the same snapshot so the two always add up. */
+      spentOnBundlesByProvider: owedToFloatsByProvider,
       /** See `free-to-spend.ts`. */
       freeToSpend: result.freeToSpend,
       liabilities: {
@@ -605,6 +606,12 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
       },
       /** Split of `liabilities.treasuryInFlight`, for the profit-to-cash bridge. */
       treasuryInFlight,
+      /**
+       * Bundle cost already charged for orders still in flight, see
+       * `inFlightBookedCost`. Not part of `freeToSpend` (it is counted once,
+       * under the floats); hard limits subtract it again as a worst case.
+       */
+      inFlightBookedCost: inFlightBookedCost(inFlight),
       pendingPayouts: {
         count: pendingPayouts._count._all,
         amount: pendingPayouts._sum.amount ?? 0,

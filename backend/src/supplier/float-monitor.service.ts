@@ -427,10 +427,13 @@ export class FloatMonitorService {
       // A hard money limit must not be checked against a memo up to two
       // minutes old (a reimbursement logged moments ago is not in it yet).
       this.solvency.invalidate()
-      const [{ owedToProvider }, { freeToSpend }] = await Promise.all([
+      const [{ owedToProvider }, position] = await Promise.all([
         this.capitalSummary(provider),
         this.solvency.position(),
       ])
+      // A hard stop, so the worst case on in-flight orders is held back too,
+      // see `inFlightBookedCost`.
+      const freeToSpend = position.freeToSpend - position.inFlightBookedCost
       const availableToMove = owedToProvider + Math.max(freeToSpend, 0)
       if (input.amount > availableToMove) {
         const ghs = (p: number) => `GHS ${(p / 100).toFixed(2)}`

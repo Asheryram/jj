@@ -188,14 +188,17 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
      * Subtracting all of `inFlight` here again counted a withdrawal twice.
      */
     const free =
-      position.freeToSpend - (inFlight - position.treasuryInFlight.drawings - position.treasuryInFlight.fees)
+      position.freeToSpend -
+      (inFlight - position.treasuryInFlight.drawings - position.treasuryInFlight.fees) -
+      // Worst case for a limit, see `inFlightBookedCost`.
+      position.inFlightBookedCost
     /**
      * A refill is held back only by money owed out in cash: agents, customer
      * wallets and refunds, payouts. Orders still being delivered are not held
      * against it, the float is what delivers them, and holding their price
      * back left a float that could not be refilled while orders waited on it.
      */
-    const freeForRefill = free + position.liabilities.undeliveredOrders
+    const freeForRefill = free + position.liabilities.undeliveredOrders + position.inFlightBookedCost
     const liveBalance = live?.ok ? live.balance : null
     // What Paystack itself can actually send, after its own fee.
     const sendable = liveBalance === null ? null : Math.max(liveBalance - fee, 0)
@@ -206,7 +209,7 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       liveBalance,
       /** The same figure Finance and All orders show, see `SolvencyService.position`. */
       freeToSpend: position.freeToSpend,
-      /** `freeToSpend`, less refills and repayments still in flight: what limits are built from. */
+      /** `freeToSpend`, less refills and repayments still in flight and the worst case on in-flight orders: what limits are built from. */
       spendableNow: free,
       inFlight,
       liabilities: position.liabilities.total,
