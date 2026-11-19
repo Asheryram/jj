@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import type { Order, OrderStatus } from '../../data/types'
-import { api, ApiError, type FinanceStatement } from '../../lib/api'
+import { api, ApiError, type AdminOrdersSummary } from '../../lib/api'
 import { DispatchModal } from '../../components/DispatchModal'
 import {
   Badge,
@@ -83,6 +83,8 @@ export default function AdminOrders() {
   const [page, setPage] = useState(1)
   const [rows, setRows] = useState<Order[]>([])
   const [total, setTotal] = useState(0)
+  /** The money behind every order matching the filter, not just this page, see `OrdersService.adminSummary`. */
+  const [summary, setSummary] = useState<AdminOrdersSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
 
@@ -110,12 +112,14 @@ export default function AdminOrders() {
         if (!live) return
         setRows(result.rows)
         setTotal(result.total)
+        setSummary(result.summary)
         setLoadError(false)
       })
       .catch(() => {
         if (!live) return
         setRows([])
         setTotal(0)
+        setSummary(null)
         setLoadError(true)
       })
       .finally(() => live && setLoading(false))
@@ -134,7 +138,7 @@ export default function AdminOrders() {
    * profit: it is only what could come out today without touching money a
    * pending order might still need, a refund not yet decided, a bundle
    * still processing, a customer's wallet balance, or money already moved
-   * across to fund a supplier float. `allTime.profit` below (revenue less
+   * across to fund a supplier float. Profit earned (revenue less
    * every real cost) is the honest answer to "how much did the business
    * make"; this is the honest answer to "how much of that could I take out
    * this second," and the two are expected to disagree, sometimes by a lot.
@@ -166,7 +170,7 @@ export default function AdminOrders() {
    * cost-settlement, money that was always going to leave Paystack for a
    * bundle a supplier already charged for, and calling that "profit turned
    * into capital" would overstate the actual gap. Only this excess was
-   * never owed to anything, still inside `allTime.profit` since it was
+   * never owed to anything, still inside Profit earned since it was
    * earned, just not free to withdraw at Paystack any more, it's sitting at
    * a supplier float as capital instead. See the Float panel for the full,
    * per-provider breakdown this is drawn from.
@@ -183,7 +187,7 @@ export default function AdminOrders() {
   }, [])
 
   /**
-   * `allTime.profit` still counts every open order's full revenue less its
+   * The raw ledger total still counts every open order's full revenue less its
    * Paystack fee, no supplier cost or agent margin subtracted yet, those
    * only book at settlement (`FulfilmentService`). This is the corrected
    * figure, `LedgerService.projectedProfit`, each open order's own frozen
@@ -205,28 +209,6 @@ export default function AdminOrders() {
         setEarnedProfit(result.earnedProfit)
         setOwnerDrawings(result.ownerDrawings)
       })
-      .catch(() => undefined)
-    return () => {
-      live = false
-    }
-  }, [])
-
-  /**
-   * All-time totals for the top row, from the ledger, not summed from
-   * `orders` below for the same reason `freeToSpendNow` isn't: that list is
-   * both capped and, worse, whatever the filter and search box currently
-   * show. A customer's payment is real the moment Paystack confirms it,
-   * whatever later happens to the order, "Customers paid" summing only
-   * `status === 'completed'` orders was silently dropping every failed or
-   * refunded sale's money, which is exactly why it read lower than the
-   * Reserve panel's "Should be at Paystack" instead of higher.
-   */
-  const [allTime, setAllTime] = useState<FinanceStatement | null>(null)
-  useEffect(() => {
-    let live = true
-    api
-      .financeStatement('all')
-      .then((statement) => live && setAllTime(statement))
       .catch(() => undefined)
     return () => {
       live = false
@@ -417,59 +399,95 @@ export default function AdminOrders() {
         }
       />
 
-      <div data-tour="orders-money-tiles" className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <StatTile
-          label="Orders matching"
-          value={String(total)}
-          hint="Follows the filter, dates and search below. The table shows one page of these at a time"
-        />
-        <StatTile
-          label="Customers paid"
-          value={allTime === null ? '-' : cedis(allTime.revenue)}
-          hint="All-time, every payment ever collected, not affected by the filter, dates or search below"
-          tone="brand"
-        />
-        <StatTile
-          label="Paid to supplier"
-          value={allTime === null ? '-' : cedis(allTime.costs.supplier)}
-          hint="All-time. What they actually charged, not the catalogue estimate"
-        />
-        <StatTile
-          label="Paystack fees"
-          value={allTime === null ? '-' : cedis(allTime.costs.paymentFees)}
-          hint="All-time. Their cut, paid on every sale"
-        />
-        <StatTile
-          label="Paid to agents"
-          value={allTime === null ? '-' : cedis(allTime.costs.agentMargins)}
-          hint="All-time. Their commission, never counted as your profit"
-        />
-        <StatTile
-          label="Profit now"
-          value={earnedProfit === null || ownerDrawings === null ? '-' : cedis(earnedProfit - ownerDrawings)}
-          hint={
-            earnedProfit === null || ownerDrawings === null
-              ? 'Profit from finished sales, less what has already been taken out'
-              : `Profit from finished sales still in the business: ${cedis(earnedProfit)} earned all-time, ` +
-                `${cedis(ownerDrawings)} already taken out. An order still being delivered counts once it settles`
-          }
-          tone="success"
-        />
-        <StatTile
-          label="Profit now, once open orders finish"
-          value={projectedProfit === null || ownerDrawings === null ? '-' : cedis(projectedProfit - ownerDrawings)}
-          hint="Profit now, plus what the orders still being delivered will add if they all succeed, using each order's expected cost. Refunds still owed are left out, that money goes back"
-        />
-        <StatTile
-          label="Free to spend now"
-          value={freeToSpendNow === null ? '-' : cedis(freeToSpendNow)}
-          hint="Cash, not profit: what you could take out of Paystack today without touching money owed to agents, customers or an order still being delivered. Same as Finance's Actually free to spend. Analytics, Cash tab, explains why it differs from profit earned"
-        />
-        <StatTile
-          label="Profit that became capital"
-          value={profitAtFloat === null ? '-' : cedis(profitAtFloat)}
-          hint="All-time. Reimbursed to a supplier's float beyond what it was actually owed. Still earned, added back to the profit above until this happened, but a supplier float cannot send it back out, so it no longer counts as yours to take. See the Float panel"
-        />
+      <div data-tour="orders-money-tiles">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          These orders
+        </p>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <StatTile
+            label="Orders matching"
+            value={String(total)}
+            hint={
+              summary && summary.openOrders > 0
+                ? `Follows the filter, dates and search below. ${summary.openOrders} still being delivered or waiting on a refund, counted in the money once they finish`
+                : 'Follows the filter, dates and search below'
+            }
+          />
+          <StatTile
+            label="Sales"
+            value={summary === null ? '-' : cedis(summary.sales)}
+            hint="What customers paid for the finished orders matching the filter"
+            tone="brand"
+          />
+          <StatTile
+            label="Paid to supplier"
+            value={summary === null ? '-' : cedis(summary.supplier)}
+            hint={
+              summary && summary.sales > 0
+                ? `${Math.round((summary.supplier / summary.sales) * 100)}% of sales. What the supplier actually charged, not the catalogue estimate`
+                : 'What the supplier actually charged, not the catalogue estimate'
+            }
+          />
+          <StatTile
+            label="Paystack fees"
+            value={summary === null ? '-' : cedis(summary.paymentFees)}
+            hint="Their cut on these sales"
+          />
+          <StatTile
+            label="Paid to agents"
+            value={summary === null ? '-' : cedis(summary.agents)}
+            hint="Their commission on these sales, never your profit"
+          />
+          {summary !== null && summary.refunds + summary.other !== 0 && (
+            <StatTile
+              label="Refunds and other"
+              value={cedis(summary.refunds + summary.other)}
+              hint="Money given back on failed orders, Paystack's fee for sending it, and any other cost booked against these orders"
+            />
+          )}
+          <StatTile
+            label="Profit from these orders"
+            value={summary === null ? '-' : cedis(summary.profit)}
+            hint={
+              summary && summary.sales > 0
+                ? `${Math.round((summary.profit / summary.sales) * 100)}% of sales. Sales less every line above, so the tiles add up`
+                : 'Sales less every line above, so the tiles add up'
+            }
+            tone="success"
+          />
+        </div>
+
+        <p className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          The business right now
+        </p>
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <StatTile
+            label="Profit now"
+            value={earnedProfit === null || ownerDrawings === null ? '-' : cedis(earnedProfit - ownerDrawings)}
+            hint={
+              earnedProfit === null || ownerDrawings === null
+                ? 'Profit from finished sales, less what has already been taken out'
+                : `Profit from finished sales still in the business: ${cedis(earnedProfit)} earned all-time, ` +
+                  `${cedis(ownerDrawings)} already taken out. Finance shows it line by line`
+            }
+            tone="success"
+          />
+          <StatTile
+            label="Once open orders finish"
+            value={projectedProfit === null || ownerDrawings === null ? '-' : cedis(projectedProfit - ownerDrawings)}
+            hint="Profit now, plus what the orders still being delivered will add if they all succeed, using each order's expected cost. Refunds still owed are left out, that money goes back"
+          />
+          <StatTile
+            label="Free to spend now"
+            value={freeToSpendNow === null ? '-' : cedis(freeToSpendNow)}
+            hint="Cash, not profit: what you could take out of Paystack today without touching money owed to agents, customers or an order still being delivered. Same as Finance. Analytics, Cash tab, explains why it differs from profit"
+          />
+          <StatTile
+            label="Profit that became capital"
+            value={profitAtFloat === null ? '-' : cedis(profitAtFloat)}
+            hint="Reimbursed to a supplier's float beyond what it was owed. Still earned, but a float cannot send it back out, so it is stock now, not cash. See the Float panel"
+          />
+        </div>
       </div>
 
       <div data-tour="orders-filters" className="mt-3 mb-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
