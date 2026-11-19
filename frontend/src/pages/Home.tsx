@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useStore } from '../state/store'
+import { useBranding } from '../state/branding'
+import { apiAsset } from '../lib/api'
 import { useRegisterPath, useShopPath } from '../lib/shopPath'
 import { cedis } from '../lib/format'
 import Catalogue from '../components/Catalogue'
@@ -39,6 +41,7 @@ const AGENT_BENEFITS = [
  */
 export default function Home() {
   const { products, retailPrice } = useStore()
+  const branding = useBranding()
   const shopPath = useShopPath()
   const registerPath = useRegisterPath()
 
@@ -53,17 +56,40 @@ export default function Home() {
     <>
       {/* ── Slim hero. Enough to say what this is, not enough to delay a purchase. ── */}
       <section className="border-b border-slate-200 dark:border-slate-700 bg-brand-700">
-        <div className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
+        <div className="mx-auto max-w-6xl px-4 py-6 sm:py-10">
           <div className="flex flex-wrap items-end justify-between gap-5">
-            <div className="max-w-xl">
-              <h1 className="text-2xl leading-tight font-extrabold tracking-tight text-white sm:text-3xl">
-                Data, airtime and result checkers, paid by Mobile Money.
-              </h1>
-              <p className="mt-2 text-brand-50/90">
-                Pick a bundle, enter the number, pay with Mobile Money.{' '}
-                <strong className="font-semibold text-white">No account needed.</strong>
-              </p>
-            </div>
+            {branding.custom ? (
+              // An agent's own shop: the buyer should know whose shop they are
+              // in before anything else. The name in full, never shortened,
+              // and the logo on a white tile so any colour of logo reads on
+              // the brand-coloured band.
+              <div className="flex max-w-2xl items-center gap-4">
+                {branding.logoUrl && (
+                  <span className="flex h-16 max-w-[40%] shrink-0 items-center rounded-2xl bg-white p-2 shadow-sm sm:h-20">
+                    <img src={apiAsset(branding.logoUrl) ?? undefined} alt="" className="h-full w-auto object-contain" />
+                  </span>
+                )}
+                <div className="min-w-0">
+                  <h1 className="text-2xl leading-tight font-extrabold tracking-tight break-words text-white sm:text-3xl">
+                    {branding.shopName}
+                  </h1>
+                  <p className="mt-1.5 text-sm text-brand-50/90 sm:text-base">
+                    Data and result checkers, paid by Mobile Money.{' '}
+                    <strong className="font-semibold text-white">No account needed.</strong>
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="max-w-xl">
+                <h1 className="text-2xl leading-tight font-extrabold tracking-tight text-white sm:text-3xl">
+                  Data, airtime and result checkers, paid by Mobile Money.
+                </h1>
+                <p className="mt-2 text-brand-50/90">
+                  Pick a bundle, enter the number, pay with Mobile Money.{' '}
+                  <strong className="font-semibold text-white">No account needed.</strong>
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </section>

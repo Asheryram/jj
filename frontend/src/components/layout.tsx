@@ -69,17 +69,34 @@ import {
 export function Logo({ compact }: { compact?: boolean }) {
   const branding = useBranding()
   const home = useShopPath()('/')
+  /**
+   * Whether the uploaded logo is a wordmark (much wider than tall), read from
+   * the image itself once it loads. Agents upload all sorts: a square badge,
+   * or a wide banner with their name already in it. A wide one squeezed into
+   * the 36px square every logo used to get became an unreadable sliver, so it
+   * now keeps its own shape, and on a phone it stands in for the written name
+   * rather than fighting it for the same few pixels.
+   */
+  const [wide, setWide] = useState(false)
+  useEffect(() => setWide(false), [branding.logoUrl])
 
   return (
-    <Link to={home} className="flex min-w-0 items-center gap-2.5">
+    <Link to={home} className="flex min-w-0 items-center gap-2.5" aria-label={`${branding.shopName || 'Shop'}, home`}>
       {/* An uploaded mark where there is one, and the shop's own initial where
           there is not, a hardcoded "J" on an agent's own shop reads as somebody
           else's brand. */}
       {branding.logoUrl ? (
         <img
           src={apiAsset(branding.logoUrl) ?? undefined}
-          alt={branding.shopName}
-          className="size-9 shrink-0 rounded-xl object-contain"
+          alt=""
+          onLoad={(event) => {
+            const img = event.currentTarget
+            setWide(img.naturalHeight > 0 && img.naturalWidth / img.naturalHeight >= 1.8)
+          }}
+          className={cn(
+            'shrink-0 object-contain',
+            wide ? 'h-9 w-auto max-w-[9.5rem] object-left sm:max-w-[12rem]' : 'size-9 rounded-xl',
+          )}
         />
       ) : (
         <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-brand-700 text-base font-bold text-white">
@@ -87,14 +104,14 @@ export function Logo({ compact }: { compact?: boolean }) {
         </span>
       )}
       {!compact && (
-        // `min-w-0` lets this shrink below its text's natural width inside the
-        // header's flex row, without it a long shop name wraps to a second
-        // line instead of truncating, and the header's fixed height clips it.
-        <span className="min-w-0 leading-tight">
-          <span className="block truncate font-bold tracking-tight text-slate-900 dark:text-slate-50">
+        // Two lines rather than one: a shop name is the shop's identity, and
+        // "A…" told a customer nothing about whose shop they were in. Long
+        // names wrap once and only then shorten.
+        <span className={cn('min-w-0 leading-tight', wide && 'hidden sm:block')}>
+          <span className="line-clamp-2 text-[15px] font-bold tracking-tight break-words text-slate-900 sm:text-base dark:text-slate-50">
             {branding.shopName}
           </span>
-          <span className="block truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
+          <span className="hidden truncate text-[11px] font-medium text-slate-500 sm:block dark:text-slate-400">
             Data · Airtime · Checkers
           </span>
         </span>
@@ -533,7 +550,6 @@ function AdminSearch({ onSearch }: { onSearch: (q: string) => void }) {
 }
 
 export function AppShell() {
-  const branding = useBranding()
   const { session, balance, logout, profiles, switchProfile, unreadAnnouncementsCount } = useStore()
   const [switching, setSwitching] = useState(false)
   const navigate = useNavigate()
@@ -671,13 +687,13 @@ export function AppShell() {
       <SkipLink />
 
       <header className="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-3 sm:px-4">
-          <Logo compact />
-          <span className="hidden font-bold tracking-tight text-slate-900 dark:text-slate-50 sm:block">
-            {branding.shopName}
-          </span>
+        <div className="mx-auto flex h-14 max-w-7xl items-center gap-2 px-3 sm:gap-3 sm:px-4">
+          {/* The name shows on a phone too, up to two lines: it was hidden
+              below `sm`, leaving an agent's own dashboard with just a tiny
+              logo and no sign of whose shop it is. */}
+          <Logo />
 
-          <div className="ml-auto flex items-center gap-2 sm:gap-3">
+          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
             {isAdmin(session.role) && <AdminSearch onSearch={(q) => navigate(`/admin/orders?ref=${encodeURIComponent(q)}`)} />}
             {!isAdmin(session.role) && (
               <Link
@@ -722,14 +738,18 @@ export function AppShell() {
               {initials(session.name)}
             </span>
             <TourButton />
-            <ThemeToggle />
+            {/* Theme and log out move into "More" below `lg` (where the
+                bottom bar is), giving the shop name the room it needs. */}
+            <span className="hidden lg:inline-flex">
+              <ThemeToggle />
+            </span>
             <button
               type="button"
               onClick={logout}
               aria-label="Log out"
               // `before:-inset-1` widens the actual tap target to the app's
               // 44px minimum without growing the visible hover halo.
-              className="relative rounded-lg p-2 text-slate-500 dark:text-slate-400 before:absolute before:-inset-1 before:content-[''] hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200"
+              className="relative hidden rounded-lg p-2 text-slate-500 dark:text-slate-400 before:absolute before:-inset-1 before:content-[''] hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 lg:block"
             >
               <LogoutIcon className="size-5" />
             </button>
@@ -806,8 +826,9 @@ export function AppShell() {
               {item.label}
             </NavLink>
           ))}
-          {overflow.length > 0 && (
-            <button
+          {/* Always shown: it also holds the account, theme and log out,
+              which every role needs on a phone, even one with no overflow. */}
+          <button
               type="button"
               onClick={() => setMoreOpen(true)}
               className="relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400"
@@ -820,7 +841,6 @@ export function AppShell() {
               </span>
               More
             </button>
-          )}
         </div>
       </nav>
 
@@ -848,6 +868,34 @@ export function AppShell() {
             </div>
           ))}
         </nav>
+        <div className="mt-4 space-y-1 border-t border-slate-200 pt-4 dark:border-slate-700">
+          <div className="flex items-center gap-3 px-2.5 pb-2">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-white dark:bg-slate-200 dark:text-slate-900">
+              {initials(session.name)}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900 dark:text-slate-50">{session.name}</p>
+              <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                {session.phone}
+                {session.role === 'agent' && <span className="ml-2 font-mono text-brand-700 dark:text-brand-300">{session.referralCode}</span>}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between rounded-lg px-2.5 py-1.5 text-sm font-semibold text-slate-600 dark:text-slate-300">
+            Dark mode
+            <ThemeToggle />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setMoreOpen(false)
+              logout()
+            }}
+            className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/40"
+          >
+            <LogoutIcon className="size-5" /> Log out
+          </button>
+        </div>
         {isAdmin(session.role) && (
           <div className="mt-4 border-t border-slate-200 pt-3 dark:border-slate-700">
             <VersionInfo />
@@ -1003,14 +1051,25 @@ export function PublicShell() {
   const { session } = useStore()
   const shopPath = useShopPath()
   const registerPath = useRegisterPath()
+  /**
+   * On a phone the header used to carry the logo, track, theme, "Log in" and
+   * "Sell with us" side by side, and the shop's name lost: it was squeezed to
+   * "A…". Below `sm` the secondary actions now live behind one menu button,
+   * leaving the name the room it needs. Track order stays out, it is the one
+   * way back in for a guest whose order went wrong.
+   */
+  const [menuOpen, setMenuOpen] = useState(false)
+  const close = () => setMenuOpen(false)
+  const menuLink =
+    'flex items-center gap-3 rounded-xl px-3 py-3 text-base font-semibold text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'
 
   return (
     <div className="min-h-dvh bg-white dark:bg-slate-950">
       <SkipLink />
       <header className="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4">
+        <div className="mx-auto flex h-16 max-w-6xl items-center gap-2 px-4 sm:gap-3">
           <Logo />
-          <nav className="ml-auto flex items-center gap-2 sm:gap-3">
+          <nav className="ml-auto flex shrink-0 items-center gap-1 sm:gap-3">
             <Link
               to={shopPath('/shop')}
               className="hidden rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 sm:block"
@@ -1023,49 +1082,81 @@ export function PublicShell() {
             >
               Result checkers
             </Link>
-            {/*
-              Was `hidden ... lg:block`, invisible on every phone and most
-              tablets, with nothing else in this header standing in for it on
-              narrow screens (unlike the logged-in shell, which has its own
-              mobile bottom nav). A guest with a failed or delayed order has
-              no account to check it from, so this is the one way in for
-              them, and it was effectively desktop-only. Icon-only below
-              `sm:` keeps it inside the same tight header that already
-              shortens "Become an agent" for the same reason, rather than
-              hiding the whole link again.
-            */}
             <Link
               to={shopPath('/track')}
               aria-label="Track order"
               className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 sm:px-3"
             >
-              <ReceiptIcon className="size-4.5 sm:hidden" />
+              <ReceiptIcon className="size-5 sm:hidden" />
               <span className="hidden sm:inline">Track order</span>
             </Link>
-            <ThemeToggle />
+            <span className="hidden sm:inline-flex">
+              <ThemeToggle />
+            </span>
             {session ? (
-              <Link to={isAdmin(session.role) ? '/admin' : '/app'}>
+              <Link to={isAdmin(session.role) ? '/admin' : '/app'} className="hidden sm:block">
                 <Button size="sm">My dashboard</Button>
               </Link>
             ) : (
               <>
-                <Link to={shopPath('/login')}>
+                <Link to={shopPath('/login')} className="hidden sm:block">
                   <Button variant="ghost" size="sm">
                     Log in
                   </Button>
                 </Link>
-                <Link to={registerPath}>
-                  {/* Room is tight at 390px, the label shortens rather than wraps. */}
-                  <Button size="sm">
-                    <span className="sm:hidden">Sell with us</span>
-                    <span className="hidden sm:inline">Become an agent</span>
-                  </Button>
+                <Link to={registerPath} className="hidden sm:block">
+                  <Button size="sm">Become an agent</Button>
                 </Link>
               </>
             )}
+            <button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              aria-label="Menu"
+              aria-expanded={menuOpen}
+              className="relative rounded-lg p-2 text-slate-600 before:absolute before:-inset-1 before:content-[''] hover:bg-slate-100 sm:hidden dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <MenuIcon className="size-6" />
+            </button>
           </nav>
         </div>
       </header>
+
+      <Modal open={menuOpen} onClose={close} title="Menu">
+        <nav className="space-y-1">
+          <Link to={shopPath('/shop')} onClick={close} className={menuLink}>
+            <StoreIcon className="size-5" /> Buy data
+          </Link>
+          <Link to={shopPath('/checkers')} onClick={close} className={menuLink}>
+            <ReceiptIcon className="size-5" /> Result checkers
+          </Link>
+          <Link to={shopPath('/track')} onClick={close} className={menuLink}>
+            <SearchIcon className="size-5" /> Track an order
+          </Link>
+        </nav>
+        <div className="mt-4 space-y-2 border-t border-slate-200 pt-4 dark:border-slate-700">
+          {session ? (
+            <Link to={isAdmin(session.role) ? '/admin' : '/app'} onClick={close} className="block">
+              <Button className="w-full">My dashboard</Button>
+            </Link>
+          ) : (
+            <>
+              <Link to={registerPath} onClick={close} className="block">
+                <Button className="w-full">Become an agent</Button>
+              </Link>
+              <Link to={shopPath('/login')} onClick={close} className="block">
+                <Button variant="outline" className="w-full">
+                  Log in
+                </Button>
+              </Link>
+            </>
+          )}
+          <div className="flex items-center justify-between rounded-xl px-3 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
+            Dark mode
+            <ThemeToggle />
+          </div>
+        </div>
+      </Modal>
       <SiteNoticeModal />
       <main id="main">
         <SafeOutlet />
