@@ -78,18 +78,30 @@ export class CatalogueService {
      * above: managing prices for a provider that isn't currently live to
      * customers is still a real, ordinary thing to do.
      */
-    const visible = isAdminRole(role)
-      ? products
-      : products.filter(
-          // No network (result checkers) means nothing to route: such a product
-          // is simply sold by whichever provider it belongs to.
-          (p) =>
-            p.network === null ||
-            (p.supplier?.provider ?? 'datahub-gh') === this.settings.providerFor(settings.networkProviderRouting, p.network, p.category),
-        )
+    // No network (result checkers) means nothing to route: such a product
+    // is simply sold by whichever provider it belongs to.
+    const routed = (p: (typeof products)[number]) =>
+      p.network === null ||
+      (p.supplier?.provider ?? 'datahub-gh') === this.settings.providerFor(settings.networkProviderRouting, p.network, p.category)
+    const visible = isAdminRole(role) ? products : products.filter(routed)
 
     return {
-      products: visible.map(isAdminRole(role) ? toProduct : toPublicProduct),
+      products: isAdminRole(role)
+        ? visible.map((p) => ({
+            ...toProduct(p),
+            /**
+             * Whether a customer or agent can see and buy this right now: on
+             * sale, in stock at its supplier, and from the supplier its
+             * network is routed to. The admin payload carries every product
+             * for managing prices, so without this an admin browsing the
+             * shop saw both providers' listings of the same bundle side by
+             * side ("1GB" twice), a shop no customer ever sees. The shop
+             * views filter on it; Prices ignores it.
+             */
+            onSaleToCustomers:
+              p.active && (p.supplierCode === null || p.supplier?.available === true) && routed(p),
+          }))
+        : visible.map(toPublicProduct),
       pricingAgents: agents,
       admin,
       settings: {

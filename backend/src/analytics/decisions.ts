@@ -63,10 +63,11 @@ export interface ProviderReliability {
 }
 
 /**
- * The same bundle (network, category, size) is on sale from two providers at
- * once, and customers keep buying the dearer one. Recommends moving that
- * volume to the cheaper provider, but only when the cheaper one delivers at
- * least as reliably on that network (within 2 points, on at least 20 orders).
+ * The same bundle (network, category, size) is listed by two providers, and
+ * the network is routed to the dearer one (customers only ever see the routed
+ * provider's listing, see `CatalogueService.snapshot`). Recommends routing
+ * that network to the cheaper provider, but only when it delivers at least as
+ * reliably there (within 2 points, on at least 20 orders).
  */
 export function providerSwitch(listings: Listing[], reliability: ProviderReliability[]): Decision | null {
   const rateOf = (provider: string, network: string | null) => {
@@ -105,7 +106,7 @@ export function providerSwitch(listings: Listing[], reliability: ProviderReliabi
     id: 'provider_switch',
     kind: 'provider_switch',
     urgency: 'this_week',
-    title: `Sell ${moves.length === 1 ? top.from.name : `${moves.length} bundles`} through ${label(top.to.provider)}, it costs less for the same bundle`,
+    title: `Switch ${top.from.network ?? ''} data to ${label(top.to.provider)}: the same bundles cost less there`.replace('  ', ' '),
     evidence: [
       ...moves
         .slice(0, 5)
@@ -120,8 +121,9 @@ export function providerSwitch(listings: Listing[], reliability: ProviderReliabi
     monthlyImpact: perMonth(total),
     action: { label: 'Open prices', to: '/admin/prices' },
     caveat:
-      'Take the dearer listing off sale (or point it at the cheaper provider) rather than deleting it, so you can switch back ' +
-      'if that provider runs short. Keep both floats topped up either way.',
+      'Change it in "Which supplier fulfils each network" on Prices: customers and agents only ever see the routed ' +
+      "supplier's listings, so nothing else needs taking off sale, and you can switch back in one tap if that provider " +
+      'runs short. Top its float up first: it will carry all of that volume.',
   }
 }
 
