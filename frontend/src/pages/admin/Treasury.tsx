@@ -214,14 +214,14 @@ export default function Treasury() {
 
       <ReconcileCard data={data} gap={gap} />
 
-      {data.refillsAwaitingArrival.length > 0 && (
+      {(data.refillsAwaitingArrival ?? []).length > 0 && (
         <Card className="mt-3">
           <CardHead
             title="Refills not yet in the float"
             subtitle="Paystack paid these to your MoMo number. Once you have topped up DataHub or GMPL from it, mark it here so the float's figures count it."
           />
           <ul className="divide-y divide-slate-100 px-4 pb-4 sm:px-5 dark:divide-slate-800">
-            {data.refillsAwaitingArrival.map((r) => (
+            {(data.refillsAwaitingArrival ?? []).map((r) => (
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                 <div>
                   <p className="font-semibold tabular text-slate-900 dark:text-slate-50">

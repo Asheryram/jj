@@ -699,7 +699,9 @@ function CustomDomainCard() {
     confirming.current = true
     api
       .confirmDomainPaystackPayment(reference)
-      .then((result) => {
+      .then((reply) => {
+        // A backend from before `status` existed answers `{ ok }` only.
+        const result = { ...reply, status: reply.status ?? (reply.ok ? 'paid' : 'failed') }
         // `pending` is not "nothing was charged": a Mobile Money prompt can
         // still be waiting for approval, and saying "try again" invited a
         // second payment for the same cycle. It is applied by itself once

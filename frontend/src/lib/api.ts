@@ -639,7 +639,8 @@ export interface TreasuryOverview {
     landedAt: string | null
   }[]
   /** Float refills Paystack has sent that nobody has confirmed reached the float, oldest first. */
-  refillsAwaitingArrival: {
+  /** Optional only so a page served before the backend restarts still renders. */
+  refillsAwaitingArrival?: {
     id: string
     reference: string
     provider: 'datahub-gh' | 'gmpl' | null
@@ -1588,7 +1589,7 @@ export const api = {
     }),
 
   confirmDomainPaystackPayment: (reference: string) =>
-    request<{ ok: boolean; status: 'paid' | 'pending' | 'failed' }>(
+    request<{ ok: boolean; status?: 'paid' | 'pending' | 'failed' }>(
       `/domains/mine/renew/pay-paystack/confirm?reference=${encodeURIComponent(reference)}`,
     ),
 
