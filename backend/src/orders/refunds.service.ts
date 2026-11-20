@@ -434,8 +434,19 @@ export class RefundsService {
       // failed one never did: returning that money to the wallet just
       // reverses a transfer of the customer's own balance, and counting it
       // against profit understated profit by the full sale price.
+      //
+      // A refused payment (under-paid or wrong currency) is booked as income
+      // too, under its own key (`PaymentsService.closeUnacceptablePayment`).
+      // Missing it here booked its refund as not touching profit, so profit
+      // kept the income for ever. An order's payment reference is the order
+      // reference, so the same key finds it.
       const revenueBooked = await tx.ledgerEntry.findFirst({
-        where: { kind: 'revenue', orderRef: request.orderRef },
+        where: {
+          OR: [
+            { kind: 'revenue', orderRef: request.orderRef },
+            { idempotencyKey: LedgerService.key('payment', request.orderRef, 'unacceptable') },
+          ],
+        },
         select: { id: true },
       })
       await this.ledger.record(

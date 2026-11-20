@@ -103,6 +103,24 @@ export function refundTransferFees(withFee: number, countWithoutFee: number, cur
   return withFee + countWithoutFee * currentFee
 }
 
+/**
+ * What actually reached Paystack on payments that were then refused
+ * (under-paid or wrong currency), net of Paystack's fee, see
+ * `SolvencyService.refusedCollectedSince`. A refusal whose fee was never kept
+ * has it estimated at the checkout rate, rounded up, so the money is never
+ * counted as more than really arrived.
+ */
+export function refusedCollected(
+  rows: readonly { amount: number; paymentRef: string | null }[],
+  feeByRef: ReadonlyMap<string, number | null>,
+  feeBp: number,
+): number {
+  return rows.reduce((sum, row) => {
+    const fee = (row.paymentRef ? feeByRef.get(row.paymentRef) : null) ?? Math.ceil((row.amount * feeBp) / 10_000)
+    return sum + row.amount - fee
+  }, 0)
+}
+
 export function freeToSpend(flows: CashFlows, claims: Claims, owedToFloatsByProvider: Record<string, number>) {
   const expectedAtPaystack =
     flows.collected - flows.transferred - flows.reimbursed - flows.advancesRepaid + flows.ownerMoney

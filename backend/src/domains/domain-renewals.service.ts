@@ -1,7 +1,6 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { PrismaService } from '../prisma/prisma.service'
-import { LedgerService } from '../finance/ledger.service'
 import { PaystackClient } from '../payments/paystack.client'
 import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
@@ -35,7 +34,6 @@ export class DomainRenewalsService implements OnApplicationBootstrap, OnModuleDe
   constructor(
     private readonly prisma: PrismaService,
     private readonly domains: DomainsService,
-    private readonly ledger: LedgerService,
     private readonly paystack: PaystackClient,
     private readonly mailer: MailerService,
     private readonly config: ConfigService,
@@ -231,6 +229,29 @@ export class DomainRenewalsService implements OnApplicationBootstrap, OnModuleDe
     }
 
     const reference = `DOMREN-${domain.id}-${Date.now()}`
+    // The renewal and its Payment row both exist before Paystack is asked, the
+    // same as an order's checkout: the Payment is what the webhook, the sweep
+    // and the late-approval revival look for, and the renewal is what
+    // `DomainsService.applyRenewalPaid` applies, so neither can be missing
+    // when the money lands. The period is provisional, set again from when
+    // the payment actually lands.
+    const periodStart = new Date()
+    await this.prisma.$transaction([
+      this.prisma.payment.create({
+        data: { reference, purpose: 'domain_renewal', amount: domain.priceAmount, userId },
+      }),
+      this.prisma.domainRenewal.create({
+        data: {
+          domainId: domain.id,
+          amount: domain.priceAmount,
+          method: 'paystack',
+          status: 'pending',
+          periodStart,
+          periodEnd: addInterval(periodStart, domain.billingInterval),
+          paystackReference: reference,
+        },
+      }),
+    ])
     const result = await this.paystack.initialise({
       reference,
       amount: domain.priceAmount,
@@ -239,66 +260,16 @@ export class DomainRenewalsService implements OnApplicationBootstrap, OnModuleDe
       metadata: { purpose: 'domain_renewal', domainId: domain.id },
     })
     if (!result.ok) {
+      await this.prisma.$transaction([
+        this.prisma.payment.update({
+          where: { reference },
+          data: { status: 'failed', providerResponse: result.reason.slice(0, 2000) },
+        }),
+        this.prisma.domainRenewal.update({ where: { paystackReference: reference }, data: { status: 'failed' } }),
+      ])
       throw new ValidationError(`Could not start that payment: ${result.reason}`)
     }
 
-    const periodStart = new Date()
-    await this.prisma.domainRenewal.create({
-      data: {
-        domainId: domain.id,
-        amount: domain.priceAmount,
-        method: 'paystack',
-        status: 'pending',
-        periodStart,
-        periodEnd: addInterval(periodStart, domain.billingInterval),
-        paystackReference: reference,
-      },
-    })
-
     return { authorizationUrl: result.authorizationUrl, reference }
-  }
-
-  /**
-   * Confirm a Paystack renewal payment, called from the return page the
-   * same way `PaymentsService.confirm` handles an order's own checkout
-   * return, a fresh server-to-Paystack verify, never the redirect trusted
-   * on its own.
-   */
-  async confirmPaystackPayment(reference: string): Promise<{ ok: boolean }> {
-    const renewal = await this.prisma.domainRenewal.findUnique({ where: { paystackReference: reference } })
-    if (!renewal) throw new NotFoundError('We could not find that payment.')
-    if (renewal.status === 'paid') return { ok: true }
-    if (renewal.status === 'failed') return { ok: false }
-
-    const outcome = await this.paystack.verify(reference)
-    if (outcome.kind !== 'found' || outcome.status !== 'success') {
-      if (outcome.kind === 'found' && outcome.status !== 'pending') {
-        await this.prisma.domainRenewal.update({ where: { id: renewal.id }, data: { status: 'failed' } })
-      }
-      return { ok: false }
-    }
-
-    const claim = await this.prisma.domainRenewal.updateMany({
-      where: { id: renewal.id, status: 'pending' },
-      data: { status: 'paid', paidAt: new Date() },
-    })
-    if (claim.count === 0) return { ok: true } // Already applied by a concurrent confirm.
-
-    const domain = await this.prisma.customDomain.update({
-      where: { id: renewal.domainId },
-      data: { active: true, graceEndsAt: null, nextRenewalAt: renewal.periodEnd },
-    })
-    await this.ledger.record([
-      {
-        idempotencyKey: LedgerService.key('domain_renewal', renewal.id, 'revenue'),
-        kind: 'revenue',
-        amount: renewal.amount,
-        affectsProfit: true,
-        description: `Domain renewal (Paystack) · ${domain.domain}`,
-        userId: domain.userId,
-        occurredAt: renewal.paidAt ?? new Date(),
-      },
-    ])
-    return { ok: true }
   }
 }

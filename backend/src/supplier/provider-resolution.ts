@@ -82,19 +82,52 @@ export function capitalProviderFilter(provider: SupplierProviderCode) {
  * relabelling).
  */
 export async function reimbursedByProvider(
-  prisma: Pick<PrismaService, 'ledgerEntry'>,
+  prisma: Pick<PrismaService, 'ledgerEntry' | 'treasuryTransfer'>,
   provider: SupplierProviderCode,
 ): Promise<number> {
-  const rows = await prisma.ledgerEntry.findMany({
-    where: { kind: { in: ['capital_in_reimbursement', 'capital_out'] }, ...capitalProviderFilter(provider) },
-    select: { id: true, kind: true, amount: true, idempotencyKey: true },
-  })
+  const [rows, inTransit] = await Promise.all([
+    prisma.ledgerEntry.findMany({
+      where: { kind: { in: ['capital_in_reimbursement', 'capital_out'] }, ...capitalProviderFilter(provider) },
+      select: { id: true, kind: true, amount: true, idempotencyKey: true },
+    }),
+    refillsInTransit(prisma, provider),
+  ])
   const reversedIds = new Set(
     rows
       .filter((r) => r.kind === 'capital_out' && r.idempotencyKey.startsWith('correction:'))
       .map((r) => r.idempotencyKey.split(':')[1]),
   )
-  return rows
+  const landed = rows
     .filter((r) => r.kind === 'capital_in_reimbursement' && !reversedIds.has(r.id))
     .reduce((sum, r) => sum + r.amount, 0)
+  // Counted as reimbursed from Paystack's side the moment it left, see
+  // `refillsInTransit`, so Free to spend does not change while it travels.
+  return landed + inTransit
+}
+
+/**
+ * Float refills Paystack has paid out to an approved MoMo number that nobody
+ * has yet confirmed reached the supplier float (`TreasuryTransfer.landedAt`).
+ *
+ * The second hop, MoMo into DataHub/GMPL, is done by hand and the app cannot
+ * see it. This money has left Paystack and is meant for the float, so
+ * Paystack's side (`reimbursedByProvider`, and through it Free to spend)
+ * counts it as reimbursed. The float's own side
+ * (`FloatMonitorService.capitalSummary`, its expected balance) does not until
+ * it is confirmed, because until then the float does not have it.
+ */
+export async function refillsInTransit(
+  prisma: Pick<PrismaService, 'treasuryTransfer'>,
+  provider: SupplierProviderCode,
+): Promise<number> {
+  const result = await prisma.treasuryTransfer.aggregate({
+    where: {
+      purpose: 'provider_refill',
+      status: 'success',
+      landedAt: null,
+      ...(provider === 'datahub-gh' ? { OR: [{ provider: 'datahub-gh' }, { provider: null }] } : { provider }),
+    },
+    _sum: { amount: true },
+  })
+  return result._sum.amount ?? 0
 }

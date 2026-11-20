@@ -699,11 +699,28 @@ function CustomDomainCard() {
     confirming.current = true
     api
       .confirmDomainPaystackPayment(reference)
-      .then((result) => {
+      .then((reply) => {
+        // A backend from before `status` existed answers `{ ok }` only.
+        const result = { ...reply, status: reply.status ?? (reply.ok ? 'paid' : 'failed') }
+        // `pending` is not "nothing was charged": a Mobile Money prompt can
+        // still be waiting for approval, and saying "try again" invited a
+        // second payment for the same cycle. It is applied by itself once
+        // Paystack confirms it.
         pushToast(
-          result.ok
+          result.status === 'paid'
             ? { tone: 'success', title: 'Paid', detail: 'Your domain is caught up.' }
-            : { tone: 'error', title: 'Payment not confirmed', detail: 'Nothing was charged, try again.' },
+            : result.status === 'pending'
+              ? {
+                  tone: 'info',
+                  title: 'Waiting for Paystack',
+                  detail:
+                    'If you approved it on your phone, it will be applied in a few minutes. Do not pay again; check back shortly.',
+                }
+              : {
+                  tone: 'error',
+                  title: 'Payment not confirmed',
+                  detail: 'If money left your account for this, contact support before paying again.',
+                },
         )
         void load()
       })

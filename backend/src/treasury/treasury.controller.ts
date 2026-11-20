@@ -116,6 +116,13 @@ export class TreasuryController {
     return this.treasury.markNotSent(id, user, dto.note)
   }
 
+  /** Confirm a float refill reached DataHub/GMPL, see `TreasuryService.confirmRefillLanded`. */
+  @Post('withdrawals/:id/landed')
+  @RequireActive()
+  confirmLanded(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.treasury.confirmRefillLanded(id, user)
+  }
+
   /** Ask Paystack what became of a transfer, see `TreasuryService.check`. */
   @Post('withdrawals/:id/check')
   check(@Param('id') id: string) {

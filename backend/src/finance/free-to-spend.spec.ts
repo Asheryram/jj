@@ -7,6 +7,7 @@ import {
   inFlightBookedCost,
   owedToFloats,
   refundTransferFees,
+  refusedCollected,
   type CashFlows,
   type Claims,
 } from './free-to-spend'
@@ -194,4 +195,45 @@ test('hard limits stay as cautious as before the display fix', () => {
   // Never more than the sale price, never negative.
   assert.equal(inFlightBookedCost([{ salePrice: 500, bookedCost: 700 }]), 500)
   assert.equal(inFlightBookedCost([{ salePrice: 500, bookedCost: -50 }]), 0)
+})
+
+test('a refused payment counts as collected, net of its fee, estimated when never kept', () => {
+  const rows = [
+    { amount: 800, paymentRef: 'JDC-A' },
+    { amount: 1000, paymentRef: 'JDC-B' },
+    { amount: 500, paymentRef: null },
+  ]
+  const fees = new Map<string, number | null>([
+    ['JDC-A', 16],
+    ['JDC-B', null],
+  ])
+  // A: its own fee. B and the unreferenced one: 1.95%, rounded up.
+  assert.equal(refusedCollected(rows, fees, 195), 800 - 16 + (1000 - 20) + (500 - 10))
+  assert.equal(refusedCollected([], fees, 195), 0)
+})
+
+test('a float refill in transit leaves Free to spend where it was, before and after it lands', () => {
+  const claims: Claims = {
+    agentEarnings: 0,
+    customerMoney: 0,
+    undeliveredOrders: 0,
+    queuedPayouts: 0,
+    manualRefundAdvances: 0,
+    manualPayoutAdvances: 0,
+    treasuryInFlight: 0,
+  }
+  const cost = new Map([['gmpl', 5000]])
+  const base: CashFlows = { collected: 20_000, transferred: 0, reimbursed: 0, advancesRepaid: 0, ownerMoney: 0 }
+
+  const before = freeToSpend(base, claims, owedToFloats(cost, new Map()))
+  // Sent to the MoMo number: gone from Paystack and counted against the
+  // float's debt (`reimbursedByProvider` includes it), not yet in the float.
+  const inTransit = freeToSpend({ ...base, reimbursed: 5000 }, claims, owedToFloats(cost, new Map([['gmpl', 5000]])))
+  // Confirmed in the float: the same 5000, now as a ledger reimbursement.
+  const landed = freeToSpend({ ...base, reimbursed: 5000 }, claims, owedToFloats(cost, new Map([['gmpl', 5000]])))
+
+  assert.equal(inTransit.freeToSpend, before.freeToSpend)
+  assert.equal(landed.freeToSpend, before.freeToSpend)
+  assert.equal(inTransit.expectedAtPaystack, before.expectedAtPaystack - 5000)
+  assert.equal(inTransit.spentOnBundles, 0)
 })

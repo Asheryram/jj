@@ -190,19 +190,43 @@ export class AdminInboxService implements OnApplicationBootstrap, OnModuleDestro
 
   /** Float refills and owner withdrawals stuck at Paystack. */
   private async treasury(): Promise<InboxItem[]> {
-    const rows = await this.prisma.treasuryTransfer.findMany({
-      where: { status: { in: ['otp', 'unknown'] } },
-      select: { id: true, status: true, amount: true, purpose: true },
-    })
-    return rows.map((row) => ({
-      id: `treasury:${row.id}`,
-      urgency: 1,
-      title: `${row.purpose === 'provider_refill' ? 'Float refill' : 'Withdrawal'} ${row.status === 'otp' ? 'needs an OTP in Paystack' : 'has no answer from Paystack'}`,
-      detail: `TRS-${row.id.slice(0, 8).toUpperCase()}. Nothing has left the balance until Paystack sends it.`,
-      amount: row.amount,
-      link: '/admin/treasury',
-      action: 'Open Paystack balance',
-    }))
+    const [rows, unconfirmed] = await Promise.all([
+      this.prisma.treasuryTransfer.findMany({
+        where: { status: { in: ['otp', 'unknown'] } },
+        select: { id: true, status: true, amount: true, purpose: true },
+      }),
+      // Sent to the MoMo number more than a day ago and still not confirmed
+      // in the float: either the hand top-up was never done, or nobody said so.
+      this.prisma.treasuryTransfer.findMany({
+        where: {
+          purpose: 'provider_refill',
+          status: 'success',
+          landedAt: null,
+          paidAt: { lt: new Date(Date.now() - 24 * 60 * 60_000) },
+        },
+        select: { id: true, amount: true },
+      }),
+    ])
+    return [
+      ...rows.map((row): InboxItem => ({
+        id: `treasury:${row.id}`,
+        urgency: 1,
+        title: `${row.purpose === 'provider_refill' ? 'Float refill' : 'Withdrawal'} ${row.status === 'otp' ? 'needs an OTP in Paystack' : 'has no answer from Paystack'}`,
+        detail: `TRS-${row.id.slice(0, 8).toUpperCase()}. Nothing has left the balance until Paystack sends it.`,
+        amount: row.amount,
+        link: '/admin/treasury',
+        action: 'Open Paystack balance',
+      })),
+      ...unconfirmed.map((row): InboxItem => ({
+        id: `treasury-landed:${row.id}`,
+        urgency: 2,
+        title: 'Float refill not confirmed in the float',
+        detail: `TRS-${row.id.slice(0, 8).toUpperCase()} reached the MoMo number over a day ago. Top up the float from it, then mark it arrived.`,
+        amount: row.amount,
+        link: '/admin/treasury',
+        action: 'Mark arrived',
+      })),
+    ]
   }
 
   private async refunds(): Promise<InboxItem[]> {

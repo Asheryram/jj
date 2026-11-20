@@ -217,11 +217,18 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    * the webhook is also lost, that money sits confirmed at Paystack and
    * uncredited in the wallet forever, with nothing ever checking again and no
    * admin screen that would even show it as stuck.
+   *
+   * Domain renewals paid by Paystack ride the same sweep: they have no order
+   * either, and before they had a Payment row at all their only path to being
+   * applied was the agent's browser coming back.
    */
   private async resolveStaleTopUps(): Promise<number> {
+    await this.payments
+      .adoptLegacyDomainRenewals()
+      .catch((error: unknown) => this.log.warn(`could not adopt older domain renewals: ${String(error)}`))
     const cutoff = new Date(Date.now() - 15 * 60_000)
     const stale = await this.prisma.payment.findMany({
-      where: { purpose: 'topup', status: 'pending', createdAt: { lt: cutoff } },
+      where: { purpose: { in: ['topup', 'domain_renewal'] }, status: 'pending', createdAt: { lt: cutoff } },
       select: { reference: true },
       take: 25,
       orderBy: { createdAt: 'asc' },

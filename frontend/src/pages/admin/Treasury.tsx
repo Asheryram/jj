@@ -71,6 +71,7 @@ export default function Treasury() {
   const [syncing, setSyncing] = useState(false)
   const [classifying, setClassifying] = useState<string | null>(null)
   const [notSent, setNotSent] = useState<TreasuryOverview['transfers'][number] | null>(null)
+  const [landing, setLanding] = useState<string | null>(null)
 
   const load = () => {
     api
@@ -109,6 +110,20 @@ export default function Treasury() {
       load()
     } catch (caught) {
       pushToast({ tone: 'error', title: caught instanceof ApiError ? caught.message : 'Could not check that.' })
+    }
+  }
+
+  /** A refill reached the float: only now is it counted there, see `TreasuryService.confirmRefillLanded`. */
+  const markLanded = async (id: string) => {
+    setLanding(id)
+    try {
+      await api.treasuryConfirmRefillLanded(id)
+      pushToast({ tone: 'success', title: 'Marked as in the float' })
+      load()
+    } catch (caught) {
+      pushToast({ tone: 'error', title: caught instanceof ApiError ? caught.message : 'Could not save that.' })
+    } finally {
+      setLanding(null)
     }
   }
 
@@ -198,6 +213,33 @@ export default function Treasury() {
       </div>
 
       <ReconcileCard data={data} gap={gap} />
+
+      {(data.refillsAwaitingArrival ?? []).length > 0 && (
+        <Card className="mt-3">
+          <CardHead
+            title="Refills not yet in the float"
+            subtitle="Paystack paid these to your MoMo number. Once you have topped up DataHub or GMPL from it, mark it here so the float's figures count it."
+          />
+          <ul className="divide-y divide-slate-100 px-4 pb-4 sm:px-5 dark:divide-slate-800">
+            {(data.refillsAwaitingArrival ?? []).map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                <div>
+                  <p className="font-semibold tabular text-slate-900 dark:text-slate-50">
+                    {cedis(r.amount)} for {r.provider === 'gmpl' ? 'GMPL' : 'DataHub GH'}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {r.reference} · to {r.destination.label} ({r.destination.phone})
+                    {r.paidAt ? ` · sent ${dateTime(r.paidAt)}` : ''}
+                  </p>
+                </div>
+                <Button size="sm" variant="outline" loading={landing === r.id} onClick={() => void markLanded(r.id)}>
+                  It is in the float
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <WithdrawCard data={data} onDone={load} />
@@ -304,6 +346,11 @@ export default function Treasury() {
                     <Badge tone={STATUS_TONE[t.status]}>{STATUS_LABEL[t.status]}</Badge>
                     {t.statusNote && (
                       <p className="mt-1 max-w-xs text-xs text-slate-500 dark:text-slate-400">{t.statusNote}</p>
+                    )}
+                    {t.purpose === 'provider_refill' && t.status === 'success' && (
+                      <p className="mt-1 max-w-xs text-xs text-slate-500 dark:text-slate-400">
+                        {t.landedAt ? `In the float since ${dateTime(t.landedAt)}` : 'Not confirmed in the float yet'}
+                      </p>
                     )}
                     {(t.status === 'pending' || t.status === 'otp' || t.status === 'unknown') && (
                       <button

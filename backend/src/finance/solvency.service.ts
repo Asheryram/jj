@@ -8,7 +8,7 @@ import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
 import { claimTransition } from '../common/alert-flag'
 import { bundleCostByProvider, reimbursedByProvider } from '../supplier/provider-resolution'
 import { LedgerService } from './ledger.service'
-import { TREASURY_IN_FLIGHT, freeToSpend, heldForUndelivered, inFlightBookedCost, refundTransferFees } from './free-to-spend'
+import { TREASURY_IN_FLIGHT, freeToSpend, heldForUndelivered, inFlightBookedCost, refundTransferFees, refusedCollected } from './free-to-spend'
 
 /**
  * What is owed, against what there is to pay it with, plus whether Paystack's
@@ -766,11 +766,43 @@ export class SolvencyService implements OnApplicationBootstrap, OnModuleDestroy 
    * balance, see `expectedLiveBalance`).
    */
   private async collectedSince(after?: Date): Promise<number> {
-    const paid = await this.prisma.payment.aggregate({
-      where: { status: 'paid', ...(after ? { paidAt: { gt: after } } : {}) },
-      _sum: { amount: true, fee: true },
+    const [paid, refused] = await Promise.all([
+      this.prisma.payment.aggregate({
+        where: { status: 'paid', ...(after ? { paidAt: { gt: after } } : {}) },
+        _sum: { amount: true, fee: true },
+      }),
+      this.refusedCollectedSince(after),
+    ])
+    return (paid._sum.amount ?? 0) - (paid._sum.fee ?? 0) + refused
+  }
+
+  /**
+   * Money that arrived on a payment that was then refused (under-paid or
+   * wrong currency, `PaymentsService.closeUnacceptablePayment`), net of
+   * Paystack's fee. The payment row says `failed`, so `collectedSince` used to
+   * miss it, while its refund leaving was still subtracted: the expected
+   * balance ended up lower than the real one by every such refund, for good.
+   *
+   * Read from the ledger line that books it, which is in GHS. A refusal from
+   * before its fee was kept on the row has its fee estimated at the checkout
+   * rate, so the money is never counted as more than really arrived.
+   */
+  private async refusedCollectedSince(after?: Date): Promise<number> {
+    const rows = await this.prisma.ledgerEntry.findMany({
+      where: {
+        kind: 'overpayment',
+        idempotencyKey: { startsWith: 'payment:', endsWith: ':unacceptable' },
+        ...(after ? { occurredAt: { gt: after } } : {}),
+      },
+      select: { amount: true, paymentRef: true },
     })
-    return (paid._sum.amount ?? 0) - (paid._sum.fee ?? 0)
+    if (rows.length === 0) return 0
+    const refs = rows.map((r) => r.paymentRef).filter((r): r is string => Boolean(r))
+    const [payments, feeBp] = await Promise.all([
+      this.prisma.payment.findMany({ where: { reference: { in: refs } }, select: { reference: true, fee: true } }),
+      this.settings.get('paystackFeeBp'),
+    ])
+    return refusedCollected(rows, new Map(payments.map((p) => [p.reference, p.fee])), feeBp)
   }
 
   /**
