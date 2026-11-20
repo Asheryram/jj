@@ -852,6 +852,12 @@ enum PaymentPurpose {
   order
   /// Adding money to a customer wallet.
   topup
+  /// An agent paying a domain renewal cycle by Paystack. The `DomainRenewal`
+  /// whose `paystackReference` equals this payment's `reference` is what it
+  /// pays for. Routed through the same confirm path as an order, so the
+  /// webhook, the sweep, the amount check and the late-approval revival all
+  /// apply to it too.
+  domain_renewal
 }
 
 enum PaymentStatus {
@@ -1821,6 +1827,12 @@ model TreasuryTransfer {
 
   createdAt DateTime  @default(now()) @map("created_at")
   paidAt    DateTime? @map("paid_at")
+  /// `provider_refill` only: when a person confirmed the money actually
+  /// reached the supplier float. Paystack paying the MoMo number is only the
+  /// first hop; the top-up into DataHub/GMPL is done by hand. Until this is
+  /// set the refill is "in transit": gone from Paystack, not yet in the
+  /// float, and not yet booked as `capital_in_reimbursement`.
+  landedAt  DateTime? @map("landed_at")
 
   @@index([status])
   @@index([createdAt])

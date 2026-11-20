@@ -635,6 +635,17 @@ export interface TreasuryOverview {
     statusNote: string | null
     createdAt: string
     paidAt: string | null
+    /** Float refills only: when someone confirmed it reached the float. Null while in transit. */
+    landedAt: string | null
+  }[]
+  /** Float refills Paystack has sent that nobody has confirmed reached the float, oldest first. */
+  refillsAwaitingArrival: {
+    id: string
+    reference: string
+    provider: 'datahub-gh' | 'gmpl' | null
+    amount: number
+    destination: { label: string; phone: string; network: string }
+    paidAt: string | null
   }[]
   topups: {
     id: string
@@ -1147,7 +1158,6 @@ export interface FinanceStatement {
   stillOpen: number
   /** Profit from finished sales only. All-time, this is Profit earned. */
   earned: number
-  cashMovement: number
   settlements: { payouts: number; walletTopUps: number; ownerTopUps: number; ownerDrawings: number }
   marginRate: number | null
 }
@@ -1578,7 +1588,9 @@ export const api = {
     }),
 
   confirmDomainPaystackPayment: (reference: string) =>
-    request<{ ok: boolean }>(`/domains/mine/renew/pay-paystack/confirm?reference=${encodeURIComponent(reference)}`),
+    request<{ ok: boolean; status: 'paid' | 'pending' | 'failed' }>(
+      `/domains/mine/renew/pay-paystack/confirm?reference=${encodeURIComponent(reference)}`,
+    ),
 
   // Custom domains, superadmin review queue
   adminDomains: (pending: boolean) =>
@@ -1819,6 +1831,9 @@ export const api = {
   }) => request<{ id: string; status: string; statusNote: string | null }>('/admin/treasury/withdrawals', { method: 'POST', body }),
   treasuryMarkNotSent: (id: string, note: string) =>
     request<void>(`/admin/treasury/withdrawals/${id}/mark-not-sent`, { method: 'POST', body: { note } }),
+  /** A float refill reached DataHub/GMPL: only now is it counted in the float. */
+  treasuryConfirmRefillLanded: (id: string) =>
+    request<{ landedAt: string }>(`/admin/treasury/withdrawals/${id}/landed`, { method: 'POST' }),
   treasurySyncTopups: () => request<{ found: number }>('/admin/treasury/topups/sync', { method: 'POST' }),
   treasuryClassifyTopup: (id: string, source: Exclude<TopupSource, 'unclassified'>) =>
     request<void>(`/admin/treasury/topups/${id}/classify`, { method: 'POST', body: { source } }),

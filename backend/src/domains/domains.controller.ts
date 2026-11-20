@@ -117,12 +117,9 @@ export class DomainsController {
     return this.renewals.startPaystackPayment(user.id, origin)
   }
 
-  /** The return-page verify, the same "never trust the redirect" pattern `PaymentsController.confirm` uses. */
-  @Roles('agent')
-  @Get('mine/renew/pay-paystack/confirm')
-  confirmPaystack(@Query('reference') reference: string) {
-    return this.renewals.confirmPaystackPayment(reference)
-  }
+  // The return-page confirm for a Paystack renewal lives in
+  // `DomainRenewalPaymentController` (payments module): it goes through
+  // `PaymentsService`, which this module cannot import without a cycle.
 
   /**
    * What a visitor's browser actually calls, on every page load of a custom

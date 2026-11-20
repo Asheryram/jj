@@ -137,7 +137,7 @@ export class LedgerService {
    *
    * One query, not three. This used to follow the per-kind `groupBy` with two
    * further all-rows `aggregate` calls, one for `profit` (filtered on
-   * `affectsProfit: true`), one for `cashMovement` (unfiltered), three full
+   * `affectsProfit: true`), one for a cash total (unfiltered), three full
    * passes over the exact same window of rows. Grouping by `affectsProfit`
    * alongside `kind` instead makes both totals derivable from the one result
    * set already in hand, with no assumption baked in about which kind carries
@@ -184,14 +184,12 @@ export class LedgerService {
     const byKind = new Map<LedgerKind, number>()
     const countOf = new Map<LedgerKind, number>()
     let profit = 0
-    let cashMovement = 0
     /** `payout_fee` the business paid itself (refund and treasury transfers), not one withheld from an agent. */
     let transferFees = 0
     for (const row of rows) {
       const amount = row._sum.amount ?? 0
       byKind.set(row.kind, (byKind.get(row.kind) ?? 0) + amount)
       countOf.set(row.kind, (countOf.get(row.kind) ?? 0) + row._count._all)
-      cashMovement += amount
       if (row.affectsProfit) profit += amount
       if (row.affectsProfit && row.kind === 'payout_fee') transferFees -= amount
     }
@@ -233,8 +231,9 @@ export class LedgerService {
        * adds up, line by line, to the figure shown as Profit earned.
        */
       earned: profit - stillOpen,
-      /** Everything that moved, including money that was never ours. */
-      cashMovement,
+      // No "cash movement" total: summing every line counted an agent's margin
+      // as cash out twice (accrued, then paid) and wallet or balance-paid
+      // sales as cash in that never moved. Cash is `SolvencyService`'s job.
       /** Settles liabilities rather than earning or spending. */
       settlements: {
         payouts: -of('payout'),

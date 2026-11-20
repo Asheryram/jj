@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common'
 import { PaymentsController } from './payments.controller'
+import { DomainRenewalPaymentController } from './domain-renewal-payment.controller'
 import { PaymentsService } from './payments.service'
 import { PaystackClient } from './paystack.client'
 import { FulfilmentModule } from '../orders/fulfilment.module'
@@ -20,7 +21,7 @@ import { TreasuryModule } from '../treasury/treasury.module'
  */
 @Module({
   imports: [FulfilmentModule, DomainsModule, TreasuryModule],
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, DomainRenewalPaymentController],
   providers: [PaymentsService, PaystackClient],
   exports: [PaymentsService, PaystackClient],
 })

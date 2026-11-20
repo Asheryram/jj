@@ -639,7 +639,7 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       }),
       this.prisma.treasuryTransfer.findMany({
         where: { createdAt: { lt: end } },
-        select: { purpose: true, status: true, amount: true, fee: true, paidAt: true },
+        select: { purpose: true, status: true, amount: true, fee: true, paidAt: true, provider: true, landedAt: true },
       }),
       this.settings.get('payoutTransferFee'),
     ])
@@ -706,6 +706,21 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
       const provider = r.provider ?? 'datahub-gh'
       reimbursedByProvider.set(provider, (reimbursedByProvider.get(provider) ?? 0) + r.amount)
     }
+    // Float refills sent by `end` but not confirmed in the float by then:
+    // counted as reimbursed from Paystack's side, as the live figure does,
+    // see `refillsInTransit`. Their ledger line is only written on arrival.
+    const refillsInTransitAtEnd = treasuryUpTo.filter(
+      (t) =>
+        t.purpose === 'provider_refill' &&
+        t.status === 'success' &&
+        t.paidAt !== null &&
+        t.paidAt < end &&
+        (t.landedAt === null || t.landedAt >= end),
+    )
+    for (const t of refillsInTransitAtEnd) {
+      const provider = t.provider ?? 'datahub-gh'
+      reimbursedByProvider.set(provider, (reimbursedByProvider.get(provider) ?? 0) + t.amount)
+    }
 
     // On their way out at `end`: started by then, and still going now or
     // landed only afterwards. See `Claims.treasuryInFlight` for what counts.
@@ -731,7 +746,9 @@ export class EtlService implements OnApplicationBootstrap, OnModuleDestroy {
             transferredRefunds._count._all - transferredRefunds._count.transferFee,
             refundFee,
           ),
-        reimbursed: liveReimbursements.reduce((sum, r) => sum + r.amount, 0),
+        reimbursed:
+          liveReimbursements.reduce((sum, r) => sum + r.amount, 0) +
+          refillsInTransitAtEnd.reduce((sum, t) => sum + t.amount, 0),
         advancesRepaid: -manualReimbursements.reduce((sum, r) => sum + r.amount, 0),
         ownerMoney: ownerMoney._sum.amount ?? 0,
       },

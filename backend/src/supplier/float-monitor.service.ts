@@ -7,7 +7,7 @@ import { SolvencyService } from '../finance/solvency.service'
 import { NotFoundError, ValidationError } from '../common/domain-errors'
 import { claimTransition } from '../common/alert-flag'
 import { escape, wrap } from '../mail/templates'
-import { bundleCostByProvider, capitalProviderFilter } from './provider-resolution'
+import { bundleCostByProvider, capitalProviderFilter, refillsInTransit } from './provider-resolution'
 import { GmplClient } from './gmpl.client'
 
 /** "DataHub GH" / "GMPL", for email text and log lines. */
@@ -97,6 +97,13 @@ export interface CapitalSummary {
    * what's free to spend.
    */
   overReimbursed: number
+  /**
+   * Refills Paystack has sent towards this float that nobody has yet
+   * confirmed arrived in it, see `refillsInTransit`. Not in `totalIn`,
+   * `reimbursed` or `net` (the float does not have it yet), but already
+   * taken off `owedToProvider`, so the same debt is never refilled twice.
+   */
+  inTransit: number
   /** When the first entry for this provider was logged, or null before anything has been. */
   since: string | null
 }
@@ -548,7 +555,7 @@ export class FloatMonitorService {
   async capitalSummary(provider: SupplierProviderCode): Promise<CapitalSummary> {
     const capitalInKinds = ['capital_in', 'capital_in_reimbursement'] as const
     const providerFilter = capitalProviderFilter(provider)
-    const [rows, bundleCost] = await Promise.all([
+    const [rows, bundleCost, inTransit] = await Promise.all([
       this.prisma.ledgerEntry.findMany({
         where: { kind: { in: [...capitalInKinds, 'capital_out'] }, orderRef: null, withdrawalId: null, ...providerFilter },
         select: { id: true, kind: true, amount: true, idempotencyKey: true, occurredAt: true },
@@ -559,6 +566,7 @@ export class FloatMonitorService {
       // `owedToProvider`/`overReimbursed` below rather than trusted to agree
       // by coincidence.
       bundleCostByProvider(this.prisma, provider),
+      refillsInTransit(this.prisma, provider),
     ])
 
     /**
@@ -604,8 +612,9 @@ export class FloatMonitorService {
       reimbursed,
       totalOut,
       net: totalIn - totalOut,
-      owedToProvider: Math.max(0, bundleCost - reimbursed),
-      overReimbursed: Math.max(0, reimbursed - bundleCost),
+      owedToProvider: Math.max(0, bundleCost - reimbursed - inTransit),
+      overReimbursed: Math.max(0, reimbursed + inTransit - bundleCost),
+      inTransit,
       since: first?.toISOString() ?? null,
     }
   }

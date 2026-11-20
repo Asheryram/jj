@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config'
 import { Prisma, type BillingInterval, type DomainMode } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { LedgerService } from '../finance/ledger.service'
+import { addInterval, renewalPeriodFor } from './renewal-period'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
 
 export interface MineView {
@@ -301,6 +302,76 @@ export class DomainsService {
   }
 
   /**
+   * A domain renewal paid by Paystack, applied inside the payment's own
+   * transaction (`PaymentsService.applyPaid`), so the webhook, the browser's
+   * return trip, the 15-minute sweep and a late Mobile Money approval all
+   * reach it the same way an order's payment does.
+   *
+   * Claims the renewal from `pending` or `failed`: a prompt approved after an
+   * "abandoned" read used to be marked failed here and the money was lost.
+   *
+   * The cycle starts when it is paid, or, if the domain is already paid up
+   * (the agent paid twice, or the balance sweep caught up in the meantime),
+   * when the cycle it already has ends. A second payment buys a second cycle
+   * rather than vanishing.
+   *
+   * Returns false when there is nothing to apply (already applied, or no such
+   * renewal); the payment itself still stands.
+   */
+  async applyRenewalPaid(tx: Prisma.TransactionClient, reference: string, paidAt: Date): Promise<boolean> {
+    const renewal = await tx.domainRenewal.findUnique({ where: { paystackReference: reference } })
+    if (!renewal) {
+      this.log.error(`${reference}: paid, but no domain renewal carries this reference`)
+      return false
+    }
+    const claim = await tx.domainRenewal.updateMany({
+      where: { id: renewal.id, status: { in: ['pending', 'failed'] } },
+      data: { status: 'paid', paidAt },
+    })
+    if (claim.count === 0) return false
+
+    const domain = await tx.customDomain.findUniqueOrThrow({ where: { id: renewal.domainId } })
+    const { periodStart, periodEnd, alreadyPaidUp } = renewalPeriodFor(domain, paidAt)
+
+    await tx.domainRenewal.update({ where: { id: renewal.id }, data: { periodStart, periodEnd } })
+    await tx.customDomain.update({
+      where: { id: domain.id },
+      data: { active: true, graceEndsAt: null, nextRenewalAt: periodEnd },
+    })
+    await this.ledger.record(
+      [
+        {
+          idempotencyKey: LedgerService.key('domain_renewal', renewal.id, 'revenue'),
+          kind: 'revenue',
+          amount: renewal.amount,
+          affectsProfit: true,
+          description: `Domain renewal (Paystack) · ${domain.domain}`,
+          paymentRef: reference,
+          userId: domain.userId,
+          occurredAt: paidAt,
+        },
+      ],
+      tx,
+    )
+    if (alreadyPaidUp) {
+      this.log.warn(`${reference}: ${domain.domain} was already paid up, this payment extends it to ${periodEnd.toISOString()}`)
+    }
+    return true
+  }
+
+  /**
+   * A domain renewal's Paystack payment closed as unpaid. Mirrors the order
+   * being closed: the renewal is marked failed, and `applyRenewalPaid` can
+   * still revive it if the money turns up after all.
+   */
+  async failRenewal(tx: Prisma.TransactionClient, reference: string): Promise<void> {
+    await tx.domainRenewal.updateMany({
+      where: { paystackReference: reference, status: 'pending' },
+      data: { status: 'failed' },
+    })
+  }
+
+  /**
    * Charge one billing cycle, balance only, no Paystack fallback here, that
    * is a deliberate choice the agent makes themselves from `renewalStatus`
    * once they are actually in grace (see `DomainRenewalsService.payByPaystack`).
@@ -559,10 +630,5 @@ function normalizeDomain(input: string): string {
   return input.trim().toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '')
 }
 
-/** A billing cycle's length from its start, calendar-aware (a month is not always 30 days). */
-export function addInterval(from: Date, interval: BillingInterval): Date {
-  const next = new Date(from)
-  if (interval === 'monthly') next.setUTCMonth(next.getUTCMonth() + 1)
-  else next.setUTCFullYear(next.getUTCFullYear() + 1)
-  return next
-}
+// Kept importable from here, where they have always lived.
+export { addInterval, renewalPeriodFor }

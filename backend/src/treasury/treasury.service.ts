@@ -290,6 +290,27 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
         statusNote: t.statusNote,
         createdAt: t.createdAt.toISOString(),
         paidAt: t.paidAt?.toISOString() ?? null,
+        /** Float refills only: when someone confirmed it reached the float. Null while in transit. */
+        landedAt: t.landedAt?.toISOString() ?? null,
+      })),
+      /**
+       * Float refills Paystack has sent that nobody has confirmed reached the
+       * float, oldest first. Listed apart from `transfers`, which only holds
+       * the latest 50, so an old one can never drop out of sight unconfirmed.
+       */
+      refillsAwaitingArrival: (
+        await this.prisma.treasuryTransfer.findMany({
+          where: { purpose: 'provider_refill', status: 'success', landedAt: null },
+          orderBy: { paidAt: 'asc' },
+          include: { destination: { select: { label: true, phone: true, network: true } } },
+        })
+      ).map((t) => ({
+        id: t.id,
+        reference: `TRS-${t.id.slice(0, 8).toUpperCase()}`,
+        provider: t.provider,
+        amount: t.amount,
+        destination: t.destination,
+        paidAt: t.paidAt?.toISOString() ?? null,
       })),
       topups: topups.map((t) => ({
         id: t.id,
@@ -523,7 +544,7 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
         }),
         this.prisma.treasuryTransfer.update({
           where: { id },
-          data: { status: 'reversed', statusNote: 'Paystack reversed this transfer after it landed.' },
+          data: { status: 'reversed', statusNote: 'Paystack reversed this transfer after it landed.', landedAt: null },
         }),
       ])
       this.solvency.invalidate()
@@ -587,6 +608,50 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
     for (const { id } of rows) await this.check(id)
   }
 
+  /**
+   * A person confirms a float refill really reached DataHub/GMPL, the hop the
+   * app cannot see. Only now is it booked as `capital_in_reimbursement`, the
+   * same key it was always booked under, so the float's expected balance
+   * rises when the float actually has the money, not when Paystack paid a
+   * MoMo number.
+   *
+   * Claimed first, so two clicks cannot book it twice; released again if the
+   * booking fails, so it is never left neither in transit nor landed.
+   */
+  async confirmRefillLanded(id: string, user: { id: string }): Promise<{ landedAt: Date }> {
+    const landedAt = new Date()
+    const claim = await this.prisma.treasuryTransfer.updateMany({
+      where: { id, purpose: 'provider_refill', status: 'success', landedAt: null },
+      data: { landedAt },
+    })
+    if (claim.count === 0) {
+      const row = await this.prisma.treasuryTransfer.findUnique({ where: { id } })
+      if (!row || row.purpose !== 'provider_refill') throw new NotFoundError('We could not find that float refill.')
+      if (row.landedAt) return { landedAt: row.landedAt }
+      throw new ValidationError('Only a refill Paystack has confirmed as sent can be marked as arrived.')
+    }
+
+    const row = await this.prisma.treasuryTransfer.findUniqueOrThrow({ where: { id }, include: { destination: true } })
+    const provider = row.provider as SupplierProviderCode
+    try {
+      await this.floatMonitor.logCapital({
+        provider,
+        direction: 'in',
+        source: 'reimbursement',
+        amount: row.amount,
+        idempotencyKey: `treasury:${id}:capital_in_reimbursement`,
+        note: `Paystack → ${row.destination.label} (${row.destination.phone}) → ${providerLabel(provider)}: ${ghs(row.amount)}, confirmed arrived`,
+        alreadyMoved: true,
+      })
+    } catch (error) {
+      await this.prisma.treasuryTransfer.updateMany({ where: { id, landedAt }, data: { landedAt: null } })
+      throw error
+    }
+    this.solvency.invalidate()
+    this.log.log(`treasury ${id}: refill confirmed in ${providerLabel(provider)} by ${user.id}`)
+    return { landedAt }
+  }
+
   private async applySuccess(id: string, transferCode?: string | null): Promise<boolean> {
     const claim = await this.prisma.treasuryTransfer.updateMany({
       // `failed` included: a person may have marked it not sent, and Paystack
@@ -600,15 +665,13 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
     const to = `${row.destination.label} (${row.destination.phone})`
 
     if (row.purpose === 'provider_refill') {
-      await this.floatMonitor.logCapital({
-        provider: row.provider as SupplierProviderCode,
-        direction: 'in',
-        source: 'reimbursement',
-        amount: row.amount,
-        idempotencyKey: `treasury:${id}:capital_in_reimbursement`,
-        note: `Paystack → ${to} to refill ${providerLabel(row.provider as SupplierProviderCode)}: ${ghs(row.amount)}`,
-        alreadyMoved: true,
-      })
+      // Not booked into the float yet. Paystack has paid the MoMo number;
+      // the top-up from there into DataHub/GMPL is done by hand and the app
+      // cannot see it. Until someone confirms it arrived
+      // (`confirmRefillLanded`), it is in transit: counted as gone from
+      // Paystack and off what the float is owed (`refillsInTransit`), but not
+      // in the float's own expected balance.
+      this.log.log(`treasury ${id}: refill sent to ${to}, waiting for confirmation it reached the float`)
     } else if (row.purpose === 'advance_repayment') {
       // Each refund's advance closed, exactly as "Mark reimbursed" does, and
       // keyed the same, so one already marked by hand is not counted twice.

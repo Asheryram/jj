@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import type { Network, Prisma } from '@prisma/client'
+import type { Network, PaymentPurpose, Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { FulfilmentService } from '../orders/fulfilment.service'
 import { ValidationError } from '../common/domain-errors'
@@ -350,6 +350,90 @@ export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy 
   }
 
   /**
+   * The return page after an agent pays a domain renewal by Paystack.
+   *
+   * Only the agent who owns the domain may ask. The answer is the payment's
+   * own status, so a Mobile Money prompt not yet approved reads `pending`
+   * ("approve it on your phone") instead of "nothing was charged, try again",
+   * which used to invite a second payment for the same cycle.
+   */
+  async confirmDomainRenewal(
+    reference: string,
+    userId: string,
+  ): Promise<{ ok: boolean; status: 'paid' | 'pending' | 'failed' }> {
+    const renewal = await this.prisma.domainRenewal.findUnique({
+      where: { paystackReference: reference },
+      include: { domain: { select: { userId: true } } },
+    })
+    if (!renewal || renewal.domain.userId !== userId) throw new NotFoundError('We could not find that payment.')
+    if (renewal.status === 'paid') return { ok: true, status: 'paid' }
+
+    await this.adoptDomainRenewal(renewal)
+    const { status } = await this.confirm(reference)
+    if (status === 'paid') return { ok: true, status }
+    // A refused payment (part of the price) leaves the payment `failed` but
+    // reads back as `pending` above; the renewal says what really happened.
+    const after = await this.prisma.domainRenewal.findUnique({
+      where: { paystackReference: reference },
+      select: { status: true },
+    })
+    if (after?.status === 'paid') return { ok: true, status: 'paid' }
+    const payment = await this.prisma.payment.findUnique({ where: { reference }, select: { status: true } })
+    return { ok: false, status: payment?.status === 'failed' ? 'failed' : status }
+  }
+
+  /**
+   * Domain renewals started before they had a `Payment` row get one, so the
+   * webhook, the sweep and the late-approval revival can reach them. Run by
+   * the reconciler; a no-op once there are none left. Looks back 90 days,
+   * well past any Mobile Money retry, and only at Paystack renewals not yet
+   * applied, `failed` included: some were marked failed on an early
+   * "abandoned" read and paid moments later.
+   */
+  async adoptLegacyDomainRenewals(): Promise<number> {
+    const since = new Date(Date.now() - 90 * 24 * 60 * 60_000)
+    const renewals = await this.prisma.domainRenewal.findMany({
+      where: {
+        method: 'paystack',
+        status: { in: ['pending', 'failed'] },
+        paystackReference: { not: null },
+        createdAt: { gte: since },
+      },
+      include: { domain: { select: { userId: true } } },
+      take: 50,
+    })
+    let adopted = 0
+    for (const renewal of renewals) {
+      if (await this.adoptDomainRenewal(renewal)) adopted++
+    }
+    if (adopted > 0) this.log.warn(`${adopted} older domain renewal payment(s) given a payment record, to be checked with Paystack`)
+    return adopted
+  }
+
+  /** True when a row was created. Pending, dated when the renewal was, so the sweep checks it at once. */
+  private async adoptDomainRenewal(renewal: {
+    paystackReference: string | null
+    amount: number
+    createdAt: Date
+    domain: { userId: string }
+  }): Promise<boolean> {
+    if (!renewal.paystackReference) return false
+    const created = await this.prisma.payment.createMany({
+      data: [
+        {
+          reference: renewal.paystackReference,
+          purpose: 'domain_renewal',
+          amount: renewal.amount,
+          userId: renewal.domain.userId,
+          createdAt: renewal.createdAt,
+        },
+      ],
+      skipDuplicates: true,
+    })
+    return created.count > 0
+  }
+
+  /**
    * Ask Paystack about a reference and apply whatever they say.
    *
    * This is what the return-from-Paystack page calls, and it is deliberately the
@@ -448,7 +532,7 @@ export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy 
 
       const wrongCurrency = detail.currency !== 'GHS'
       if (wrongCurrency || detail.amount < payment.amount) {
-        await this.closeUnacceptablePayment(tx, payment, reference, detail, wrongCurrency)
+        await this.closeUnacceptablePayment(tx, payment, reference, detail, wrongCurrency, feeEstimate)
         return null
       }
 
@@ -589,6 +673,14 @@ export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy 
         return null
       }
 
+      // A domain renewal: the domain comes back on and the cycle is booked as
+      // revenue, in this same transaction, see `DomainsService.applyRenewalPaid`.
+      if (payment.purpose === 'domain_renewal') {
+        const applied = await this.domains.applyRenewalPaid(tx, reference, paidAt)
+        this.log.log(`domain renewal ${reference}: ${applied ? 'applied' : 'already applied'}`)
+        return null
+      }
+
       if (payment.orderId) {
         const order = await tx.order.findUniqueOrThrow({
           where: { id: payment.orderId },
@@ -671,17 +763,34 @@ export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy 
    * Refunded instead, for exactly what arrived: the payment is closed, the
    * order fails, and a refund request is queued for a person to send, the
    * same as any other failed paid order. The amount is booked as income
-   * here so the refund's cost nets it to zero, profit never moves.
-   * `expectedBalance` only counts `paid` payments, so this sum reads as not
-   * at Paystack until the refund goes, understating what's free to spend
-   * for a while, the cautious side to be wrong on.
+   * here so the refund's cost nets it to zero, profit never moves: the
+   * refund is booked against profit because `RefundsService.approve` counts
+   * this entry as booked income, the same as an order's `revenue`.
+   *
+   * In GHS, always. A wrong-currency amount is in that currency's minor
+   * units, so booking it as pesewas moved profit by a meaningless number;
+   * what was asked for in GHS stands in, which is also what is refunded.
+   *
+   * Paystack's fee is kept on the row and booked as the cost it is: the
+   * money arrived net of it and only what arrived goes back.
+   * `SolvencyService.collectedSince` counts these as at Paystack, so the
+   * refund leaving does not drag the expected balance below the real one.
    */
   private async closeUnacceptablePayment(
     tx: Prisma.TransactionClient,
-    payment: { amount: number; orderId: string | null; userId: string | null },
+    payment: { amount: number; orderId: string | null; userId: string | null; purpose: PaymentPurpose },
     reference: string,
-    detail: { amount: number; currency: string; network: Network | null; raw: string },
+    detail: {
+      amount: number
+      currency: string
+      network: Network | null
+      channel: string | null
+      fee: number | null
+      providerId: string | null
+      raw: string
+    },
     wrongCurrency: boolean,
+    feeEstimate: number,
   ): Promise<void> {
     const why = wrongCurrency
       ? `paid in ${detail.currency || 'an unknown currency'}, expected GHS`
@@ -690,25 +799,51 @@ export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy 
 
     const claim = await tx.payment.updateMany({
       where: { reference, status: { in: ['pending', 'failed'] } },
-      data: { status: 'failed', providerResponse: detail.raw },
+      data: {
+        status: 'failed',
+        providerResponse: detail.raw,
+        channel: detail.channel,
+        network: detail.network,
+        fee: detail.fee,
+        providerId: detail.providerId,
+      },
     })
     if (claim.count === 0) return
 
+    const now = new Date()
     await this.ledger.record(
       [
         {
           idempotencyKey: LedgerService.key('payment', reference, 'unacceptable'),
           kind: 'overpayment',
-          amount: detail.amount,
+          amount: wrongCurrency ? payment.amount : detail.amount,
           description: `Payment not accepted (${why}), being refunded`,
           paymentRef: reference,
           userId: payment.userId,
-          occurredAt: new Date(),
+          occurredAt: now,
+        },
+        {
+          idempotencyKey: LedgerService.key('payment', reference, 'fee'),
+          kind: 'payment_fee',
+          amount: -(detail.fee ?? feeEstimate),
+          description:
+            detail.fee != null
+              ? `Paystack fee · refused payment`
+              : `Paystack fee (estimated, not reported) · refused payment`,
+          paymentRef: reference,
+          userId: payment.userId,
+          occurredAt: now,
         },
       ],
       tx,
     )
 
+    if (payment.purpose === 'domain_renewal') {
+      // The domain is not renewed on part of its price. There is no order to
+      // queue a refund against, so it is left for a person, loudly.
+      await this.domains.failRenewal(tx, reference)
+      this.log.error(`${reference}: domain renewal refused (${why}); what arrived is owed back to the agent by hand`)
+    }
     if (!payment.orderId) return
     const order = await tx.order.findUnique({ where: { id: payment.orderId } })
     if (!order) return
@@ -760,6 +895,9 @@ export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy 
         data: { status: 'failed' },
       })
     }
+    if (payment?.purpose === 'domain_renewal') {
+      await this.domains.failRenewal(this.prisma, reference)
+    }
 
     this.log.warn(`${reference} not paid, closed`)
   }
@@ -776,7 +914,18 @@ export class PaymentsService implements OnApplicationBootstrap, OnModuleDestroy 
     if (!reference) return { applied: false }
 
     if (event === 'charge.success') {
-      const before = await this.prisma.payment.findUnique({ where: { reference } })
+      let before = await this.prisma.payment.findUnique({ where: { reference } })
+      if (!before && reference.startsWith('DOMREN-')) {
+        // A domain renewal started before renewals had a Payment row.
+        const renewal = await this.prisma.domainRenewal.findUnique({
+          where: { paystackReference: reference },
+          include: { domain: { select: { userId: true } } },
+        })
+        if (renewal && renewal.status !== 'paid') {
+          await this.adoptDomainRenewal(renewal)
+          before = await this.prisma.payment.findUnique({ where: { reference } })
+        }
+      }
       if (!before) {
         // A reference we never issued. Not ours to act on.
         this.log.warn(`webhook for unknown reference ${reference}`)
