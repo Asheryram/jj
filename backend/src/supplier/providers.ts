@@ -1,5 +1,6 @@
 import { mapProviderStatus } from './datahub.client'
 import { mapGmplOrderStatus } from './gmpl.client'
+import { mapNetpulseStatus } from './netpulse.client'
 
 /**
  * Every supplier we buy from, described once.
@@ -18,9 +19,9 @@ import { mapGmplOrderStatus } from './gmpl.client'
  * No Nest or Prisma imports, so settings, analytics and the clients can all
  * read it without a dependency cycle.
  */
-export type SupplierProviderCode = 'datahub-gh' | 'gmpl'
+export type SupplierProviderCode = 'datahub-gh' | 'gmpl' | 'netpulse'
 
-export const KNOWN_PROVIDERS = ['datahub-gh', 'gmpl'] as const satisfies readonly SupplierProviderCode[]
+export const KNOWN_PROVIDERS = ['datahub-gh', 'gmpl', 'netpulse'] as const satisfies readonly SupplierProviderCode[]
 
 /** Our reading of a supplier's order status: final one way or the other, or not yet. */
 export type MappedStatus = 'completed' | 'failed' | null
@@ -69,7 +70,8 @@ export const PROVIDERS: Readonly<Record<SupplierProviderCode, ProviderInfo>> = {
     needsCapacity: true,
     numberApproval: true,
     networks: null,
-    categories: null,
+    // Its catalogue sync brings in data bundles and nothing else.
+    categories: ['data'],
   },
   gmpl: {
     label: 'GMPL',
@@ -81,6 +83,20 @@ export const PROVIDERS: Readonly<Record<SupplierProviderCode, ProviderInfo>> = {
     numberApproval: true,
     networks: ['MTN', 'Telecel'],
     categories: ['data'],
+  },
+  netpulse: {
+    label: 'NetPulse',
+    fullLabel: 'NetPulse',
+    liveEnvKey: 'NETPULSE_LIVE',
+    mapStatus: mapNetpulseStatus,
+    // Confirmed with NetPulse, 21 Nov 2026: a failed order's charge goes back to the wallet.
+    refundsFailedCharge: true,
+    // `networkKey` holds their exact capacity string, all `/purchase` needs with the network.
+    needsCapacity: false,
+    // No approved-numbers list in their API.
+    numberApproval: false,
+    networks: ['MTN', 'Telecel', 'AirtelTigo'],
+    categories: ['data', 'mashup', 'checker'],
   },
 }
 
@@ -120,7 +136,8 @@ export function routingRefusal(provider: SupplierProviderCode, network: string, 
     return `${info.label} doesn't sell ${network}, route it to another supplier.`
   }
   if (info.categories && !info.categories.includes(category)) {
-    return `${info.label} only sells ${info.categories.join(' and ')}, route other categories to another supplier.`
+    const list = info.categories.length > 1 ? `${info.categories.slice(0, -1).join(', ')} and ${info.categories.at(-1)}` : info.categories[0]
+    return `${info.label} only sells ${list}, route other categories to another supplier.`
   }
   return null
 }

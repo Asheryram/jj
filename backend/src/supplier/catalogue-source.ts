@@ -27,6 +27,12 @@ export interface SourceSku {
    */
   networkKey: string | null
   capacityGb: string | null
+  /**
+   * What the supplier says the product holds and how long it lasts, shown
+   * under its name. Only for a supplier that tells us; left out, it is blank,
+   * so we never claim an expiry nobody gave us.
+   */
+  validity?: string
 }
 
 /**

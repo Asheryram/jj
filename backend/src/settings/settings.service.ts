@@ -18,7 +18,7 @@ export { KNOWN_PROVIDERS, type SupplierProviderCode }
 export type NetworkProviderRouting = Record<string, SupplierProviderCode>
 
 const KNOWN_NETWORKS = ['MTN', 'Telecel', 'AirtelTigo'] as const
-const KNOWN_CATEGORIES = ['data', 'airtime', 'voice', 'sms', 'afa', 'checker'] as const
+const KNOWN_CATEGORIES = ['data', 'airtime', 'voice', 'sms', 'afa', 'checker', 'mashup'] as const
 
 /**
  * Runtime platform switches, one row per key so a new flag needs no migration.
@@ -228,13 +228,17 @@ export class SettingsService {
   }
 
   /**
-   * Which provider is selected for one network+category, `'datahub-gh'` for
-   * anything not explicitly routed. `network: null` (a result checker, an
-   * AFA registration) is never routable at all, those aren't network-specific.
+   * Which provider is selected for one network+category. Not explicitly
+   * routed: the first supplier that sells it, which is DataHub for every
+   * data network, and NetPulse for MTN Mashup, which only they sell.
+   * `network: null` (a result checker, an AFA registration) is never
+   * routable at all, those aren't network-specific.
    */
   providerFor(routingTable: NetworkProviderRouting, network: string | null, category: string): SupplierProviderCode {
     if (!network) return 'datahub-gh'
-    return routingTable[`${network}:${category}`] ?? 'datahub-gh'
+    const routed = routingTable[`${network}:${category}`]
+    if (routed) return routed
+    return KNOWN_PROVIDERS.find((p) => routingRefusal(p, network, category) === null) ?? 'datahub-gh'
   }
 
   /**

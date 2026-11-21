@@ -137,8 +137,8 @@ export class ApplyMarkupDto {
 
   /** Restrict to one category. Omitted means every category. */
   @IsOptional()
-  @IsIn(['data', 'airtime', 'voice', 'sms', 'afa', 'checker'])
-  category?: 'data' | 'airtime' | 'voice' | 'sms' | 'afa' | 'checker'
+  @IsIn(['data', 'airtime', 'voice', 'sms', 'afa', 'checker', 'mashup'])
+  category?: 'data' | 'airtime' | 'voice' | 'sms' | 'afa' | 'checker' | 'mashup'
 }
 
 export class ApproveRefundDto {

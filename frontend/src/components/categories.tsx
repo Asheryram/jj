@@ -9,7 +9,7 @@ import {
   VoiceIcon,
 } from './icons'
 
-/** FR-3.1, the six categories, described once and reused everywhere. */
+/** FR-3.1, every category, described once and reused everywhere. */
 export const CATEGORY_META: Record<
   Category,
   { label: string; short: string; blurb: string; icon: (p: { className?: string }) => ReactNode; accent: string }
@@ -57,6 +57,13 @@ export const CATEGORY_META: Record<
     icon: CertificateIcon,
     accent: 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400',
   },
+  mashup: {
+    label: 'MTN Mashup',
+    short: 'Mashup',
+    blurb: 'Data, minutes and SMS together in one MTN pack.',
+    icon: VoiceIcon,
+    accent: 'bg-yellow-50 dark:bg-yellow-950/40 text-yellow-800 dark:text-yellow-300',
+  },
 }
 
-export const CATEGORY_ORDER: Category[] = ['data', 'airtime', 'voice', 'sms', 'afa', 'checker']
+export const CATEGORY_ORDER: Category[] = ['data', 'mashup', 'airtime', 'voice', 'sms', 'afa', 'checker']

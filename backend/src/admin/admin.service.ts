@@ -1069,7 +1069,7 @@ export class AdminService {
    */
   async buyerNumbers(input: { by: 'recipient' | 'buyer'; category: string | null; show: 'all' | 'bought' | 'tried' }) {
     const field = input.by === 'buyer' ? 'buyerPhone' : 'recipient'
-    const categories = ['data', 'airtime', 'voice', 'sms', 'afa', 'checker']
+    const categories = ['data', 'airtime', 'voice', 'sms', 'afa', 'checker', 'mashup']
     const where: Prisma.OrderWhereInput =
       input.category && categories.includes(input.category) ? { category: input.category as Category } : {}
     const groups = await this.prisma.order.groupBy({

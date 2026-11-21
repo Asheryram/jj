@@ -78,6 +78,8 @@ enum Category {
   sms
   afa
   checker
+  /// MTN Mashup: data, minutes and SMS in one pack (NetPulse).
+  mashup
 }
 
 enum Network {

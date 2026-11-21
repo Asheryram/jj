@@ -195,9 +195,11 @@ export default function CostPrices() {
   // into "Outdated": a bundle that's never sold isn't wrong, it's untested.
   const notBoughtInCategory = categoryProducts.filter((p) => reviewStatusOf(p) === 'none').length
 
+  const supplierFilterShown = category === 'data' || category === 'checker'
   const visible = categoryProducts
     .filter((p) => reviewFilter === 'all' || reviewStatusOf(p) === reviewFilter)
-    .filter((p) => providerFilter === 'all' || (p.provider ?? 'datahub-gh') === providerFilter)
+    // Only where the supplier filter is shown, so a choice made on Data never empties Mashup.
+    .filter((p) => !supplierFilterShown || providerFilter === 'all' || (p.provider ?? 'datahub-gh') === providerFilter)
 
   /**
    * Grouped by network, because that is how the person pricing them thinks.
@@ -444,7 +446,8 @@ export default function CostPrices() {
         </div>
       )}
 
-      {category === 'data' && (
+      {/* Data and result checkers now come from more than one supplier. */}
+      {supplierFilterShown && (
         <div className="mt-3 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
           <Segmented<'all' | SupplierCode>
             options={[

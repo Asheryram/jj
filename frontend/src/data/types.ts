@@ -10,7 +10,7 @@ export type Pesewas = number
 
 export type Network = 'MTN' | 'Telecel' | 'AirtelTigo'
 
-export type Category = 'data' | 'airtime' | 'voice' | 'sms' | 'afa' | 'checker'
+export type Category = 'data' | 'airtime' | 'voice' | 'sms' | 'afa' | 'checker' | 'mashup'
 
 /** FR-4.4, the only legal order states. */
 export type OrderStatus =

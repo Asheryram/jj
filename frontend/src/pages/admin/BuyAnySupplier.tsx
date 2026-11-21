@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../lib/api'
-import type { Network, Product } from '../../data/types'
+import type { Category, Network, Product } from '../../data/types'
+import { CATEGORY_META } from '../../components/categories'
 import { cedis } from '../../lib/format'
 import { checkPhone, prettyPhone } from '../../lib/networks'
 import { SUPPLIERS, type SupplierCode } from '../../lib/suppliers'
@@ -19,6 +20,8 @@ import { AlertIcon } from '../../components/icons'
  */
 
 const NETWORKS: Network[] = ['MTN', 'Telecel', 'AirtelTigo']
+/** What can be bought here: everything a supplier fulfils automatically. */
+const CATEGORIES: Category[] = ['data', 'mashup', 'checker']
 
 function newKey(): string {
   return `any-${crypto.randomUUID()}`
@@ -34,6 +37,7 @@ function hiddenBecause(p: Product): string | null {
 export default function BuyAnySupplier() {
   const [products, setProducts] = useState<Product[] | null>(null)
   const [loadError, setLoadError] = useState('')
+  const [category, setCategory] = useState<Category>('data')
   const [supplier, setSupplier] = useState<'all' | SupplierCode>('all')
   const [network, setNetwork] = useState<Network>('MTN')
   const [hiddenOnly, setHiddenOnly] = useState(false)
@@ -49,34 +53,53 @@ export default function BuyAnySupplier() {
     let live = true
     api
       .catalogue()
-      .then((snapshot) => live && setProducts(snapshot.products.filter((p) => p.category === 'data')))
+      .then((snapshot) => live && setProducts(snapshot.products.filter((p) => CATEGORIES.includes(p.category))))
       .catch((error: unknown) => live && setLoadError(error instanceof Error ? error.message : 'We could not load the bundles.'))
     return () => {
       live = false
     }
   }, [])
 
+  // Only the networks this category is sold on, and none for checkers.
+  const networks = NETWORKS.filter((n) => (products ?? []).some((p) => p.category === category && p.network === n))
+  const pickCategory = (next: Category) => {
+    setCategory(next)
+    setPicked(null)
+    const first = NETWORKS.find((n) => (products ?? []).some((p) => p.category === next && p.network === n))
+    if (first) setNetwork(first)
+  }
+
   const list = useMemo(
     () =>
       (products ?? [])
-        .filter((p) => p.network === network)
+        .filter((p) => p.category === category)
+        // Checkers have no network; Mashup is MTN only.
+        .filter((p) => p.network === null || p.network === network)
         .filter((p) => supplier === 'all' || (p.provider ?? 'datahub-gh') === supplier)
         .filter((p) => !hiddenOnly || !p.onSaleToCustomers)
         .sort((a, b) => a.standardPrice - b.standardPrice),
-    [products, network, supplier, hiddenOnly],
+    [products, category, network, supplier, hiddenOnly],
   )
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6">
       <PageHead
         title="Buy from any supplier"
-        subtitle="Buy any bundle from any supplier, whether or not customers can see it. A normal sale, paid by Mobile Money."
+        subtitle="Buy any bundle, Mashup pack or result checker from any supplier, whether or not customers can see it. A normal sale, paid by Mobile Money."
       />
 
       <Card className="mt-4">
         <CardHead title="Pick a bundle" />
         <div className="space-y-3 px-4 pb-4">
-          <Segmented<Network> className="w-full" options={NETWORKS.map((n) => ({ value: n, label: n }))} value={network} onChange={setNetwork} />
+          <Segmented<Category>
+            className="w-full"
+            options={CATEGORIES.map((c) => ({ value: c, label: CATEGORY_META[c].short }))}
+            value={category}
+            onChange={pickCategory}
+          />
+          {networks.length > 1 && (
+            <Segmented<Network> className="w-full" options={networks.map((n) => ({ value: n, label: n }))} value={network} onChange={setNetwork} />
+          )}
           <Segmented<'all' | SupplierCode>
             className="w-full"
             options={[{ value: 'all', label: 'All suppliers' }, ...SUPPLIERS.map((s) => ({ value: s.code, label: s.label }))]}
@@ -115,6 +138,7 @@ export default function BuyAnySupplier() {
                     >
                       <span className="flex flex-wrap items-center gap-2">
                         <span className="font-semibold text-slate-900 dark:text-slate-50">{p.name}</span>
+                        {p.validity && <span className="w-full text-xs text-slate-500 dark:text-slate-400">{p.validity}</span>}
                         <ProviderChip provider={(p.provider ?? 'datahub-gh') as SupplierCode} />
                         {hidden ? <Badge tone="warning">{hidden}</Badge> : <Badge tone="success">Customers see this</Badge>}
                         {atCost && <Badge tone="danger">Priced at cost</Badge>}
@@ -182,7 +206,7 @@ function BuyForm({ product }: { product: Product }) {
       <CardHead title={`Buy ${product.name}`} subtitle={`${cedis(product.standardPrice)}, paid by Mobile Money`} />
       <div className="space-y-3 px-4 pb-4">
         <div className="flex flex-wrap items-center gap-2">
-          <NetworkChip network={product.network} />
+          {product.network && <NetworkChip network={product.network} />}
           <ProviderChip provider={(product.provider ?? 'datahub-gh') as SupplierCode} />
         </div>
         {atCost && (
@@ -191,7 +215,9 @@ function BuyForm({ product }: { product: Product }) {
             you want a margin on it.
           </Callout>
         )}
-        <Field label="Number to receive the bundle" htmlFor="any-recipient" error={touched && !check.ok ? check.reason : undefined}>
+        <Field
+          label={product.category === 'checker' ? 'Number to receive the PIN by SMS' : 'Number to receive the bundle'}
+          htmlFor="any-recipient" error={touched && !check.ok ? check.reason : undefined}>
           <TextInput
             id="any-recipient"
             inputMode="tel"
@@ -211,7 +237,9 @@ function BuyForm({ product }: { product: Product }) {
           </Callout>
         )}
         {placedRef ? (
-          <Callout tone="success">Order {placedRef} placed. Follow it on All orders.</Callout>
+          <Callout tone="success">
+            Order {placedRef} placed. Follow it on All orders{product.category === 'checker' ? '; Track order with this number shows its serial and PIN' : ''}.
+          </Callout>
         ) : (
           <Button block loading={placing} onClick={() => void buy()}>
             Pay {cedis(product.standardPrice)}

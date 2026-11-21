@@ -12,7 +12,7 @@ import { resolveSupplierProvider } from '../supplier/supplier.service'
  * suppliers keep (`PROVIDERS[p].numberApproval`). Typed to those alone, so a
  * supplier without a list can never reach this code by default.
  */
-import type { ApprovalProvider } from '../supplier/providers'
+import { isApprovalProvider, type ApprovalProvider } from '../supplier/providers'
 
 /**
  * Orders paid for and held because the supplier has not approved the
@@ -364,7 +364,9 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
 
     const providerByOrder = new Map<string, ApprovalProvider>()
     for (const order of held) {
-      providerByOrder.set(order.recipient, await resolveSupplierProvider(this.prisma, order.supplierCodeAtSale))
+      const provider = await resolveSupplierProvider(this.prisma, order.supplierCodeAtSale)
+      // Only suppliers with an approval list ever hold an order for one.
+      if (isApprovalProvider(provider)) providerByOrder.set(order.recipient, provider)
     }
 
     const byPhone = new Map<

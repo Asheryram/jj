@@ -80,6 +80,12 @@ export default function Settings() {
               note: 'MTN and Telecel data bundles, wherever routing sends them here.',
             },
             {
+              name: 'NetPulse',
+              field: 'NETPULSE_API_KEY',
+              state: health?.providers.netpulse,
+              note: 'MTN, Telecel and AirtelTigo data bundles, wherever routing sends them here.',
+            },
+            {
               name: 'Paystack',
               field: 'PAYSTACK_SECRET_KEY',
               state: health?.providers.paystack,

@@ -742,6 +742,8 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       paystackAndMomo: number
       datahub: number
       gmpl: number
+      /** Optional: left out, the NetPulse float is taken as matching the records. */
+      netpulse?: number
       capitalRepaid: boolean
       note: string
       preview: boolean
@@ -758,7 +760,7 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
     if (!input.preview && !input.readJustNow) {
       throw new ValidationError('Confirm these balances were read just now. Older figures would put the books out again.')
     }
-    for (const v of [input.paystackAndMomo, input.datahub, input.gmpl]) {
+    for (const v of [input.paystackAndMomo, input.datahub, input.gmpl, ...(input.netpulse === undefined ? [] : [input.netpulse])]) {
       if (!Number.isInteger(v) || v < 0) throw new ValidationError('Enter each real balance as an amount like 250.00.')
     }
 
@@ -768,7 +770,12 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
       throw new ConflictError('PAYSTACK_UNREACHABLE', 'Paystack did not answer, so today\'s payments still on their way cannot be counted. Try again.')
     }
 
-    const actual: Record<SupplierProviderCode, number> = { 'datahub-gh': input.datahub, gmpl: input.gmpl }
+    // Undefined: not read, so no adjustment for that float.
+    const actual: Record<SupplierProviderCode, number | undefined> = {
+      'datahub-gh': input.datahub,
+      gmpl: input.gmpl,
+      netpulse: input.netpulse,
+    }
     const floats = await Promise.all(
       KNOWN_PROVIDERS.map(async (provider) => {
         const [summary, cost, expected] = await Promise.all([
@@ -782,9 +789,9 @@ export class TreasuryService implements OnApplicationBootstrap, OnModuleDestroy 
           provider,
           label: providerLabel(provider),
           expected: expectedBalance,
-          actual: actual[provider],
+          actual: actual[provider] ?? expectedBalance,
           capitalRepaid,
-          adjustment: actual[provider] - expectedBalance,
+          adjustment: (actual[provider] ?? expectedBalance) - expectedBalance,
         }
       }),
     )
