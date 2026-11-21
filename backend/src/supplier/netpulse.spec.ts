@@ -287,3 +287,41 @@ test('checker: a lost reply is found by reference, or left for a person', async 
     lost.restore()
   }
 })
+
+function withKey(key: string) {
+  const config = { get: (k: string) => (k === 'NETPULSE_API_KEY' ? key : undefined) } as unknown as ConfigService
+  return new NetpulseClient(config)
+}
+
+test('a key pasted with a line break or spaces is sent without them', async () => {
+  const np = withKey('  np_live_abc123\ndef456 \n')
+  assert.equal(np.apiKey, 'np_live_abc123def456')
+  const seen: string[] = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
+    seen.push(String((init?.headers as Record<string, string>)['x-api-key']))
+    return new Response(JSON.stringify({ balance: 1 }), { status: 200 })
+  }) as typeof fetch
+  try {
+    await np.balance()
+    assert.deepEqual(seen, ['np_live_abc123def456'])
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test('a key that cannot be sent is treated as missing, and errors never carry the key', async () => {
+  assert.equal(withKey('np_live_abc 123é').apiKey, null)
+  const np = withKey('np_live_secretsecret')
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async () => {
+    throw new TypeError('Headers.append: "np_live_secretsecret" is an invalid header value.')
+  }) as typeof fetch
+  try {
+    const r = await np.packages()
+    assert.equal(r.kind, 'failed')
+    assert.ok(r.kind === 'failed' && !r.reason.includes('secretsecret'), r.kind === 'failed' ? r.reason : '')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})

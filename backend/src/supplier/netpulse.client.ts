@@ -160,8 +160,40 @@ export class NetpulseClient {
     return this.config.get<string>('NETPULSE_BASE_URL')?.replace(/\/$/, '') || 'https://buydata.space/api/v1'
   }
 
+  /**
+   * The key as it can be sent. Whitespace anywhere is dropped: a key pasted
+   * on a phone often picks up a line break or space in the middle, which
+   * `fetch` refuses as a header value (and then quotes the whole key in its
+   * error, see `safe`). Anything else outside printable ASCII makes the key
+   * unusable, reported once instead of on every call.
+   */
   get apiKey(): string | null {
-    return this.config.get<string>('NETPULSE_API_KEY')?.trim() || null
+    const key = (this.config.get<string>('NETPULSE_API_KEY') ?? '').replace(/\s+/g, '')
+    if (!key) return null
+    if (!/^[\x21-\x7e]+$/.test(key)) {
+      if (!this.warnedBadKey) {
+        this.warnedBadKey = true
+        this.log.error('NETPULSE_API_KEY contains characters that cannot be sent; paste it again on Render.')
+      }
+      return null
+    }
+    return key
+  }
+
+  private warnedBadKey = false
+
+  /**
+   * An error as text with the API key cut out. A header error from `fetch`
+   * quotes the header value, which put the key in the server logs.
+   */
+  private safe(error: unknown): string {
+    let text = String(error)
+    const raw = this.config.get<string>('NETPULSE_API_KEY') ?? ''
+    for (const secret of [raw, raw.trim(), raw.replace(/\s+/g, '')]) {
+      if (secret.length >= 8) text = text.split(secret).join('[key]')
+    }
+    // Also anything shaped like one of their keys, in case it was mangled.
+    return text.replace(/np_(live|test)_[A-Za-z0-9]+/g, 'np_$1_[key]')
   }
 
   get configured(): boolean {
@@ -214,7 +246,7 @@ export class NetpulseClient {
     try {
       response = await this.get('/packages', 'packages', 20_000)
     } catch (error) {
-      return { kind: 'failed', reason: `NetPulse did not answer: ${String(error)}` }
+      return { kind: 'failed', reason: `NetPulse did not answer: ${this.safe(error)}` }
     }
     const { body } = await NetpulseClient.read(response)
     if (!response.ok) return { kind: 'failed', reason: errorText(body, `HTTP ${response.status}`) }
@@ -278,9 +310,9 @@ export class NetpulseClient {
         signal: AbortSignal.timeout(30_000),
       })
     } catch (error) {
-      const reason = (error as Error)?.name === 'TimeoutError' ? 'timed out' : String(error)
+      const reason = (error as Error)?.name === 'TimeoutError' ? 'timed out' : this.safe(error)
       this.log.error(`purchase ${input.reference} → ${input.recipient} ${reason}, looking it up by reference`)
-      return this.recover(input.reference, `Request ${reason} before a reply arrived.`, String(error))
+      return this.recover(input.reference, `Request ${reason} before a reply arrived.`, this.safe(error))
     }
 
     const { body, raw } = await NetpulseClient.read(response)
@@ -347,7 +379,7 @@ export class NetpulseClient {
     try {
       response = await this.get(`/order-status/${encodeURIComponent(reference)}`, 'order-status')
     } catch (error) {
-      return { kind: 'unavailable', reason: (error as Error)?.name === 'TimeoutError' ? 'TimeoutError' : String(error) }
+      return { kind: 'unavailable', reason: (error as Error)?.name === 'TimeoutError' ? 'TimeoutError' : this.safe(error) }
     }
     const { body } = await NetpulseClient.read(response)
     if (response.status === 404) return { kind: 'not_found' }
@@ -362,7 +394,7 @@ export class NetpulseClient {
     try {
       response = await this.get('/balance', 'balance')
     } catch (error) {
-      return { kind: 'unavailable', reason: String(error) }
+      return { kind: 'unavailable', reason: this.safe(error) }
     }
     const { body } = await NetpulseClient.read(response)
     const balance = Number(body.balance)
@@ -379,7 +411,7 @@ export class NetpulseClient {
     try {
       response = await this.get('/checkers', 'checkers', 20_000)
     } catch (error) {
-      return { kind: 'failed', reason: `NetPulse did not answer: ${String(error)}` }
+      return { kind: 'failed', reason: `NetPulse did not answer: ${this.safe(error)}` }
     }
     const { body } = await NetpulseClient.read(response)
     if (!response.ok || body.success === false) return { kind: 'failed', reason: errorText(body, `HTTP ${response.status}`) }
@@ -430,9 +462,9 @@ export class NetpulseClient {
         signal: AbortSignal.timeout(30_000),
       })
     } catch (error) {
-      const reason = (error as Error)?.name === 'TimeoutError' ? 'timed out' : String(error)
+      const reason = (error as Error)?.name === 'TimeoutError' ? 'timed out' : this.safe(error)
       this.log.error(`checker ${input.reference} ${reason}, looking it up by reference`)
-      return this.recoverChecker(input.reference, `Request ${reason} before a reply arrived.`, String(error))
+      return this.recoverChecker(input.reference, `Request ${reason} before a reply arrived.`, this.safe(error))
     }
 
     const { body, raw } = await NetpulseClient.read(response)
@@ -487,7 +519,7 @@ export class NetpulseClient {
     try {
       response = await this.get(`/checkers/${encodeURIComponent(reference)}`, 'checker-lookup')
     } catch (error) {
-      return { kind: 'unknown', reason: String(error), raw: String(error) }
+      return { kind: 'unknown', reason: this.safe(error), raw: this.safe(error) }
     }
     const { body, raw } = await NetpulseClient.read(response)
     if (response.status === 404) return { kind: 'not_found' }
