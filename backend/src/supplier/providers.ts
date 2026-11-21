@@ -1,5 +1,6 @@
 import { mapProviderStatus } from './datahub.client'
 import { mapGmplOrderStatus } from './gmpl.client'
+import { mapNetpulseStatus } from './netpulse.client'
 
 /**
  * Every supplier we buy from, described once.
@@ -18,9 +19,9 @@ import { mapGmplOrderStatus } from './gmpl.client'
  * No Nest or Prisma imports, so settings, analytics and the clients can all
  * read it without a dependency cycle.
  */
-export type SupplierProviderCode = 'datahub-gh' | 'gmpl'
+export type SupplierProviderCode = 'datahub-gh' | 'gmpl' | 'netpulse'
 
-export const KNOWN_PROVIDERS = ['datahub-gh', 'gmpl'] as const satisfies readonly SupplierProviderCode[]
+export const KNOWN_PROVIDERS = ['datahub-gh', 'gmpl', 'netpulse'] as const satisfies readonly SupplierProviderCode[]
 
 /** Our reading of a supplier's order status: final one way or the other, or not yet. */
 export type MappedStatus = 'completed' | 'failed' | null
@@ -80,6 +81,20 @@ export const PROVIDERS: Readonly<Record<SupplierProviderCode, ProviderInfo>> = {
     needsCapacity: false,
     numberApproval: true,
     networks: ['MTN', 'Telecel'],
+    categories: ['data'],
+  },
+  netpulse: {
+    label: 'NetPulse',
+    fullLabel: 'NetPulse',
+    liveEnvKey: 'NETPULSE_LIVE',
+    mapStatus: mapNetpulseStatus,
+    // Confirmed with NetPulse, 21 Nov 2026: a failed order's charge goes back to the wallet.
+    refundsFailedCharge: true,
+    // `networkKey` holds their exact capacity string, all `/purchase` needs with the network.
+    needsCapacity: false,
+    // No approved-numbers list in their API.
+    numberApproval: false,
+    networks: ['MTN', 'Telecel', 'AirtelTigo'],
     categories: ['data'],
   },
 }

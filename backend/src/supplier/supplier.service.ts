@@ -9,9 +9,10 @@ import { FloatMonitorService } from './float-monitor.service'
 import { asProvider, KNOWN_PROVIDERS, PROVIDERS } from './providers'
 import type { StatusOutcome as DatahubStatusOutcome } from './datahub.client'
 import type { StatusOutcome as GmplStatusOutcome } from './gmpl.client'
+import { NetpulseClient, netpulseReference, type NetpulseStatusOutcome } from './netpulse.client'
 
 /** One supplier's answer about one order, whichever supplier it is. */
-export type StatusLookup = DatahubStatusOutcome | GmplStatusOutcome
+export type StatusLookup = DatahubStatusOutcome | GmplStatusOutcome | NetpulseStatusOutcome
 
 export interface DispatchResult {
   /**
@@ -112,6 +113,7 @@ export class SupplierService implements OnModuleInit {
     private readonly config: ConfigService,
     private readonly datahub: DatahubClient,
     private readonly gmpl: GmplClient,
+    private readonly netpulse: NetpulseClient,
     private readonly float: FloatMonitorService,
   ) {}
 
@@ -120,11 +122,11 @@ export class SupplierService implements OnModuleInit {
    * not compile until it is given one, so nothing can be routed to it with
    * DataHub's client standing in.
    */
-  private get clients(): Record<SupplierProviderCode, DatahubClient | GmplClient> {
-    return { 'datahub-gh': this.datahub, gmpl: this.gmpl }
+  private get clients(): Record<SupplierProviderCode, DatahubClient | GmplClient | NetpulseClient> {
+    return { 'datahub-gh': this.datahub, gmpl: this.gmpl, netpulse: this.netpulse }
   }
 
-  private clientFor(provider: string): DatahubClient | GmplClient {
+  private clientFor(provider: string): DatahubClient | GmplClient | NetpulseClient {
     return this.clients[asProvider(provider)]
   }
 
@@ -343,6 +345,7 @@ export class SupplierService implements OnModuleInit {
     const place: Record<SupplierProviderCode, () => Promise<DispatchResult>> = {
       'datahub-gh': () => this.dispatchLiveDatahub(order, supplier),
       gmpl: () => this.dispatchLiveGmpl(order, supplier, attempt),
+      netpulse: () => this.dispatchLiveNetpulse(order, supplier, attempt),
     }
     return place[asProvider(provider)]()
   }
@@ -544,6 +547,47 @@ export class SupplierService implements OnModuleInit {
       return { outcome: 'needs_approval', reason: result.reason, providerResponse: result.raw }
     }
 
+    return { outcome: 'rejected', reason: result.reason, providerResponse: result.raw }
+  }
+
+  /**
+   * Place the order with NetPulse for real. Data bundles only. No number
+   * approval list, so no pre-check. Their reply means "processing", never
+   * "delivered"; with no webhooks the reconciler asks until it is final.
+   */
+  private async dispatchLiveNetpulse(order: Order, supplier: SupplierProduct, attempt: number): Promise<DispatchResult> {
+    if (order.category !== 'data' || !supplier.network) {
+      return { outcome: 'rejected', reason: 'NetPulse is only set up for data bundles here.' }
+    }
+
+    const result = await this.netpulse.purchase({
+      // Our network names are theirs: MTN, Telecel, AirtelTigo.
+      network: supplier.network,
+      capacity: supplier.networkKey as string,
+      recipient: order.recipient,
+      reference: netpulseReference(order.reference, attempt),
+    })
+
+    if (result.kind === 'accepted') {
+      // Their reply carries the balance after this purchase, like DataHub's.
+      if (result.balanceAfter !== null) await this.float.record('netpulse', result.balanceAfter, order.reference)
+      return {
+        outcome: 'pending',
+        providerReference: result.providerReference,
+        providerStatus: result.providerStatus,
+        providerCharged: result.charged ?? undefined,
+        providerResponse: result.raw,
+      }
+    }
+
+    if (result.kind === 'unknown') {
+      this.log.error(`UNRESOLVED NetPulse dispatch for ${order.reference} → ${order.recipient}: ${result.reason}`)
+      return { outcome: 'unknown', reason: result.reason, providerResponse: result.raw }
+    }
+
+    if (result.insufficientBalance) {
+      this.log.error('NetPulse wallet is empty, every order routed to them will fail until it is topped up.')
+    }
     return { outcome: 'rejected', reason: result.reason, providerResponse: result.raw }
   }
 

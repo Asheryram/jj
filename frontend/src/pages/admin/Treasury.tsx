@@ -827,6 +827,8 @@ function BalanceBooksCard({ onDone }: { onDone: () => void }) {
   const [paystack, setPaystack] = useState('')
   const [datahub, setDatahub] = useState('')
   const [gmpl, setGmpl] = useState('')
+  // Optional: empty means it was not read, and its records are left as they are.
+  const [netpulse, setNetpulse] = useState('')
   const [capitalRepaid, setCapitalRepaid] = useState(false)
   const [readJustNow, setReadJustNow] = useState(false)
   const [note, setNote] = useState('')
@@ -836,6 +838,7 @@ function BalanceBooksCard({ onDone }: { onDone: () => void }) {
 
   const amounts = () => {
     const values = [parseCedis(paystack), parseCedis(datahub), parseCedis(gmpl)]
+    if (netpulse.trim() && parseCedis(netpulse) === null) return null
     return values.every((v) => v !== null) ? (values as number[]) : null
   }
 
@@ -851,6 +854,7 @@ function BalanceBooksCard({ onDone }: { onDone: () => void }) {
         paystackAndMomo: values[0],
         datahub: values[1],
         gmpl: values[2],
+        netpulse: netpulse.trim() ? (parseCedis(netpulse) ?? undefined) : undefined,
         capitalRepaid,
         note: note.trim(),
         preview,
@@ -899,6 +903,9 @@ function BalanceBooksCard({ onDone }: { onDone: () => void }) {
           </Field>
           <Field label="GMPL float, real balance now (GHS)" htmlFor="bb-gmpl">
             <TextInput id="bb-gmpl" inputMode="decimal" placeholder="398.00" value={gmpl} onChange={(e) => { setGmpl(e.target.value); edited() }} />
+          </Field>
+          <Field label="NetPulse float, real balance now (GHS)" htmlFor="bb-netpulse" hint="Leave empty if you didn't read it; its records stay as they are.">
+            <TextInput id="bb-netpulse" inputMode="decimal" placeholder="100.00" value={netpulse} onChange={(e) => { setNetpulse(e.target.value); edited() }} />
           </Field>
           <label className="flex items-start gap-2.5 rounded-xl border border-slate-200 dark:border-slate-700 p-3 text-sm text-slate-700 dark:text-slate-200">
             <input

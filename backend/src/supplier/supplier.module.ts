@@ -7,6 +7,8 @@ import { DatahubClient } from './datahub.client'
 import { DatahubSource } from './datahub.source'
 import { GmplClient } from './gmpl.client'
 import { GmplSource } from './gmpl.source'
+import { NetpulseClient } from './netpulse.client'
+import { NetpulseSource } from './netpulse.source'
 import { CatalogueImportService } from './catalogue-import.service'
 import { CATALOGUE_SOURCES } from './catalogue-source'
 
@@ -39,13 +41,15 @@ import { CATALOGUE_SOURCES } from './catalogue-source'
     DatahubSource,
     GmplClient,
     GmplSource,
+    NetpulseClient,
+    NetpulseSource,
     CatalogueImportService,
     {
       provide: CATALOGUE_SOURCES,
-      useFactory: (datahub: DatahubSource, gmpl: GmplSource) => [datahub, gmpl],
-      inject: [DatahubSource, GmplSource],
+      useFactory: (datahub: DatahubSource, gmpl: GmplSource, netpulse: NetpulseSource) => [datahub, gmpl, netpulse],
+      inject: [DatahubSource, GmplSource, NetpulseSource],
     },
   ],
-  exports: [SupplierService, DatahubClient, GmplClient, CatalogueImportService, FloatMonitorService],
+  exports: [SupplierService, DatahubClient, GmplClient, NetpulseClient, CatalogueImportService, FloatMonitorService],
 })
 export class SupplierModule {}

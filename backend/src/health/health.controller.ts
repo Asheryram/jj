@@ -93,6 +93,7 @@ export class HealthController {
         // sent would be the most expensive kind of wrong.
         datahub: this.supplier.providerState,
         gmpl: this.supplier.gmplProviderState,
+        netpulse: this.supplier.providerStateFor('netpulse'),
         paystack: process.env.PAYSTACK_SECRET_KEY ? 'live' : 'simulated',
       },
       uptimeSeconds: Math.round(process.uptime()),

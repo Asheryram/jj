@@ -10,6 +10,7 @@ import { escape, wrap } from '../mail/templates'
 import { bundleCostByProvider, capitalProviderFilter, refillsInTransit } from './provider-resolution'
 import { GmplClient, type WalletBalanceOutcome } from './gmpl.client'
 import { asProvider, PROVIDERS } from './providers'
+import { NetpulseClient } from './netpulse.client'
 
 /** "DataHub GH" / "GMPL", for email text and log lines. */
 export function providerLabel(provider: SupplierProviderCode): string {
@@ -233,6 +234,7 @@ export class FloatMonitorService {
     private readonly ledger: LedgerService,
     private readonly solvency: SolvencyService,
     private readonly gmpl: GmplClient,
+    private readonly netpulse: NetpulseClient,
   ) {}
 
   /**
@@ -360,7 +362,11 @@ export class FloatMonitorService {
    * A `Record`, so a new supplier has to say which kind it is.
    */
   private get balanceReaders(): Record<SupplierProviderCode, (() => Promise<WalletBalanceOutcome>) | null> {
-    return { 'datahub-gh': null, gmpl: () => this.gmpl.getWalletBalance() }
+    return {
+      'datahub-gh': null,
+      gmpl: () => this.gmpl.getWalletBalance(),
+      netpulse: () => this.netpulse.balance(),
+    }
   }
 
   /** Whether this supplier's balance can be asked for at any time. */

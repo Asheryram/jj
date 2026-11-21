@@ -27,6 +27,7 @@ export const PALETTE = {
 export const PROVIDER_COLOURS: Record<string, string> = {
   'datahub-gh': '#2d5bbb',
   gmpl: '#d97706',
+  netpulse: '#0f9d76',
 }
 
 export function useElementWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {

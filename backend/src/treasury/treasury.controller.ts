@@ -71,6 +71,12 @@ export class BalanceBooksDto {
   @Min(0)
   gmpl!: number
 
+  /** Optional until NetPulse holds money; left out, its float is taken as matching the records. */
+  @IsOptional()
+  @IsInt({ message: 'Enter the NetPulse float like 100.00.' })
+  @Min(0)
+  netpulse?: number
+
   /** Treat the owner's own capital spent on bundles as already repaid to him. */
   @IsBoolean()
   capitalRepaid!: boolean

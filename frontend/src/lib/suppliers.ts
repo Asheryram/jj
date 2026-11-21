@@ -7,7 +7,7 @@
  * would have shown as "DataHub" everywhere. Lists come from `SUPPLIERS`,
  * names from `supplierName`; a new supplier is added here and nowhere else.
  */
-export type SupplierCode = 'datahub-gh' | 'gmpl'
+export type SupplierCode = 'datahub-gh' | 'gmpl' | 'netpulse'
 
 export interface SupplierInfo {
   code: SupplierCode
@@ -24,6 +24,7 @@ export interface SupplierInfo {
 export const SUPPLIERS: SupplierInfo[] = [
   { code: 'datahub-gh', label: 'DataHub', fullLabel: 'DataHub GH', liveBalance: false, networks: null },
   { code: 'gmpl', label: 'GMPL', fullLabel: 'GMPL', liveBalance: true, networks: ['MTN', 'Telecel'] },
+  { code: 'netpulse', label: 'NetPulse', fullLabel: 'NetPulse', liveBalance: true, networks: null },
 ]
 
 export const SUPPLIER_CODES: SupplierCode[] = SUPPLIERS.map((s) => s.code)

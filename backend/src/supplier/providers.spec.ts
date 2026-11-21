@@ -19,7 +19,8 @@ test('a stored provider with no value is DataHub, as for every order before GMPL
 })
 
 test('a supplier we do not know is refused, never sent to DataHub', () => {
-  assert.throws(() => asProvider('netpulse'), /Unknown supplier "netpulse"/)
+  assert.throws(() => asProvider('acme'), /Unknown supplier "acme"/)
+  assert.equal(asProvider('netpulse'), 'netpulse')
 })
 
 test('status words read the same as before, per supplier', () => {
@@ -63,6 +64,21 @@ test('automated fulfilment: GMPL needs a bundle id, DataHub a key and a size', (
   assert.equal(hasAutomatedFulfilment({ provider: 'gmpl', networkKey: null, capacityGb: null }), false)
 })
 
-test('both current suppliers keep the number-approval flow', () => {
-  for (const p of KNOWN_PROVIDERS) assert.equal(isApprovalProvider(p), true)
+test('DataHub and GMPL keep the number-approval flow; NetPulse has none', () => {
+  assert.equal(isApprovalProvider('datahub-gh'), true)
+  assert.equal(isApprovalProvider('gmpl'), true)
+  assert.equal(isApprovalProvider('netpulse'), false)
+  assert.deepEqual([...KNOWN_PROVIDERS], ['datahub-gh', 'gmpl', 'netpulse'])
+})
+
+test('NetPulse: refunds failures, sells all three networks, data only', () => {
+  const np = PROVIDERS.netpulse
+  assert.equal(np.refundsFailedCharge, true)
+  assert.equal(np.liveEnvKey, 'NETPULSE_LIVE')
+  assert.equal(routingRefusal('netpulse', 'AirtelTigo', 'data'), null)
+  assert.match(routingRefusal('netpulse', 'MTN', 'checker') ?? '', /only sells data/)
+  assert.equal(np.mapStatus('completed'), 'completed')
+  assert.equal(np.mapStatus('failed'), 'failed')
+  assert.equal(np.mapStatus('processing'), null)
+  assert.equal(hasAutomatedFulfilment({ provider: 'netpulse', networkKey: '1GB', capacityGb: '1' }), true)
 })

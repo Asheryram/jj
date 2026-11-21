@@ -1529,7 +1529,7 @@ export const api = {
     request<{
       status: string
       database: string
-      providers: { datahub: string; gmpl: string; paystack: string }
+      providers: { datahub: string; gmpl: string; netpulse?: string; paystack: string }
     }>('/health', { auth: false }),
 
   /** Which server build is live and the last database update applied, see `HealthController.version`. */
@@ -1849,6 +1849,7 @@ export const api = {
     paystackAndMomo: number
     datahub: number
     gmpl: number
+    netpulse?: number
     capitalRepaid: boolean
     note: string
     preview: boolean

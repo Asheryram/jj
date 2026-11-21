@@ -786,6 +786,7 @@ function IntegrationsStrip({ refreshKey }: { refreshKey: number }) {
   const services = [
     { name: 'DataHub', ...supplier(health?.providers.datahub) },
     { name: 'GMPL', ...supplier(health?.providers.gmpl) },
+    { name: 'NetPulse', ...supplier(health?.providers.netpulse) },
     {
       name: 'Paystack',
       ...(health
