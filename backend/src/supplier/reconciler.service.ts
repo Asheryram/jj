@@ -740,6 +740,9 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     const soldThrough = await this.resolveProvider(order.supplierCodeAtSale)
     let provider = soldThrough
     let moveTo: { code: string; costPrice: number; name: string } | null = null
+    // `provider` naming the supplier the order is already on is the same as
+    // leaving it out: the form now always says where it was ordered again,
+    // rather than only when it guessed that differed, so the server decides.
     if (input.provider && input.provider !== soldThrough) {
       if (!input.reorderedByHand) {
         throw new ValidationError(
