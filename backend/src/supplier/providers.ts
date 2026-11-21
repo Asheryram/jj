@@ -70,7 +70,8 @@ export const PROVIDERS: Readonly<Record<SupplierProviderCode, ProviderInfo>> = {
     needsCapacity: true,
     numberApproval: true,
     networks: null,
-    categories: null,
+    // Its catalogue sync brings in data bundles and nothing else.
+    categories: ['data'],
   },
   gmpl: {
     label: 'GMPL',
@@ -95,7 +96,7 @@ export const PROVIDERS: Readonly<Record<SupplierProviderCode, ProviderInfo>> = {
     // No approved-numbers list in their API.
     numberApproval: false,
     networks: ['MTN', 'Telecel', 'AirtelTigo'],
-    categories: ['data'],
+    categories: ['data', 'mashup', 'checker'],
   },
 }
 
@@ -135,7 +136,8 @@ export function routingRefusal(provider: SupplierProviderCode, network: string, 
     return `${info.label} doesn't sell ${network}, route it to another supplier.`
   }
   if (info.categories && !info.categories.includes(category)) {
-    return `${info.label} only sells ${info.categories.join(' and ')}, route other categories to another supplier.`
+    const list = info.categories.length > 1 ? `${info.categories.slice(0, -1).join(', ')} and ${info.categories.at(-1)}` : info.categories[0]
+    return `${info.label} only sells ${list}, route other categories to another supplier.`
   }
   return null
 }

@@ -21,6 +21,9 @@ import { ConfigService } from '@nestjs/config'
  *    reference instead, and if that finds nothing the order is left
  *    `unknown` for a person, the same as DataHub's ambiguous case.
  *  · Money fields are in cedis with decimals; everything we store is pesewas.
+ *  · Three products: ordinary data, MTN Mashup (same endpoints with
+ *    `product: "mashup"`), and WAEC/BECE result checkers, whose PINs come
+ *    back in the purchase reply itself.
  */
 
 export type NetpulsePurchaseOutcome =
@@ -53,7 +56,56 @@ export interface NetpulsePackage {
   validity: string
 }
 
-export type NetpulseCatalogueOutcome = { kind: 'ok'; packages: NetpulsePackage[] } | { kind: 'failed'; reason: string }
+/** An MTN Mashup pack: one price for data, minutes and SMS together. */
+export interface NetpulseMashup {
+  /** What `/purchase` takes back with `product: "mashup"`, e.g. "10". An id, not a size. */
+  capacity: string
+  /** Their own name for it, e.g. "Mashup 10GB". Not the data it holds, see `data`. */
+  size: string
+  pricePesewas: number
+  /** The real contents, from `allowances`. */
+  data: string
+  mtnMinutes: number
+  otherMinutes: number
+  sms: number
+  validityDays: number | null
+}
+
+export type NetpulseCatalogueOutcome =
+  | { kind: 'ok'; packages: NetpulsePackage[]; mashup: NetpulseMashup[] }
+  | { kind: 'failed'; reason: string }
+
+export interface NetpulseChecker {
+  /** What `/checkers/purchase` takes as `type`: "waec", "bece". */
+  id: string
+  name: string
+  pricePesewas: number
+  available: boolean
+}
+
+export type NetpulseCheckerCatalogueOutcome = { kind: 'ok'; checkers: NetpulseChecker[] } | { kind: 'failed'; reason: string }
+
+export type NetpulseCheckerOutcome =
+  | {
+      kind: 'approved'
+      providerReference: string
+      serial: string
+      pin: string
+      /** Pesewas, from `total_cost`. */
+      charged: number | null
+      /** Cedis, from `balance_after`. */
+      balanceAfter: number | null
+      raw: string
+    }
+  | { kind: 'rejected'; reason: string; insufficientBalance: boolean; raw: string }
+  | { kind: 'unknown'; reason: string; raw: string }
+
+/** A checker purchase looked up again, after a lost reply. */
+export type NetpulseCheckerLookup =
+  | Extract<NetpulseCheckerOutcome, { kind: 'approved' }>
+  | { kind: 'failed'; reason: string; raw: string }
+  | { kind: 'not_found' }
+  | { kind: 'unknown'; reason: string; raw: string }
 
 /** Their status words, read into ours. `processing` is not final. */
 export function mapNetpulseStatus(status: string): 'completed' | 'failed' | null {
@@ -173,14 +225,40 @@ export class NetpulseClient {
       if (typeof row.network !== 'string' || typeof row.capacity !== 'string' || pricePesewas === null) continue
       packages.push({ network: row.network, capacity: row.capacity, pricePesewas, validity: String(row.validity ?? '') })
     }
-    return { kind: 'ok', packages }
+    // Only present when Mashup is enabled and priced for this account.
+    const mashup: NetpulseMashup[] = []
+    for (const row of Array.isArray(body.mashup) ? (body.mashup as Body[]) : []) {
+      const pricePesewas = toPesewas(row.price)
+      const capacity = row.capacity == null ? '' : String(row.capacity)
+      const a = (row.allowances && typeof row.allowances === 'object' ? row.allowances : {}) as Body
+      if (!capacity || pricePesewas === null) continue
+      const days = Number(a.validityDays)
+      mashup.push({
+        capacity,
+        size: typeof row.size === 'string' ? row.size : `Mashup ${capacity}`,
+        pricePesewas,
+        data: typeof a.dataAllowance === 'string' ? a.dataAllowance : '',
+        mtnMinutes: Number(a.mtnMinutes) || 0,
+        otherMinutes: Number(a.otherMinutes) || 0,
+        sms: Number(a.sms) || 0,
+        validityDays: Number.isFinite(days) && days > 0 ? days : null,
+      })
+    }
+    return { kind: 'ok', packages, mashup }
   }
 
   /**
    * Buy one data bundle. Sent once, never retried (see the file header);
    * anything ambiguous is looked up by `reference` before giving up as unknown.
    */
-  async purchase(input: { network: string; capacity: string; recipient: string; reference: string }): Promise<NetpulsePurchaseOutcome> {
+  async purchase(input: {
+    network: string
+    capacity: string
+    recipient: string
+    reference: string
+    /** "mashup" for an MTN Mashup pack; left out for ordinary data. */
+    product?: 'mashup'
+  }): Promise<NetpulsePurchaseOutcome> {
     if (!this.configured) {
       return { kind: 'rejected', reason: 'No NetPulse API key configured.', insufficientBalance: false, raw: '' }
     }
@@ -192,6 +270,7 @@ export class NetpulseClient {
         headers: this.headers(true),
         body: JSON.stringify({
           network: input.network,
+          ...(input.product ? { product: input.product } : {}),
           phoneNumber: input.recipient,
           capacity: input.capacity,
           reference: input.reference,
@@ -291,5 +370,132 @@ export class NetpulseClient {
       return { kind: 'unavailable', reason: errorText(body, `HTTP ${response.status}`) }
     }
     return { kind: 'ok', balanceCedis: balance }
+  }
+
+  /** WAEC/BECE checker types and prices. */
+  async checkers(): Promise<NetpulseCheckerCatalogueOutcome> {
+    if (!this.configured) return { kind: 'failed', reason: 'No NetPulse API key configured.' }
+    let response: Response
+    try {
+      response = await this.get('/checkers', 'checkers', 20_000)
+    } catch (error) {
+      return { kind: 'failed', reason: `NetPulse did not answer: ${String(error)}` }
+    }
+    const { body } = await NetpulseClient.read(response)
+    if (!response.ok || body.success === false) return { kind: 'failed', reason: errorText(body, `HTTP ${response.status}`) }
+    const checkers: NetpulseChecker[] = []
+    for (const row of Array.isArray(body.checkers) ? (body.checkers as Body[]) : []) {
+      const pricePesewas = toPesewas(row.price)
+      if (typeof row.id !== 'string' || !row.id || pricePesewas === null) continue
+      checkers.push({
+        id: row.id,
+        name: typeof row.name === 'string' && row.name ? row.name : `${row.id.toUpperCase()} Result Checker`,
+        pricePesewas,
+        available: row.available !== false,
+      })
+    }
+    return { kind: 'ok', checkers }
+  }
+
+  /** The serial and PIN out of a checker reply (`pins[0]`), if it has them. */
+  private static approvedChecker(body: Body, fallbackReference: string, raw: string): Extract<NetpulseCheckerOutcome, { kind: 'approved' }> | null {
+    const first = Array.isArray(body.pins) ? (body.pins[0] as Body | undefined) : undefined
+    if (!first || first.serial == null || first.pin == null) return null
+    const balance = Number(body.balance_after)
+    return {
+      kind: 'approved',
+      providerReference: typeof body.reference === 'string' && body.reference ? body.reference : fallbackReference,
+      serial: String(first.serial),
+      pin: String(first.pin),
+      charged: toPesewas(body.total_cost),
+      balanceAfter: body.balance_after != null && Number.isFinite(balance) ? balance : null,
+      raw,
+    }
+  }
+
+  /**
+   * Buy one checker PIN. Pins come back in the same reply. Sent once, never
+   * retried; a lost reply or a duplicate is looked up by our reference.
+   */
+  async buyChecker(input: { type: string; reference: string }): Promise<NetpulseCheckerOutcome> {
+    if (!this.configured) {
+      return { kind: 'rejected', reason: 'No NetPulse API key configured.', insufficientBalance: false, raw: '' }
+    }
+    let response: Response
+    try {
+      response = await fetch(`${this.baseUrl}/checkers/purchase`, {
+        method: 'POST',
+        headers: this.headers(true),
+        body: JSON.stringify({ type: input.type, quantity: 1, reference: input.reference }),
+        signal: AbortSignal.timeout(30_000),
+      })
+    } catch (error) {
+      const reason = (error as Error)?.name === 'TimeoutError' ? 'timed out' : String(error)
+      this.log.error(`checker ${input.reference} ${reason}, looking it up by reference`)
+      return this.recoverChecker(input.reference, `Request ${reason} before a reply arrived.`, String(error))
+    }
+
+    const { body, raw } = await NetpulseClient.read(response)
+    if (response.ok && body.success !== false) {
+      return (
+        NetpulseClient.approvedChecker(body, input.reference, raw) ??
+        this.recoverChecker(input.reference, 'NetPulse replied without a serial and PIN.', raw)
+      )
+    }
+
+    const reason = errorText(body, `HTTP ${response.status}`)
+    switch (response.status) {
+      case 402:
+        this.log.error(`NetPulse wallet is too low for a checker: ${reason}`)
+        return { kind: 'rejected', reason: `NetPulse wallet balance is too low: ${reason}`, insufficientBalance: true, raw }
+      case 409: {
+        // Already bought under this reference; they send the original back.
+        const original = body.original && typeof body.original === 'object' ? (body.original as Body) : {}
+        return (
+          NetpulseClient.approvedChecker(original, input.reference, raw) ??
+          this.recoverChecker(input.reference, `NetPulse says ${input.reference} was already used: ${reason}`, raw)
+        )
+      }
+      case 401:
+      case 403:
+        this.log.error(`NetPulse refused our API key (${response.status}): ${reason}`)
+        return { kind: 'rejected', reason: `NetPulse refused our API key: ${reason}`, insufficientBalance: false, raw }
+      case 429:
+        return { kind: 'rejected', reason: `NetPulse rate limit reached, nothing was bought: ${reason}`, insufficientBalance: false, raw }
+      default:
+        if (response.status >= 500) return this.recoverChecker(input.reference, `NetPulse returned ${response.status}: ${reason}`, raw)
+        // 400: disabled, out of stock or over the pin cap. Nothing bought.
+        return { kind: 'rejected', reason, insufficientBalance: false, raw }
+    }
+  }
+
+  private async recoverChecker(reference: string, reason: string, raw: string): Promise<NetpulseCheckerOutcome> {
+    const found = await this.checkerByReference(reference)
+    if (found.kind === 'approved') {
+      this.log.warn(`checker ${reference} recovered by lookup`)
+      return found
+    }
+    if (found.kind === 'failed') return { kind: 'rejected', reason: found.reason, insufficientBalance: false, raw: found.raw }
+    this.log.error(`checker ${reference} outcome unknown (${reason}), left for a person`)
+    return { kind: 'unknown', reason, raw }
+  }
+
+  /** A checker purchase and its PINs, by the reference it was bought under. */
+  async checkerByReference(reference: string): Promise<NetpulseCheckerLookup> {
+    if (!this.configured) return { kind: 'unknown', reason: 'No NetPulse API key configured.', raw: '' }
+    let response: Response
+    try {
+      response = await this.get(`/checkers/${encodeURIComponent(reference)}`, 'checker-lookup')
+    } catch (error) {
+      return { kind: 'unknown', reason: String(error), raw: String(error) }
+    }
+    const { body, raw } = await NetpulseClient.read(response)
+    if (response.status === 404) return { kind: 'not_found' }
+    if (!response.ok) return { kind: 'unknown', reason: errorText(body, `HTTP ${response.status}`), raw }
+    const approved = NetpulseClient.approvedChecker(body, reference, raw)
+    if (approved) return approved
+    const status = typeof body.status === 'string' ? body.status.toLowerCase() : ''
+    if (['failed', 'cancelled', 'refunded'].includes(status)) return { kind: 'failed', reason: `NetPulse marked it ${status}.`, raw }
+    return { kind: 'unknown', reason: `NetPulse says ${status || 'nothing'} and gave no PIN yet.`, raw }
   }
 }

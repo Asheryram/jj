@@ -556,14 +556,17 @@ export class SupplierService implements OnModuleInit {
    * "delivered"; with no webhooks the reconciler asks until it is final.
    */
   private async dispatchLiveNetpulse(order: Order, supplier: SupplierProduct, attempt: number): Promise<DispatchResult> {
-    if (order.category !== 'data' || !supplier.network) {
-      return { outcome: 'rejected', reason: 'NetPulse is only set up for data bundles here.' }
+    if (order.category === 'checker') return this.dispatchNetpulseChecker(order, supplier, attempt)
+    if ((order.category !== 'data' && order.category !== 'mashup') || !supplier.network) {
+      return { outcome: 'rejected', reason: 'NetPulse is set up for data, Mashup and result checkers only.' }
     }
 
     const result = await this.netpulse.purchase({
       // Our network names are theirs: MTN, Telecel, AirtelTigo.
       network: supplier.network,
+      // For Mashup, their pack id ("10"); for data, their size ("1GB").
       capacity: supplier.networkKey as string,
+      ...(order.category === 'mashup' ? { product: 'mashup' as const } : {}),
       recipient: order.recipient,
       reference: netpulseReference(order.reference, attempt),
     })
@@ -585,6 +588,54 @@ export class SupplierService implements OnModuleInit {
       return { outcome: 'unknown', reason: result.reason, providerResponse: result.raw }
     }
 
+    if (result.insufficientBalance) {
+      this.log.error('NetPulse wallet is empty, every order routed to them will fail until it is topped up.')
+    }
+    return { outcome: 'rejected', reason: result.reason, providerResponse: result.raw }
+  }
+
+  /**
+   * A WAEC/BECE checker from NetPulse: the serial and PIN come back in the
+   * same reply, so it is delivered on the spot. A retry first asks after the
+   * earlier attempt, so a lost reply never means buying the PIN twice.
+   */
+  private async dispatchNetpulseChecker(order: Order, supplier: SupplierProduct, attempt: number): Promise<DispatchResult> {
+    if (attempt > 1) {
+      const earlier = await this.netpulse.checkerByReference(netpulseReference(order.reference, attempt - 1))
+      if (earlier.kind === 'approved') {
+        return {
+          outcome: 'delivered',
+          voucher: { serial: earlier.serial, pin: earlier.pin },
+          providerReference: earlier.providerReference,
+          providerStatus: 'completed',
+          providerCharged: earlier.charged ?? undefined,
+          providerResponse: earlier.raw,
+        }
+      }
+      if (earlier.kind === 'unknown') {
+        return { outcome: 'unknown', reason: `Could not confirm the earlier attempt yet: ${earlier.reason}`, providerResponse: earlier.raw }
+      }
+    }
+
+    const result = await this.netpulse.buyChecker({
+      type: supplier.networkKey as string,
+      reference: netpulseReference(order.reference, attempt),
+    })
+    if (result.kind === 'approved') {
+      if (result.balanceAfter !== null) await this.float.record('netpulse', result.balanceAfter, order.reference)
+      return {
+        outcome: 'delivered',
+        voucher: { serial: result.serial, pin: result.pin },
+        providerReference: result.providerReference,
+        providerStatus: 'completed',
+        providerCharged: result.charged ?? undefined,
+        providerResponse: result.raw,
+      }
+    }
+    if (result.kind === 'unknown') {
+      this.log.error(`UNRESOLVED NetPulse checker for ${order.reference}: ${result.reason}`)
+      return { outcome: 'unknown', reason: result.reason, providerResponse: result.raw }
+    }
     if (result.insufficientBalance) {
       this.log.error('NetPulse wallet is empty, every order routed to them will fail until it is topped up.')
     }

@@ -166,7 +166,7 @@ export class CatalogueImportService implements OnApplicationBootstrap, OnModuleD
           // Suppliers do not tell us about expiry, so neither do we. The seed
           // used to print "Non-expiry" on every bundle, which was a promise to
           // the customer that nobody had verified.
-          validity: '',
+          validity: sku.validity ?? '',
           costPrice: sku.costPrice,
           networkKey: sku.networkKey,
           capacityGb: sku.capacityGb,
@@ -174,6 +174,7 @@ export class CatalogueImportService implements OnApplicationBootstrap, OnModuleD
         },
         update: {
           name: sku.name,
+          validity: sku.validity ?? '',
           costPrice: sku.costPrice,
           networkKey: sku.networkKey,
           capacityGb: sku.capacityGb,
@@ -279,7 +280,7 @@ export class CatalogueImportService implements OnApplicationBootstrap, OnModuleD
           category: sku.category,
           network: sku.network,
           name: sku.name,
-          validity: '',
+          validity: sku.validity ?? '',
           supplierCode: sku.code,
           supplierCost: sku.costPrice,
           adminPrice: sku.costPrice,
@@ -306,7 +307,7 @@ export class CatalogueImportService implements OnApplicationBootstrap, OnModuleD
         // creation, so the catalogue cannot drift into making claims for them
         // that they never made.
         name: sku.name,
-        validity: '',
+        validity: sku.validity ?? '',
         supplierCost: sku.costPrice,
         adminPrice: priceFromMarkup(sku.costPrice, product.agentMarkupBp),
         standardPrice: priceFromMarkup(sku.costPrice, product.walkupMarkupBp),
