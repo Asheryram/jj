@@ -845,7 +845,15 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       }
     }
     this.lastProviderCheckAt.set(order.id, Date.now())
-    const settled = await this.checkWithProvider({ ...order, providerReference: reference })
+    // The supplier it is on now: `order` was read before the save, so for a
+    // re-send on the other supplier it still names the old one, and asking
+    // that one about the new reference only timed out. JDC-825162680 saved
+    // with DataHub saying SUCCESSFUL, then sat "processing" for a sweep.
+    const settled = await this.checkWithProvider({
+      ...order,
+      providerReference: reference,
+      supplierCodeAtSale: moveTo?.code ?? order.supplierCodeAtSale,
+    })
     if (settled) this.lastProviderCheckAt.delete(order.id)
     return {
       settled,
