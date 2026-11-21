@@ -166,6 +166,16 @@ export class SupplierService implements OnModuleInit {
     return this.hasCredentialsFor(provider) && this.config.get<string>(this.liveEnvKeyFor(provider))?.trim() === 'true'
   }
 
+  /**
+   * Whether an order for this supplier would actually go anywhere: sent for
+   * real, or simulated outside production. In production a supplier that is
+   * not live gets nothing sent (see `dispatch`), so taking money for it
+   * would only park the order.
+   */
+  wouldFulfil(provider: string): boolean {
+    return this.isLiveFor(provider) || this.config.get<string>('NODE_ENV') !== 'production'
+  }
+
   /** What `/api/health` reports, so the state is never ambiguous to a tester. */
   providerStateFor(provider: string): 'live' | 'simulated' | 'simulated-live-off' | 'live-requested-no-key' {
     if (this.isLiveFor(provider)) return 'live'

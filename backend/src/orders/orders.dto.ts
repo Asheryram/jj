@@ -49,6 +49,16 @@ export class PlaceOrderDto {
   @MinLength(8)
   @MaxLength(64)
   idempotencyKey?: string
+
+  /**
+   * Admin only: buy this bundle even though customers cannot, because it is
+   * off sale or its supplier is not the one its network is routed to. For
+   * trying a supplier before customers see it, or buying from one supplier
+   * while customers are sold another's. A normal sale in every other way.
+   */
+  @IsOptional()
+  @IsBoolean()
+  anySupplier?: boolean
 }
 
 export class TrackOrderDto {
