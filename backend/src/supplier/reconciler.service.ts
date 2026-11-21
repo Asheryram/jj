@@ -11,6 +11,7 @@ import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
 import { appUrl } from '../common/app-links'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
+import { sizeGb } from '../analytics/decisions'
 
 /**
  * Closes orders that DataHub GH accepted but never reported back on.
@@ -694,7 +695,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
    */
   async attachProviderReference(
     orderId: string,
-    input: { reference: string; reorderedByHand: boolean; note?: string },
+    input: { reference: string; reorderedByHand: boolean; provider?: SupplierProviderCode; note?: string },
     user: { id: string; role: string },
   ): Promise<{ settled: boolean; checked: boolean; corrected: boolean; providerStatus: string | null; message: string }> {
     const reference = input.reference.trim()
@@ -734,8 +735,23 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       throw new ConflictError('REFERENCE_IN_USE', `That reference already belongs to order ${taken.reference}.`)
     }
 
-    // Checked with the partner before anything is written.
-    const provider = await this.resolveProvider(order.supplierCodeAtSale)
+    // Checked with the partner before anything is written: the one the order
+    // was sold through, unless it was ordered again by hand somewhere else.
+    const soldThrough = await this.resolveProvider(order.supplierCodeAtSale)
+    let provider = soldThrough
+    let moveTo: { code: string; costPrice: number; name: string } | null = null
+    if (input.provider && input.provider !== soldThrough) {
+      if (!input.reorderedByHand) {
+        throw new ValidationError(
+          'A reference from a different supplier only fits if you ordered it again there. Choose "I ordered it again".',
+        )
+      }
+      if (!open) {
+        throw new ConflictError('ALREADY_SETTLED', `That order is already ${order.status}; it cannot move supplier now.`)
+      }
+      moveTo = await this.matchingBundleOn(input.provider, order.supplierCodeAtSale)
+      provider = input.provider
+    }
     const live = this.supplier.isLiveFor(provider)
     const label = provider === 'gmpl' ? 'GMPL' : 'DataHub'
     let providerStatus: string | null = null
@@ -759,23 +775,33 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
 
     const note = input.note?.trim()
     const corrected = Boolean(order.providerReference)
-    const what = corrected ? `Corrected from ${order.providerReference} to ${reference}` : `Reference ${reference} added by hand`
+    const moved = moveTo ? ` on ${label}, moved from ${soldThrough === 'gmpl' ? 'GMPL' : 'DataHub'} to ${moveTo.name}` : ''
+    const what =
+      (corrected ? `Corrected from ${order.providerReference} to ${reference}` : `Reference ${reference} added by hand`) + moved
     const mark = `${HAND_REFERENCE_MARK} ${what}${note ? `: ${note}` : ''}`
     await this.prisma.$transaction(async (tx) => {
       if (handAdded && latest) {
         // Correcting the reference typed in before: the same attempt, fixed.
         await tx.supplierDispatch.update({
           where: { id: latest.id },
-          data: { providerReference: reference, providerStatus, reason: [latest.reason, mark].filter(Boolean).join('. ') },
+          data: {
+            providerReference: reference,
+            providerStatus,
+            reason: [latest.reason, mark].filter(Boolean).join('. '),
+            ...(moveTo ? { supplierCode: moveTo.code, costPrice: moveTo.costPrice } : {}),
+          },
         })
       } else if (input.reorderedByHand && latest) {
         await tx.supplierDispatch.create({
           data: {
             orderId: order.id,
             orderRef: order.reference,
-            supplierCode: latest.supplierCode,
+            // The bundle it was actually re-sent as: settlement books the
+            // cost against this attempt's supplier, so a DataHub re-send of
+            // a GMPL order is charged to the DataHub float, not GMPL's.
+            supplierCode: moveTo?.code ?? latest.supplierCode,
             recipient: latest.recipient,
-            costPrice: latest.costPrice,
+            costPrice: moveTo?.costPrice ?? latest.costPrice,
             outcome: 'pending',
             reason: `Ordered again by hand on the delivery partner's dashboard. ${mark}`,
             simulated: false,
@@ -792,7 +818,13 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       }
       await tx.order.update({
         where: { id: order.id },
-        data: { providerReference: reference, ...(order.status === 'pending' ? { status: 'processing' } : {}) },
+        data: {
+          providerReference: reference,
+          ...(order.status === 'pending' ? { status: 'processing' } : {}),
+          // Every later status check asks the order's own supplier, the same
+          // as `FulfilmentService.reorder` moving an order to another bundle.
+          ...(moveTo ? { supplierCodeAtSale: moveTo.code } : {}),
+        },
       })
     })
     this.log.warn(`${order.reference}: ${mark} by ${user.id}`)
@@ -821,6 +853,32 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
         ? `Saved. ${label} says ${providerStatus}, so the order is settled.`
         : `Saved. ${label} says ${providerStatus}; it is checked again automatically every ten minutes.`,
     }
+  }
+
+  /**
+   * The same bundle on another supplier: same network, category and size,
+   * in stock, cheapest first. Used when an admin re-sent an order by hand
+   * from a different supplier's dashboard than the one it was sold through.
+   */
+  private async matchingBundleOn(
+    provider: SupplierProviderCode,
+    currentCode: string | null,
+  ): Promise<{ code: string; costPrice: number; name: string }> {
+    const label = provider === 'gmpl' ? 'GMPL' : 'DataHub'
+    const current = currentCode ? await this.prisma.supplierProduct.findUnique({ where: { code: currentCode } }) : null
+    const size = current ? (current.capacityGb ? Number(current.capacityGb) : sizeGb(current.name)) : null
+    if (!current || size === null) {
+      throw new ValidationError(`We could not tell which ${label} bundle matches this order. Fail it and use Reorder instead.`)
+    }
+    const candidates = await this.prisma.supplierProduct.findMany({
+      where: { provider, network: current.network, category: current.category, available: true },
+      orderBy: { costPrice: 'asc' },
+    })
+    const match = candidates.find((c) => (c.capacityGb ? Number(c.capacityGb) : sizeGb(c.name)) === size)
+    if (!match) {
+      throw new ValidationError(`${label} has no ${current.network ?? ''} ${size}GB bundle in stock to match this order.`)
+    }
+    return { code: match.code, costPrice: match.costPrice, name: `${label} ${match.name}` }
   }
 
   private async platformName(): Promise<string> {
