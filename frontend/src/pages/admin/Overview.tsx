@@ -38,6 +38,7 @@ import {
   TrendUpIcon,
   UsersIcon,
 } from '../../components/icons'
+import { SUPPLIER_CODES, SUPPLIERS, type SupplierCode } from '../../lib/suppliers'
 
 /**
  * FR-6.3, the admin's home screen, in the order it is used:
@@ -206,10 +207,7 @@ function ActNowCard({ refreshKey }: { refreshKey: number }) {
 
 // ── 2. Money ────────────────────────────────────────────────────────────────
 
-const PROVIDERS: { code: 'datahub-gh' | 'gmpl'; name: string }[] = [
-  { code: 'datahub-gh', name: 'DataHub GH' },
-  { code: 'gmpl', name: 'GMPL' },
-]
+const PROVIDERS: { code: SupplierCode; name: string }[] = SUPPLIERS.map((s) => ({ code: s.code, name: s.fullLabel }))
 
 const LEVEL = {
   ok: { label: 'OK', tone: 'success' },
@@ -238,19 +236,21 @@ function MoneyCard({ refreshKey }: { refreshKey: number }) {
 
   useEffect(() => {
     let live = true
-    Promise.allSettled([
-      api.treasury(),
-      api.supplierFloat('datahub-gh'),
-      api.supplierFloat('gmpl'),
-      api.financeStatement(7),
-    ]).then(([money, datahub, gmpl, week]) => {
+    Promise.all([
+      Promise.allSettled([api.treasury(), api.financeStatement(7)]),
+      Promise.allSettled(SUPPLIER_CODES.map((code) => api.supplierFloat(code))),
+    ]).then(([[money, week], perSupplier]) => {
       if (!live) return
       setTreasury(money.status === 'fulfilled' ? money.value : null)
       setFailed(money.status === 'rejected')
-      setFloats({
-        'datahub-gh': datahub.status === 'fulfilled' ? datahub.value : null,
-        gmpl: gmpl.status === 'fulfilled' ? gmpl.value : null,
-      })
+      setFloats(
+        Object.fromEntries(
+          SUPPLIER_CODES.map((code, i) => {
+            const result = perSupplier[i]
+            return [code, result.status === 'fulfilled' ? result.value : null]
+          }),
+        ),
+      )
       setWeekBundleSpend(week.status === 'fulfilled' ? Math.abs(week.value.costs.supplier) : null)
     })
     return () => {
@@ -857,8 +857,8 @@ function GettingStartedCard() {
     let live = true
     // Done the moment EITHER provider's float has capital tracked: a shop
     // routing everything through GMPL has just as real a way to satisfy it.
-    Promise.all([api.supplierFloat('datahub-gh'), api.supplierFloat('gmpl')])
-      .then(([datahub, gmpl]) => live && setFloatLogged(datahub.capital.since !== null || gmpl.capital.since !== null))
+    Promise.all(SUPPLIER_CODES.map((code) => api.supplierFloat(code)))
+      .then((floats) => live && setFloatLogged(floats.some((f) => f.capital.since !== null)))
       .catch(() => undefined)
     return () => {
       live = false

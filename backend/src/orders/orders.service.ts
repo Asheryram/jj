@@ -12,6 +12,7 @@ import { DatahubClient } from '../supplier/datahub.client'
 import { GmplClient, gmplSendOutcome, toGmplNetwork } from '../supplier/gmpl.client'
 import { datahubNetworkKeyFor } from './approvals.service'
 import type { SupplierProviderCode } from '../settings/settings.service'
+import { asProvider, isApprovalProvider, PROVIDERS, type ApprovalProvider } from '../supplier/providers'
 import { ReconcilerService } from '../supplier/reconciler.service'
 import { LedgerService } from '../finance/ledger.service'
 import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
@@ -312,7 +313,10 @@ export class OrdersService {
       where: { id: productId },
       select: { name: true, standardPrice: true, network: true, supplier: { select: { networkKey: true, provider: true } } },
     })
-    const provider: SupplierProviderCode = (product?.supplier?.provider as SupplierProviderCode | undefined) ?? 'datahub-gh'
+    const supplierCode = asProvider(product?.supplier?.provider)
+    // Only suppliers with an approved-numbers list ever decline for this.
+    if (!isApprovalProvider(supplierCode)) return
+    const provider: ApprovalProvider = supplierCode
     const network: Network = product?.network ?? 'MTN'
     const networkKey = provider === 'gmpl' ? toGmplNetwork(network) : (product?.supplier?.networkKey ?? 'YELLO')
     const outcome = provider === 'gmpl' ? gmplOutcome : undefined
@@ -345,7 +349,7 @@ export class OrdersService {
       },
     })
 
-    this.log.warn(`${recipient} needs ${provider === 'gmpl' ? 'GMPL' : 'DataHub'} approval, sale refused`)
+    this.log.warn(`${recipient} needs ${PROVIDERS[provider].label} approval, sale refused`)
 
     /**
      * Reach the other provider immediately, not only whenever an admin next
@@ -382,12 +386,14 @@ export class OrdersService {
    * must never be reset by a sale it was never asked about.
    */
   private async registerWithOtherProvider(
-    provider: SupplierProviderCode,
+    provider: ApprovalProvider,
     network: Network,
     recipient: string,
   ): Promise<void> {
     if (network === 'AirtelTigo') return
-    const other: SupplierProviderCode = provider === 'gmpl' ? 'datahub-gh' : 'gmpl'
+    // The other supplier with an approval list. Suppliers without one never
+    // refuse a number, so there is nothing to register with them.
+    const other: ApprovalProvider = provider === 'gmpl' ? 'datahub-gh' : 'gmpl'
 
     const existing = await this.prisma.beneficiaryRequest.findUnique({
       where: { phone_provider: { phone: recipient, provider: other } },
@@ -519,7 +525,7 @@ export class OrdersService {
     // unmapped product (no supplier row at all) is still refused here exactly
     // as before, not silently let through because there is no `.provider` to
     // check liveness against.
-    const effectiveProvider = supplierRow?.provider ?? 'datahub-gh'
+    const effectiveProvider = asProvider(supplierRow?.provider)
 
     if (this.supplier.isLiveFor(effectiveProvider)) {
       if (!supplierRow || !hasAutomatedFulfilment(supplierRow)) {
@@ -1037,8 +1043,7 @@ export class OrdersService {
           })
         : []
     const providerByCode = new Map(supplierRows.map((s) => [s.code, s.provider as SupplierProviderCode]))
-    const providerFor = (code: string | null): SupplierProviderCode =>
-      code ? (providerByCode.get(code) ?? 'datahub-gh') : 'datahub-gh'
+    const providerFor = (code: string | null): SupplierProviderCode => asProvider(code ? providerByCode.get(code) : null)
 
     return rows.map((row) => ({
       ...toOrder(row),
@@ -1236,7 +1241,12 @@ export class OrdersService {
       return { checked: false, verified: true, message: '' }
     }
 
-    if (supplier.provider === 'gmpl') {
+    const provider = asProvider(supplier.provider)
+    // A supplier with no approved-numbers list never refuses one, so there is
+    // nothing to ask before taking the money.
+    if (!isApprovalProvider(provider)) return { checked: false, verified: true, message: '' }
+
+    if (provider === 'gmpl') {
       // Their MTN Up2U precheck, the same role DataHub's /verify plays
       // below, but a different provider with a different check. TELECEL
       // never blocks, so nothing here is worth asking about.

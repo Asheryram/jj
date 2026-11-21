@@ -4,6 +4,7 @@ import { api, ApiError, type ReservePosition } from '../../lib/api'
 import { cedis } from '../../lib/format'
 import { Button, Callout, Card, CardHead, Spinner, cn } from '../../components/ui'
 import { AlertIcon, CashIcon, CheckIcon, RefreshIcon } from '../../components/icons'
+import { SUPPLIER_CODES, supplierName, type SupplierCode } from '../../lib/suppliers'
 
 /**
  * What is owed, against what our own records say should be sitting at
@@ -76,7 +77,7 @@ export default function ReservePanel() {
   }
 
   const { expectedAtPaystack, freeToSpend, spentOnBundles, spentOnBundlesByProvider, liabilities, floats } = position
-  const providerLabel = (provider: 'datahub-gh' | 'gmpl') => (provider === 'gmpl' ? 'GMPL' : 'DataHub GH')
+  const providerLabel = (provider: SupplierCode) => supplierName(provider, true)
 
   return (
     <Card className="mt-3">
@@ -180,7 +181,7 @@ export default function ReservePanel() {
                 −{cedis(spentOnBundles)}
               </p>
             </div>
-            {(['datahub-gh', 'gmpl'] as const).map(
+            {SUPPLIER_CODES.map(
               (provider) =>
                 spentOnBundlesByProvider[provider] > 0 && (
                   <p key={provider} className="mt-1.5 flex justify-between text-xs text-slate-500 dark:text-slate-400">

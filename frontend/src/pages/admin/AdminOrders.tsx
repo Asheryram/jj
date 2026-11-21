@@ -29,6 +29,7 @@ import {
   Th,
 } from '../../components/ui'
 import { AlertIcon, DownloadIcon, ReceiptIcon, SearchIcon } from '../../components/icons'
+import { SUPPLIER_CODES, supplierName } from '../../lib/suppliers'
 
 type Filter = 'all' | OrderStatus | 'unresolved'
 const STATUS_VALUES: OrderStatus[] = ['pending', 'processing', 'completed', 'failed']
@@ -178,8 +179,8 @@ export default function AdminOrders() {
   const [profitAtFloat, setProfitAtFloat] = useState<number | null>(null)
   useEffect(() => {
     let live = true
-    Promise.all([api.supplierFloat('datahub-gh'), api.supplierFloat('gmpl')])
-      .then(([datahub, gmpl]) => live && setProfitAtFloat(datahub.capital.overReimbursed + gmpl.capital.overReimbursed))
+    Promise.all(SUPPLIER_CODES.map((code) => api.supplierFloat(code)))
+      .then((floats) => live && setProfitAtFloat(floats.reduce((sum, f) => sum + f.capital.overReimbursed, 0)))
       .catch(() => undefined)
     return () => {
       live = false
@@ -340,7 +341,7 @@ export default function AdminOrders() {
         o.buyer,
         o.productName,
         o.network ?? 'All',
-        o.provider === 'gmpl' ? 'GMPL' : 'DataHub',
+        supplierName(o.provider),
         o.recipient,
         (o.salePrice / 100).toFixed(2),
         o.paystackFee == null ? '' : (o.paystackFee / 100).toFixed(2),
@@ -1021,7 +1022,7 @@ function OrderStatusDetails({ order, onWhy, onReverse }: { order: Order; onWhy: 
           // automated path, or simply any GMPL order at all, GMPL has no
           // manual queue of its own, so every one of its references lands
           // here (see `fulfilmentReference`'s own comment).
-          title={`${order.provider === 'gmpl' ? 'GMPL' : "DataHub's automated system"} handled this one, a plain reference, not routed to a person.`}
+          title={`${order.provider && order.provider !== 'datahub-gh' ? supplierName(order.provider) : "DataHub's automated system"} handled this one, a plain reference, not routed to a person.`}
         >
           <Badge tone="neutral">Code</Badge>
         </span>

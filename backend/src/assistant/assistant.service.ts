@@ -19,6 +19,7 @@ import { WithdrawalsService } from '../withdrawals/withdrawals.service'
 import { LedgerService } from '../finance/ledger.service'
 import { SettingsService } from '../settings/settings.service'
 import { OrdersService } from '../orders/orders.service'
+import { KNOWN_PROVIDERS } from '../supplier/providers'
 
 /**
  * Free-tier friendly, and deliberately so: this answers plain questions about
@@ -515,7 +516,7 @@ export class AssistantService {
   private async runAdminTool(name: string): Promise<unknown> {
     switch (name) {
       case 'get_float_status': {
-        const providers = ['datahub-gh', 'gmpl'] as const
+        const providers = KNOWN_PROVIDERS
         const perProvider = await Promise.all(
           providers.map(async (provider) => {
             const [expected, observed] = await Promise.all([

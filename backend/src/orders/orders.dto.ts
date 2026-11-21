@@ -7,6 +7,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator'
+import { KNOWN_PROVIDERS, type SupplierProviderCode } from '../supplier/providers'
 
 const GH_PHONE = /^0\d{9}$/
 
@@ -87,8 +88,8 @@ export class ProviderReferenceDto {
    * the right float. Only with `reorderedByHand`. Omit for the same supplier.
    */
   @IsOptional()
-  @IsIn(['datahub-gh', 'gmpl'])
-  provider?: 'datahub-gh' | 'gmpl'
+  @IsIn([...KNOWN_PROVIDERS])
+  provider?: SupplierProviderCode
 
   @IsOptional()
   @IsString()

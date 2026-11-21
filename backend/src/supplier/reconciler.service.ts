@@ -5,8 +5,9 @@ import { FulfilmentService } from '../orders/fulfilment.service'
 import { PaymentsService } from '../payments/payments.service'
 import { SupplierService, resolveSupplierProvider } from './supplier.service'
 import type { SupplierProviderCode } from '../settings/settings.service'
-import { DatahubClient, mapProviderStatus } from './datahub.client'
-import { checkerPaymentReference, GmplClient, mapGmplOrderStatus } from './gmpl.client'
+import { DatahubClient } from './datahub.client'
+import { checkerPaymentReference, GmplClient } from './gmpl.client'
+import { asProvider, KNOWN_PROVIDERS, PROVIDERS } from './providers'
 import { MailerService } from '../mail/mailer.service'
 import { escape, wrap } from '../mail/templates'
 import { appUrl } from '../common/app-links'
@@ -355,7 +356,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
 
     // Neither provider live means nothing real to ask either of them, same
     // early return as before, just no longer gated on DataHub alone.
-    if (!this.supplier.isLiveFor('datahub-gh') && !this.supplier.isLiveFor('gmpl')) {
+    if (!KNOWN_PROVIDERS.some((p) => this.supplier.isLiveFor(p))) {
       return { checked: 0, settled }
     }
     if (this.supplier.isLiveFor('gmpl')) settled += await this.resolveUnknownCheckers()
@@ -468,17 +469,14 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     supplierCodeAtSale: string | null
   }): Promise<{ providerStatus: string | null; conflict: boolean; changed?: boolean; message: string }> {
     const provider = await this.resolveProvider(order.supplierCodeAtSale)
-    const label = provider === 'gmpl' ? 'GMPL' : 'DataHub'
+    const label = PROVIDERS[provider].label
     if (!order.providerReference) {
       return { providerStatus: null, conflict: false, message: `This order never got a ${label} reference, so there is nothing to ask about.` }
     }
     if (!this.supplier.isLiveFor(provider)) {
       return { providerStatus: null, conflict: false, message: 'The supplier integration is simulated right now, there is nothing real to check.' }
     }
-    const result =
-      provider === 'gmpl'
-        ? await this.gmpl.orderStatus(order.providerReference)
-        : await this.datahub.orderStatus(order.providerReference)
+    const result = await this.supplier.orderStatus(provider, order.providerReference)
     if (result.kind === 'unavailable') {
       return { providerStatus: null, conflict: false, message: `${label} did not answer (${result.reason}). Try again in a minute.` }
     }
@@ -489,7 +487,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       where: { orderId: order.id, providerReference: order.providerReference },
       data: { providerStatus: result.providerStatus },
     })
-    const mapped = provider === 'gmpl' ? mapGmplOrderStatus(result.providerStatus) : mapProviderStatus(result.providerStatus)
+    const mapped = PROVIDERS[provider].mapStatus(result.providerStatus)
     if (mapped === null) {
       return { providerStatus: result.providerStatus, conflict: false, message: `${label} says ${result.providerStatus}, not a final answer yet.` }
     }
@@ -541,11 +539,8 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     supplierCodeAtSale: string | null
   }): Promise<boolean> {
     const provider = await this.resolveProvider(order.supplierCodeAtSale)
-    const providerLabel = provider === 'gmpl' ? 'GMPL' : 'DataHub'
-    const result =
-      provider === 'gmpl'
-        ? await this.gmpl.orderStatus(order.providerReference as string)
-        : await this.datahub.orderStatus(order.providerReference as string)
+    const providerLabel = PROVIDERS[provider].label
+    const result = await this.supplier.orderStatus(provider, order.providerReference as string)
 
     if (result.kind === 'unavailable') {
       this.log.warn(`could not check ${order.reference}: ${result.reason}`)
@@ -568,7 +563,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       data: { providerStatus: result.providerStatus },
     })
 
-    const mapped = provider === 'gmpl' ? mapGmplOrderStatus(result.providerStatus) : mapProviderStatus(result.providerStatus)
+    const mapped = PROVIDERS[provider].mapStatus(result.providerStatus)
     if (mapped === null) {
       // Same reasoning as the payment-side checks above: logged every time,
       // not just once resolved, so there's an actual trail of what the
@@ -756,10 +751,10 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       provider = input.provider
     }
     const live = this.supplier.isLiveFor(provider)
-    const label = provider === 'gmpl' ? 'GMPL' : 'DataHub'
+    const label = PROVIDERS[provider].label
     let providerStatus: string | null = null
     if (live) {
-      const result = provider === 'gmpl' ? await this.gmpl.orderStatus(reference) : await this.datahub.orderStatus(reference)
+      const result = await this.supplier.orderStatus(provider, reference)
       if (result.kind === 'not_found') {
         throw new ValidationError(`${label} does not recognise ${reference}. Check it on their dashboard and try again.`)
       }
@@ -778,7 +773,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
 
     const note = input.note?.trim()
     const corrected = Boolean(order.providerReference)
-    const moved = moveTo ? ` on ${label}, moved from ${soldThrough === 'gmpl' ? 'GMPL' : 'DataHub'} to ${moveTo.name}` : ''
+    const moved = moveTo ? ` on ${label}, moved from ${PROVIDERS[soldThrough].label} to ${moveTo.name}` : ''
     const what =
       (corrected ? `Corrected from ${order.providerReference} to ${reference}` : `Reference ${reference} added by hand`) + moved
     const mark = `${HAND_REFERENCE_MARK} ${what}${note ? `: ${note}` : ''}`
@@ -875,7 +870,7 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     provider: SupplierProviderCode,
     currentCode: string | null,
   ): Promise<{ code: string; costPrice: number; name: string }> {
-    const label = provider === 'gmpl' ? 'GMPL' : 'DataHub'
+    const label = PROVIDERS[provider].label
     const current = currentCode ? await this.prisma.supplierProduct.findUnique({ where: { code: currentCode } }) : null
     const size = current ? (current.capacityGb ? Number(current.capacityGb) : sizeGb(current.name)) : null
     if (!current || size === null) {
@@ -1045,11 +1040,11 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
         ? await this.prisma.supplierProduct.findMany({ where: { code: { in: codes } }, select: { code: true, provider: true } })
         : []
     const providerByCode = new Map(suppliers.map((s) => [s.code, s.provider as SupplierProviderCode]))
-    const providerFor = (code: string | null): SupplierProviderCode => (code ? (providerByCode.get(code) ?? 'datahub-gh') : 'datahub-gh')
+    const providerFor = (code: string | null): SupplierProviderCode => asProvider(code ? providerByCode.get(code) : null)
 
     return rows.map((r) => {
       const provider = providerFor(r.supplierCodeAtSale)
-      const providerLabel = provider === 'gmpl' ? 'GMPL' : 'DataHub'
+      const providerLabel = PROVIDERS[provider].label
       return {
         id: r.id,
         reference: r.reference,

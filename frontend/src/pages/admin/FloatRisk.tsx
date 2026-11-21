@@ -16,6 +16,7 @@ import {
   Th,
 } from '../../components/ui'
 import { CheckIcon } from '../../components/icons'
+import { supplierName } from '../../lib/suppliers'
 
 /**
  * Two related questions, one page: which products on sale right now cost more
@@ -47,7 +48,7 @@ export default function FloatRisk() {
 
   useEffect(load, [])
 
-  const providerLabel = (provider: string | null | undefined) => (provider === 'gmpl' ? 'GMPL' : 'DataHub GH')
+  const providerLabel = (provider: string | null | undefined) => supplierName(provider, true)
   const floatFor = (provider: string | null | undefined) =>
     data?.floats.find((f) => f.provider === (provider ?? 'datahub-gh'))?.floatReference ?? null
 

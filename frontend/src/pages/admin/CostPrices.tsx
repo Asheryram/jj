@@ -27,6 +27,7 @@ import { AlertIcon, ChevronDownIcon, TagIcon, TrendUpIcon } from '../../componen
 import { NetworkProviderRouting } from '../../components/NetworkProviderRouting'
 import { api, ApiError } from '../../lib/api'
 import { formatMarkup, priceFromMarkup } from '../../lib/pricing'
+import { SUPPLIERS, type SupplierCode, supplierName } from '../../lib/suppliers'
 
 type Tier = 'supplierCost' | 'adminPrice' | 'standardPrice'
 
@@ -68,8 +69,8 @@ function accuracyKey(name: string, network: string | null): string {
  * `warning`) so the two never read as the same kind of signal.
  */
 function ProviderBadge({ provider }: { provider?: string | null }) {
-  const isGmpl = provider === 'gmpl'
-  return <Badge tone={isGmpl ? 'brand' : 'info'}>{isGmpl ? 'GMPL' : 'DataHub'}</Badge>
+  const isDatahub = (provider ?? 'datahub-gh') === 'datahub-gh'
+  return <Badge tone={isDatahub ? 'info' : 'brand'}>{supplierName(provider)}</Badge>
 }
 
 const TIER_LABELS: Record<Tier, { label: string; help: string }> = {
@@ -111,7 +112,7 @@ export default function CostPrices() {
    * too), and picking just one out of a mixed list is exactly what this is
    * for.
    */
-  const [providerFilter, setProviderFilter] = useState<'all' | 'datahub-gh' | 'gmpl'>('all')
+  const [providerFilter, setProviderFilter] = useState<'all' | SupplierCode>('all')
 
   /** For the routing panel's own "GMPL is simulated" callout, see Settings.tsx's identical fetch. */
   const [gmplState, setGmplState] = useState<string | undefined>(undefined)
@@ -445,11 +446,10 @@ export default function CostPrices() {
 
       {category === 'data' && (
         <div className="mt-3 -mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
-          <Segmented<'all' | 'datahub-gh' | 'gmpl'>
+          <Segmented<'all' | SupplierCode>
             options={[
               { value: 'all', label: 'All providers' },
-              { value: 'datahub-gh', label: 'DataHub GH' },
-              { value: 'gmpl', label: 'GMPL' },
+              ...SUPPLIERS.map((s) => ({ value: s.code, label: s.fullLabel })),
             ]}
             value={providerFilter}
             onChange={setProviderFilter}

@@ -2,11 +2,12 @@ import { Injectable, Logger } from '@nestjs/common'
 import type { Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { ValidationError } from '../common/domain-errors'
+import { isProvider, KNOWN_PROVIDERS, routingRefusal, type SupplierProviderCode } from '../supplier/providers'
 
 type Db = PrismaService | Prisma.TransactionClient
 
-/** The two suppliers this platform can fulfil an order against. */
-export type SupplierProviderCode = 'datahub-gh' | 'gmpl'
+/** Defined with the rest of each supplier's description, see `supplier/providers.ts`. */
+export { KNOWN_PROVIDERS, type SupplierProviderCode }
 
 /**
  * Which provider fulfils a given network+category, keyed `"<Network>:<Category>"`.
@@ -18,8 +19,6 @@ export type NetworkProviderRouting = Record<string, SupplierProviderCode>
 
 const KNOWN_NETWORKS = ['MTN', 'Telecel', 'AirtelTigo'] as const
 const KNOWN_CATEGORIES = ['data', 'airtime', 'voice', 'sms', 'afa', 'checker'] as const
-/** Every supplier this platform can fulfil an order against. Exported so anything that needs to treat "every known provider" generically (a catalogue-wide query, a purge script) never has to hardcode just one. */
-export const KNOWN_PROVIDERS: readonly SupplierProviderCode[] = ['datahub-gh', 'gmpl']
 
 /**
  * Runtime platform switches, one row per key so a new flag needs no migration.
@@ -292,16 +291,12 @@ export class SettingsService {
         ) {
           throw new ValidationError(`"${pair}" is not a network:category pair we recognise.`)
         }
-        if (!KNOWN_PROVIDERS.includes(provider as SupplierProviderCode)) {
+        if (!isProvider(provider)) {
           throw new ValidationError(`"${provider}" is not a supplier we know about.`)
         }
-        if (provider === 'gmpl' && network === 'AirtelTigo') {
-          throw new ValidationError("GMPL doesn't sell AirtelTigo, route it to DataHub GH instead.")
-        }
-        if (provider === 'gmpl' && category !== 'data') {
-          throw new ValidationError('GMPL only sells data bundles, route other categories to DataHub GH.')
-        }
-        clean[pair] = provider as SupplierProviderCode
+        const refusal = routingRefusal(provider, network, category)
+        if (refusal) throw new ValidationError(refusal)
+        clean[pair] = provider
       }
 
       await this.prisma.setting.upsert({
@@ -478,7 +473,7 @@ function routing(value: unknown, fallback: NetworkProviderRouting): NetworkProvi
     ) {
       continue
     }
-    if (provider === 'datahub-gh' || provider === 'gmpl') clean[pair] = provider
+    if (isProvider(provider)) clean[pair] = provider
   }
   return clean
 }

@@ -8,11 +8,12 @@ import { NotFoundError, ValidationError } from '../common/domain-errors'
 import { claimTransition } from '../common/alert-flag'
 import { escape, wrap } from '../mail/templates'
 import { bundleCostByProvider, capitalProviderFilter, refillsInTransit } from './provider-resolution'
-import { GmplClient } from './gmpl.client'
+import { GmplClient, type WalletBalanceOutcome } from './gmpl.client'
+import { asProvider, PROVIDERS } from './providers'
 
 /** "DataHub GH" / "GMPL", for email text and log lines. */
 export function providerLabel(provider: SupplierProviderCode): string {
-  return provider === 'gmpl' ? 'GMPL' : 'DataHub GH'
+  return PROVIDERS[provider].fullLabel
 }
 
 /**
@@ -340,9 +341,10 @@ export class FloatMonitorService {
    * `FloatObservation.orderRef`.
    */
   async refreshLive(provider: SupplierProviderCode): Promise<FloatObservation | null> {
-    if (provider !== 'gmpl') return this.latest(provider)
+    const read = this.balanceReaders[provider]
+    if (!read) return this.latest(provider)
 
-    const result = await this.gmpl.getWalletBalance()
+    const result = await read()
     if (result.kind !== 'ok') {
       this.log.warn(`could not check the ${providerLabel(provider)} float live: ${result.reason}`)
       return this.latest(provider)
@@ -352,8 +354,22 @@ export class FloatMonitorService {
     return this.latest(provider)
   }
 
-  /** When `noteOrderPlaced` last asked GMPL, see its throttle. */
-  private lastOrderBalanceCheckAt = 0
+  /**
+   * How to ask each supplier for its balance, or null for one with no balance
+   * endpoint (DataHub, whose balance arrives in every order reply instead).
+   * A `Record`, so a new supplier has to say which kind it is.
+   */
+  private get balanceReaders(): Record<SupplierProviderCode, (() => Promise<WalletBalanceOutcome>) | null> {
+    return { 'datahub-gh': null, gmpl: () => this.gmpl.getWalletBalance() }
+  }
+
+  /** Whether this supplier's balance can be asked for at any time. */
+  hasLiveBalance(provider: SupplierProviderCode): boolean {
+    return this.balanceReaders[provider] !== null
+  }
+
+  /** When `noteOrderPlaced` last asked each supplier, see its throttle. */
+  private readonly lastOrderBalanceCheckAt = new Map<SupplierProviderCode, number>()
 
   /**
    * Keep GMPL's live reading moving with its orders. DataHub reports its
@@ -368,12 +384,13 @@ export class FloatMonitorService {
    * reading in place, the same as a failed "Check live".
    */
   async noteOrderPlaced(provider: SupplierProviderCode, orderRef: string): Promise<void> {
-    if (provider !== 'gmpl') return
-    if (Date.now() - this.lastOrderBalanceCheckAt < 60_000) return
-    this.lastOrderBalanceCheckAt = Date.now()
-    const result = await this.gmpl.getWalletBalance()
+    const read = this.balanceReaders[provider]
+    if (!read) return
+    if (Date.now() - (this.lastOrderBalanceCheckAt.get(provider) ?? 0) < 60_000) return
+    this.lastOrderBalanceCheckAt.set(provider, Date.now())
+    const result = await read()
     if (result.kind !== 'ok') {
-      this.log.warn(`could not read the GMPL float after ${orderRef}: ${result.reason}`)
+      this.log.warn(`could not read the ${providerLabel(provider)} float after ${orderRef}: ${result.reason}`)
       return
     }
     await this.record(provider, result.balanceCedis, orderRef)
@@ -711,7 +728,7 @@ export class FloatMonitorService {
     if (original.kind !== 'capital_in' || original.orderRef || original.withdrawalId) {
       throw new ValidationError('Only a plain capital top-up can be reclassified this way.')
     }
-    const provider = (original.provider as SupplierProviderCode | null) ?? 'datahub-gh'
+    const provider = asProvider(original.provider)
 
     const cancelKey = LedgerService.key('correction', entryId, 'capital_out')
     const alreadyDone = await this.prisma.ledgerEntry.findUnique({ where: { idempotencyKey: cancelKey } })
@@ -772,7 +789,7 @@ export class FloatMonitorService {
     ) {
       throw new ValidationError('Only a plain top-up or reimbursement can be reversed this way.')
     }
-    const provider = (original.provider as SupplierProviderCode | null) ?? 'datahub-gh'
+    const provider = asProvider(original.provider)
 
     const cancelKey = LedgerService.key('correction', entryId, 'capital_out')
     const alreadyDone = await this.prisma.ledgerEntry.findUnique({ where: { idempotencyKey: cancelKey } })
@@ -1097,7 +1114,7 @@ export class FloatMonitorService {
              : ''
          }
          <p style="margin:0 0 8px;font-size:12.5px;line-height:1.6;color:#64748b">${
-           provider === 'gmpl'
+           this.hasLiveBalance(provider)
              ? escape(`${label} can be checked live any time from the float panel, this figure is whichever is more recent, a live check or your last order.`)
              : escape(`This figure comes from the reply to your most recent order, ${label} has no balance endpoint to ask directly, so it is only ever as current as your last sale.`)
          }</p>
@@ -1122,7 +1139,7 @@ export class FloatMonitorService {
               '',
             ]
           : []),
-        provider === 'gmpl'
+        this.hasLiveBalance(provider)
           ? `${label} can be checked live any time from the float panel, this figure is whichever is more recent, a live check or your last order.`
           : `This figure comes from the reply to your most recent order, ${label} has no balance endpoint to ask directly, so it is only ever as current as your last sale.`,
         '',

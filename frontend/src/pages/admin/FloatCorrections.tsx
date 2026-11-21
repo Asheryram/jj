@@ -4,6 +4,7 @@ import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
 import { Button, Callout, Card, CardHead, EmptyState, PageHead, Spinner, TextInput } from '../../components/ui'
 import { AlertIcon, SearchIcon } from '../../components/icons'
+import { SUPPLIER_CODES, supplierName, type SupplierCode } from '../../lib/suppliers'
 
 /**
  * Corrects a top-up James logged as plain personal capital when it was
@@ -25,9 +26,9 @@ import { AlertIcon, SearchIcon } from '../../components/icons'
  * profit" and "Free to withdraw now" show elsewhere, one step more
  * sensitive than logging a fresh one.
  */
-type Row = CapitalNeedingReview & { provider: 'datahub-gh' | 'gmpl' }
+type Row = CapitalNeedingReview & { provider: SupplierCode }
 
-const providerLabel = (provider: 'datahub-gh' | 'gmpl') => (provider === 'gmpl' ? 'GMPL' : 'DataHub GH')
+const providerLabel = (provider: SupplierCode) => supplierName(provider, true)
 
 export default function FloatCorrections() {
   const { pushToast } = useStore()
@@ -38,11 +39,12 @@ export default function FloatCorrections() {
 
   useEffect(() => {
     let live = true
-    Promise.all([
-      api.floatCapitalNeedingReview('datahub-gh').then((r) => r.map((row) => ({ ...row, provider: 'datahub-gh' as const }))),
-      api.floatCapitalNeedingReview('gmpl').then((r) => r.map((row) => ({ ...row, provider: 'gmpl' as const }))),
-    ])
-      .then(([datahub, gmpl]) => live && setRows([...datahub, ...gmpl]))
+    Promise.all(
+      SUPPLIER_CODES.map((provider) =>
+        api.floatCapitalNeedingReview(provider).then((r) => r.map((row): Row => ({ ...row, provider }))),
+      ),
+    )
+      .then((perSupplier) => live && setRows(perSupplier.flat()))
       .catch(
         (caught) =>
           live &&

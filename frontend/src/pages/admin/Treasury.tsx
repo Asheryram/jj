@@ -24,11 +24,9 @@ import {
   Th,
 } from '../../components/ui'
 import { AlertIcon } from '../../components/icons'
+import { SUPPLIERS, supplierName, type SupplierCode } from '../../lib/suppliers'
 
-const PROVIDERS = [
-  { value: 'datahub-gh', label: 'DataHub GH' },
-  { value: 'gmpl', label: 'GMPL' },
-] as const
+const PROVIDERS = SUPPLIERS.map((s) => ({ value: s.code, label: s.fullLabel }))
 
 const STATUS_TONE = {
   success: 'success',
@@ -225,7 +223,7 @@ export default function Treasury() {
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                 <div>
                   <p className="font-semibold tabular text-slate-900 dark:text-slate-50">
-                    {cedis(r.amount)} for {r.provider === 'gmpl' ? 'GMPL' : 'DataHub GH'}
+                    {cedis(r.amount)} for {supplierName(r.provider, true)}
                   </p>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     {r.reference} · to {r.destination.label} ({r.destination.phone})
@@ -328,7 +326,7 @@ export default function Treasury() {
                   </Td>
                   <Td>
                     {t.purpose === 'provider_refill'
-                      ? `Refill ${t.provider === 'gmpl' ? 'GMPL' : 'DataHub GH'}`
+                      ? `Refill ${supplierName(t.provider, true)}`
                       : t.purpose === 'advance_repayment'
                         ? 'Repaid hand-paid refunds'
                         : 'Taken out'}
@@ -546,7 +544,7 @@ function PaystackCode({ code }: { code: string }) {
 function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => void }) {
   const { pushToast } = useStore()
   const [purpose, setPurpose] = useState<TreasuryPurpose>('provider_refill')
-  const [provider, setProvider] = useState<'datahub-gh' | 'gmpl'>('datahub-gh')
+  const [provider, setProvider] = useState<SupplierCode>('datahub-gh')
   const [amount, setAmount] = useState('')
   const [destinationId, setDestinationId] = useState('')
   const [note, setNote] = useState('')
@@ -639,7 +637,7 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
             <Select
               id="treasury-provider"
               value={provider}
-              onChange={(e) => setProvider(e.target.value as 'datahub-gh' | 'gmpl')}
+              onChange={(e) => setProvider(e.target.value as SupplierCode)}
             >
               {PROVIDERS.map((p) => (
                 <option key={p.value} value={p.value}>

@@ -1,5 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service'
-import type { SupplierProviderCode } from '../settings/settings.service'
+import { asProvider, type SupplierProviderCode } from './providers'
 
 /**
  * Which provider actually owns a given `SupplierProduct.code`.
@@ -24,7 +24,9 @@ export async function resolveSupplierProvider(
 ): Promise<SupplierProviderCode> {
   if (!supplierCode) return 'datahub-gh'
   const row = await prisma.supplierProduct.findUnique({ where: { code: supplierCode }, select: { provider: true } })
-  return (row?.provider as SupplierProviderCode | undefined) ?? 'datahub-gh'
+  // A code with no row is history from before GMPL (DataHub); a row naming a
+  // supplier we do not know throws rather than being sent to DataHub.
+  return asProvider(row?.provider)
 }
 
 /**
@@ -71,7 +73,7 @@ export async function bundleCostByProvider(
  * actually carries this column (see `LedgerEntry.provider`'s own comment).
  */
 export function capitalProviderFilter(provider: SupplierProviderCode) {
-  return provider === 'datahub-gh' ? { OR: [{ provider: 'datahub-gh' }, { provider: null }] } : { provider: 'gmpl' }
+  return provider === 'datahub-gh' ? { OR: [{ provider: 'datahub-gh' }, { provider: null }] } : { provider }
 }
 
 /**

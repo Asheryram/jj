@@ -3,6 +3,7 @@ import { useStore } from '../state/store'
 import { api } from '../lib/api'
 import { Callout, Card, CardHead, Field, Select } from './ui'
 import { AlertIcon } from './icons'
+import { SUPPLIERS, sellsNetwork, supplierName, type SupplierCode } from '../lib/suppliers'
 
 const NETWORKS = ['MTN', 'Telecel', 'AirtelTigo'] as const
 
@@ -27,7 +28,7 @@ const NETWORKS = ['MTN', 'Telecel', 'AirtelTigo'] as const
  */
 export function NetworkProviderRouting({ gmplState }: { gmplState?: string }) {
   const { pushToast } = useStore()
-  const [routing, setRouting] = useState<Record<string, 'datahub-gh' | 'gmpl'>>({})
+  const [routing, setRouting] = useState<Record<string, SupplierCode>>({})
   const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState<string | null>(null)
 
@@ -48,13 +49,13 @@ export function NetworkProviderRouting({ gmplState }: { gmplState?: string }) {
 
   const providerFor = (network: string) => routing[`${network}:data`] ?? 'datahub-gh'
 
-  const save = async (network: string, provider: 'datahub-gh' | 'gmpl') => {
+  const save = async (network: string, provider: SupplierCode) => {
     const next = { ...routing, [`${network}:data`]: provider }
     setSaving(network)
     try {
       const settings = await api.setNetworkProviderRouting(next)
       setRouting(settings.networkProviderRouting ?? next)
-      pushToast({ tone: 'success', title: `${network} data bundles now route to ${provider === 'gmpl' ? 'GMPL' : 'DataHub GH'}.` })
+      pushToast({ tone: 'success', title: `${network} data bundles now route to ${supplierName(provider, true)}.` })
     } catch (error) {
       pushToast({ tone: 'error', title: error instanceof Error ? error.message : 'We could not save that.' })
     } finally {
@@ -78,17 +79,21 @@ export function NetworkProviderRouting({ gmplState }: { gmplState?: string }) {
 
         <div className="grid gap-3 sm:grid-cols-3">
           {NETWORKS.map((network) => {
-            const isAirtelTigo = network === 'AirtelTigo'
+            // Only suppliers that sell this network; AirtelTigo has just DataHub.
+            const sellers = SUPPLIERS.filter((s) => sellsNetwork(s.code, network))
             return (
               <Field key={network} label={network} htmlFor={`routing-${network}`}>
                 <Select
                   id={`routing-${network}`}
-                  disabled={!loaded || isAirtelTigo || saving === network}
-                  value={isAirtelTigo ? 'datahub-gh' : providerFor(network)}
-                  onChange={(event) => void save(network, event.target.value as 'datahub-gh' | 'gmpl')}
+                  disabled={!loaded || sellers.length < 2 || saving === network}
+                  value={providerFor(network)}
+                  onChange={(event) => void save(network, event.target.value as SupplierCode)}
                 >
-                  <option value="datahub-gh">DataHub GH</option>
-                  {!isAirtelTigo && <option value="gmpl">GMPL</option>}
+                  {sellers.map((s) => (
+                    <option key={s.code} value={s.code}>
+                      {s.fullLabel}
+                    </option>
+                  ))}
                 </Select>
               </Field>
             )

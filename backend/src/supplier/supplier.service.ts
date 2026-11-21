@@ -6,6 +6,12 @@ import { SettingsService, type SupplierProviderCode } from '../settings/settings
 import { DatahubClient } from './datahub.client'
 import { checkerPaymentReference, GmplClient, gmplIdempotencyKey } from './gmpl.client'
 import { FloatMonitorService } from './float-monitor.service'
+import { asProvider, KNOWN_PROVIDERS, PROVIDERS } from './providers'
+import type { StatusOutcome as DatahubStatusOutcome } from './datahub.client'
+import type { StatusOutcome as GmplStatusOutcome } from './gmpl.client'
+
+/** One supplier's answer about one order, whichever supplier it is. */
+export type StatusLookup = DatahubStatusOutcome | GmplStatusOutcome
 
 export interface DispatchResult {
   /**
@@ -76,7 +82,7 @@ export function hasAutomatedFulfilment(
   supplier: Pick<SupplierProduct, 'provider' | 'networkKey' | 'capacityGb'>,
 ): boolean {
   if (!supplier.networkKey) return false
-  if (supplier.provider === 'gmpl') return true
+  if (!PROVIDERS[asProvider(supplier.provider)].needsCapacity) return true
   return supplier.capacityGb != null
 }
 
@@ -109,12 +115,30 @@ export class SupplierService implements OnModuleInit {
     private readonly float: FloatMonitorService,
   ) {}
 
+  /**
+   * Each supplier's client. A `Record` on purpose: a new supplier code does
+   * not compile until it is given one, so nothing can be routed to it with
+   * DataHub's client standing in.
+   */
+  private get clients(): Record<SupplierProviderCode, DatahubClient | GmplClient> {
+    return { 'datahub-gh': this.datahub, gmpl: this.gmpl }
+  }
+
   private clientFor(provider: string): DatahubClient | GmplClient {
-    return provider === 'gmpl' ? this.gmpl : this.datahub
+    return this.clients[asProvider(provider)]
   }
 
   private liveEnvKeyFor(provider: string): string {
-    return provider === 'gmpl' ? 'GMPL_LIVE' : 'DATAHUB_LIVE'
+    return PROVIDERS[asProvider(provider)].liveEnvKey
+  }
+
+  /**
+   * Ask the supplier that owns this order about one of its references.
+   * The one way the reconciler and the order screens reach a supplier, so
+   * none of them picks a client themselves.
+   */
+  orderStatus(provider: SupplierProviderCode, reference: string): Promise<StatusLookup> {
+    return this.clients[provider].orderStatus(reference)
   }
 
   /** Credentials are present for this provider. Necessary for live fulfilment, not sufficient. */
@@ -167,10 +191,8 @@ export class SupplierService implements OnModuleInit {
   }
 
   onModuleInit(): void {
-    for (const [provider, label] of [
-      ['datahub-gh', 'DataHub GH'],
-      ['gmpl', 'GMPL'],
-    ] as const) {
+    for (const provider of KNOWN_PROVIDERS) {
+      const label = PROVIDERS[provider].fullLabel
       const state = this.providerStateFor(provider)
       if (state === 'live') {
         this.log.warn(`${this.liveEnvKeyFor(provider)}=true, orders WILL spend real money at ${label}.`)
@@ -308,9 +330,11 @@ export class SupplierService implements OnModuleInit {
       }
     }
 
-    return provider === 'gmpl'
-      ? this.dispatchLiveGmpl(order, supplier, attempt)
-      : this.dispatchLiveDatahub(order, supplier)
+    const place: Record<SupplierProviderCode, () => Promise<DispatchResult>> = {
+      'datahub-gh': () => this.dispatchLiveDatahub(order, supplier),
+      gmpl: () => this.dispatchLiveGmpl(order, supplier, attempt),
+    }
+    return place[asProvider(provider)]()
   }
 
   /** Place the order with DataHub GH for real. */

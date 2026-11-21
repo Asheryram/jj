@@ -3,7 +3,7 @@ import type { Order, Prisma } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
 import { SupplierService, hasAutomatedFulfilment, resolveSupplierProvider } from '../supplier/supplier.service'
 import { toGmplNetwork } from '../supplier/gmpl.client'
-import type { SupplierProviderCode } from '../settings/settings.service'
+import { asProvider, isApprovalProvider, providerName, PROVIDERS, type ApprovalProvider } from '../supplier/providers'
 import { LedgerService, type LedgerDraft } from '../finance/ledger.service'
 import { lastRealCost } from '../common/real-cost'
 import { ConflictError, NotFoundError, ValidationError } from '../common/domain-errors'
@@ -521,7 +521,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
       if (result.providerCharged != null) {
         const believedCost = (order.split as unknown as OrderSplit).supplierCost
         const provider = await resolveSupplierProvider(this.prisma, order.supplierCodeAtSale)
-        const providerLabel = provider === 'gmpl' ? 'GMPL' : 'DataHub'
+        const providerLabel = PROVIDERS[provider].label
         await this.ledger.record([
           {
             idempotencyKey: supplierCostKey(order.reference, attempt),
@@ -607,7 +607,14 @@ export class FulfilmentService implements OnApplicationBootstrap {
       })
       .then((row) => row?.product ?? null)
 
-    const provider: SupplierProviderCode = (product?.supplier?.provider as SupplierProviderCode | undefined) ?? 'datahub-gh'
+    const supplierCode = asProvider(product?.supplier?.provider)
+    // Only suppliers with an approved-numbers list ever answer "needs
+    // approval"; one that does not has nothing to put on the Approvals screen.
+    if (!isApprovalProvider(supplierCode)) {
+      this.log.error(`${order.reference} held for approval, but ${providerName(supplierCode)} has no approval list`)
+      return
+    }
+    const provider: ApprovalProvider = supplierCode
     // GMPL's own bundle id lives in `supplier.networkKey` for a GMPL SKU, not
     // a network name (see `GmplSource`'s own comment), so a GMPL row is
     // written from `product.network` mapped through `toGmplNetwork` instead.
@@ -634,7 +641,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
     })
 
     this.log.warn(
-      `${order.reference} held: ${order.recipient} needs ${provider === 'gmpl' ? 'GMPL' : 'DataHub'} approval (${reason})`,
+      `${order.reference} held: ${order.recipient} needs ${PROVIDERS[provider].label} approval (${reason})`,
     )
   }
 
@@ -1002,7 +1009,7 @@ export class FulfilmentService implements OnApplicationBootstrap {
      * The live GMPL reading after each order (`noteOrderPlaced`) is the
      * check on this: if they ever stop refunding, the float shows it.
      */
-    if (costProvider === 'gmpl') {
+    if (PROVIDERS[costProvider].refundsFailedCharge) {
       await this.ledger.record(
         [
           {

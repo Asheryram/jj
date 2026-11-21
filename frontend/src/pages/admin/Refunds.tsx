@@ -35,6 +35,7 @@ import { OrderTimeline } from '../../components/OrderTimeline'
 import { withUndo } from '../../lib/undo'
 import { useRemembered } from '../../lib/remember'
 import { downloadCsv } from '../../lib/csv'
+import { supplierName } from '../../lib/suppliers'
 
 type Filter = 'pending' | 'approved' | 'rejected'
 
@@ -1010,7 +1011,7 @@ function BulkRefuseModal({
  */
 /** A provider code as people say it. */
 function providerName(code: string): string {
-  return code === 'gmpl' ? 'GMPL' : code === 'datahub-gh' ? 'DataHub GH' : code
+  return supplierName(code, true)
 }
 
 function ReorderModal({
