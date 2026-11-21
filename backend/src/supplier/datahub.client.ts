@@ -339,8 +339,14 @@ export class DatahubClient {
     const orderNumber = manual ? manual[1] : /^\d{6,}$/.test(providerReference) ? providerReference : null
     if (orderNumber) {
       const byNumber = await this.orderStatusBy('orderNumber', orderNumber)
-      // A manual reference DataHub still knows by reference is asked that way too.
-      if (byNumber.kind !== 'not_found' || !manual) return byNumber
+      // Not found by order number: ask by reference too. A manual reference
+      // DataHub still knows by reference needs it, and so does a reference
+      // that is simply all digits: DataHub's own purchase reply hands back
+      // eight-digit references like 10535899, which are not order numbers.
+      // Stopping at "not found" here left orders DataHub had accepted (and
+      // reported PROCESSING) stuck as "does not recognise, needs manual
+      // checking" (JDC-562728021, JDC-235611813, JDC-156267425, Nov 2026).
+      if (byNumber.kind !== 'not_found') return byNumber
     }
     return this.orderStatusBy('reference', providerReference)
   }
