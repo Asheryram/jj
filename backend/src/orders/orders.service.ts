@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
+import { resolveSupplierProvider } from '../supplier/provider-resolution'
 import { randomInt } from 'node:crypto'
 import { Prisma, type Network, type Order, type OrderStatus } from '@prisma/client'
 import { PrismaService } from '../prisma/prisma.service'
@@ -1148,7 +1149,14 @@ export class OrdersService {
     // unguessable, which is the same bearer-token logic a payment link uses.
     if (!user) return { ...toTrackedOrder(row), paymentCollected }
 
-    if (isAdminRole(user.role)) return { ...toOrder(row), paymentCollected }
+    if (isAdminRole(user.role)) {
+      // Which supplier the order is on, as the admin list already says (see
+      // `enrichForAdmin`). Missing here, the order screen opened from Needs
+      // attention could not tell a GMPL order from a DataHub one, and its
+      // "Where did you order it again?" choice labelled them the wrong way round.
+      const provider = await resolveSupplierProvider(this.prisma, row.supplierCodeAtSale)
+      return { ...toOrder(row), paymentCollected, provider }
+    }
 
     // The buyer's own account, or the agent who sold it. Not a phone match
     // (never verified, see `scopeFor`), and not an upline (referral sharing

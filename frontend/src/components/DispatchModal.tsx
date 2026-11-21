@@ -167,7 +167,10 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
    * from DataHub's dashboard. The reference is checked with that supplier and
    * the order moves to its matching bundle (see `attachProviderReference`).
    */
-  const soldThrough: 'datahub-gh' | 'gmpl' = order?.provider ?? 'datahub-gh'
+  // Unknown only if the server did not say: then nothing is labelled "same"
+  // and the server, not this guess, decides whether the supplier changed.
+  const knownSupplier = order?.provider ?? null
+  const soldThrough: 'datahub-gh' | 'gmpl' = knownSupplier ?? 'datahub-gh'
   const [reorderedOn, setReorderedOn] = useState<'datahub-gh' | 'gmpl'>(soldThrough)
   const supplierLabel = (p: 'datahub-gh' | 'gmpl') => (p === 'gmpl' ? 'GMPL' : 'DataHub')
   const [refNote, setRefNote] = useState('')
@@ -293,7 +296,9 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
       const result = await api.addProviderReference(order.id, {
         reference: refValue.trim(),
         reorderedByHand: !correcting && refHow === 'reordered',
-        ...(!correcting && refHow === 'reordered' && reorderedOn !== soldThrough ? { provider: reorderedOn } : {}),
+        // Always sent when ordered again: the server compares it with the
+        // order's real supplier itself, instead of trusting a guess here.
+        ...(!correcting && refHow === 'reordered' ? { provider: reorderedOn } : {}),
         note: refNote.trim() || undefined,
       })
       pushToast({
@@ -592,21 +597,33 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
                         <p className="mt-3 text-xs font-semibold text-slate-700 dark:text-slate-200">Where did you order it again?</p>
                         <Segmented<'datahub-gh' | 'gmpl'>
                           className="mt-1.5 w-full"
-                          options={[
-                            { value: soldThrough, label: `${supplierLabel(soldThrough)} (same)` },
-                            {
-                              value: soldThrough === 'gmpl' ? 'datahub-gh' : 'gmpl',
-                              label: supplierLabel(soldThrough === 'gmpl' ? 'datahub-gh' : 'gmpl'),
-                            },
-                          ]}
+                          options={
+                            knownSupplier
+                              ? [
+                                  { value: knownSupplier, label: `${supplierLabel(knownSupplier)} (same)` },
+                                  {
+                                    value: knownSupplier === 'gmpl' ? 'datahub-gh' : 'gmpl',
+                                    label: supplierLabel(knownSupplier === 'gmpl' ? 'datahub-gh' : 'gmpl'),
+                                  },
+                                ]
+                              : [
+                                  { value: 'datahub-gh', label: 'DataHub' },
+                                  { value: 'gmpl', label: 'GMPL' },
+                                ]
+                          }
                           value={reorderedOn}
                           onChange={setReorderedOn}
                         />
-                        {reorderedOn !== soldThrough && (
+                        {knownSupplier && (
+                          <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                            This order was sold through {supplierLabel(knownSupplier)}.
+                          </p>
+                        )}
+                        {knownSupplier && reorderedOn !== knownSupplier && (
                           <p className="mt-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
                             The reference is checked with {supplierLabel(reorderedOn)}, and the order moves to its
                             matching {supplierLabel(reorderedOn)} bundle, so the cost comes off the {supplierLabel(reorderedOn)} float.
-                            Make sure the first attempt on {supplierLabel(soldThrough)} really did not go through, or the
+                            Make sure the first attempt on {supplierLabel(knownSupplier)} really did not go through, or the
                             customer gets it twice and you pay twice.
                           </p>
                         )}
