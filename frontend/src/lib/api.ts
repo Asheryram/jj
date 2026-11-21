@@ -1,3 +1,4 @@
+import type { SupplierCode } from './suppliers'
 import type {
   AgentPrice,
   Category,
@@ -483,7 +484,7 @@ export interface NeedsAttentionOrder {
    */
   conflict: boolean
   /** Which actual supplier this order is stuck at or was flagged against. */
-  provider: 'datahub-gh' | 'gmpl'
+  provider: SupplierCode
 }
 
 /**
@@ -535,7 +536,7 @@ export interface BuyerNumber {
 export interface NumberCheckResult {
   phone: string
   network: Network
-  results: { provider: 'datahub-gh' | 'gmpl'; status: 'approved' | 'not_approved' | 'unknown'; detail: string }[]
+  results: { provider: SupplierCode; status: 'approved' | 'not_approved' | 'unknown'; detail: string }[]
   /** Put on the approvals list by this check. */
   added: boolean
   /** Orders that were waiting on this number and are now on their way. */
@@ -573,7 +574,7 @@ export interface MyOrdersPage {
 
 export interface BalanceBooksPlan {
   paystack: { expected: number; inTransit: number; actual: number; capitalRepaid: number; adjustment: number }
-  floats: { provider: 'datahub-gh' | 'gmpl'; label: string; expected: number; actual: number; capitalRepaid: number; adjustment: number }[]
+  floats: { provider: SupplierCode; label: string; expected: number; actual: number; capitalRepaid: number; adjustment: number }[]
   at: string
   saved: boolean
 }
@@ -617,8 +618,8 @@ export interface TreasuryOverview {
   ownerDrawingMax: number
   /** Refunds paid by hand and not repaid yet, repaid in one transfer of exactly `total`. */
   advancesToRepay: { total: number; count: number }
-  refillMax: Record<'datahub-gh' | 'gmpl', number>
-  owedToProvider: Record<'datahub-gh' | 'gmpl', number>
+  refillMax: Record<SupplierCode, number>
+  owedToProvider: Record<SupplierCode, number>
   destinations: TreasuryDestination[]
   transfers: {
     id: string
@@ -626,7 +627,7 @@ export interface TreasuryOverview {
     /** Paystack's own code (`TRF_…`), what their dashboard search finds. */
     transferCode: string | null
     purpose: TreasuryPurpose
-    provider: 'datahub-gh' | 'gmpl' | null
+    provider: SupplierCode | null
     amount: number
     fee: number
     destination: { label: string; phone: string; network: string }
@@ -643,7 +644,7 @@ export interface TreasuryOverview {
   refillsAwaitingArrival?: {
     id: string
     reference: string
-    provider: 'datahub-gh' | 'gmpl' | null
+    provider: SupplierCode | null
     amount: number
     destination: { label: string; phone: string; network: string }
     paidAt: string | null
@@ -785,7 +786,7 @@ export interface PlatformSettings {
    * (e.g. `"MTN:data"`). A missing key means DataHub GH, the only-ever
    * supplier before GMPL existed, so an empty object changes nothing.
    */
-  networkProviderRouting: Record<string, 'datahub-gh' | 'gmpl'>
+  networkProviderRouting: Record<string, SupplierCode>
 }
 
 /** One SKU in the provider's catalogue. */
@@ -1105,7 +1106,7 @@ export interface ReservePosition {
     total: number
   }
   /** Same total as `spentOnBundles`, split by which supplier actually charged it. */
-  spentOnBundlesByProvider: Record<'datahub-gh' | 'gmpl', number>
+  spentOnBundlesByProvider: Record<SupplierCode, number>
   /**
    * Each provider's float, current reading, alongside Paystack's side, not a
    * claim on `expectedAtPaystack`, just the business's other pots of money,
@@ -1113,7 +1114,7 @@ export interface ReservePosition {
    * purchase has ever reported a balance for that provider, see `FloatPanel`
    * for the full picture (thresholds, capital tracking, reconciliation).
    */
-  floats: { provider: 'datahub-gh' | 'gmpl'; floatBalance: number | null }[]
+  floats: { provider: SupplierCode; floatBalance: number | null }[]
   pendingPayouts: { count: number; amount: number }
   unclaimedRefunds: { count: number; amount: number }
   /** Owed back and waiting on approval. Already counted in the liabilities. */
@@ -1782,7 +1783,7 @@ export const api = {
   /** The reference from the delivery partner's own dashboard, see `ReconcilerService.attachProviderReference`. */
   addProviderReference: (
     id: string,
-    body: { reference: string; reorderedByHand: boolean; provider?: 'datahub-gh' | 'gmpl'; note?: string },
+    body: { reference: string; reorderedByHand: boolean; provider?: SupplierCode; note?: string },
   ) =>
     request<{ settled: boolean; checked: boolean; corrected: boolean; providerStatus: string | null; message: string }>(`/orders/${id}/provider-reference`, { method: 'POST', body }),
 
@@ -1828,7 +1829,7 @@ export const api = {
   treasury: () => request<TreasuryOverview>('/admin/treasury'),
   treasuryWithdraw: (body: {
     purpose: TreasuryPurpose
-    provider?: 'datahub-gh' | 'gmpl'
+    provider?: SupplierCode
     amount: number
     destinationId: string
     note?: string
@@ -2262,7 +2263,7 @@ export const api = {
     request<{
       /** One entry per known supplier, each judged against its own float independently. */
       floats: {
-        provider: 'datahub-gh' | 'gmpl'
+        provider: SupplierCode
         /** Pesewas, what tracked capital says this provider's float should
          *  hold right now, deliberately not the live reading (which only
          *  refreshes on an order and can sit stale for days). Null until a
@@ -2334,11 +2335,11 @@ export const api = {
       body: { role },
     }),
 
-  supplierFloat: (provider: 'datahub-gh' | 'gmpl') =>
+  supplierFloat: (provider: SupplierCode) =>
     request<SupplierFloat>(`/admin/supplier/float?provider=${provider}`),
 
   /** Ask the provider directly what the float holds right now. A no-op for DataHub, which has no such endpoint; GMPL alone answers with a genuinely live figure. */
-  refreshSupplierFloatLive: (provider: 'datahub-gh' | 'gmpl') =>
+  refreshSupplierFloatLive: (provider: SupplierCode) =>
     request<SupplierFloat>(`/admin/supplier/float/refresh?provider=${provider}`, { method: 'POST' }),
 
   /**
@@ -2349,7 +2350,7 @@ export const api = {
    * reduces "already spent on bundles" on the Reserve panel.
    */
   logFloatCapital: (
-    provider: 'datahub-gh' | 'gmpl',
+    provider: SupplierCode,
     direction: 'in' | 'out',
     amount: number,
     note?: string,
@@ -2361,7 +2362,7 @@ export const api = {
     }),
 
   /** Plain top-ups that might actually be Paystack money paying this provider back, not yet corrected. */
-  floatCapitalNeedingReview: (provider: 'datahub-gh' | 'gmpl') =>
+  floatCapitalNeedingReview: (provider: SupplierCode) =>
     request<CapitalNeedingReview[]>(`/admin/supplier/float/capital/needs-review?provider=${provider}`),
 
   /** One click: reclassifies a mislabeled top-up as a Paystack reimbursement instead of personal capital. */
@@ -2398,7 +2399,7 @@ export const api = {
   adminSettings: () => request<PlatformSettings>('/admin/settings'),
 
   /** Replaces the whole routing table, not one entry, callers must send the full merged object. */
-  setNetworkProviderRouting: (routing: Record<string, 'datahub-gh' | 'gmpl'>) =>
+  setNetworkProviderRouting: (routing: Record<string, SupplierCode>) =>
     request<PlatformSettings>('/admin/settings/network-provider-routing', {
       method: 'PATCH',
       body: { routing },

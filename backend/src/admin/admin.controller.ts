@@ -78,8 +78,8 @@ export class MarkCopiedDto {
 
 export class LogCapitalDto {
   /** Which supplier float this top-up/withdrawal concerns. */
-  @IsIn(['datahub-gh', 'gmpl'])
-  provider!: 'datahub-gh' | 'gmpl'
+  @IsIn([...KNOWN_PROVIDERS])
+  provider!: SupplierProviderCode
 
   @IsIn(['in', 'out'])
   direction!: 'in' | 'out'

@@ -13,6 +13,7 @@ import {
 import type { Network, OrderStatus } from '../data/types'
 import { NETWORK_STYLES } from '../lib/networks'
 import { CheckIcon, ClockIcon, CopyIcon, XIcon, AlertIcon, HelpIcon } from './icons'
+import { supplierName, type SupplierCode } from '../lib/suppliers'
 
 export function cn(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ')
@@ -402,10 +403,10 @@ export function NetworkChip({ network, className }: { network: Network | null; c
 }
 
 /** Admin-only: which actual supplier a bundle went to, DataHub or GMPL, now that both are live. */
-export function ProviderChip({ provider, className }: { provider: 'datahub-gh' | 'gmpl'; className?: string }) {
+export function ProviderChip({ provider, className }: { provider: SupplierCode; className?: string }) {
   return (
-    <Badge tone={provider === 'gmpl' ? 'info' : 'neutral'} className={className}>
-      {provider === 'gmpl' ? 'GMPL' : 'DataHub'}
+    <Badge tone={provider === 'datahub-gh' ? 'neutral' : 'info'} className={className}>
+      {supplierName(provider)}
     </Badge>
   )
 }

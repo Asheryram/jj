@@ -20,6 +20,7 @@ import {
   Th,
 } from '../../components/ui'
 import { AlertIcon, CheckIcon, CopyIcon, RefreshIcon, SearchIcon } from '../../components/icons'
+import { supplierName } from '../../lib/suppliers'
 
 /**
  * Numbers at least one provider has not approved yet, and the sales they are
@@ -452,7 +453,7 @@ function StatusBadge({ status }: { status: ProviderApprovalStatus }) {
 
 /** "DataHub approved, GMPL not yet" from a check's answers. */
 function checkSummary(result: NumberCheckResult): string {
-  const name = (p: string) => (p === 'gmpl' ? 'GMPL' : 'DataHub')
+  const name = (p: string) => supplierName(p)
   const word = { approved: 'approved', not_approved: 'not approved yet', unknown: 'no clear answer' } as const
   return result.results.map((r) => `${name(r.provider)} ${word[r.status]}`).join(', ')
 }
@@ -554,7 +555,7 @@ function CheckNumberCard({ onChecked }: { onChecked: () => void }) {
             <ul className="mt-2 space-y-1.5 text-sm">
               {result.results.map((r) => (
                 <li key={r.provider} className="flex flex-wrap items-center gap-2">
-                  <span className="w-16 font-medium text-slate-700 dark:text-slate-200">{r.provider === 'gmpl' ? 'GMPL' : 'DataHub'}</span>
+                  <span className="w-16 font-medium text-slate-700 dark:text-slate-200">{supplierName(r.provider)}</span>
                   <Badge tone={r.status === 'approved' ? 'success' : r.status === 'not_approved' ? 'warning' : 'neutral'}>
                     {r.status === 'approved' ? 'Approved' : r.status === 'not_approved' ? 'Not approved yet' : 'No clear answer'}
                   </Badge>

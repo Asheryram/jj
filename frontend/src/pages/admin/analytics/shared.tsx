@@ -5,6 +5,7 @@ import { cn } from '../../../components/ui'
 import type { Category } from '../../../data/types'
 import type { InsightsGranularity } from '../../../lib/api'
 import { cedis, cedisCompact } from '../../../lib/format'
+import { supplierName } from '../../../lib/suppliers'
 
 export { cedis, cedisCompact }
 
@@ -91,9 +92,7 @@ export function granularityWord(granularity: InsightsGranularity): string {
 // ─── Names ──────────────────────────────────────────────────────────────────
 
 export function providerName(provider: string): string {
-  if (provider === 'gmpl') return 'GMPL'
-  if (provider === 'datahub-gh') return 'DataHub'
-  return provider
+  return supplierName(provider)
 }
 
 export function networkName(network: string): string {

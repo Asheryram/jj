@@ -1,3 +1,4 @@
+import { providerName } from '../supplier/providers'
 /**
  * Turns this business's own numbers into a short, ranked list of decisions:
  * what to do this week, why, and roughly what it is worth.
@@ -98,7 +99,7 @@ export function providerSwitch(listings: Listing[], reliability: ProviderReliabi
   if (moves.length === 0) return null
   moves.sort((a, b) => b.saving - a.saving)
   const total = moves.reduce((sum, m) => sum + m.saving, 0)
-  const label = (p: string) => (p === 'gmpl' ? 'GMPL' : p === 'datahub-gh' ? 'DataHub' : p)
+  const label = providerName
   const top = moves[0]
   const fromRate = rateOf(top.from.provider, top.from.network)!
   const toRate = rateOf(top.to.provider, top.to.network)!
@@ -146,7 +147,7 @@ export interface FloatState {
  * under two days is "now".
  */
 export function floatRunway(floats: FloatState[]): Decision[] {
-  const label = (p: string) => (p === 'gmpl' ? 'GMPL' : p === 'datahub-gh' ? 'DataHub' : p)
+  const label = providerName
   return floats
     .filter((f) => f.balance !== null && f.dailySpend > 0)
     .map((f) => ({ ...f, days: (f.balance as number) / f.dailySpend }))

@@ -5,6 +5,7 @@ import { useStore } from '../../state/store'
 import { cedis, dateTime, parseCedis } from '../../lib/format'
 import { Button, Callout, Card, CardHead, Field, Modal, Segmented, Spinner, TextInput, cn } from '../../components/ui'
 import { AlertIcon, CheckIcon, RefreshIcon } from '../../components/icons'
+import { SUPPLIERS, supplierInfo, supplierName, type SupplierCode } from '../../lib/suppliers'
 
 type FloatLevel = 'ok' | 'watch' | 'risk'
 
@@ -23,10 +24,7 @@ function levelColor(level: FloatLevel): string {
       : 'text-slate-900 dark:text-slate-50'
 }
 
-const PROVIDERS: { value: 'datahub-gh' | 'gmpl'; label: string }[] = [
-  { value: 'datahub-gh', label: 'DataHub GH' },
-  { value: 'gmpl', label: 'GMPL' },
-]
+const PROVIDERS: { value: SupplierCode; label: string }[] = SUPPLIERS.map((s) => ({ value: s.code, label: s.fullLabel }))
 
 /**
  * What is left in a supplier's float.
@@ -47,7 +45,7 @@ const PROVIDERS: { value: 'datahub-gh' | 'gmpl'; label: string }[] = [
  * showing nothing at all.
  */
 export default function FloatPanel() {
-  const [provider, setProvider] = useState<'datahub-gh' | 'gmpl'>('datahub-gh')
+  const [provider, setProvider] = useState<SupplierCode>('datahub-gh')
   const [float, setFloat] = useState<SupplierFloat | null>(null)
   const [error, setError] = useState('')
   const [logging, setLogging] = useState<'in' | 'out' | null>(null)
@@ -165,9 +163,11 @@ export default function FloatPanel() {
     }
   }, [provider])
 
-  const providerLabel = provider === 'gmpl' ? 'GMPL' : 'DataHub GH'
+  const providerLabel = supplierName(provider, true)
+  // Its balance can be asked for any time (GMPL), not only read off an order reply (DataHub).
+  const liveBalance = supplierInfo(provider)?.liveBalance ?? false
   const providerSwitcher = (
-    <Segmented<'datahub-gh' | 'gmpl'> options={PROVIDERS} value={provider} onChange={setProvider} />
+    <Segmented<SupplierCode> options={PROVIDERS} value={provider} onChange={setProvider} />
   )
 
   /**
@@ -213,7 +213,7 @@ export default function FloatPanel() {
         subtitle={`What ${providerLabel} has left to buy bundles with`}
         action={
           <div className="flex gap-2" data-tour="float-refresh-buttons">
-            {provider === 'gmpl' && (
+            {liveBalance && (
               <Button size="sm" variant="ghost" loading={checkingLive} onClick={() => void checkLiveBalance()}>
                 <RefreshIcon className="size-4" /> Check live
               </Button>
@@ -229,7 +229,7 @@ export default function FloatPanel() {
         {observation === null ? (
           /* Honest empty state. Not "GHS 0.00", which would read as an emergency. */
           <Callout tone="info" title="Not known yet">
-            {provider === 'gmpl'
+            {liveBalance
               ? 'Nothing read yet. Check the live balance above, or place an order and it will show up automatically.'
               : `${providerLabel} does not publish a balance, so this only appears once an order has been sent, their reply is the only place the number exists.`}
           </Callout>
@@ -265,7 +265,7 @@ export default function FloatPanel() {
                 </p>
                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                   read {dateTime(observation.observedAt)}
-                  {observation.orderRef ? ` · from ${observation.orderRef}` : provider === 'gmpl' ? ' · checked live' : ''}
+                  {observation.orderRef ? ` · from ${observation.orderRef}` : liveBalance ? ' · checked live' : ''}
                 </p>
               </div>
             </div>
@@ -335,7 +335,7 @@ export default function FloatPanel() {
               {reconciliation?.pending && (
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   Logged, "Should hold" above will confirm against the live float
-                  {provider === 'gmpl' ? ' once you check live again or the next order updates it.' : ' once the next order updates it.'}
+                  {liveBalance ? ' once you check live again or the next order updates it.' : ' once the next order updates it.'}
                 </p>
               )}
             </>
@@ -408,8 +408,8 @@ function CapitalModal({
   onClose,
   onLogged,
 }: {
-  provider: 'datahub-gh' | 'gmpl'
-  onProviderChange: (provider: 'datahub-gh' | 'gmpl') => void
+  provider: SupplierCode
+  onProviderChange: (provider: SupplierCode) => void
   providerLabel: string
   direction: 'in' | 'out' | null
   /** Pesewas this provider is currently owed for bundles that no reimbursement has covered yet. */
@@ -509,7 +509,7 @@ function CapitalModal({
           <p className="mb-1.5 text-xs font-semibold tracking-wide text-brand-800 uppercase dark:text-brand-200">
             Which float is this for?
           </p>
-          <Segmented<'datahub-gh' | 'gmpl'>
+          <Segmented<SupplierCode>
             className="w-full"
             options={PROVIDERS}
             value={provider}

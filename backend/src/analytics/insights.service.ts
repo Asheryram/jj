@@ -7,6 +7,7 @@ import { FloatMonitorService } from '../supplier/float-monitor.service'
 import { KNOWN_PROVIDERS } from '../settings/settings.service'
 import { AnalyticsPrismaService } from './analytics-prisma.service'
 import { addDays, dateIntToDate, toDateInt } from './date'
+import { providerName as supplierName } from '../supplier/providers'
 
 export type Granularity = 'day' | 'week' | 'month'
 
@@ -80,7 +81,7 @@ const ghs = (pesewas: number) => `GHS ${(pesewas / 100).toLocaleString('en-GH', 
 /** 'under an hour', '5 hours', '14 days'. */
 const waited = (hours: number) =>
   hours < 1 ? 'under an hour' : hours < 48 ? `${Math.round(hours)} hour${Math.round(hours) === 1 ? '' : 's'}` : `${Math.round(hours / 24)} days`
-const providerName = (p: string | null) => (p === 'gmpl' ? 'GMPL' : p === 'datahub-gh' ? 'DataHub' : 'Not sent')
+const providerName = (p: string | null) => (p === null ? 'Not sent' : supplierName(p))
 
 /**
  * Everything the /analytics page shows, for one date range, in one call.

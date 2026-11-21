@@ -6,6 +6,7 @@ import { cedis, dateTime } from '../lib/format'
 import { Button, Callout, Field, Modal, Segmented, Spinner, TextInput, cn } from './ui'
 import { AlertIcon, CheckIcon, ClockIcon } from './icons'
 import { OrderTimeline } from './OrderTimeline'
+import { SUPPLIERS, supplierName, type SupplierCode } from '../lib/suppliers'
 
 /**
  * Turn a supplier's reply into something James can act on.
@@ -170,9 +171,9 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
   // Unknown only if the server did not say: then nothing is labelled "same"
   // and the server, not this guess, decides whether the supplier changed.
   const knownSupplier = order?.provider ?? null
-  const soldThrough: 'datahub-gh' | 'gmpl' = knownSupplier ?? 'datahub-gh'
-  const [reorderedOn, setReorderedOn] = useState<'datahub-gh' | 'gmpl'>(soldThrough)
-  const supplierLabel = (p: 'datahub-gh' | 'gmpl') => (p === 'gmpl' ? 'GMPL' : 'DataHub')
+  const soldThrough: SupplierCode = knownSupplier ?? 'datahub-gh'
+  const [reorderedOn, setReorderedOn] = useState<SupplierCode>(soldThrough)
+  const supplierLabel = (p: SupplierCode) => supplierName(p)
   const [refNote, setRefNote] = useState('')
   const [refError, setRefError] = useState('')
 
@@ -595,21 +596,17 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
                     {refHow === 'reordered' && (
                       <>
                         <p className="mt-3 text-xs font-semibold text-slate-700 dark:text-slate-200">Where did you order it again?</p>
-                        <Segmented<'datahub-gh' | 'gmpl'>
+                        <Segmented<SupplierCode>
                           className="mt-1.5 w-full"
                           options={
+                            // The supplier it was sold through first, marked "(same)",
+                            // then every other one.
                             knownSupplier
                               ? [
                                   { value: knownSupplier, label: `${supplierLabel(knownSupplier)} (same)` },
-                                  {
-                                    value: knownSupplier === 'gmpl' ? 'datahub-gh' : 'gmpl',
-                                    label: supplierLabel(knownSupplier === 'gmpl' ? 'datahub-gh' : 'gmpl'),
-                                  },
+                                  ...SUPPLIERS.filter((s) => s.code !== knownSupplier).map((s) => ({ value: s.code, label: s.label })),
                                 ]
-                              : [
-                                  { value: 'datahub-gh', label: 'DataHub' },
-                                  { value: 'gmpl', label: 'GMPL' },
-                                ]
+                              : SUPPLIERS.map((s) => ({ value: s.code, label: s.label }))
                           }
                           value={reorderedOn}
                           onChange={setReorderedOn}

@@ -7,7 +7,12 @@ import { FulfilmentService } from './fulfilment.service'
 import { claimTransition } from '../common/alert-flag'
 import { ValidationError } from '../common/domain-errors'
 import { resolveSupplierProvider } from '../supplier/supplier.service'
-import type { SupplierProviderCode } from '../settings/settings.service'
+/**
+ * Everything here is about the approved-numbers lists, which only some
+ * suppliers keep (`PROVIDERS[p].numberApproval`). Typed to those alone, so a
+ * supplier without a list can never reach this code by default.
+ */
+import type { ApprovalProvider } from '../supplier/providers'
 
 /**
  * Orders paid for and held because the supplier has not approved the
@@ -84,7 +89,7 @@ const DATAHUB_KEY_TO_NETWORK: Record<string, Network> = {
 }
 
 /** The generic network a `BeneficiaryRequest` row represents, from its own provider-specific `networkKey`. Null for a DataHub key this platform does not recognise, rather than guessing. */
-function networkFor(provider: SupplierProviderCode, networkKey: string): Network | null {
+function networkFor(provider: ApprovalProvider, networkKey: string): Network | null {
   if (provider === 'gmpl') return networkKey === 'TELECEL' ? 'Telecel' : 'MTN'
   return DATAHUB_KEY_TO_NETWORK[networkKey] ?? null
 }
@@ -103,7 +108,7 @@ export function datahubNetworkKeyFor(network: Network): string {
 }
 
 /** Which providers could ever serve this network at all. GMPL sells MTN and Telecel only. */
-function applicableProviders(network: Network): SupplierProviderCode[] {
+function applicableProviders(network: Network): ApprovalProvider[] {
   return network === 'AirtelTigo' ? ['datahub-gh'] : ['datahub-gh', 'gmpl']
 }
 
@@ -142,7 +147,7 @@ export interface ProviderApprovalStatus {
 
 /** What one provider says about one number, see `ApprovalsService.checkNumber`. */
 export interface NumberCheck {
-  provider: SupplierProviderCode
+  provider: ApprovalProvider
   /** approved: can buy now; not_approved: needs approving; unknown: the provider did not give a clear answer. */
   status: 'approved' | 'not_approved' | 'unknown'
   detail: string
@@ -229,14 +234,14 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
       select: { phone: true, provider: true, networkKey: true },
     })
 
-    const byPhone = new Map<string, { provider: SupplierProviderCode; networkKey: string }[]>()
+    const byPhone = new Map<string, { provider: ApprovalProvider; networkKey: string }[]>()
     for (const row of rows) {
       const list = byPhone.get(row.phone) ?? []
-      list.push({ provider: row.provider as SupplierProviderCode, networkKey: row.networkKey })
+      list.push({ provider: row.provider as ApprovalProvider, networkKey: row.networkKey })
       byPhone.set(row.phone, list)
     }
 
-    const toCreate: { phone: string; provider: SupplierProviderCode; networkKey: string }[] = []
+    const toCreate: { phone: string; provider: ApprovalProvider; networkKey: string }[] = []
     for (const [phone, entries] of byPhone) {
       const present = new Set(entries.map((e) => e.provider))
       // Resolved from whichever entry is recognisable; two conflicting
@@ -292,7 +297,7 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
 
       const created: {
         phone: string
-        provider: SupplierProviderCode
+        provider: ApprovalProvider
         networkKey: string
         attempts: number
         approvedAt: Date | null
@@ -357,7 +362,7 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
 
     const registry = await this.prisma.beneficiaryRequest.findMany()
 
-    const providerByOrder = new Map<string, SupplierProviderCode>()
+    const providerByOrder = new Map<string, ApprovalProvider>()
     for (const order of held) {
       providerByOrder.set(order.recipient, await resolveSupplierProvider(this.prisma, order.supplierCodeAtSale))
     }
@@ -417,14 +422,14 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
     for (const row of byPhone.values()) {
       const entries = registryByPhone.get(row.phone) ?? []
       const network = entries
-        .map((e) => networkFor(e.provider as SupplierProviderCode, e.networkKey))
+        .map((e) => networkFor(e.provider as ApprovalProvider, e.networkKey))
         .find((n) => n !== null)
       // No recognisable network and no registry entry at all, just a held
       // order older than this tracking, resolved via the order's own
       // provider instead.
       const resolvedNetwork: Network = network ?? 'MTN'
 
-      const statusFor = (provider: SupplierProviderCode): ProviderApprovalStatus => {
+      const statusFor = (provider: ApprovalProvider): ProviderApprovalStatus => {
         if (!applicableProviders(resolvedNetwork).includes(provider)) {
           return { status: 'not_applicable', networkKey: null, copiedAt: null, recordedAt: null, lastSendError: null }
         }
@@ -500,7 +505,7 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
     let added = false
     let released = 0
 
-    const record = async (provider: SupplierProviderCode, networkKey: string, check: NumberCheck) => {
+    const record = async (provider: ApprovalProvider, networkKey: string, check: NumberCheck) => {
       results.push(check)
       const key = { phone_provider: { phone, provider } }
       if (check.status === 'approved') {
@@ -595,7 +600,7 @@ export class ApprovalsService implements OnApplicationBootstrap, OnModuleDestroy
    * the same phone can genuinely have held orders under both providers at
    * once, approving one must never touch the other's.
    */
-  private async releaseOrdersFor(phone: string, provider: SupplierProviderCode): Promise<number> {
+  private async releaseOrdersFor(phone: string, provider: ApprovalProvider): Promise<number> {
     const held = await this.prisma.order.findMany({
       where: { status: 'awaiting_approval', recipient: phone },
       select: { id: true, reference: true, supplierCodeAtSale: true },

@@ -3,14 +3,15 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, Min, MinLength, ValidateIf } from 'class-validator'
 import { CurrentUser, RequireActive, Roles, type AuthUser } from '../common/auth'
 import { TreasuryService } from './treasury.service'
+import { KNOWN_PROVIDERS, type SupplierProviderCode } from '../supplier/providers'
 
 export class TreasuryWithdrawDto {
   @IsIn(['provider_refill', 'owner_drawing', 'advance_repayment'], { message: 'Choose what this withdrawal is for.' })
   purpose!: 'provider_refill' | 'owner_drawing' | 'advance_repayment'
 
   @ValidateIf((dto: TreasuryWithdrawDto) => dto.purpose === 'provider_refill')
-  @IsIn(['datahub-gh', 'gmpl'], { message: 'Choose which provider float this refills.' })
-  provider?: 'datahub-gh' | 'gmpl'
+  @IsIn([...KNOWN_PROVIDERS], { message: 'Choose which provider float this refills.' })
+  provider?: SupplierProviderCode
 
   /** Pesewas. The real floor and ceiling are checked in `TreasuryService.withdraw`. */
   @IsInt({ message: 'Enter an amount like 50.00.' })

@@ -1,3 +1,4 @@
+import type { SupplierCode } from '../lib/suppliers'
 /**
  * Domain types for the JamesDataConsult platform.
  *
@@ -274,7 +275,7 @@ export interface Order {
    */
   refundStatus?: 'pending' | 'rejected' | null
   /** Admin only: which actual supplier fulfilled this order, DataHub or GMPL. */
-  provider?: 'datahub-gh' | 'gmpl'
+  provider?: SupplierCode
 }
 
 /** Customer wallet ledger entry (FR-2.4). */
