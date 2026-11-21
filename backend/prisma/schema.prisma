@@ -308,7 +308,12 @@ model SupplierProduct {
   @@map("supplier_products")
 }
 
-/// Every fulfilment attempt against the provider, request and outcome.
+/// Every fulfilment attempt against a supplier (DataHub or GMPL, see
+/// `supplier.provider`), what we asked for and what came back.
+///
+/// Not the order's final result. That is `Order.status`; this row is one
+/// attempt's history, and an order can have several (retries, hand
+/// re-sends, a move to the other supplier).
 ///
 /// A real integration would log the HTTP call here. The simulated one logs the
 /// same shape, which is what makes acceptance testing legible: a tester says
@@ -321,11 +326,23 @@ model SupplierDispatch {
   supplierCode String @map("supplier_code")
 
   recipient String
-  /// What we paid the provider for this dispatch, at dispatch time.
+  /// The catalogue price of `supplierCode` when this attempt was sent. An
+  /// estimate, `providerCharged` is what was really taken.
   costPrice Int    @map("cost_price")
 
-  /// 'delivered' | 'rejected'. Free text because a real provider returns its own
-  /// vocabulary and we should not lose it in a narrow enum.
+  /// The supplier's FIRST reply, at the moment we sent it, never updated
+  /// afterwards. Our own vocabulary, the same for every supplier:
+  ///   pending         accepted and queued (shown as "accepted")
+  ///   delivered       delivered on the spot
+  ///   rejected        refused at once, see `reason`
+  ///   unknown         no usable answer (timeout, network), may or may not
+  ///                   have gone through
+  ///   needs_approval  refused because the number is not set up yet
+  ///
+  /// "pending" here is normal on a completed order, most completed orders
+  /// look like that. To know whether an order was delivered read
+  /// `Order.status`; to know what the supplier says now read `providerStatus`.
+  /// Counting `outcome = 'pending'` as unfinished is wrong.
   outcome String
   /// The provider's reason when it rejects. Shown to admin, never to the buyer.
   reason  String?
@@ -334,15 +351,27 @@ model SupplierDispatch {
   /// table were real money and which were the stand-in.
   simulated Boolean @default(true)
 
-  /// The provider's own order reference, returned by POST /data-purchase. The
-  /// only handle we have on their side of the transaction.
+  /// The supplier's own order reference, from their purchase reply or typed
+  /// in by an admin for a hand re-send. The only handle we have on their side
+  /// of the transaction. Which supplier to ask about it comes from
+  /// `supplierCode`, never from the reference's shape.
   providerReference String? @map("provider_reference")
-  /// Their status verbatim: INITIATED, PENDING, PROCESSING, SUCCESSFUL, FAILED,
-  /// CANCELLED. Stored raw rather than mapped, so a new value of theirs shows up
-  /// in the log instead of being silently coerced into ours.
+  /// The supplier's LATEST status, verbatim and in their own vocabulary,
+  /// overwritten by every webhook and status check. Unlike `outcome` this
+  /// moves. The words depend on the supplier:
+  ///   DataHub  INITIATED, PENDING, PROCESSING, SUCCESSFUL, FAILED, CANCELLED,
+  ///            REFUNDED (uppercase), read by `mapProviderStatus`
+  ///   GMPL     received, approved, delivered, fulfilled, rejected,
+  ///            could_not_deliver, fulfillment_failed, refunded (lowercase),
+  ///            read by `mapGmplOrderStatus`
+  /// Stored raw rather than mapped, so a new value of theirs shows up instead
+  /// of being silently coerced into ours. Compare it only through those two
+  /// functions, never against a literal.
   providerStatus    String? @map("provider_status")
 
-  /// What the provider ACTUALLY debited, in pesewas, from their reply.
+  /// What the supplier ACTUALLY debited, in pesewas, from their reply. Null
+  /// when they did not say, as on a hand re-send. Settlement books this when
+  /// present, else the last real charge for the same bundle, else `costPrice`.
   ///
   /// `costPrice` above is what we believed the bundle cost; this is what it cost.
   /// They are seeded from estimates rather than a real price list, so until a
