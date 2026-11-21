@@ -1780,7 +1780,10 @@ export const api = {
       { method: 'POST' },
     ),
   /** The reference from the delivery partner's own dashboard, see `ReconcilerService.attachProviderReference`. */
-  addProviderReference: (id: string, body: { reference: string; reorderedByHand: boolean; note?: string }) =>
+  addProviderReference: (
+    id: string,
+    body: { reference: string; reorderedByHand: boolean; provider?: 'datahub-gh' | 'gmpl'; note?: string },
+  ) =>
     request<{ settled: boolean; checked: boolean; corrected: boolean; providerStatus: string | null; message: string }>(`/orders/${id}/provider-reference`, { method: 'POST', body }),
 
   /**

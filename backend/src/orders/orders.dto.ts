@@ -79,6 +79,17 @@ export class ProviderReferenceDto {
   @IsBoolean()
   reorderedByHand!: boolean
 
+  /**
+   * Where it was ordered again, when that was a different supplier from the
+   * one the order was sold through (a GMPL order that timed out, re-sent by
+   * hand from DataHub's dashboard). The reference is then checked with that
+   * supplier, and the order moves to its matching bundle so the cost lands on
+   * the right float. Only with `reorderedByHand`. Omit for the same supplier.
+   */
+  @IsOptional()
+  @IsIn(['datahub-gh', 'gmpl'])
+  provider?: 'datahub-gh' | 'gmpl'
+
   @IsOptional()
   @IsString()
   @MaxLength(300)

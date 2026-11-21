@@ -161,6 +161,15 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
   const [refOpen, setRefOpen] = useState(false)
   const [refValue, setRefValue] = useState('')
   const [refHow, setRefHow] = useState<'found' | 'reordered'>('found')
+  /**
+   * The supplier the order was sold through, and where it was ordered again
+   * by hand, which can be the other one: a GMPL order that timed out, re-sent
+   * from DataHub's dashboard. The reference is checked with that supplier and
+   * the order moves to its matching bundle (see `attachProviderReference`).
+   */
+  const soldThrough: 'datahub-gh' | 'gmpl' = order?.provider ?? 'datahub-gh'
+  const [reorderedOn, setReorderedOn] = useState<'datahub-gh' | 'gmpl'>(soldThrough)
+  const supplierLabel = (p: 'datahub-gh' | 'gmpl') => (p === 'gmpl' ? 'GMPL' : 'DataHub')
   const [refNote, setRefNote] = useState('')
   const [refError, setRefError] = useState('')
 
@@ -188,6 +197,8 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
       setRefError('')
       return
     }
+    // A different order may have been sold through the other supplier.
+    setReorderedOn(order.provider ?? 'datahub-gh')
     let live = true
     api
       .orderDispatches(order.id)
@@ -218,6 +229,7 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
   const isSuperadmin = session?.role === 'superadmin'
   /** Correcting, not adding: a superadmin fixing a reference, open or settled. */
   const correcting = isSuperadmin && Boolean(currentReference) && (handReference || !stuck)
+  const refSupplier = !correcting && refHow === 'reordered' ? reorderedOn : soldThrough
   const canAddReference = (stuck && !handReference) || correcting
 
   const submitRetry = async () => {
@@ -281,6 +293,7 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
       const result = await api.addProviderReference(order.id, {
         reference: refValue.trim(),
         reorderedByHand: !correcting && refHow === 'reordered',
+        ...(!correcting && refHow === 'reordered' && reorderedOn !== soldThrough ? { provider: reorderedOn } : {}),
         note: refNote.trim() || undefined,
       })
       pushToast({
@@ -540,12 +553,12 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
             {!refOpen ? (
               <>
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  {correcting ? 'Wrong reference on this order?' : 'Have its reference from the DataHub dashboard?'}
+                  {correcting ? 'Wrong reference on this order?' : `Have its reference from the ${supplierLabel(soldThrough)} dashboard?`}
                 </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   {correcting
                     ? `Now ${currentReference}. Replace it with the right one; it is checked with the delivery partner first.`
-                    : 'If it went through, or you ordered it again there by hand, add the reference. It is checked with the delivery partner before it is saved.'}
+                    : 'If it went through, or you ordered it again by hand (on either supplier), add the reference. It is checked with that supplier before it is saved.'}
                 </p>
                 <div className="mt-2.5">
                   <Button size="sm" variant="outline" onClick={() => setRefOpen(true)}>
@@ -571,15 +584,40 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
                     />
                     <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
                       {refHow === 'found'
-                        ? 'You found this order on their dashboard: this is its reference.'
-                        : 'Nothing went through, so you placed it again on their dashboard: this is the new one.'}
+                        ? `You found this order on ${supplierLabel(soldThrough)}'s dashboard: this is its reference.`
+                        : 'Nothing went through, so you placed it again by hand: this is the new one.'}
                     </p>
+                    {refHow === 'reordered' && (
+                      <>
+                        <p className="mt-3 text-xs font-semibold text-slate-700 dark:text-slate-200">Where did you order it again?</p>
+                        <Segmented<'datahub-gh' | 'gmpl'>
+                          className="mt-1.5 w-full"
+                          options={[
+                            { value: soldThrough, label: `${supplierLabel(soldThrough)} (same)` },
+                            {
+                              value: soldThrough === 'gmpl' ? 'datahub-gh' : 'gmpl',
+                              label: supplierLabel(soldThrough === 'gmpl' ? 'datahub-gh' : 'gmpl'),
+                            },
+                          ]}
+                          value={reorderedOn}
+                          onChange={setReorderedOn}
+                        />
+                        {reorderedOn !== soldThrough && (
+                          <p className="mt-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                            The reference is checked with {supplierLabel(reorderedOn)}, and the order moves to its
+                            matching {supplierLabel(reorderedOn)} bundle, so the cost comes off the {supplierLabel(reorderedOn)} float.
+                            Make sure the first attempt on {supplierLabel(soldThrough)} really did not go through, or the
+                            customer gets it twice and you pay twice.
+                          </p>
+                        )}
+                      </>
+                    )}
                   </>
                 )}
                 <Field label="Reference" htmlFor="provider-ref" className="mt-2" error={refError}>
                   <TextInput
                     id="provider-ref"
-                    placeholder="As shown on the DataHub dashboard"
+                    placeholder={`As shown on the ${supplierLabel(refSupplier)} dashboard`}
                     value={refValue}
                     invalid={Boolean(refError)}
                     onChange={(event) => {
