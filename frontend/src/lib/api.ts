@@ -1268,6 +1268,8 @@ export interface PlaceOrderBody {
   payWith: 'wallet' | 'momo'
   sellerCode?: string | null
   idempotencyKey?: string
+  /** Admin only: buy past the on-sale and routing gates, see the Buy from any supplier page. */
+  anySupplier?: boolean
 }
 
 // ─── Analytics: one call per date range, see `InsightsService` ──────────────

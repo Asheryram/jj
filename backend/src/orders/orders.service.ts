@@ -19,6 +19,7 @@ import { splitDiscrepancy, type OrderSplit } from '../domain/pricing'
 import { toOrder, toOrderFor, toTrackedOrder } from '../common/mappers'
 import {
   ConflictError,
+  ForbiddenError,
   InsufficientBalanceError,
   LedgerImbalanceError,
   NotFoundError,
@@ -92,6 +93,17 @@ export class OrdersService {
       throw new ValidationError('A wallet purchase needs an idempotency key.')
     }
 
+    // Buying what customers cannot (off sale, or a supplier the network is not
+    // routed to) is for admins only, checked here and never trusted from the
+    // page that offers it.
+    const anySupplier = dto.anySupplier === true
+    if (anySupplier) {
+      if (!user || !isAdminRole(user.role)) {
+        throw new ForbiddenError('Only an admin can buy from a supplier that is not on sale.')
+      }
+      await this.refuseUnsendable(dto.productId)
+    }
+
     const seller = await this.effectiveSeller(dto.sellerCode ?? null, user)
     const sellerCode = seller?.code ?? null
 
@@ -162,7 +174,7 @@ export class OrdersService {
     for (let attempt = 0; !order; attempt++) {
       try {
         order = await this.prisma.$transaction(async (tx) => {
-          const { product, salePrice, split } = await this.priceInside(tx, dto.productId, sellerCode, dto.recipient)
+          const { product, salePrice, split } = await this.priceInside(tx, dto.productId, sellerCode, dto.recipient, anySupplier)
 
           // FR-2.3, a wallet payment is debited as the order is created, and only a
           // customer holds a spendable wallet. An agent's balance is earnings.
@@ -230,6 +242,11 @@ export class OrdersService {
 
         throw error
       }
+    }
+
+    if (anySupplier) {
+      // `buyerUserId` already names the admin; this says they went past the gates.
+      this.log.warn(`${order.reference}: ${user?.name ?? 'an admin'} bought ${order.productName} past the on-sale and routing gates`)
     }
 
     if (needsPayment) {
@@ -452,10 +469,12 @@ export class OrdersService {
     productId: string,
     sellerCode: string | null,
     recipient: string,
+    /** An admin buying past the on-sale and routing gates, see `PlaceOrderDto.anySupplier`. */
+    anySupplier = false,
   ) {
     const row = await tx.product.findUnique({ where: { id: productId } })
     if (!row) throw new NotFoundError('We could not find that bundle.')
-    if (!row.active) {
+    if (!row.active && !anySupplier) {
       throw new ConflictError(
         'PRODUCT_INACTIVE',
         `${row.name} is not on sale at the moment. Pick another bundle.`,
@@ -496,7 +515,7 @@ export class OrdersService {
       const settingsNow = await this.settings.all(tx)
       const selectedProvider = this.settings.providerFor(settingsNow.networkProviderRouting, row.network, row.category)
       // No network (result checkers): not routable, sold by its own provider.
-      if (row.network !== null && supplierRow.provider !== selectedProvider) {
+      if (row.network !== null && supplierRow.provider !== selectedProvider && !anySupplier) {
         throw new ConflictError(
           'PRODUCT_INACTIVE',
           `${row.name} is not on sale at the moment. Pick another bundle.`,
@@ -1215,6 +1234,30 @@ export class OrdersService {
 
     const paymentCollected = await this.paymentCollectedFlag(row.id, row.status)
     return { ...toTrackedOrder(row), paymentCollected }
+  }
+
+  /**
+   * Refuse an admin's any-supplier purchase that would only take money:
+   * a supplier with no automated way to send the bundle, or one not
+   * switched on for real orders on this server.
+   */
+  private async refuseUnsendable(productId: string): Promise<void> {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { name: true, supplier: true },
+    })
+    if (!product) throw new NotFoundError('We could not find that bundle.')
+    if (!product.supplier) {
+      throw new ConflictError('PRODUCT_INACTIVE', `${product.name} has no supplier bundle behind it, so nothing could be sent.`)
+    }
+    const provider = asProvider(product.supplier.provider)
+    if (!this.supplier.wouldFulfil(provider)) {
+      throw new ConflictError(
+        'SUPPLIER_NOT_LIVE',
+        `${PROVIDERS[provider].label} is not switched on for real orders on this server (${PROVIDERS[provider].liveEnvKey}), ` +
+          'so nothing would be sent. Switch it on first; customers still will not see it until you route a network to it.',
+      )
+    }
   }
 
   /**

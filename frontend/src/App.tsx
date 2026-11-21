@@ -40,6 +40,7 @@ import Announcements from './pages/app/Announcements'
 import Overview from './pages/admin/Overview'
 import Finance from './pages/admin/Finance'
 import AdminOrders from './pages/admin/AdminOrders'
+import BuyAnySupplier from './pages/admin/BuyAnySupplier'
 import Treasury from './pages/admin/Treasury'
 import Today from './pages/admin/Today'
 import Users from './pages/admin/Users'
@@ -345,6 +346,7 @@ export default function App() {
               <Route path="/admin/treasury" element={<Treasury />} />
               <Route path="/admin/today" element={<Today />} />
               <Route path="/admin/orders" element={<AdminOrders />} />
+              <Route path="/admin/buy" element={<BuyAnySupplier />} />
               <Route path="/admin/users" element={<Users />} />
               <Route path="/admin/prices" element={<CostPrices />} />
               <Route path="/admin/catalogue-accuracy" element={<CatalogueAccuracy />} />
