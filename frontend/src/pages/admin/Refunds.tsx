@@ -325,15 +325,24 @@ export default function Refunds() {
                       <p className="tabular mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                         Receipt {prettyPhone(row.buyerPhone)}
                       </p>
-                      {row.method === 'transfer' &&
-                        (row.payerPhone ? (
+                      {/* Where the refund goes, in one sentence, so it never reads
+                          as two facts that seem to disagree. */}
+                      {row.method === 'transfer' ? (
+                        row.payerPhone ? (
                           <p className="tabular mt-0.5 text-xs font-semibold text-slate-800 dark:text-slate-100">
-                            Paid from {prettyPhone(row.payerPhone)}
-                            {row.payerNetwork ? ` (${row.payerNetwork})` : ''}
+                            Refund goes to {prettyPhone(row.payerPhone)}
+                            {row.payerNetwork ? ` (${row.payerNetwork})` : ''}, the number that paid
                           </p>
                         ) : (
-                          <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">Paying number not known</p>
-                        ))}
+                          <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-400">
+                            The paying number isn't known, so this refund is sent by hand
+                          </p>
+                        )
+                      ) : (
+                        <p className="mt-0.5 text-xs text-slate-600 dark:text-slate-300">
+                          {row.method === 'wallet' ? 'Refund goes to their wallet' : 'Refund by claim link'}
+                        </p>
+                      )}
                     </Td>
                     <Td label="Order">
                       <p className="tabular text-sm text-slate-800 dark:text-slate-100">{row.orderRef}</p>
@@ -341,16 +350,7 @@ export default function Refunds() {
                     </Td>
                     <Td label="Why it failed">
                       <p className="max-w-xs text-sm text-slate-700 dark:text-slate-200">{row.reason}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <Badge tone="neutral">
-                          {row.method === 'wallet'
-                            ? 'to wallet'
-                            : row.method === 'transfer'
-                              ? 'to the number that paid'
-                              : 'claim link'}
-                        </Badge>
-                        <span className="text-xs text-slate-500 dark:text-slate-400">{dateTime(row.createdAt)}</span>
-                      </div>
+                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{dateTime(row.createdAt)}</p>
                       {row.note && (
                         <p className="mt-1 text-xs text-red-700 dark:text-red-400">Refused: {row.note}</p>
                       )}
