@@ -747,32 +747,52 @@
   .stack-on-phone thead {
     display: none;
   }
+  /* Each row is a card: a fixed label column on the left, the value
+     left-aligned beside it. The value's own pieces (a number, a note, a
+     badge) stay stacked the way they are written, instead of being spread
+     across the line as separate items, which scattered them. */
   .stack-on-phone tbody tr {
     display: block;
-    padding-block: 0.5rem;
+    padding-block: 0.625rem;
     border-bottom: 1px solid var(--color-slate-200);
   }
   .stack-on-phone tbody td {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 0.75rem;
+    display: block;
+    position: relative;
     border: 0;
-    padding: 0.375rem 1rem;
-    text-align: right;
-  }
-  .stack-on-phone tbody td > * {
-    min-width: 0;
+    padding: 0.3rem 1rem 0.3rem 7.25rem;
+    min-height: 1.75rem;
+    text-align: left !important;
+    overflow-wrap: anywhere;
   }
   .stack-on-phone tbody td[data-label]::before {
     content: attr(data-label);
-    flex-shrink: 0;
-    text-align: left;
-    font-size: 0.75rem;
+    position: absolute;
+    left: 1rem;
+    top: 0.45rem;
+    width: 5.75rem;
+    font-size: 0.6875rem;
     font-weight: 600;
+    line-height: 1.2;
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--color-slate-500);
+  }
+  /* A cell with no label is the row's actions: full width, at the bottom
+     of the card, buttons from the left, never squeezed beside a label. */
+  .stack-on-phone tbody td:not([data-label]),
+  .stack-on-phone tbody td[data-label=''] {
+    padding-left: 1rem;
+    padding-top: 0.5rem;
+  }
+  .stack-on-phone tbody td .justify-end {
+    justify-content: flex-start;
+  }
+  .stack-on-phone tbody td .items-end {
+    align-items: flex-start;
+  }
+  .stack-on-phone tbody td .whitespace-nowrap {
+    white-space: normal;
   }
   .stack-on-phone tbody td:empty {
     display: none;

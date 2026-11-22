@@ -597,12 +597,10 @@ export default function AdminOrders() {
                         <p className="truncate font-medium text-slate-900 dark:text-slate-50">
                           {order.productName}
                         </p>
-                        <div className="mt-1 flex items-center gap-2">
+                        <p className="tabular mt-0.5 whitespace-nowrap text-xs text-slate-500 dark:text-slate-400">{order.reference}</p>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                           <NetworkChip network={order.network} />
                           {order.provider && <ProviderChip provider={order.provider} />}
-                          <span className="tabular text-xs text-slate-500 dark:text-slate-400">
-                            {order.reference}
-                          </span>
                         </div>
                       </div>
                       <p className="tabular shrink-0 font-semibold text-slate-900 dark:text-slate-50">
@@ -619,7 +617,7 @@ export default function AdminOrders() {
                         <Badge tone="neutral">Direct sale</Badge>
                       )}
                       <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                        to {order.recipient} · {order.buyer} · {dateTime(order.createdAt)}
+                        to {order.recipient}{order.buyer ? ` · ${order.buyer}` : ''} · {dateTime(order.createdAt)}
                       </p>
                     </div>
 
@@ -1032,9 +1030,12 @@ function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void 
         order.status === 'processing' ||
         order.status === 'pending' ||
         order.status === 'completed') && (
-        <Button className="mt-1.5" size="sm" variant="outline" onClick={onWhy}>
-          {order.status === 'completed' ? 'Details' : 'What happened?'}
-        </Button>
+        // Its own line under the status, never squeezed beside the badge.
+        <div className="mt-2">
+          <Button size="sm" variant="outline" onClick={onWhy}>
+            {order.status === 'completed' ? 'Details' : 'What happened?'}
+          </Button>
+        </div>
       )}
 
       {/* When it actually finished, not just when it was placed,
