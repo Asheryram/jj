@@ -146,7 +146,16 @@ function explain(attempt: DispatchAttempt): {
  * actions regardless of which page led them here, rather than the queue
  * offering a thinner "resolve by hand only" version of the same decision.
  */
-export function DispatchModal({ order, onClose }: { order: Order | null; onClose: () => void }) {
+export function DispatchModal({
+  order,
+  onClose,
+  onReverse,
+}: {
+  order: Order | null
+  onClose: () => void
+  /** Superadmin only: reverse a settled order's outcome, one of the answers to "what happened?". */
+  onReverse?: () => void
+}) {
   const { pushToast, refresh, session } = useStore()
   const [attempts, setAttempts] = useState<DispatchAttempt[] | null>(null)
   const [error, setError] = useState('')
@@ -285,6 +294,16 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
             title: stuck ? 'Ask the supplier now' : 'Ask the supplier if this is still right',
             detail: stuck ? "Don't wait for the automatic check." : 'A supplier can change its answer later.',
             run: () => void submitCheckNow(),
+          },
+        ]
+      : []),
+    ...(onReverse && (order.status === 'completed' || order.status === 'failed')
+      ? [
+          {
+            key: 'reverse',
+            title: order.status === 'completed' ? 'It was not delivered: reverse it' : 'It was delivered after all: reverse it',
+            detail: 'Superadmin. Re-settles the order the other way. Kept on the record.',
+            run: onReverse,
           },
         ]
       : []),

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, ApiError, type CapitalNeedingReview } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { cedis, dateTime } from '../../lib/format'
-import { Button, Callout, Card, CardHead, EmptyState, PageHead, Spinner, TextInput } from '../../components/ui'
+import { Button, Callout, Card, CardHead, ChoiceModal, EmptyState, PageHead, Spinner, TextInput } from '../../components/ui'
 import { AlertIcon, SearchIcon } from '../../components/icons'
 import { SUPPLIER_CODES, supplierName, type SupplierCode } from '../../lib/suppliers'
 
@@ -36,6 +36,8 @@ export default function FloatCorrections() {
   const [error, setError] = useState('')
   const [query, setQuery] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
+  /** "Fix this entry" asks what is wrong with it first. */
+  const [fixing, setFixing] = useState<Row | null>(null)
 
   useEffect(() => {
     let live = true
@@ -167,32 +169,14 @@ export default function FloatCorrections() {
                         {row.description} · {dateTime(row.occurredAt)}
                       </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {row.kind === 'capital_in' && !row.reimbursedAs && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          loading={busyId === row.id}
-                          onClick={() => void reclassify(row)}
-                        >
-                          Mark as Paystack reimbursement
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        loading={busyId === (row.reimbursedAs?.id ?? row.id)}
-                        onClick={() =>
-                          void reverse(
-                            row,
-                            row.reimbursedAs?.id ?? row.id,
-                            row.reimbursedAs?.amount ?? row.amount,
-                          )
-                        }
-                      >
-                        {row.reimbursedAs ? 'Reverse capital (and its reimbursement)' : "Wasn't real, reverse it"}
-                      </Button>
-                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      loading={busyId === row.id || busyId === row.reimbursedAs?.id}
+                      onClick={() => setFixing(row)}
+                    >
+                      Fix this entry
+                    </Button>
                   </div>
 
                   {row.reimbursedAs && (
@@ -206,14 +190,7 @@ export default function FloatCorrections() {
                           {row.reimbursedAs.description} · {dateTime(row.reimbursedAs.occurredAt)}
                         </p>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        loading={busyId === row.reimbursedAs.id}
-                        onClick={() => void reverse(row, row.reimbursedAs!.id, row.reimbursedAs!.amount)}
-                      >
-                        Reverse just the reimbursement
-                      </Button>
+
                     </div>
                   )}
                 </div>
@@ -222,6 +199,36 @@ export default function FloatCorrections() {
           )}
         </div>
       </Card>
+
+      {fixing && (
+        <ChoiceModal<'reimbursement' | 'reverse' | 'reverseReimbursement'>
+          open
+          title={`Fix ${cedis(fixing.amount)} · ${providerLabel(fixing.provider)}`}
+          question="What is wrong with this entry?"
+          choices={[
+            ...(fixing.kind === 'capital_in' && !fixing.reimbursedAs
+              ? [{ value: 'reimbursement' as const, title: 'It was Paystack money, not mine', detail: 'Customer money moved to the supplier, not new capital.' }]
+              : []),
+            ...(fixing.reimbursedAs
+              ? [{ value: 'reverseReimbursement' as const, title: 'Only the reimbursement is wrong', detail: `Undo the ${cedis(fixing.reimbursedAs.amount)} reimbursement, keep the capital.` }]
+              : []),
+            {
+              value: 'reverse' as const,
+              title: 'It never happened',
+              detail: fixing.reimbursedAs ? 'Reverse the capital and its reimbursement.' : 'Reverse it. Nothing else changes.',
+              danger: true,
+            },
+          ]}
+          onClose={() => setFixing(null)}
+          onPick={(choice) => {
+            const row = fixing
+            setFixing(null)
+            if (choice === 'reimbursement') void reclassify(row)
+            else if (choice === 'reverseReimbursement') void reverse(row, row.reimbursedAs!.id, row.reimbursedAs!.amount)
+            else void reverse(row, row.reimbursedAs?.id ?? row.id, row.reimbursedAs?.amount ?? row.amount)
+          }}
+        />
+      )}
     </div>
   )
 }

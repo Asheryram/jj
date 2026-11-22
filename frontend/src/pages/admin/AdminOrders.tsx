@@ -624,7 +624,7 @@ export default function AdminOrders() {
                     </div>
 
                     <div className="mt-2">
-                      <OrderStatusDetails order={order} onWhy={() => setInspecting(order)} onReverse={isSuperadmin ? () => setReversing(order) : undefined} />
+                      <OrderStatusDetails order={order} onWhy={() => setInspecting(order)} />
                     </div>
 
                     <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5 border-t border-slate-100 dark:border-slate-800 pt-2.5 text-sm">
@@ -703,7 +703,7 @@ export default function AdminOrders() {
                     </Td>
                     <Td className="tabular">{order.recipient}</Td>
                     <Td>
-                      <OrderStatusDetails order={order} onWhy={() => setInspecting(order)} onReverse={isSuperadmin ? () => setReversing(order) : undefined} />
+                      <OrderStatusDetails order={order} onWhy={() => setInspecting(order)} />
                     </Td>
                     <Td align="right" className="tabular font-semibold text-slate-900 dark:text-slate-50">
                       {cedis(order.salePrice)}
@@ -786,11 +786,26 @@ export default function AdminOrders() {
         </div>
       )}
 
-      <DispatchModal order={inspecting} onClose={() => setInspecting(null)} />
+      <DispatchModal
+        order={inspecting}
+        onClose={() => setInspecting(null)}
+        onReverse={
+          isSuperadmin && inspecting
+            ? () => {
+                setReversing(inspecting)
+                setInspecting(null)
+              }
+            : undefined
+        }
+      />
 
       <ReverseOutcomeModal
         order={reversing}
         onClose={() => setReversing(null)}
+        onBack={() => {
+          setInspecting(reversing)
+          setReversing(null)
+        }}
         onReversed={() => setReloadTick((t) => t + 1)}
       />
     </div>
@@ -800,10 +815,12 @@ export default function AdminOrders() {
 function ReverseOutcomeModal({
   order,
   onClose,
+  onBack,
   onReversed,
 }: {
   order: Order | null
   onClose: () => void
+  onBack?: () => void
   onReversed: () => void
 }) {
   const { pushToast } = useStore()
@@ -835,7 +852,7 @@ function ReverseOutcomeModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Reverse outcome · ${order.reference}`}>
+    <Modal open onClose={onClose} onBack={onBack} title={`Reverse outcome · ${order.reference}`}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); void submit() }}>
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
           <p className="font-semibold text-slate-900 dark:text-slate-50">{order.productName}</p>
@@ -903,7 +920,7 @@ function FinancialFigure({
  * table's Status column and the mobile card fallback below, so the two never
  * drift out of sync with each other.
  */
-function OrderStatusDetails({ order, onWhy, onReverse }: { order: Order; onWhy: () => void; onReverse?: () => void }) {
+function OrderStatusDetails({ order, onWhy }: { order: Order; onWhy: () => void }) {
   return (
     <>
       {order.status === 'failed' && order.paymentCollected === false ? (
@@ -1019,16 +1036,7 @@ function OrderStatusDetails({ order, onWhy, onReverse }: { order: Order; onWhy: 
           {order.status === 'completed' ? 'Details' : 'What happened?'}
         </Button>
       )}
-      {onReverse && (order.status === 'completed' || order.status === 'failed') && (
-        <button
-          type="button"
-          onClick={onReverse}
-          className="mt-1 block text-xs font-semibold text-red-600 dark:text-red-400 underline underline-offset-2"
-          title="Superadmin: reverse this outcome and re-settle with the opposite result"
-        >
-          Reverse outcome
-        </button>
-      )}
+
       {/* When it actually finished, not just when it was placed,
           `completedAt` is exact; a failed order has no
           dedicated column for this, so `failedAt` is read off
