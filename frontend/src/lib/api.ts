@@ -982,6 +982,8 @@ export interface RefundRequest {
   orderId: string
   /** The bundle it was sent as, for "Send it again" to offer the same supplier first. */
   soldThroughCode?: string | null
+  /** That bundle's supplier, for marking it "(same)". */
+  soldThroughProvider?: string | null
   /** Whether the order this refund is for still stands as failed. */
   orderFailed: boolean
   /** A person failed this order, so the customer may already be sorted out. */

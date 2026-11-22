@@ -126,6 +126,14 @@ export class RefundsService {
       : []
     const agentByReferralCode = new Map(agentUsers.map((a) => [a.referralCode, a]))
 
+    // Which supplier each order was sent to first, so the screens can mark it "(same)".
+    const saleCodes = [...new Set(rows.map((row) => row.order.supplierCodeAtSale).filter((c): c is string => c !== null))]
+    const providerByCode = new Map(
+      (
+        await this.prisma.supplierProduct.findMany({ where: { code: { in: saleCodes } }, select: { code: true, provider: true } })
+      ).map((p) => [p.code, p.provider]),
+    )
+
     return rows.map((row) => {
       // Frozen at the original sale and unchanged by a reorder, `settle`'s
       // delivered branch always pays an agent this exact amount regardless of
@@ -144,6 +152,8 @@ export class RefundsService {
         orderId: row.orderId,
         /** The bundle it was sent as, so "Send it again" can offer the same supplier first. */
         soldThroughCode: row.order.supplierCodeAtSale,
+        /** That bundle's supplier; null for an order sold before suppliers were recorded (DataHub). */
+        soldThroughProvider: row.order.supplierCodeAtSale ? (providerByCode.get(row.order.supplierCodeAtSale) ?? 'datahub-gh') : null,
         /** Whether the order this refund is for still stands as failed. */
         orderFailed: row.order.status === 'failed',
         /** A person failed this order, so the customer may already be sorted out. */

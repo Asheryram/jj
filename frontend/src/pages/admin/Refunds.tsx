@@ -15,6 +15,7 @@ import {
   Badge,
   Button,
   Callout,
+  ChoiceList,
   ChoiceModal,
   Card,
   CardHead,
@@ -36,7 +37,7 @@ import { OrderTimeline } from '../../components/OrderTimeline'
 import { withUndo } from '../../lib/undo'
 import { useRemembered } from '../../lib/remember'
 import { downloadCsv } from '../../lib/csv'
-import { SUPPLIERS, supplierName, type SupplierCode } from '../../lib/suppliers'
+import { supplierChoices, supplierName, type SupplierCode } from '../../lib/suppliers'
 
 type Filter = 'pending' | 'approved' | 'rejected'
 
@@ -854,7 +855,8 @@ function ResentByHandModal({
   onDone: () => Promise<void> | void
 }) {
   const { pushToast } = useStore()
-  const [provider, setProvider] = useState<SupplierCode>('datahub-gh')
+  /** Null until chosen: the supplier is its own step, never a default left in place. */
+  const [provider, setProvider] = useState<SupplierCode | null>(null)
   const [reference, setReference] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -863,7 +865,7 @@ function ResentByHandModal({
   const [lastKey, setLastKey] = useState(key)
   if (key !== lastKey) {
     setLastKey(key)
-    setProvider('datahub-gh')
+    setProvider(null)
     setReference('')
     setError('')
   }
@@ -871,6 +873,7 @@ function ResentByHandModal({
   if (!request) return null
 
   const submit = async () => {
+    if (!provider) return
     const ref = reference.trim()
     if (ref.length < 3) return setError('Paste the reference exactly as the supplier shows it.')
     setBusy(true)
@@ -888,7 +891,23 @@ function ResentByHandModal({
   }
 
   return (
-    <Modal open onClose={onClose} onBack={onBack} title={`Sent again by hand, ${request.orderRef}`}>
+    <Modal
+      open
+      onClose={onClose}
+      onBack={provider ? () => setProvider(null) : onBack}
+      title={`Sent again by hand, ${request.orderRef}`}
+    >
+      {!provider ? (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            {request.productName} · {cedis(request.amount)}. <strong>Where did you send it again?</strong>
+          </p>
+          <ChoiceList<SupplierCode> choices={supplierChoices(request.soldThroughProvider)} onPick={setProvider} />
+          <Button block variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      ) : (
       <form
         className="space-y-4"
         onSubmit={(event) => {
@@ -906,14 +925,14 @@ function ResentByHandModal({
           The reference is checked with the supplier first, including the number. Then this refund is closed, nothing is paid out,
           and the order is marked delivered with that supplier's cost.
         </p>
-        <Field label="Where did you send it again?" htmlFor="resent-provider">
-          <Segmented<SupplierCode>
-            className="w-full"
-            options={SUPPLIERS.map((s) => ({ value: s.code, label: s.label }))}
-            value={provider}
-            onChange={setProvider}
-          />
-        </Field>
+        <p className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
+          <span>
+            Sent again on <strong className="text-slate-900 dark:text-slate-50">{supplierName(provider)}</strong>
+          </span>
+          <button type="button" onClick={() => setProvider(null)} className="text-xs font-semibold text-brand-700 dark:text-brand-300">
+            Change
+          </button>
+        </p>
         <Field label={`Reference from ${supplierName(provider)}`} htmlFor="resent-reference" error={error}>
           <TextInput
             id="resent-reference"
@@ -936,6 +955,7 @@ function ResentByHandModal({
           </Button>
         </div>
       </form>
+      )}
     </Modal>
   )
 }
@@ -1244,12 +1264,9 @@ function ReorderModal({
             (request.network === null || row.network === request.network),
         )
         const first = rows.find((row) => row.code === request.soldThroughCode) ?? null
-        // The same supplier first when it can still send it, else the first that can.
-        const start = first && usable.some((row) => row.provider === first.provider) ? first.provider : (usable[0]?.provider ?? '')
+        // No supplier picked for them: choosing it is the first step.
         setOptions(usable)
         setOriginal(first)
-        setProvider(start)
-        setSupplierCode(sameSizeOn(usable, start, first))
       })
       .catch(() => {
         if (!cancelled) setOptions([])
@@ -1307,7 +1324,12 @@ function ReorderModal({
   }
 
   return (
-    <Modal open onClose={onClose} onBack={onBack} title={`Send it again, ${request.orderRef}`}>
+    <Modal
+      open
+      onClose={onClose}
+      onBack={provider ? () => pickProvider('') : onBack}
+      title={`Send it again, ${request.orderRef}`}
+    >
       <div className="space-y-4">
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
           <p className="font-semibold text-slate-900 dark:text-slate-50">
@@ -1332,28 +1354,30 @@ function ReorderModal({
           </p>
         ) : (
           <>
-            <Field label="Send it through" htmlFor="reorder-provider">
-              <Segmented<string>
-                className="w-full"
-                options={[...new Set(options.map((row) => row.provider))].map((p) => ({
-                  value: p,
-                  label: original?.provider === p ? `${providerName(p)} (same)` : providerName(p),
-                }))}
-                value={provider}
-                onChange={pickProvider}
-              />
-            </Field>
-            {original && !options.some((row) => row.provider === original.provider) && (
-              <p className="-mt-2 text-xs text-amber-700 dark:text-amber-400">
-                {providerName(original.provider)}, which it went to first, can't send this right now, so another supplier is needed.
-              </p>
-            )}
-            {original && provider && provider !== original.provider && (
-              <p className="-mt-2 text-xs text-slate-500 dark:text-slate-400">
-                A different supplier from the first time ({providerName(original.provider)}). Its cost comes out of the{' '}
-                {providerName(provider)} float.
-              </p>
-            )}
+            {!provider ? (
+              <>
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Which supplier should send it?</p>
+                <ChoiceList<string>
+                  choices={supplierChoices(original?.provider, (code) => options.some((row) => row.provider === code))}
+                  onPick={pickProvider}
+                />
+                {original && !options.some((row) => row.provider === original.provider) && (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    {providerName(original.provider)}, which it went to first, can't send this right now, so it isn't listed.
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+            <p className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
+              <span>
+                Through <strong className="text-slate-900 dark:text-slate-50">{providerName(provider)}</strong>
+                {original && provider === original.provider ? ' (same as before)' : ''}
+              </span>
+              <button type="button" onClick={() => pickProvider('')} className="text-xs font-semibold text-brand-700 dark:text-brand-300">
+                Change
+              </button>
+            </p>
             <Field label="Bundle" htmlFor="reorder-sku">
               <select
                 id="reorder-sku"
@@ -1375,6 +1399,8 @@ function ReorderModal({
                   ))}
               </select>
             </Field>
+              </>
+            )}
           </>
         )}
 
@@ -1577,18 +1603,18 @@ function SendRefundModal({
           <p className="mt-1 text-sm text-brand-900 dark:text-brand-200">{request.buyerName}</p>
         </div>
 
-        <Field label="Which Mobile Money network?" htmlFor="refund-network">
-          <Segmented<Network>
-            className="w-full"
-            options={[
-              { value: 'MTN', label: 'MTN' },
-              { value: 'Telecel', label: 'Telecel' },
-              { value: 'AirtelTigo', label: 'AirtelTigo' },
+        <div>
+          <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">Which Mobile Money network?</p>
+          <ChoiceList<Network>
+            selected={network}
+            choices={[
+              { value: 'MTN', title: 'MTN', detail: 'MTN Mobile Money' },
+              { value: 'Telecel', title: 'Telecel', detail: 'Telecel Cash' },
+              { value: 'AirtelTigo', title: 'AirtelTigo', detail: 'AT Money' },
             ]}
-            value={network}
-            onChange={setNetwork}
+            onPick={setNetwork}
           />
-        </Field>
+        </div>
 
         {known ? (
           <Callout tone="info" icon={<CheckIcon className="size-4" />}>
@@ -1708,18 +1734,18 @@ function SettleManuallyModal({
           tells the customer it has been sent, there is no automatic transfer behind it this time.
         </Callout>
 
-        <Field label="Which Mobile Money network did you send it on?" htmlFor="settle-network">
-          <Segmented<Network>
-            className="w-full"
-            options={[
-              { value: 'MTN', label: 'MTN' },
-              { value: 'Telecel', label: 'Telecel' },
-              { value: 'AirtelTigo', label: 'AirtelTigo' },
+        <div>
+          <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">Which Mobile Money network did you send it on?</p>
+          <ChoiceList<Network>
+            selected={network}
+            choices={[
+              { value: 'MTN', title: 'MTN', detail: 'MTN Mobile Money' },
+              { value: 'Telecel', title: 'Telecel', detail: 'Telecel Cash' },
+              { value: 'AirtelTigo', title: 'AirtelTigo', detail: 'AT Money' },
             ]}
-            value={network}
-            onChange={setNetwork}
+            onPick={setNetwork}
           />
-        </Field>
+        </div>
 
         <Field label="How and where did you send it?" htmlFor="settle-note" error={error}>
           <TextInput

@@ -1155,6 +1155,51 @@ export interface Choice<T extends string> {
 }
 
 /**
+ * The answers to one question as a vertical list of cards, each with a line
+ * saying what it means. Used inside a form for any choice that decides what
+ * happens next (which supplier, which way), so it is its own step and cannot
+ * be skimmed past the way a small toggle row can.
+ */
+export function ChoiceList<T extends string>({
+  choices,
+  onPick,
+  selected,
+}: {
+  choices: Choice<T>[]
+  onPick: (value: T) => void
+  /** Marks the current answer when coming back to this step. */
+  selected?: T | null
+}) {
+  return (
+    <div className="space-y-2">
+      {choices.map((c) => (
+        <button
+          key={c.value}
+          type="button"
+          onClick={() => onPick(c.value)}
+          className={cn(
+            'w-full rounded-xl border p-3.5 text-left hover:border-brand-400 hover:bg-brand-50/60 dark:hover:bg-brand-950/30',
+            selected === c.value
+              ? 'border-brand-400 bg-brand-50/60 dark:bg-brand-950/30'
+              : 'border-slate-200 dark:border-slate-700',
+          )}
+        >
+          <span
+            className={cn(
+              'block text-sm font-semibold',
+              c.danger ? 'text-red-700 dark:text-red-400' : 'text-slate-900 dark:text-slate-50',
+            )}
+          >
+            {c.title}
+          </span>
+          <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{c.detail}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/**
  * "What happened?" before any form: one question, a short list of answers,
  * each opening the one form that records it. The pattern for any row with
  * more than one way forward, instead of a cluster of buttons and text links.
@@ -1166,6 +1211,7 @@ export function ChoiceModal<T extends string>({
   choices,
   onPick,
   onClose,
+  onBack,
 }: {
   open: boolean
   title: string
@@ -1173,29 +1219,13 @@ export function ChoiceModal<T extends string>({
   choices: Choice<T>[]
   onPick: (value: T) => void
   onClose: () => void
+  onBack?: () => void
 }) {
   return (
-    <Modal open={open} onClose={onClose} title={title}>
+    <Modal open={open} onClose={onClose} onBack={onBack} title={title}>
       <p className="text-sm text-slate-600 dark:text-slate-300">{question}</p>
-      <div className="mt-4 space-y-2">
-        {choices.map((c) => (
-          <button
-            key={c.value}
-            type="button"
-            onClick={() => onPick(c.value)}
-            className="w-full rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-left hover:border-brand-400 hover:bg-brand-50/60 dark:hover:bg-brand-950/30"
-          >
-            <span
-              className={cn(
-                'block text-sm font-semibold',
-                c.danger ? 'text-red-700 dark:text-red-400' : 'text-slate-900 dark:text-slate-50',
-              )}
-            >
-              {c.title}
-            </span>
-            <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{c.detail}</span>
-          </button>
-        ))}
+      <div className="mt-4">
+        <ChoiceList choices={choices} onPick={onPick} />
       </div>
       <Button className="mt-4" block variant="outline" onClick={onClose}>
         Cancel
