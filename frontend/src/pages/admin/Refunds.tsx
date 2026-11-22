@@ -35,7 +35,7 @@ import { OrderTimeline } from '../../components/OrderTimeline'
 import { withUndo } from '../../lib/undo'
 import { useRemembered } from '../../lib/remember'
 import { downloadCsv } from '../../lib/csv'
-import { supplierName } from '../../lib/suppliers'
+import { SUPPLIERS, supplierName, type SupplierCode } from '../../lib/suppliers'
 
 type Filter = 'pending' | 'approved' | 'rejected'
 
@@ -62,6 +62,7 @@ export default function Refunds() {
   const [sending, setSending] = useState<RefundRequest | null>(null)
   const [settling, setSettling] = useState<RefundRequest | null>(null)
   const [reordering, setReordering] = useState<RefundRequest | null>(null)
+  const [resent, setResent] = useState<RefundRequest | null>(null)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -394,6 +395,16 @@ export default function Refunds() {
                           >
                             Reorder instead?
                           </button>
+                          {/* Already bought again by hand on a supplier's dashboard:
+                              record its reference, the refund closes and the order
+                              settles with that supplier's real cost. */}
+                          <button
+                            type="button"
+                            onClick={() => setResent(row)}
+                            className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
+                          >
+                            Sent it again by hand?
+                          </button>
                           {/* Only offered once an automatic transfer has actually bounced,
                               a Starter Business Paystack account refuses every third-party
                               payout outright, and this is the way through that wall. Hidden
@@ -479,6 +490,8 @@ export default function Refunds() {
       />
 
       <ReopenModal request={reopening} onClose={() => setReopening(null)} onDone={load} />
+
+      <ResentByHandModal request={resent} onClose={() => setResent(null)} onDone={load} />
 
       <RefuseModal
         request={rejecting}
@@ -734,6 +747,10 @@ function RefuseModal({
           This customer paid and did not get their bundle. Only refuse if you know the bundle
           actually arrived, or the payment never did.
         </Callout>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Bought it again by hand on a supplier's dashboard? Close this and use <strong>Sent it again by hand?</strong>{' '}
+          instead, so the cost goes to the supplier that delivered and its reference is kept.
+        </p>
 
         <QuickReasons
           // A refund is only ever queued when the payment arrived, so "it was
@@ -766,6 +783,109 @@ function RefuseModal({
             Refuse refund
           </Button>
           <Button type="button" block disabled={busy} onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+/**
+ * The supplier refused it, the refund was raised, and an admin then bought
+ * the bundle again by hand on a supplier's dashboard. Saving the reference
+ * checks it with that supplier, closes this refund as not owed and settles
+ * the order with that supplier's real cost, see
+ * `ReconcilerService.attachProviderReference`.
+ */
+function ResentByHandModal({
+  request,
+  onClose,
+  onDone,
+}: {
+  request: RefundRequest | null
+  onClose: () => void
+  onDone: () => Promise<void> | void
+}) {
+  const { pushToast } = useStore()
+  const [provider, setProvider] = useState<SupplierCode>('datahub-gh')
+  const [reference, setReference] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const key = request?.id ?? 'none'
+  const [lastKey, setLastKey] = useState(key)
+  if (key !== lastKey) {
+    setLastKey(key)
+    setProvider('datahub-gh')
+    setReference('')
+    setError('')
+  }
+
+  if (!request) return null
+
+  const submit = async () => {
+    const ref = reference.trim()
+    if (ref.length < 3) return setError('Paste the reference exactly as the supplier shows it.')
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.addProviderReference(request.orderId, { reference: ref, reorderedByHand: true, provider })
+      await onDone()
+      pushToast({ tone: result.settled ? 'success' : 'info', title: `${request.orderRef}: ${result.message}` })
+      onClose()
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'We could not save that.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Sent again by hand, ${request.orderRef}`}>
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void submit()
+        }}
+      >
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
+          <p className="font-semibold text-slate-900 dark:text-slate-50">
+            {request.productName} · {cedis(request.amount)}
+          </p>
+          <p className="mt-1 text-slate-600 dark:text-slate-300">{request.reason}</p>
+        </div>
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          The reference is checked with the supplier first, including the number. Then this refund is closed, nothing is paid out,
+          and the order is marked delivered with that supplier's cost.
+        </p>
+        <Field label="Where did you send it again?" htmlFor="resent-provider">
+          <Segmented<SupplierCode>
+            className="w-full"
+            options={SUPPLIERS.map((s) => ({ value: s.code, label: s.label }))}
+            value={provider}
+            onChange={setProvider}
+          />
+        </Field>
+        <Field label={`Reference from ${supplierName(provider)}`} htmlFor="resent-reference" error={error}>
+          <TextInput
+            id="resent-reference"
+            autoComplete="off"
+            placeholder="2149085861"
+            value={reference}
+            invalid={Boolean(error)}
+            onChange={(event) => {
+              setReference(event.target.value)
+              setError('')
+            }}
+          />
+        </Field>
+        <div className="flex gap-2">
+          <Button type="submit" block loading={busy}>
+            Save and close the refund
+          </Button>
+          <Button type="button" block variant="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
         </div>
