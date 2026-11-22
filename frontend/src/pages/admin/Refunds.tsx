@@ -63,6 +63,8 @@ export default function Refunds() {
   const [settling, setSettling] = useState<RefundRequest | null>(null)
   const [reordering, setReordering] = useState<RefundRequest | null>(null)
   const [resent, setResent] = useState<RefundRequest | null>(null)
+  /** "Don't refund" asks why first, then opens the one form that fits. */
+  const [deciding, setDeciding] = useState<RefundRequest | null>(null)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -380,31 +382,10 @@ export default function Refunds() {
                             >
                               Refund
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => setRejecting(row)}>
-                              Refuse
+                            <Button size="sm" variant="outline" onClick={() => setDeciding(row)}>
+                              Don't refund
                             </Button>
                           </div>
-                          {/* For the case the failure itself was wrong, a catalogue
-                              mapping that's since been fixed, stock that's back, rather
-                              than a genuine reason the order couldn't be filled. Cancels
-                              this refund automatically if it delivers this time. */}
-                          <button
-                            type="button"
-                            onClick={() => setReordering(row)}
-                            className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
-                          >
-                            Reorder instead?
-                          </button>
-                          {/* Already bought again by hand on a supplier's dashboard:
-                              record its reference, the refund closes and the order
-                              settles with that supplier's real cost. */}
-                          <button
-                            type="button"
-                            onClick={() => setResent(row)}
-                            className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
-                          >
-                            Sent it again by hand?
-                          </button>
                           {/* Only offered once an automatic transfer has actually bounced,
                               a Starter Business Paystack account refuses every third-party
                               payout outright, and this is the way through that wall. Hidden
@@ -490,6 +471,19 @@ export default function Refunds() {
       />
 
       <ReopenModal request={reopening} onClose={() => setReopening(null)} onDone={load} />
+
+      <DontRefundModal
+        request={deciding}
+        onClose={() => setDeciding(null)}
+        onPick={(choice) => {
+          const row = deciding
+          setDeciding(null)
+          if (!row) return
+          if (choice === 'resent') setResent(row)
+          else if (choice === 'reorder') setReordering(row)
+          else setRejecting(row)
+        }}
+      />
 
       <ResentByHandModal request={resent} onClose={() => setResent(null)} onDone={load} />
 
@@ -747,10 +741,6 @@ function RefuseModal({
           This customer paid and did not get their bundle. Only refuse if you know the bundle
           actually arrived, or the payment never did.
         </Callout>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Bought it again by hand on a supplier's dashboard? Close this and use <strong>Sent it again by hand?</strong>{' '}
-          instead, so the cost goes to the supplier that delivered and its reference is kept.
-        </p>
 
         <QuickReasons
           // A refund is only ever queued when the payment arrived, so "it was
@@ -787,6 +777,65 @@ function RefuseModal({
           </Button>
         </div>
       </form>
+    </Modal>
+  )
+}
+
+type DontRefundChoice = 'resent' | 'reorder' | 'refuse'
+
+/**
+ * The first step of "Don't refund": why not. Each answer opens the one form
+ * that records it properly, so nobody has to know which link to look for, or
+ * refuses a refund in a way that books the cost to the wrong supplier.
+ */
+function DontRefundModal({
+  request,
+  onClose,
+  onPick,
+}: {
+  request: RefundRequest | null
+  onClose: () => void
+  onPick: (choice: DontRefundChoice) => void
+}) {
+  if (!request) return null
+  const options: { value: DontRefundChoice; title: string; detail: string }[] = [
+    {
+      value: 'resent',
+      title: 'I sent it again by hand',
+      detail: "You bought it again on a supplier's dashboard. Enter its reference.",
+    },
+    {
+      value: 'reorder',
+      title: 'Send it again now',
+      detail: 'The app orders it again. The refund closes if it delivers.',
+    },
+    {
+      value: 'refuse',
+      title: 'Another reason',
+      detail: 'The first order did arrive, or the payment never did.',
+    },
+  ]
+  return (
+    <Modal open onClose={onClose} title={`Don't refund ${request.orderRef}`}>
+      <p className="text-sm text-slate-600 dark:text-slate-300">
+        {request.productName} · {cedis(request.amount)}. Why isn't this customer being refunded?
+      </p>
+      <div className="mt-4 space-y-2">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => onPick(o.value)}
+            className="w-full rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-left hover:border-brand-400 hover:bg-brand-50/60 dark:hover:bg-brand-950/30"
+          >
+            <span className="block text-sm font-semibold text-slate-900 dark:text-slate-50">{o.title}</span>
+            <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{o.detail}</span>
+          </button>
+        ))}
+      </div>
+      <Button className="mt-4" block variant="outline" onClick={onClose}>
+        Cancel
+      </Button>
     </Modal>
   )
 }
