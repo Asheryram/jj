@@ -3,10 +3,10 @@ import { api, ApiError, type DispatchAttempt } from '../lib/api'
 import type { Order } from '../data/types'
 import { useStore } from '../state/store'
 import { cedis, dateTime } from '../lib/format'
-import { Button, Callout, Field, Modal, Segmented, Spinner, TextInput, cn } from './ui'
+import { ChoiceList, Button, Callout, Field, Modal, Spinner, TextInput, cn } from './ui'
 import { AlertIcon, CheckIcon, ChevronLeftIcon, ClockIcon } from './icons'
 import { OrderTimeline } from './OrderTimeline'
-import { SUPPLIERS, supplierName, type SupplierCode } from '../lib/suppliers'
+import { supplierChoices, supplierName, type SupplierCode } from '../lib/suppliers'
 
 /**
  * Turn a supplier's reply into something James can act on.
@@ -181,7 +181,8 @@ export function DispatchModal({
   // and the server, not this guess, decides whether the supplier changed.
   const knownSupplier = order?.provider ?? null
   const soldThrough: SupplierCode = knownSupplier ?? 'datahub-gh'
-  const [reorderedOn, setReorderedOn] = useState<SupplierCode>(soldThrough)
+  /** Null until picked: where it was sent again is its own step, never a default left in place. */
+  const [reorderedOn, setReorderedOn] = useState<SupplierCode | null>(null)
   const supplierLabel = (p: SupplierCode) => supplierName(p)
   const [refNote, setRefNote] = useState('')
   const [refError, setRefError] = useState('')
@@ -211,7 +212,7 @@ export function DispatchModal({
       return
     }
     // A different order may have been sold through the other supplier.
-    setReorderedOn(order.provider ?? 'datahub-gh')
+    setReorderedOn(null)
     let live = true
     api
       .orderDispatches(order.id)
@@ -250,11 +251,13 @@ export function DispatchModal({
    */
   const resentAfterFailure = order.status === 'failed' && order.paymentCollected !== false && !order.refunded && !correcting
   const how = resentAfterFailure ? 'reordered' : refHow
-  const refSupplier = !correcting && how === 'reordered' ? reorderedOn : soldThrough
+  const refSupplier = !correcting && how === 'reordered' ? (reorderedOn ?? soldThrough) : soldThrough
+  const pickingSupplier = !correcting && how === 'reordered' && !reorderedOn
   const canAddReference = (stuck && !handReference) || correcting || resentAfterFailure
   const canCheck = stuck || order.status === 'completed' || (order.status === 'failed' && order.paymentCollected !== false)
   const openReference = (how: 'found' | 'reordered') => () => {
     setRefHow(how)
+    setReorderedOn(null)
     setRefOpen(true)
   }
   /** The answers to "what happened?", only those that apply to this order. */
@@ -378,7 +381,7 @@ export function DispatchModal({
         reorderedByHand: !correcting && how === 'reordered',
         // Always sent when ordered again: the server compares it with the
         // order's real supplier itself, instead of trusting a guess here.
-        ...(!correcting && how === 'reordered' ? { provider: reorderedOn } : {}),
+        ...(!correcting && how === 'reordered' && reorderedOn ? { provider: reorderedOn } : {}),
         note: refNote.trim() || undefined,
       })
       pushToast({
@@ -687,7 +690,7 @@ export function DispatchModal({
               </>
             ) : (
               <>
-                <PanelBack onClick={() => setRefOpen(false)} />
+                <PanelBack onClick={() => (how === 'reordered' && reorderedOn && !correcting ? setReorderedOn(null) : setRefOpen(false))} />
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                   {correcting ? 'The right reference' : how === 'reordered' ? 'I sent it again by hand' : 'It went through'}
                 </p>
@@ -700,28 +703,29 @@ export function DispatchModal({
                     </p>
                     {how === 'reordered' && (
                       <>
-                        <p className="mt-3 text-xs font-semibold text-slate-700 dark:text-slate-200">Where did you order it again?</p>
-                        <Segmented<SupplierCode>
-                          className="mt-1.5 w-full"
-                          options={
-                            // The supplier it was sold through first, marked "(same)",
-                            // then every other one.
-                            knownSupplier
-                              ? [
-                                  { value: knownSupplier, label: `${supplierLabel(knownSupplier)} (same)` },
-                                  ...SUPPLIERS.filter((s) => s.code !== knownSupplier).map((s) => ({ value: s.code, label: s.label })),
-                                ]
-                              : SUPPLIERS.map((s) => ({ value: s.code, label: s.label }))
-                          }
-                          value={reorderedOn}
-                          onChange={setReorderedOn}
-                        />
-                        {knownSupplier && (
-                          <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                            This order was sold through {supplierLabel(knownSupplier)}.
+                        {!reorderedOn ? (
+                          <>
+                            <p className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">Where did you send it again?</p>
+                            <div className="mt-2">
+                              <ChoiceList<SupplierCode> choices={supplierChoices(knownSupplier)} onPick={setReorderedOn} />
+                            </div>
+                          </>
+                        ) : (
+                          <p className="mt-3 flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
+                            <span>
+                              Sent again on <strong className="text-slate-900 dark:text-slate-50">{supplierLabel(reorderedOn)}</strong>
+                              {reorderedOn === knownSupplier ? ' (same as before)' : ''}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setReorderedOn(null)}
+                              className="text-xs font-semibold text-brand-700 dark:text-brand-300"
+                            >
+                              Change
+                            </button>
                           </p>
                         )}
-                        {knownSupplier && reorderedOn !== knownSupplier && (
+                        {knownSupplier && reorderedOn && reorderedOn !== knownSupplier && (
                           <p className="mt-1.5 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
                             The reference is checked with {supplierLabel(reorderedOn)}, and the order moves to its
                             matching {supplierLabel(reorderedOn)} bundle, so the cost comes off the {supplierLabel(reorderedOn)} float.
@@ -733,6 +737,8 @@ export function DispatchModal({
                     )}
                   </>
                 )}
+                {!pickingSupplier && (
+                  <>
                 <Field label="Reference" htmlFor="provider-ref" className="mt-2" error={refError}>
                   <TextInput
                     id="provider-ref"
@@ -761,6 +767,8 @@ export function DispatchModal({
                     Back
                   </Button>
                 </div>
+                  </>
+                )}
               </>
             )}
           </div>

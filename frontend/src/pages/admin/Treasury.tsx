@@ -4,6 +4,7 @@ import { withUndo } from '../../lib/undo'
 import { api, ApiError, type BalanceBooksPlan, type TopupSource, type TreasuryOverview, type TreasuryPurpose } from '../../lib/api'
 import { cedis, dateTime, parseCedis } from '../../lib/format'
 import {
+  ChoiceList,
   ChoiceModal,
   Badge,
   Button,
@@ -15,8 +16,6 @@ import {
   Field,
   Modal,
   PageHead,
-  Segmented,
-  Select,
   Spinner,
   StatTile,
   TableWrap,
@@ -562,8 +561,9 @@ function PaystackCode({ code }: { code: string }) {
 
 function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => void }) {
   const { pushToast } = useStore()
-  const [purpose, setPurpose] = useState<TreasuryPurpose>('provider_refill')
-  const [provider, setProvider] = useState<SupplierCode>('datahub-gh')
+  /** Null until picked: what this money is for, then which supplier, are their own steps. */
+  const [purpose, setPurpose] = useState<TreasuryPurpose | null>(null)
+  const [provider, setProvider] = useState<SupplierCode | null>(null)
   const [amount, setAmount] = useState('')
   const [destinationId, setDestinationId] = useState('')
   const [note, setNote] = useState('')
@@ -573,9 +573,16 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
   const destinations = data.destinations.filter((d) => d.active)
   const repaying = purpose === 'advance_repayment'
   const owedBack = data.advancesToRepay
-  const max = repaying ? owedBack.total : purpose === 'owner_drawing' ? data.ownerDrawingMax : data.refillMax[provider]
+  const max = repaying ? owedBack.total : purpose === 'owner_drawing' ? data.ownerDrawingMax : provider ? data.refillMax[provider] : 0
+  const choosing: 'purpose' | 'provider' | null = !purpose ? 'purpose' : purpose === 'provider_refill' && !provider ? 'provider' : null
+  const startOver = () => {
+    setPurpose(null)
+    setProvider(null)
+    setError('')
+  }
 
   const submit = async () => {
+    if (!purpose) return
     // A repayment is always exactly what is owed back, never typed in.
     const pesewas = repaying ? owedBack.total : parseCedis(amount)
     if (repaying && owedBack.count === 0) return setError('Nothing is owed back for refunds paid by hand.')
@@ -601,7 +608,7 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
       if (!(await withUndo(`Sending ${cedis(pesewas)} to ${target?.label ?? 'the chosen number'}`))) return
       const result = await api.treasuryWithdraw({
         purpose,
-        provider: purpose === 'provider_refill' ? provider : undefined,
+        provider: purpose === 'provider_refill' ? (provider ?? undefined) : undefined,
         amount: pesewas,
         destinationId,
         note: note.trim() || undefined,
@@ -638,35 +645,68 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
           void submit()
         }}
       >
-        <Segmented
-          options={[
-            { value: 'provider_refill', label: 'Refill a provider float' },
-            { value: 'owner_drawing', label: 'Take money out' },
-            { value: 'advance_repayment', label: 'Repay my hand-paid refunds' },
-          ]}
-          value={purpose}
-          onChange={(v) => {
-            setPurpose(v)
-            setError('')
-          }}
-        />
-
-        {purpose === 'provider_refill' && (
-          <Field label="Which float" htmlFor="treasury-provider" hint={`Owed to it: ${cedis(data.owedToProvider[provider])}`}>
-            <Select
-              id="treasury-provider"
-              value={provider}
-              onChange={(e) => setProvider(e.target.value as SupplierCode)}
-            >
-              {PROVIDERS.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
-              ))}
-            </Select>
-          </Field>
+        {choosing === 'purpose' ? (
+          <>
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">What is this money for?</p>
+            <ChoiceList<TreasuryPurpose>
+              choices={[
+                {
+                  value: 'provider_refill',
+                  title: "Top up a supplier's balance",
+                  detail: 'Sends Paystack money to your MoMo, so you can fund DataHub, GMPL or NetPulse with it.',
+                },
+                {
+                  value: 'owner_drawing',
+                  title: 'Take profit out for myself',
+                  detail: `Up to ${cedis(Math.max(data.ownerDrawingMax, 0))} now. Money owed to agents and customers stays.`,
+                },
+                {
+                  value: 'advance_repayment',
+                  title: 'Pay myself back for refunds I sent by hand',
+                  detail:
+                    owedBack.count > 0
+                      ? `${cedis(owedBack.total)} owed back for ${owedBack.count} refund${owedBack.count === 1 ? '' : 's'}.`
+                      : 'Nothing owed back right now.',
+                },
+              ]}
+              onPick={(v) => {
+                setPurpose(v)
+                setError('')
+              }}
+            />
+          </>
+        ) : choosing === 'provider' ? (
+          <>
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Which supplier's balance?</p>
+            <ChoiceList<SupplierCode>
+              choices={PROVIDERS.map((p) => ({
+                value: p.value,
+                title: p.label,
+                detail: `Owed to it: ${cedis(data.owedToProvider[p.value])}. Up to ${cedis(Math.max(data.refillMax[p.value], 0))} can be sent now.`,
+              }))}
+              onPick={setProvider}
+            />
+            <Button type="button" block variant="outline" onClick={startOver}>
+              Back
+            </Button>
+          </>
+        ) : (
+          <p className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
+            <span className="font-semibold text-slate-900 dark:text-slate-50">
+              {purpose === 'provider_refill'
+                ? `Top up ${PROVIDERS.find((p) => p.value === provider)?.label ?? ''}`
+                : purpose === 'owner_drawing'
+                  ? 'Take profit out'
+                  : 'Pay back hand-sent refunds'}
+            </span>
+            <button type="button" onClick={startOver} className="text-xs font-semibold text-brand-700 dark:text-brand-300">
+              Change
+            </button>
+          </p>
         )}
 
+        {!choosing && (
+          <>
         {repaying ? (
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-sm dark:border-slate-700 dark:bg-slate-800">
             <p className="text-slate-600 dark:text-slate-300">
@@ -695,16 +735,14 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
         </Field>
         )}
 
-        <Field label="Send to" htmlFor="treasury-destination">
-          <Select id="treasury-destination" value={destinationId} onChange={(e) => setDestinationId(e.target.value)}>
-            <option value="">Choose an approved number</option>
-            {destinations.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.label} · {d.phone} ({d.network})
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <div>
+          <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">Send to which approved number?</p>
+          <ChoiceList<string>
+            selected={destinationId || null}
+            choices={destinations.map((d) => ({ value: d.id, title: d.label, detail: `${d.phone} · ${d.network}` }))}
+            onPick={setDestinationId}
+          />
+        </div>
         {destinations.length === 0 && (
           <p className="text-xs text-slate-500 dark:text-slate-400">
             No approved numbers yet. A superadmin adds them at the bottom of this page.
@@ -723,6 +761,8 @@ function WithdrawCard({ data, onDone }: { data: TreasuryOverview; onDone: () => 
         <Button type="submit" block loading={busy} disabled={!data.enabled}>
           Send with Paystack
         </Button>
+          </>
+        )}
       </form>
     </Card>
   )
@@ -816,17 +856,18 @@ function DestinationsCard({ data, onDone }: { data: TreasuryOverview; onDone: ()
               }}
             />
           </Field>
-          <Field label="Network" htmlFor="dest-network">
-            <Select
-              id="dest-network"
-              value={network}
-              onChange={(e) => setNetwork(e.target.value as 'MTN' | 'Telecel' | 'AirtelTigo')}
-            >
-              <option value="MTN">MTN</option>
-              <option value="Telecel">Telecel</option>
-              <option value="AirtelTigo">AirtelTigo</option>
-            </Select>
-          </Field>
+          <div>
+          <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">Which Mobile Money network is this number on?</p>
+          <ChoiceList<'MTN' | 'Telecel' | 'AirtelTigo'>
+            selected={network}
+            choices={[
+              { value: 'MTN', title: 'MTN', detail: 'MTN Mobile Money' },
+              { value: 'Telecel', title: 'Telecel', detail: 'Telecel Cash' },
+              { value: 'AirtelTigo', title: 'AirtelTigo', detail: 'AirtelTigo Money' },
+            ]}
+            onPick={setNetwork}
+          />
+        </div>
           <Button type="submit" block variant="outline" loading={busy}>
             Approve number
           </Button>

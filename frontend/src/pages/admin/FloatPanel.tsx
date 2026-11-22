@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { api, ApiError, type SupplierFloat } from '../../lib/api'
 import { useStore } from '../../state/store'
 import { cedis, dateTime, parseCedis } from '../../lib/format'
-import { Button, Callout, Card, CardHead, Field, Modal, Segmented, Spinner, TextInput, cn } from '../../components/ui'
+import { Button, Callout, Card, CardHead, ChoiceList, Field, Modal, Segmented, Spinner, TextInput, cn } from '../../components/ui'
 import { AlertIcon, CheckIcon, RefreshIcon } from '../../components/icons'
 import { SUPPLIERS, supplierInfo, supplierName, type SupplierCode } from '../../lib/suppliers'
 
@@ -423,6 +423,12 @@ function CapitalModal({
   const [value, setValue] = useState('')
   const [note, setNote] = useState('')
   const [source, setSource] = useState<'external' | 'reimbursement'>('external')
+  /**
+   * One question at a time: which balance, then (for money in) where it came
+   * from, then the amount. Each is picked on purpose, never a default left
+   * in place, because a wrong answer here puts money on the wrong books.
+   */
+  const [step, setStep] = useState<'provider' | 'source' | 'form'>('provider')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   /**
@@ -441,6 +447,7 @@ function CapitalModal({
     setValue('')
     setNote('')
     setSource('external')
+    setStep('provider')
     setError('')
     setAcknowledgedOverpay(false)
   }
@@ -498,48 +505,71 @@ function CapitalModal({
     <Modal
       open
       onClose={onClose}
+      onBack={step === 'form' ? () => setStep(direction === 'in' ? 'source' : 'provider') : step === 'source' ? () => setStep('provider') : undefined}
       title={`${direction === 'in' ? 'Log a top-up' : 'Log money taken out'} for ${providerLabel}`}
     >
-      <div className="space-y-4">
-        {/* Repeated here, not just implied by whatever tab was open behind
-            this modal: the one choice that determines everything else on
-            this form, so it comes first, and changing it updates the same
-            tab, never a second, disagreeing idea of which float this is. */}
-        <div className="rounded-xl border-2 border-brand-200 bg-brand-50 p-3 dark:border-brand-800 dark:bg-brand-950/40">
-          <p className="mb-1.5 text-xs font-semibold tracking-wide text-brand-800 uppercase dark:text-brand-200">
-            Which float is this for?
+      {step === 'provider' ? (
+        <div className="space-y-4">
+          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            {direction === 'in' ? "Which supplier's balance did the money go into?" : "Which supplier's balance did the money come out of?"}
           </p>
-          <Segmented<SupplierCode>
-            className="w-full"
-            options={PROVIDERS}
-            value={provider}
-            onChange={onProviderChange}
+          <ChoiceList<SupplierCode>
+            selected={provider}
+            choices={PROVIDERS.map((p) => ({
+              value: p.value,
+              title: p.label,
+              detail: p.value === provider ? 'The one you were looking at.' : `Log it against ${p.label} instead.`,
+            }))}
+            onPick={(next) => {
+              onProviderChange(next)
+              setStep(direction === 'in' ? 'source' : 'form')
+            }}
           />
+          <Button block variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
         </div>
+      ) : step === 'source' ? (
+        <div className="space-y-4">
+          <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">Where did this money come from?</p>
+          <ChoiceList<'external' | 'reimbursement'>
+            choices={[
+              {
+                value: 'external',
+                title: 'My own money',
+                detail: 'From your pocket or MoMo, not money customers paid. Counts as your capital.',
+              },
+              {
+                value: 'reimbursement',
+                title: 'Customer money from Paystack',
+                detail: `Paying ${providerLabel} back for bundles customers bought. Sent with Treasury → Refill? Don't log it here: tap "It is in the float" in Treasury instead.`,
+              },
+            ]}
+            onPick={(next) => {
+              setSource(next)
+              setStep('form')
+            }}
+          />
+          <Button block variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </div>
+      ) : (
+      <div className="space-y-4">
+        <p className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
+          <span>
+            <strong className="text-slate-900 dark:text-slate-50">{providerLabel}</strong>
+            {direction === 'in' ? (source === 'external' ? ' · my own money' : ' · customer money from Paystack') : ' · money taken out'}
+          </span>
+          <button type="button" onClick={() => setStep('provider')} className="text-xs font-semibold text-brand-700 dark:text-brand-300">
+            Change
+          </button>
+        </p>
 
         <Callout tone="info" icon={<AlertIcon className="size-4" />}>
           This tracks your own capital, it never counts as revenue or cost, and does not change
           the profit figures anywhere else.
         </Callout>
-
-        {direction === 'in' && (
-          <Field label="Where did this come from?" htmlFor="capital-source">
-            <Segmented<'external' | 'reimbursement'>
-              className="w-full"
-              options={[
-                { value: 'external', label: 'Outside the business' },
-                { value: 'reimbursement', label: `Paystack, paying ${providerLabel} back` },
-              ]}
-              value={source}
-              onChange={setSource}
-            />
-            <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-              {source === 'reimbursement'
-                ? `Money already collected from customers for what ${providerLabel} charges, you're moving it from Paystack to where it was always meant to end up, not adding new capital. This is the only kind of top-up that clears "Already spent on bundles" on the Reserve panel.`
-                : 'Fresh money, from somewhere other than what this business itself has collected.'}
-            </p>
-          </Field>
-        )}
 
         {touchesOwedMoney > 0 && (
           <Callout tone="danger" icon={<AlertIcon className="size-4" />}>
@@ -608,6 +638,7 @@ function CapitalModal({
           </Button>
         </div>
       </div>
+      )}
     </Modal>
   )
 }

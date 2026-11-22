@@ -48,3 +48,24 @@ export function sellsNetwork(code: SupplierCode, network: string): boolean {
   const networks = supplierInfo(code)?.networks
   return !networks || networks.includes(network)
 }
+
+/**
+ * Suppliers as answers to "where did you send it?", the one it went to first
+ * listed first and marked, so the admin picks one deliberately instead of
+ * leaving a toggle on its default.
+ */
+export function supplierChoices(
+  original: string | null | undefined,
+  only?: (code: SupplierCode) => boolean,
+): { value: SupplierCode; title: string; detail: string }[] {
+  const first = supplierInfo(original)?.code ?? null
+  const list = SUPPLIERS.filter((s) => !only || only(s.code))
+  return [...list.filter((s) => s.code === first), ...list.filter((s) => s.code !== first)].map((s) => ({
+    value: s.code,
+    title: s.code === first ? `${s.label} (same as before)` : s.label,
+    detail:
+      s.code === first
+        ? 'The supplier it was sent to the first time.'
+        : `A different supplier${first ? ` from the first time (${supplierInfo(first)?.label})` : ''}. Its cost comes out of the ${s.label} balance.`,
+  }))
+}

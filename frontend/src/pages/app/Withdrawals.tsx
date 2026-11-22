@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useStore } from '../../state/store'
 import { cedis, dateTime, parseCedis } from '../../lib/format'
-import { NETWORKS } from '../../lib/networks'
 import type { Network } from '../../data/types'
 import {
   Badge,
@@ -14,7 +13,7 @@ import {
   Field,
   Modal,
   PageHead,
-  Select,
+  ChoiceList,
   StatTile,
   TableWrap,
   Td,
@@ -336,23 +335,18 @@ function RequestModal({
           </p>
         )}
 
-        <Field label="Mobile Money network" htmlFor="wd-network">
-          <Select
-            id="wd-network"
-            value={network}
-            onChange={(event) => setNetwork(event.target.value as Network)}
-          >
-            {NETWORKS.map((option) => (
-              <option key={option} value={option}>
-                {option === 'MTN'
-                  ? 'MTN Mobile Money'
-                  : option === 'Telecel'
-                    ? 'Telecel Cash'
-                    : 'AirtelTigo Money'}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <div>
+          <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">Which Mobile Money network is your number on?</p>
+          <ChoiceList<Network>
+            selected={network}
+            choices={[
+              { value: 'MTN', title: 'MTN', detail: 'MTN Mobile Money' },
+              { value: 'Telecel', title: 'Telecel', detail: 'Telecel Cash' },
+              { value: 'AirtelTigo', title: 'AirtelTigo', detail: 'AirtelTigo Money' },
+            ]}
+            onPick={setNetwork}
+          />
+        </div>
 
         <Field
           label="Paid to"

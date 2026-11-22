@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, ApiError } from '../../lib/api'
 import { useStore } from '../../state/store'
-import { Badge, Button, Card, CardHead, Field, PageHead, Segmented, Spinner, Textarea, TextInput } from '../../components/ui'
+import { Badge, Button, Card, CardHead, Field, PageHead, ChoiceList, Spinner, Textarea, TextInput } from '../../components/ui'
 import { SearchIcon, XIcon } from '../../components/icons'
 
 type Audience = 'all' | 'agents' | 'admins' | 'selected'
@@ -150,18 +150,16 @@ export default function ComposeAnnouncement() {
 
           <div>
             <p className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-200">Send to</p>
-            <div className="-mx-3 overflow-x-auto px-3 pb-1 sm:mx-0 sm:px-0">
-              <Segmented<Audience>
-                options={[
-                  { value: 'all', label: AUDIENCE_LABEL.all },
-                  { value: 'agents', label: AUDIENCE_LABEL.agents },
-                  { value: 'admins', label: AUDIENCE_LABEL.admins },
-                  { value: 'selected', label: 'Choose people' },
-                ]}
-                value={audience}
-                onChange={setAudience}
-              />
-            </div>
+            <ChoiceList<Audience>
+              selected={audience}
+              choices={[
+                { value: 'all', title: AUDIENCE_LABEL.all, detail: `${agentCount + adminCount} people: every agent and admin.` },
+                { value: 'agents', title: AUDIENCE_LABEL.agents, detail: `${agentCount} agent${agentCount === 1 ? '' : 's'}.` },
+                { value: 'admins', title: AUDIENCE_LABEL.admins, detail: `${adminCount} admin${adminCount === 1 ? '' : 's'}.` },
+                { value: 'selected', title: 'Choose people', detail: 'Only the people you pick.' },
+              ]}
+              onPick={setAudience}
+            />
             {audience === 'all' && (
               <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                 Sending to {agentCount + adminCount} people: {agentCount} agent{agentCount === 1 ? '' : 's'} and{' '}
