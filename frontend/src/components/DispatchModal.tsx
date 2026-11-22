@@ -4,7 +4,7 @@ import type { Order } from '../data/types'
 import { useStore } from '../state/store'
 import { cedis, dateTime } from '../lib/format'
 import { Button, Callout, Field, Modal, Segmented, Spinner, TextInput, cn } from './ui'
-import { AlertIcon, CheckIcon, ClockIcon } from './icons'
+import { AlertIcon, CheckIcon, ChevronLeftIcon, ClockIcon } from './icons'
 import { OrderTimeline } from './OrderTimeline'
 import { SUPPLIERS, supplierName, type SupplierCode } from '../lib/suppliers'
 
@@ -243,6 +243,58 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
   const how = resentAfterFailure ? 'reordered' : refHow
   const refSupplier = !correcting && how === 'reordered' ? reorderedOn : soldThrough
   const canAddReference = (stuck && !handReference) || correcting || resentAfterFailure
+  const canCheck = stuck || order.status === 'completed' || (order.status === 'failed' && order.paymentCollected !== false)
+  const openReference = (how: 'found' | 'reordered') => () => {
+    setRefHow(how)
+    setRefOpen(true)
+  }
+  /** The answers to "what happened?", only those that apply to this order. */
+  const actions: { key: string; title: string; detail: string; run: () => void }[] = [
+    ...(canAddReference && correcting
+      ? [{ key: 'correct', title: 'The reference is wrong', detail: `Now ${currentReference}. Enter the right one.`, run: openReference('found') }]
+      : []),
+    ...(canAddReference && !correcting && !resentAfterFailure
+      ? [
+          {
+            key: 'found',
+            title: 'It went through: I have its reference',
+            detail: `You found it on the ${supplierLabel(soldThrough)} dashboard.`,
+            run: openReference('found'),
+          },
+        ]
+      : []),
+    ...(canAddReference && !correcting
+      ? [
+          {
+            key: 'resent',
+            title: 'I sent it again by hand',
+            detail: resentAfterFailure
+              ? 'Enter its reference. The refund is cancelled and it settles with that supplier.'
+              : "On this supplier's dashboard or another one. Enter the new reference.",
+            run: openReference('reordered'),
+          },
+        ]
+      : []),
+    ...(canRetry
+      ? [{ key: 'retry', title: 'Nothing went out: send it again', detail: "Only after checking the supplier's dashboard.", run: () => setRetrying(true) }]
+      : []),
+    ...(canCheck
+      ? [
+          {
+            key: 'check',
+            title: stuck ? 'Ask the supplier now' : 'Ask the supplier if this is still right',
+            detail: stuck ? "Don't wait for the automatic check." : 'A supplier can change its answer later.',
+            run: () => void submitCheckNow(),
+          },
+        ]
+      : []),
+    ...(stuck
+      ? [
+          { key: 'delivered', title: 'I know it was delivered', detail: 'Only when you are certain. Kept on the record.', run: () => setResolving('delivered') },
+          { key: 'failed', title: 'I know it failed', detail: 'A refund is queued for the customer.', run: () => setResolving('rejected') },
+        ]
+      : []),
+  ]
 
   const submitRetry = async () => {
     if (retryNote.trim().length < 5) {
@@ -481,12 +533,38 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
           )
         })}
 
+        {/* One question instead of a stack of panels: what happened? Each answer
+            opens the one form that records it; Cancel there comes back here. */}
+        {!refOpen && !retrying && resolving === null && actions.length > 0 && (
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
+            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+              {stuck ? 'What happened with this order?' : resentAfterFailure ? 'Did it get sent another way?' : 'Need to check it?'}
+            </p>
+            <div className="mt-2.5 space-y-2">
+              {actions.map((a) => (
+                <button
+                  key={a.key}
+                  type="button"
+                  disabled={a.key === 'check' && checkingNow}
+                  onClick={a.run}
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2.5 text-left hover:border-brand-400 hover:bg-brand-50/60 disabled:opacity-60 dark:hover:bg-brand-950/30"
+                >
+                  <span className="block text-sm font-semibold text-slate-900 dark:text-slate-50">
+                    {a.key === 'check' && checkingNow ? 'Checking…' : a.title}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{a.detail}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Only for the one case retrying is actually safe: no reference at
             all was ever obtained, so this can never be double-sent by both
             a retry and a delayed real reply landing later, there is no
             delayed reply coming, because DataHub never gave us anything to
             match one against. */}
-        {canRetry && (
+        {canRetry && retrying && (
           <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 p-3.5">
             {!retrying ? (
               <>
@@ -505,6 +583,13 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
               </>
             ) : (
               <>
+                <PanelBack
+                  onClick={() => {
+                    setRetrying(false)
+                    setRetryNote('')
+                    setRetryNoteError('')
+                  }}
+                />
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                   Send this order to the delivery partner again
                 </p>
@@ -539,7 +624,7 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
                       setRetryNoteError('')
                     }}
                   >
-                    Cancel
+                    Back
                   </Button>
                 </div>
               </>
@@ -547,11 +632,6 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
           </div>
         )}
 
-        {/* The whole story in one place: who decided what, and where the money went. */}
-        <details className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5" open>
-          <summary className="cursor-pointer text-sm font-semibold text-slate-800 dark:text-slate-100">Full history</summary>
-          <OrderTimeline orderId={order.id} className="mt-3" />
-        </details>
 
         {/* The webhook never came and the order has no reference to check with,
             or it sits in someone's manual queue: the admin finds it on the
@@ -562,7 +642,7 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
             Reference <span className="font-mono">{currentReference}</span> was added by hand. If it is wrong, ask a superadmin to correct it.
           </p>
         )}
-        {canAddReference && (
+        {canAddReference && refOpen && (
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
             {!refOpen ? (
               <>
@@ -588,22 +668,12 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
               </>
             ) : (
               <>
+                <PanelBack onClick={() => setRefOpen(false)} />
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  {correcting ? 'The right reference' : 'Reference from the delivery partner'}
+                  {correcting ? 'The right reference' : how === 'reordered' ? 'I sent it again by hand' : 'It went through'}
                 </p>
                 {!correcting && (
                   <>
-                    {!resentAfterFailure && (
-                    <Segmented<'found' | 'reordered'>
-                      className="mt-2 w-full"
-                      options={[
-                        { value: 'found', label: 'It went through' },
-                        { value: 'reordered', label: 'I ordered it again' },
-                      ]}
-                      value={refHow}
-                      onChange={setRefHow}
-                    />
-                    )}
                     <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
                       {how === 'found'
                         ? `You found this order on ${supplierLabel(soldThrough)}'s dashboard: this is its reference.`
@@ -669,7 +739,7 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
                     {correcting ? 'Check and correct' : 'Check and save'}
                   </Button>
                   <Button size="sm" variant="outline" disabled={busy} onClick={() => setRefOpen(false)}>
-                    Cancel
+                    Back
                   </Button>
                 </div>
               </>
@@ -677,32 +747,11 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
           </div>
         )}
 
-        {/* The automatic sweep still covers this order eventually, but only
-            once every ten minutes, this asks the delivery partner directly,
-            right now, instead of waiting on its clock. */}
-        {(stuck || order.status === 'completed' || (order.status === 'failed' && order.paymentCollected !== false)) && (
-          <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
-            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-              {stuck ? "Don't want to wait for the automatic check?" : 'Is this still right?'}
-            </p>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              {stuck
-                ? "Asks the delivery partner for this order's status right now."
-                : 'Asks the delivery partner what it says about this order now. A provider can turn a delivered order into a failed one later; if it has, the order is flagged for you to decide.'}
-            </p>
-            <div className="mt-2.5">
-              <Button size="sm" variant="outline" loading={checkingNow} onClick={() => void submitCheckNow()}>
-                {stuck ? 'Check now' : 'Check with provider'}
-              </Button>
-            </div>
-          </div>
-        )}
-
         {/* For the case nothing automatic ever resolves: the provider's own
             status never reaches a word the reconciler recognises as final
             (see mapProviderStatus), even though the real outcome is already
             known to whoever is looking at this. */}
-        {stuck && (
+        {stuck && resolving !== null && (
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5">
             {resolving === null ? (
               <>
@@ -724,6 +773,14 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
               </>
             ) : (
               <>
+                <PanelBack
+                  onClick={() => {
+                    setResolving(null)
+                    setAlreadyRefunded(false)
+                    setNote('')
+                    setNoteError('')
+                  }}
+                />
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                   {resolving === 'delivered'
                     ? 'Mark this as delivered'
@@ -777,14 +834,33 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
                       setNoteError('')
                     }}
                   >
-                    Cancel
+                    Back
                   </Button>
                 </div>
               </>
             )}
           </div>
         )}
+
+        {/* The whole story in one place: who decided what, and where the money went. */}
+        <details className="rounded-xl border border-slate-200 dark:border-slate-700 p-3.5" open>
+          <summary className="cursor-pointer text-sm font-semibold text-slate-800 dark:text-slate-100">Full history</summary>
+          <OrderTimeline orderId={order.id} className="mt-3" />
+        </details>
       </div>
     </Modal>
+  )
+}
+
+/** The small "Back" above a form opened from "What happened?". */
+function PanelBack({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="-ml-1 mb-1.5 inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+    >
+      <ChevronLeftIcon className="size-3.5" /> Back
+    </button>
   )
 }

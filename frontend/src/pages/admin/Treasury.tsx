@@ -4,6 +4,7 @@ import { withUndo } from '../../lib/undo'
 import { api, ApiError, type BalanceBooksPlan, type TopupSource, type TreasuryOverview, type TreasuryPurpose } from '../../lib/api'
 import { cedis, dateTime, parseCedis } from '../../lib/format'
 import {
+  ChoiceModal,
   Badge,
   Button,
   Callout,
@@ -69,6 +70,8 @@ export default function Treasury() {
   const [syncing, setSyncing] = useState(false)
   const [classifying, setClassifying] = useState<string | null>(null)
   const [notSent, setNotSent] = useState<TreasuryOverview['transfers'][number] | null>(null)
+  /** A transfer not confirmed yet: "Not confirmed" asks what to do first. */
+  const [sortingOut, setSortingOut] = useState<TreasuryOverview['transfers'][number] | null>(null)
   const [landing, setLanding] = useState<string | null>(null)
 
   const load = () => {
@@ -351,22 +354,9 @@ export default function Treasury() {
                       </p>
                     )}
                     {(t.status === 'pending' || t.status === 'otp' || t.status === 'unknown') && (
-                      <button
-                        type="button"
-                        onClick={() => void checkTransfer(t.id)}
-                        className="mt-1 block text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
-                      >
-                        Check with Paystack
-                      </button>
-                    )}
-                    {isSuperadmin && (t.status === 'otp' || t.status === 'unknown') && (
-                      <button
-                        type="button"
-                        onClick={() => setNotSent(t)}
-                        className="mt-1 block text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
-                      >
-                        Checked, it did not go
-                      </button>
+                      <Button className="mt-1.5" size="sm" variant="outline" onClick={() => setSortingOut(t)}>
+                        Not confirmed
+                      </Button>
                     )}
                   </Td>
                 </tr>
@@ -382,7 +372,36 @@ export default function Treasury() {
 
       <Glossary />
 
-      <MarkNotSentModal transfer={notSent} onClose={() => setNotSent(null)} onDone={load} />
+      {sortingOut && (
+        <ChoiceModal<'check' | 'notSent'>
+          open
+          title={`Not confirmed · ${cedis(sortingOut.amount)}`}
+          question={`To ${sortingOut.destination.label}. What do you want to do?`}
+          choices={[
+            { value: 'check', title: 'Ask Paystack', detail: 'See whether this transfer went through.' },
+            ...(isSuperadmin && (sortingOut.status === 'otp' || sortingOut.status === 'unknown')
+              ? [{ value: 'notSent' as const, title: 'I checked: it did not go', detail: 'Paystack shows no transfer. The money is free again.', danger: true }]
+              : []),
+          ]}
+          onClose={() => setSortingOut(null)}
+          onPick={(choice) => {
+            const row = sortingOut
+            setSortingOut(null)
+            if (choice === 'check') void checkTransfer(row.id)
+            else setNotSent(row)
+          }}
+        />
+      )}
+
+      <MarkNotSentModal
+        transfer={notSent}
+        onClose={() => setNotSent(null)}
+        onBack={() => {
+          setSortingOut(notSent)
+          setNotSent(null)
+        }}
+        onDone={load}
+      />
     </div>
   )
 }
@@ -998,10 +1017,12 @@ function BalanceBooksCard({ onDone }: { onDone: () => void }) {
 function MarkNotSentModal({
   transfer,
   onClose,
+  onBack,
   onDone,
 }: {
   transfer: TreasuryOverview['transfers'][number] | null
   onClose: () => void
+  onBack?: () => void
   onDone: () => void
 }) {
   const [note, setNote] = useState('')
@@ -1026,7 +1047,7 @@ function MarkNotSentModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Did not go · ${transfer.reference}`}>
+    <Modal open onClose={onClose} onBack={onBack} title={`Did not go · ${transfer.reference}`}>
       <form
         className="space-y-4"
         onSubmit={(e) => {

@@ -15,6 +15,7 @@ import {
   Badge,
   Button,
   Callout,
+  ChoiceModal,
   Card,
   CardHead,
   EmptyState,
@@ -63,6 +64,8 @@ export default function Refunds() {
   const [settling, setSettling] = useState<RefundRequest | null>(null)
   const [reordering, setReordering] = useState<RefundRequest | null>(null)
   const [resent, setResent] = useState<RefundRequest | null>(null)
+  /** "Don't refund" asks why first, then opens the one form that fits. */
+  const [deciding, setDeciding] = useState<RefundRequest | null>(null)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -380,31 +383,10 @@ export default function Refunds() {
                             >
                               Refund
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => setRejecting(row)}>
-                              Refuse
+                            <Button size="sm" variant="outline" onClick={() => setDeciding(row)}>
+                              Don't refund
                             </Button>
                           </div>
-                          {/* For the case the failure itself was wrong, a catalogue
-                              mapping that's since been fixed, stock that's back, rather
-                              than a genuine reason the order couldn't be filled. Cancels
-                              this refund automatically if it delivers this time. */}
-                          <button
-                            type="button"
-                            onClick={() => setReordering(row)}
-                            className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
-                          >
-                            Reorder instead?
-                          </button>
-                          {/* Already bought again by hand on a supplier's dashboard:
-                              record its reference, the refund closes and the order
-                              settles with that supplier's real cost. */}
-                          <button
-                            type="button"
-                            onClick={() => setResent(row)}
-                            className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
-                          >
-                            Sent it again by hand?
-                          </button>
                           {/* Only offered once an automatic transfer has actually bounced,
                               a Starter Business Paystack account refuses every third-party
                               payout outright, and this is the way through that wall. Hidden
@@ -491,11 +473,36 @@ export default function Refunds() {
 
       <ReopenModal request={reopening} onClose={() => setReopening(null)} onDone={load} />
 
-      <ResentByHandModal request={resent} onClose={() => setResent(null)} onDone={load} />
+      <DontRefundModal
+        request={deciding}
+        onClose={() => setDeciding(null)}
+        onPick={(choice) => {
+          const row = deciding
+          setDeciding(null)
+          if (!row) return
+          if (choice === 'resent') setResent(row)
+          else if (choice === 'reorder') setReordering(row)
+          else setRejecting(row)
+        }}
+      />
+
+      <ResentByHandModal
+        request={resent}
+        onClose={() => setResent(null)}
+        onBack={() => {
+          setDeciding(resent)
+          setResent(null)
+        }}
+        onDone={load}
+      />
 
       <RefuseModal
         request={rejecting}
         onClose={() => setRejecting(null)}
+        onBack={() => {
+          setDeciding(rejecting)
+          setRejecting(null)
+        }}
         onRefused={async () => {
           await load()
         }}
@@ -512,6 +519,10 @@ export default function Refunds() {
       <ReorderModal
         request={reordering}
         onClose={() => setReordering(null)}
+        onBack={() => {
+          setDeciding(reordering)
+          setReordering(null)
+        }}
         onReordered={async () => {
           await load()
         }}
@@ -680,10 +691,13 @@ function toastFor(orderRef: string, result: ReorderOutcome): { tone: 'success' |
 function RefuseModal({
   request,
   onClose,
+  onBack,
   onRefused,
 }: {
   request: RefundRequest | null
   onClose: () => void
+  /** Back to the "Don't refund" choice this was opened from. */
+  onBack?: () => void
   onRefused: () => Promise<void>
 }) {
   const { pushToast } = useStore()
@@ -728,7 +742,7 @@ function RefuseModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Refuse refund, ${request.orderRef}`}>
+    <Modal open onClose={onClose} onBack={onBack} title={`Refuse refund, ${request.orderRef}`}>
       <form
         className="space-y-4"
         onSubmit={(event) => {
@@ -747,10 +761,6 @@ function RefuseModal({
           This customer paid and did not get their bundle. Only refuse if you know the bundle
           actually arrived, or the payment never did.
         </Callout>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Bought it again by hand on a supplier's dashboard? Close this and use <strong>Sent it again by hand?</strong>{' '}
-          instead, so the cost goes to the supplier that delivered and its reference is kept.
-        </p>
 
         <QuickReasons
           // A refund is only ever queued when the payment arrived, so "it was
@@ -791,6 +801,39 @@ function RefuseModal({
   )
 }
 
+type DontRefundChoice = 'resent' | 'reorder' | 'refuse'
+
+/**
+ * The first step of "Don't refund": why not. Each answer opens the one form
+ * that records it properly, so nobody refuses a refund in a way that books
+ * the cost to the wrong supplier.
+ */
+function DontRefundModal({
+  request,
+  onClose,
+  onPick,
+}: {
+  request: RefundRequest | null
+  onClose: () => void
+  onPick: (choice: DontRefundChoice) => void
+}) {
+  if (!request) return null
+  return (
+    <ChoiceModal<DontRefundChoice>
+      open
+      title={`Don't refund ${request.orderRef}`}
+      question={`${request.productName} · ${cedis(request.amount)}. Why isn't this customer being refunded?`}
+      choices={[
+        { value: 'resent', title: 'I sent it again by hand', detail: "You bought it again on a supplier's dashboard. Enter its reference." },
+        { value: 'reorder', title: 'Send it again now', detail: 'The app orders it again, on the same supplier or another. The refund closes if it delivers.' },
+        { value: 'refuse', title: 'Another reason', detail: 'The first order did arrive, or the payment never did.' },
+      ]}
+      onPick={onPick}
+      onClose={onClose}
+    />
+  )
+}
+
 /**
  * The supplier refused it, the refund was raised, and an admin then bought
  * the bundle again by hand on a supplier's dashboard. Saving the reference
@@ -801,10 +844,13 @@ function RefuseModal({
 function ResentByHandModal({
   request,
   onClose,
+  onBack,
   onDone,
 }: {
   request: RefundRequest | null
   onClose: () => void
+  /** Back to the "Don't refund" choice this was opened from. */
+  onBack?: () => void
   onDone: () => Promise<void> | void
 }) {
   const { pushToast } = useStore()
@@ -842,7 +888,7 @@ function ResentByHandModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Sent again by hand, ${request.orderRef}`}>
+    <Modal open onClose={onClose} onBack={onBack} title={`Sent again by hand, ${request.orderRef}`}>
       <form
         className="space-y-4"
         onSubmit={(event) => {
@@ -1137,10 +1183,13 @@ function providerName(code: string): string {
 function ReorderModal({
   request,
   onClose,
+  onBack,
   onReordered,
 }: {
   request: RefundRequest | null
   onClose: () => void
+  /** Back to the "Don't refund" choice this was opened from. */
+  onBack?: () => void
   onReordered: () => Promise<void>
 }) {
   const { pushToast } = useStore()
@@ -1148,6 +1197,9 @@ function ReorderModal({
   const [supplierCode, setSupplierCode] = useState('')
   const [notRefunded, setNotRefunded] = useState(false)
   const [options, setOptions] = useState<SupplierSku[] | null>(null)
+  /** The bundle it was first sent as, even if no longer in stock. */
+  const [original, setOriginal] = useState<SupplierSku | null>(null)
+  const [provider, setProvider] = useState<string>('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -1158,6 +1210,22 @@ function ReorderModal({
     setNote('')
     setSupplierCode('')
     setOptions(null)
+    setOriginal(null)
+    setProvider('')
+    setError('')
+  }
+
+  /** The same size on this supplier, so switching supplier keeps the bundle. */
+  const sameSizeOn = (rows: SupplierSku[], on: string, like: SupplierSku | null): string => {
+    const mine = rows.filter((row) => row.provider === on)
+    if (!like) return ''
+    const match = mine.find((row) => row.capacityGb !== null && row.capacityGb === like.capacityGb) ?? mine.find((row) => row.code === like.code)
+    return match?.code ?? ''
+  }
+
+  const pickProvider = (next: string) => {
+    setProvider(next)
+    setSupplierCode(sameSizeOn(options ?? [], next, original))
     setError('')
   }
 
@@ -1168,15 +1236,20 @@ function ReorderModal({
       .supplierCatalogue()
       .then((rows) => {
         if (cancelled) return
-        setOptions(
-          rows.filter(
-            (row) =>
-              row.category === request.category &&
-              row.available &&
-              row.autoFulfillable &&
-              (request.network === null || row.network === request.network),
-          ),
+        const usable = rows.filter(
+          (row) =>
+            row.category === request.category &&
+            row.available &&
+            row.autoFulfillable &&
+            (request.network === null || row.network === request.network),
         )
+        const first = rows.find((row) => row.code === request.soldThroughCode) ?? null
+        // The same supplier first when it can still send it, else the first that can.
+        const start = first && usable.some((row) => row.provider === first.provider) ? first.provider : (usable[0]?.provider ?? '')
+        setOptions(usable)
+        setOriginal(first)
+        setProvider(start)
+        setSupplierCode(sameSizeOn(usable, start, first))
       })
       .catch(() => {
         if (!cancelled) setOptions([])
@@ -1234,7 +1307,7 @@ function ReorderModal({
   }
 
   return (
-    <Modal open onClose={onClose} title={`Reorder, ${request.orderRef}`}>
+    <Modal open onClose={onClose} onBack={onBack} title={`Send it again, ${request.orderRef}`}>
       <div className="space-y-4">
         <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3.5 text-sm">
           <p className="font-semibold text-slate-900 dark:text-slate-50">
@@ -1244,50 +1317,66 @@ function ReorderModal({
         </div>
 
         <Callout tone="info" icon={<AlertIcon className="size-4" />}>
-          This places the order again instead of refunding it, against whichever bundle you choose
-          below, not necessarily the one this was originally sold as, since its mapping or price
-          may have changed since. If it delivers, this refund is cancelled automatically. If it
-          fails again, the refund stays exactly as it is now, still owed.
+          Orders it again instead of refunding. If it delivers, this refund closes. If it fails again,
+          the refund stays owed.
         </Callout>
 
-        <Field label="Which bundle should this fulfil against?" htmlFor="reorder-sku">
-          {options === null ? (
-            <div className="flex items-center gap-2 py-1 text-sm text-slate-500 dark:text-slate-400">
-              <Spinner className="size-4" /> Loading the catalogue…
-            </div>
-          ) : options.length === 0 ? (
-            <p className="text-sm text-red-700 dark:text-red-400">
-              Nothing in the catalogue right now can fulfil a {request.network ?? ''}{' '}
-              {request.category} order, check Supplier catalogue before reordering this one.
-            </p>
-          ) : (
-            <select
-              id="reorder-sku"
-              value={supplierCode}
-              onChange={(event) => {
-                setSupplierCode(event.target.value)
-                setError('')
-              }}
-              className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-50"
-            >
-              <option value="">Choose a bundle…</option>
-              {/* Grouped by the provider that sells it, so the choice of provider (and of
-                  whose float pays) is made knowingly, not guessed from the price. */}
-              {[...new Set(options.map((row) => row.provider))].map((provider) => (
-                <optgroup key={provider} label={providerName(provider)}>
-                  {options
-                    .filter((row) => row.provider === provider)
-                    .map((row) => (
-                      <option key={row.code} value={row.code}>
-                        {row.name} · {providerName(row.provider)} · {cedis(row.realCost ?? row.costPrice)}
-                        {row.realCost !== null && row.realCost !== row.costPrice ? ' (real)' : ''}
-                      </option>
-                    ))}
-                </optgroup>
-              ))}
-            </select>
-          )}
-        </Field>
+        {options === null ? (
+          <div className="flex items-center gap-2 py-1 text-sm text-slate-500 dark:text-slate-400">
+            <Spinner className="size-4" /> Loading the catalogue…
+          </div>
+        ) : options.length === 0 ? (
+          <p className="text-sm text-red-700 dark:text-red-400">
+            Nothing in the catalogue right now can fulfil a {request.network ?? ''} {request.category} order, check Supplier
+            catalogue before reordering this one.
+          </p>
+        ) : (
+          <>
+            <Field label="Send it through" htmlFor="reorder-provider">
+              <Segmented<string>
+                className="w-full"
+                options={[...new Set(options.map((row) => row.provider))].map((p) => ({
+                  value: p,
+                  label: original?.provider === p ? `${providerName(p)} (same)` : providerName(p),
+                }))}
+                value={provider}
+                onChange={pickProvider}
+              />
+            </Field>
+            {original && !options.some((row) => row.provider === original.provider) && (
+              <p className="-mt-2 text-xs text-amber-700 dark:text-amber-400">
+                {providerName(original.provider)}, which it went to first, can't send this right now, so another supplier is needed.
+              </p>
+            )}
+            {original && provider && provider !== original.provider && (
+              <p className="-mt-2 text-xs text-slate-500 dark:text-slate-400">
+                A different supplier from the first time ({providerName(original.provider)}). Its cost comes out of the{' '}
+                {providerName(provider)} float.
+              </p>
+            )}
+            <Field label="Bundle" htmlFor="reorder-sku">
+              <select
+                id="reorder-sku"
+                value={supplierCode}
+                onChange={(event) => {
+                  setSupplierCode(event.target.value)
+                  setError('')
+                }}
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm text-slate-900 dark:text-slate-50"
+              >
+                <option value="">Choose a bundle…</option>
+                {options
+                  .filter((row) => row.provider === provider)
+                  .map((row) => (
+                    <option key={row.code} value={row.code}>
+                      {row.name} · {cedis(row.realCost ?? row.costPrice)}
+                      {row.realCost !== null && row.realCost !== row.costPrice ? ' (real)' : ''}
+                    </option>
+                  ))}
+              </select>
+            </Field>
+          </>
+        )}
 
         {selected && (
           <p className="-mt-2 text-sm text-slate-600 dark:text-slate-300">

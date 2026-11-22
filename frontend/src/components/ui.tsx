@@ -12,7 +12,7 @@ import {
 } from 'react'
 import type { Network, OrderStatus } from '../data/types'
 import { NETWORK_STYLES } from '../lib/networks'
-import { CheckIcon, ClockIcon, CopyIcon, XIcon, AlertIcon, HelpIcon } from './icons'
+import { CheckIcon, ChevronLeftIcon, ClockIcon, CopyIcon, XIcon, AlertIcon, HelpIcon } from './icons'
 import { supplierName, type SupplierCode } from '../lib/suppliers'
 
 export function cn(...parts: (string | false | null | undefined)[]): string {
@@ -644,9 +644,12 @@ export function Modal({
    * such as the unread-announcements dialog over a page's own popup.
    */
   zIndex = 50,
+  onBack,
 }: {
   open: boolean
   onClose: () => void
+  /** A small "Back" before the title, for a form reached from a chooser: returns to it. */
+  onBack?: () => void
   title: string
   children: ReactNode
   footer?: ReactNode
@@ -751,9 +754,21 @@ export function Modal({
         className="relative w-full max-w-md rounded-t-2xl bg-white dark:bg-slate-900 shadow-xl outline-none sm:rounded-2xl"
       >
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-4 py-3.5">
-          <h2 id={titleId} className="font-semibold text-slate-900 dark:text-slate-50">
-            {title}
-          </h2>
+          <div className="flex min-w-0 items-center gap-1.5">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                aria-label="Back"
+                className="-ml-1.5 inline-flex items-center rounded-lg p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+              >
+                <ChevronLeftIcon className="size-5" />
+              </button>
+            )}
+            <h2 id={titleId} className="truncate font-semibold text-slate-900 dark:text-slate-50">
+              {title}
+            </h2>
+          </div>
           {dismissable && (
             <button
               type="button"
@@ -1128,5 +1143,63 @@ export function CopyIconButton({ value }: { value: string }) {
     >
       {copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
     </button>
+  )
+}
+
+export interface Choice<T extends string> {
+  value: T
+  title: string
+  detail: string
+  /** Red text, for an answer that undoes something. */
+  danger?: boolean
+}
+
+/**
+ * "What happened?" before any form: one question, a short list of answers,
+ * each opening the one form that records it. The pattern for any row with
+ * more than one way forward, instead of a cluster of buttons and text links.
+ */
+export function ChoiceModal<T extends string>({
+  open,
+  title,
+  question,
+  choices,
+  onPick,
+  onClose,
+}: {
+  open: boolean
+  title: string
+  question: ReactNode
+  choices: Choice<T>[]
+  onPick: (value: T) => void
+  onClose: () => void
+}) {
+  return (
+    <Modal open={open} onClose={onClose} title={title}>
+      <p className="text-sm text-slate-600 dark:text-slate-300">{question}</p>
+      <div className="mt-4 space-y-2">
+        {choices.map((c) => (
+          <button
+            key={c.value}
+            type="button"
+            onClick={() => onPick(c.value)}
+            className="w-full rounded-xl border border-slate-200 dark:border-slate-700 p-3.5 text-left hover:border-brand-400 hover:bg-brand-50/60 dark:hover:bg-brand-950/30"
+          >
+            <span
+              className={cn(
+                'block text-sm font-semibold',
+                c.danger ? 'text-red-700 dark:text-red-400' : 'text-slate-900 dark:text-slate-50',
+              )}
+            >
+              {c.title}
+            </span>
+            <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{c.detail}</span>
+          </button>
+        ))}
+      </div>
+      <Button className="mt-4" block variant="outline" onClick={onClose}>
+        Cancel
+      </Button>
+    </Modal>
   )
 }
