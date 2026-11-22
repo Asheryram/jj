@@ -61,6 +61,7 @@ export class RefundsService {
             soldByCode: true,
             status: true,
             resolvedManually: true,
+            supplierCodeAtSale: true,
           },
         },
       },
@@ -141,6 +142,8 @@ export class RefundsService {
         id: row.id,
         /** For the "Reorder" action, see `FulfilmentService.reorder`. */
         orderId: row.orderId,
+        /** The bundle it was sent as, so "Send it again" can offer the same supplier first. */
+        soldThroughCode: row.order.supplierCodeAtSale,
         /** Whether the order this refund is for still stands as failed. */
         orderFailed: row.order.status === 'failed',
         /** A person failed this order, so the customer may already be sorted out. */

@@ -903,41 +903,6 @@ function FinancialFigure({
  * table's Status column and the mobile card fallback below, so the two never
  * drift out of sync with each other.
  */
-/**
- * Asks the provider about this one order now, from its row. Delivered and failed
- * orders are checked again too: a provider can turn a delivered order into a
- * failed one later, and a disagreement is flagged on Needs attention.
- */
-function CheckWithProvider({ order }: { order: Order }) {
-  const { pushToast } = useStore()
-  const [busy, setBusy] = useState(false)
-  const check = async () => {
-    setBusy(true)
-    try {
-      const result = await api.checkOrderNow(order.id)
-      pushToast({
-        tone: result.conflict ? 'error' : result.settled || result.changed ? 'success' : 'info',
-        title: `${order.reference}: ${result.conflict ? 'the provider disagrees' : result.changed ? 'changed to match the provider' : result.settled ? 'settled' : 'checked'}`,
-        detail: result.message ?? (result.settled ? 'The provider has answered; reload to see it.' : 'Nothing new from the provider.'),
-      })
-    } catch (caught) {
-      pushToast({ tone: 'error', title: caught instanceof ApiError ? caught.message : 'Could not check that order.' })
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={() => void check()}
-      className="mt-1 block text-xs font-semibold text-slate-600 underline underline-offset-2 hover:text-slate-900 disabled:opacity-60 dark:text-slate-300"
-    >
-      {busy ? 'Checking…' : 'Check with provider'}
-    </button>
-  )
-}
-
 function OrderStatusDetails({ order, onWhy, onReverse }: { order: Order; onWhy: () => void; onReverse?: () => void }) {
   return (
     <>
@@ -1044,20 +1009,16 @@ function OrderStatusDetails({ order, onWhy, onReverse }: { order: Order; onWhy: 
           recipient and a withdrawn bundle into one word. The
           difference decides what to do about it, so it is one
           click away rather than a database query. */}
-      {(order.status === 'failed' || order.status === 'processing' || (onReverse && order.status === 'completed')) && (
-        <button
-          type="button"
-          onClick={onWhy}
-          className="mt-1 block text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2 hover:text-brand-800"
-        >
-          {/* A superadmin opens a completed order too, to correct its reference. */}
-          {order.status === 'completed' ? 'Details' : 'Why?'}
-        </button>
-      )}
-      {(order.status === 'completed' ||
+      {/* One way in: the order screen asks what happened and offers only
+          what fits (check with the supplier, add a reference, resolve). */}
+      {(order.status === 'failed' ||
         order.status === 'processing' ||
         order.status === 'pending' ||
-        (order.status === 'failed' && order.paymentCollected !== false)) && <CheckWithProvider order={order} />}
+        order.status === 'completed') && (
+        <Button className="mt-1.5" size="sm" variant="outline" onClick={onWhy}>
+          {order.status === 'completed' ? 'Details' : 'What happened?'}
+        </Button>
+      )}
       {onReverse && (order.status === 'completed' || order.status === 'failed') && (
         <button
           type="button"

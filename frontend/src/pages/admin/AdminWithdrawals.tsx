@@ -10,6 +10,7 @@ import {
   Badge,
   Button,
   Callout,
+  ChoiceModal,
   Card,
   CopyIconButton,
   CardHead,
@@ -49,6 +50,8 @@ export default function AdminWithdrawals() {
   const [filter, setFilter] = useRemembered<Filter>('withdrawals-filter', 'pending', ['pending', 'all'])
   const [settling, setSettling] = useState<WithdrawalRequest | null>(null)
   const [cancelling, setCancelling] = useState<WithdrawalRequest | null>(null)
+  /** Approved but not confirmed sent: "Not sent yet" asks what happened first. */
+  const [sortingOut, setSortingOut] = useState<WithdrawalRequest | null>(null)
   const [decidingId, setDecidingId] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -423,44 +426,9 @@ export default function AdminWithdrawals() {
                          it never has no way forward at all. */
                       <div className="flex flex-col items-end gap-1">
                         <span className="text-xs text-slate-500 dark:text-slate-400">Decided</span>
-                        {/* Not for one marked to send by hand: Paystack has no
-                            transfer to ask about. */}
-                        {request.transferStatus !== 'manual' && (
-                          <button
-                            type="button"
-                            disabled={checkingId === request.id}
-                            onClick={() => {
-                              setCheckingId(request.id)
-                              void checkWithdrawal(request.id).finally(() => setCheckingId(null))
-                            }}
-                            className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2 disabled:opacity-50"
-                          >
-                            {checkingId === request.id ? 'Checking…' : 'Check status'}
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setSettling(request)}
-                          className="text-xs font-semibold text-brand-700 dark:text-brand-300 underline underline-offset-2"
-                        >
-                          Paid another way?
-                        </button>
-                        {/* Approving used to be one-way: decide not to send it
-                            after all (wrong number, should have refused) and
-                            the agent's money stayed held. Hidden once Paystack
-                            has a real transfer, that one is theirs to settle. */}
-                        {(request.transferStatus === 'manual' ||
-                          request.transferStatus === 'unknown' ||
-                          request.transferStatus === 'otp' ||
-                          !request.transferStatus) && (
-                          <button
-                            type="button"
-                            onClick={() => setCancelling(request)}
-                            className="text-xs font-semibold text-red-700 dark:text-red-400 underline underline-offset-2"
-                          >
-                            Not sending it?
-                          </button>
-                        )}
+                        <Button size="sm" variant="outline" loading={checkingId === request.id} onClick={() => setSortingOut(request)}>
+                          Not sent yet
+                        </Button>
                       </div>
                     ) : (
                       <span className="text-xs text-slate-500 dark:text-slate-400">Decided</span>
@@ -476,8 +444,53 @@ export default function AdminWithdrawals() {
 
       <ManualAdvancesCard />
 
-      <SettleManuallyModal request={settling} onClose={() => setSettling(null)} />
-      <SettleManuallyModal request={cancelling} mode="cancel" onClose={() => setCancelling(null)} />
+      {sortingOut && (
+        <ChoiceModal<'check' | 'paid' | 'cancel'>
+          open
+          title="Not sent yet"
+          question={`${cedis(sortingOut.amount)} to ${sortingOut.agentName ?? 'this agent'}. What do you want to do?`}
+          choices={[
+            ...(sortingOut.transferStatus !== 'manual'
+              ? [{ value: 'check' as const, title: 'Ask Paystack', detail: 'See whether the transfer went through.' }]
+              : []),
+            { value: 'paid' as const, title: 'I paid it another way', detail: 'You sent it yourself, by MoMo or cash. Record it.' },
+            ...(sortingOut.transferStatus === 'manual' ||
+            sortingOut.transferStatus === 'unknown' ||
+            sortingOut.transferStatus === 'otp' ||
+            !sortingOut.transferStatus
+              ? [{ value: 'cancel' as const, title: "Don't send it", detail: "The agent's money goes back to their balance.", danger: true }]
+              : []),
+          ]}
+          onClose={() => setSortingOut(null)}
+          onPick={(choice) => {
+            const row = sortingOut
+            setSortingOut(null)
+            if (choice === 'check') {
+              setCheckingId(row.id)
+              void checkWithdrawal(row.id).finally(() => setCheckingId(null))
+            } else if (choice === 'paid') setSettling(row)
+            else setCancelling(row)
+          }}
+        />
+      )}
+
+      <SettleManuallyModal
+        request={settling}
+        onClose={() => setSettling(null)}
+        onBack={() => {
+          setSortingOut(settling)
+          setSettling(null)
+        }}
+      />
+      <SettleManuallyModal
+        request={cancelling}
+        mode="cancel"
+        onClose={() => setCancelling(null)}
+        onBack={() => {
+          setSortingOut(cancelling)
+          setCancelling(null)
+        }}
+      />
     </div>
   )
 }
@@ -569,10 +582,13 @@ function ManualAdvancesCard() {
 function SettleManuallyModal({
   request,
   onClose,
+  onBack,
   mode = 'settle',
 }: {
   request: WithdrawalRequest | null
   onClose: () => void
+  /** Back to the "Not sent yet" choice this was opened from. */
+  onBack?: () => void
   /** 'cancel': back out of the approved payout instead, the money returns to the agent. */
   mode?: 'settle' | 'cancel'
 }) {
@@ -619,6 +635,7 @@ function SettleManuallyModal({
 
   return (
     <Modal
+      onBack={onBack}
       open
       onClose={onClose}
       title={cancelling ? `Don't send ${cedis(request.amount)}` : `Mark ${cedis(request.amount)} as sent`}
