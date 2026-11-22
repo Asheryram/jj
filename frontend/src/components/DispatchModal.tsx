@@ -233,8 +233,16 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
   const isSuperadmin = session?.role === 'superadmin'
   /** Correcting, not adding: a superadmin fixing a reference, open or settled. */
   const correcting = isSuperadmin && Boolean(currentReference) && (handReference || !stuck)
-  const refSupplier = !correcting && refHow === 'reordered' ? reorderedOn : soldThrough
-  const canAddReference = (stuck && !handReference) || correcting
+  /**
+   * Failed, nothing paid back yet, and re-sent by hand afterwards (the
+   * supplier refused, a refund was raised, then an admin bought it on
+   * another supplier's dashboard). Only "I ordered it again" fits: saving
+   * cancels the refund and settles the order with that supplier.
+   */
+  const resentAfterFailure = order.status === 'failed' && order.paymentCollected !== false && !order.refunded && !correcting
+  const how = resentAfterFailure ? 'reordered' : refHow
+  const refSupplier = !correcting && how === 'reordered' ? reorderedOn : soldThrough
+  const canAddReference = (stuck && !handReference) || correcting || resentAfterFailure
 
   const submitRetry = async () => {
     if (retryNote.trim().length < 5) {
@@ -296,10 +304,10 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
     try {
       const result = await api.addProviderReference(order.id, {
         reference: refValue.trim(),
-        reorderedByHand: !correcting && refHow === 'reordered',
+        reorderedByHand: !correcting && how === 'reordered',
         // Always sent when ordered again: the server compares it with the
         // order's real supplier itself, instead of trusting a guess here.
-        ...(!correcting && refHow === 'reordered' ? { provider: reorderedOn } : {}),
+        ...(!correcting && how === 'reordered' ? { provider: reorderedOn } : {}),
         note: refNote.trim() || undefined,
       })
       pushToast({
@@ -559,12 +567,18 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
             {!refOpen ? (
               <>
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  {correcting ? 'Wrong reference on this order?' : `Have its reference from the ${supplierLabel(soldThrough)} dashboard?`}
+                  {correcting
+                    ? 'Wrong reference on this order?'
+                    : resentAfterFailure
+                      ? 'Sent it again by hand after it failed?'
+                      : `Have its reference from the ${supplierLabel(soldThrough)} dashboard?`}
                 </p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   {correcting
                     ? `Now ${currentReference}. Replace it with the right one; it is checked with the delivery partner first.`
-                    : 'If it went through, or you ordered it again by hand (on either supplier), add the reference. It is checked with that supplier before it is saved.'}
+                    : resentAfterFailure
+                      ? 'Add the reference from the supplier you sent it on. It is checked with them first; then the refund is cancelled and the order settles with that supplier.'
+                      : 'If it went through, or you ordered it again by hand (on either supplier), add the reference. It is checked with that supplier before it is saved.'}
                 </p>
                 <div className="mt-2.5">
                   <Button size="sm" variant="outline" onClick={() => setRefOpen(true)}>
@@ -579,6 +593,7 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
                 </p>
                 {!correcting && (
                   <>
+                    {!resentAfterFailure && (
                     <Segmented<'found' | 'reordered'>
                       className="mt-2 w-full"
                       options={[
@@ -588,12 +603,13 @@ export function DispatchModal({ order, onClose }: { order: Order | null; onClose
                       value={refHow}
                       onChange={setRefHow}
                     />
+                    )}
                     <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-                      {refHow === 'found'
+                      {how === 'found'
                         ? `You found this order on ${supplierLabel(soldThrough)}'s dashboard: this is its reference.`
                         : 'Nothing went through, so you placed it again by hand: this is the new one.'}
                     </p>
-                    {refHow === 'reordered' && (
+                    {how === 'reordered' && (
                       <>
                         <p className="mt-3 text-xs font-semibold text-slate-700 dark:text-slate-200">Where did you order it again?</p>
                         <Segmented<SupplierCode>

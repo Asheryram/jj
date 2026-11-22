@@ -700,10 +700,30 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
     const superadmin = user.role === 'superadmin'
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { id: true, reference: true, status: true, recipient: true, providerReference: true, supplierCodeAtSale: true },
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        recipient: true,
+        providerReference: true,
+        supplierCodeAtSale: true,
+        refunded: true,
+      },
     })
     if (!order) throw new NotFoundError('We could not find that order.')
-    const open = order.status === 'pending' || order.status === 'processing'
+    /**
+     * A failed order re-sent by hand: the supplier refused it, a refund was
+     * raised, and an admin then bought it again on another supplier's
+     * dashboard (JDC-211656166: GMPL refused, re-sent on DataHub). Allowed
+     * while no money has gone back, and it reopens the order as if it had
+     * never failed: the refund is closed as not owed, the order moves to the
+     * supplier that delivered, and it settles with that supplier's real
+     * cost. Refusing the refund instead would book the cost to the supplier
+     * that refused it, and record no reference at all.
+     */
+    const reopening = order.status === 'failed' && input.reorderedByHand
+    if (reopening) await this.refuseIfRefundSent(order)
+    const open = order.status === 'pending' || order.status === 'processing' || reopening
 
     const latest = await this.prisma.supplierDispatch.findFirst({
       where: { orderId: order.id },
@@ -778,6 +798,27 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       (corrected ? `Corrected from ${order.providerReference} to ${reference}` : `Reference ${reference} added by hand`) + moved
     const mark = `${HAND_REFERENCE_MARK} ${what}${note ? `: ${note}` : ''}`
     await this.prisma.$transaction(async (tx) => {
+      if (reopening) {
+        // Checked again inside the transaction: a refund approved a moment
+        // ago must win, the customer is then owed nothing more from us.
+        const sent = await tx.refundRequest.count({ where: { orderId: order.id, status: 'approved' } })
+        const reopened = await tx.order.updateMany({
+          where: { id: order.id, status: 'failed', refunded: false },
+          data: { status: 'processing', completedAt: null, resolvedManually: true },
+        })
+        if (sent > 0 || reopened.count === 0) {
+          throw new ConflictError('REFUND_SENT', `${order.reference} has just been refunded or changed. Nothing was saved; refresh and check.`)
+        }
+        await tx.refundRequest.updateMany({
+          where: { orderId: order.id, status: 'pending' },
+          data: {
+            status: 'rejected',
+            decidedAt: new Date(),
+            decidedBy: user.id,
+            note: `Delivered by hand on ${label}, reference ${reference}. Nothing owed back.`,
+          },
+        })
+      }
       if (handAdded && latest) {
         // Correcting the reference typed in before: the same attempt, fixed.
         await tx.supplierDispatch.update({
@@ -858,6 +899,20 @@ export class ReconcilerService implements OnApplicationBootstrap, OnModuleDestro
       message: settled
         ? `Saved. ${label} says ${providerStatus}, so the order is settled.`
         : `Saved. ${label} says ${providerStatus}; it is checked again automatically every ten minutes.`,
+    }
+  }
+
+  /**
+   * A failed order can only be reopened while no money has gone back to the
+   * customer: otherwise they would have both the bundle and the refund.
+   */
+  private async refuseIfRefundSent(order: { id: string; reference: string; refunded: boolean }): Promise<void> {
+    const approved = await this.prisma.refundRequest.count({ where: { orderId: order.id, status: 'approved' } })
+    if (order.refunded || approved > 0) {
+      throw new ConflictError(
+        'REFUND_SENT',
+        `${order.reference} has already been refunded, so it cannot be marked delivered now. If the customer got the bundle too, recover the refund first.`,
+      )
     }
   }
 
