@@ -376,7 +376,7 @@ export default function NeedsAttention() {
                     loading={opening === row.id}
                     onClick={() => void openResolve(row)}
                   >
-                    Resolve by hand
+                    What happened?
                   </Button>
                 </div>
               )
